@@ -273,6 +273,9 @@ formalized in section 6. All sources below concern framework behavior.
 | S-51 | 2026-09-16 | Pipeline monitoring and links must use a provider-neutral execution identity plus concrete provider adapters. Ship an Azure DevOps reference adapter, make additional adapters independently extensible, and document the exact adapter contract so agents never invent provider translations or verify a URL by accessibility alone. |
 | S-52 | 2026-09-16 | Every focused lifecycle skill must use the same unmistakable-intent rule as the global framework instructions. Requests to implement, fix, test, publish, or act immediately activate the normal flow and do not by themselves skip Requirements, Test Design, or Technical Design. |
 | S-53 | 2026-09-16 | Staging access is environment-specific. Dedicated secured machines and user-owned testing are supported policy choices, not universal framework assumptions. The selected environment contract determines location, owner, automation, and available agent execution. This supersedes S-33's universal wording. |
+| S-54 | 2026-09-17 | Distribute the OSS framework through npm, standalone platform archives/installers, WinGet, Homebrew, and direct release downloads. Every channel must install the same verified framework version and preserve clean migration, doctor, update, uninstall, ownership, and restart behavior. Build the channels in parallel where their shared contract permits it. |
+| S-55 | 2026-09-17 | Make the personal third-party OSS repository ready for external supply-chain review without implying Microsoft ownership. Add transparent governance, security reporting, support, contribution, release integrity, dependency maintenance, vulnerability scanning, SBOM, and reproducibility evidence comparable to mature OSS projects. |
+| S-56 | 2026-09-17 | For the time-bounded initial multi-channel release, require native macOS Apple Silicon validation on the available real host. Publish macOS Intel artifacts and metadata as explicitly unverified, non-blocking output. Defer native Windows installation and verification to an explicit tester handoff after the remaining implementation is complete. Treat Linux installers as out of scope. |
 
 ## 6. Framework requirements
 
@@ -1610,7 +1613,9 @@ project name and version rather than naming the artifact after the CI/CD process
 - AC-042.2: Packaging produces exactly one archive named
   `ai-sdlc-framework-<version>.tgz`, derived from package metadata. Tests,
   repository metadata, generated runtime state, and unrelated local files are
-  excluded from the installable archive.
+  excluded from the npm installable archive. Additional platform distribution
+  wrappers under FR-053 are separate release artifacts derived from that same
+  validated payload.
 - AC-042.3: Repeating packaging for the same source and toolchain produces the
   same SHA-256 digest. CI retains deterministic package identity, size, file
   inventory, and digest data internally and compares the distributable against a
@@ -2191,3 +2196,197 @@ requirements while preserving explicit promotion and completion boundaries.
   STAGING execution policy validation.
 
 **Source:** S-53.
+
+### 6.25 Multi-channel public distribution
+
+#### FR-053 - Provide standalone, WinGet, and Homebrew installation channels
+
+The framework must be installable without direct npm-registry access through
+verified standalone release artifacts, WinGet on Windows, and Homebrew on
+macOS. All channels must install the same framework payload and lifecycle
+behavior as the npm package.
+
+**Definition of Done**
+
+- AC-053.1: The initial versioned multi-channel release produces the npm
+  package plus deterministic Windows x64, macOS Apple Silicon arm64, and macOS
+  Intel x64 standalone archives. Intel artifacts and package-manager metadata
+  are published with explicit unverified/non-blocking status until native
+  acceptance exists. Linux installer archives and metadata are outside the
+  initial release scope. The framework payload is architecture-neutral
+  JavaScript; supported execution requires a Node 22+ runtime available for the
+  host architecture.
+- AC-053.2: Standalone archives contain the framework payload, platform
+  launcher/installer, license, version metadata, and cryptographic checksum
+  references. They do not require access to npmjs.org during installation.
+- AC-053.3: Standalone installation may require a documented supported Node.js
+  runtime, but it validates Node 22 or later before mutating `COPILOT_HOME`.
+  WinGet and Homebrew declare or install their applicable Node dependency and
+  every launcher verifies the actual selected runtime before any framework or
+  Copilot-home mutation. A missing, shadowed, or incompatible runtime preserves
+  the existing installation. npm-independent does not mean Node-free or fully
+  offline.
+- AC-053.4: Every channel supports normal install/update, explicit
+  `--purge-existing` clean migration, `doctor`, ordinary state-preserving
+  uninstall, and explicit purge through the same underlying CLI contracts.
+- AC-053.15: Standalone installers may explicitly install into
+  `COPILOT_HOME`. WinGet and Homebrew own only their channel-managed
+  launcher/payload location; users then invoke that launcher’s `sdlc install`
+  or `sdlc install --purge-existing` command to mutate `COPILOT_HOME`.
+  Package-manager upgrade replaces only the channel payload. Package-manager
+  uninstall never silently removes Copilot-home state or performs purge.
+- AC-053.16: Switching channels is supported by installing the new channel
+  payload first, running its explicit framework install/update or clean
+  migration, and only then removing the old channel payload. Removing an old
+  package afterward cannot delete the replacement Copilot-home installation.
+- AC-053.5: All channels preserve unrelated Copilot content, use ownership
+  manifests, require restart after installation/update, and never claim hooks
+  were hot-reloaded.
+- AC-053.6: WinGet manifests identify the exact public Windows installer URL,
+  version, architecture, installer type, SHA-256 digest, upgrade behavior, and
+  uninstall command. Manifest validation passes before publication.
+- AC-053.7: Homebrew formula/cask metadata identifies the exact public macOS
+  artifact URL, version, architecture-specific SHA-256 digest, Node dependency,
+  install/update behavior, and uninstall cleanup. Audit/style validation passes
+  before publication.
+- AC-053.8: Direct release assets and package-manager metadata are publicly
+  reachable without source-repository collaborator access. Publishing therefore
+  uses a public repository or another explicitly approved public artifact host.
+- AC-053.9: CI builds each artifact from the validated source revision, verifies
+  archive inventory and checksums, verifies a shared payload manifest/digest
+  across npm and every wrapper, and permits only documented platform launcher,
+  metadata, and line-ending differences. Direct-download tests verify the
+  published checksum before execution. A checksum or payload mismatch fails
+  before installation or destructive migration. CI installs each mandatory
+  native channel into an isolated Copilot home and prevents release publication
+  when any required artifact or metadata is inconsistent.
+- AC-053.10: Native macOS Apple Silicon arm64 validation exercises standalone
+  and Homebrew installation, update, doctor, uninstall, clean migration,
+  channel switching, checksums, and hook behavior on the available real host
+  and is release-blocking. Windows x64 artifacts and WinGet metadata must pass
+  deterministic cross-build, schema, payload-integrity, and non-execution
+  validation before publication, while native PowerShell, Command Prompt,
+  WinGet, path, and hook acceptance remains explicit `NotRun` for a later
+  Windows tester handoff and does not block this release. macOS Intel x64 is
+  explicit `NotRun` and non-blocking. Linux installer artifacts, metadata, and
+  native acceptance are out of scope and are not published in this release.
+- AC-053.11: One release version is used consistently across npm, GitHub
+  Release assets, standalone metadata, WinGet, and Homebrew. Prerelease channels
+  do not become stable/latest channels. Initial WinGet and Homebrew metadata is
+  stable-release-only.
+- AC-053.12: Documentation presents npm as the simplest general path, explains
+  corporate quarantine separately, and provides equivalent standalone, WinGet,
+  Homebrew, direct archive, update, and uninstall commands without describing
+  any channel as a security-control bypass.
+- AC-053.13: Standalone archives are complete only when published as publicly
+  reachable release assets and successfully installed from a clean client.
+  Homebrew is complete when its supported tap/formula is publicly reachable and
+  `brew install`/upgrade/uninstall are verified. WinGet metadata is
+  repository-ready when local manifest validation passes, but public-client
+  availability is reported separately until the community repository accepts
+  the submission.
+- AC-053.14: Microsoft CFS quarantine, package exceptions, client-device
+  registry access, WinGet policy, and OS download/execution controls remain
+  separate external controls under FR-045.3. Blocked clients report the exact
+  control and use only approved waiting, exception, or alternate-channel
+  guidance; another channel is never guaranteed to bypass policy.
+- AC-053.17: After implementation and macOS validation complete, the release
+  produces a self-contained Windows tester prompt covering anonymous download,
+  SHA-256 and payload verification before execution, PowerShell and Command
+  Prompt standalone lifecycle, WinGet manifest/install behavior, paths with
+  spaces, hook execution, clean migration, ordinary uninstall, purge,
+  unrelated-content preservation, evidence capture, and truthful
+  `Passed`/`Failed`/`NotRun`/`Blocked` reporting.
+
+**Sources:** S-54, S-56.
+
+### 6.26 Third-party OSS trust and supply-chain evidence
+
+#### FR-054 - Publish transparent security and governance evidence
+
+The repository must provide complete, truthful evidence for review as a
+personal third-party OSS project. It must not claim Microsoft ownership,
+first-party status, sponsorship, approval, CFS exemption, or guaranteed
+corporate availability.
+
+**Definition of Done**
+
+- AC-054.1: Repository, package, license, security, support, and contribution
+  metadata identify the project as personal/community-maintained third-party
+  OSS and name the actual public source, issue, discussion, and vulnerability
+  reporting channels.
+- AC-054.2: `SECURITY.md` defines supported versions, private vulnerability
+  reporting, required report content, disclosure expectations, and response
+  boundaries without promising unsupported service levels.
+- AC-054.3: `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SUPPORT.md`,
+  `CODEOWNERS`, pull-request guidance, and `CHANGELOG.md` define contribution,
+  review, conduct, support, ownership, and release expectations.
+- AC-054.4: Automated dependency maintenance covers GitHub Actions and every
+  package ecosystem actually used. The runtime remains dependency-free unless
+  an explicit reviewed change updates requirements, SBOM, and release evidence.
+- AC-054.5: CI performs source checks, tests, package verification, dependency
+  review where applicable, static security analysis, secret scanning through
+  repository controls, and deterministic SBOM generation.
+- AC-054.11: CodeQL or an equivalent static-analysis job covers every shipped
+  JavaScript/TypeScript and native-launcher language. Every release candidate
+  re-evaluates all unresolved actionable high/critical findings. Release is
+  blocked unless each finding is resolved or covered by a currently valid,
+  reviewed, time-bounded exception recording owner, rationale, scope, expiry,
+  and remediation. Expired exceptions fail the gate. Dependency review runs
+  when dependency or workflow manifests change and blocks
+  disallowed/high-risk additions under documented policy.
+- AC-054.12: Repository evidence distinguishes secret scanning alerts from push
+  protection. Enabled controls, unresolved alerts, dismissed-alert rationale,
+  and unavailable account-tier features are reported separately. A configured
+  but skipped/disabled/unverifiable control is not Passed.
+- AC-054.13: Ongoing scheduled security checks detect newly disclosed
+  vulnerabilities after release. Alerts receive an explicit triage state and
+  cannot be silently ignored by a green historical release workflow.
+- AC-054.6: Every released artifact is bound to source commit, version,
+  inventory, SHA-256, license, and SBOM. Public-repository releases publish
+  supported provenance/attestations when the repository/account mechanism
+  permits it; unsupported mechanisms report that limitation rather than
+  fabricating provenance.
+- AC-054.14: The SBOM uses a documented machine-readable SPDX or CycloneDX
+  version, validates against its schema, includes every shipped component and
+  runtime dependency, distinguishes external runtime/toolchain/GitHub Actions
+  build dependencies from shipped dependencies, and is generated twice with
+  identical canonical content for the same source/toolchain. A dependency-free
+  runtime is not described as a dependency-free supply chain.
+- AC-054.15: Postpublication acceptance verifies the downloaded artifact
+  attestation/provenance against the expected repository, full source commit,
+  workflow identity, and artifact digest. Missing or mismatched provenance is
+  rejected where provenance is required and reported NotRun/Blocked where the
+  hosting/account mechanism cannot provide it.
+- AC-054.7: The repository documents threat boundaries, trusted inputs,
+  installation/update ownership, hook advisory semantics, provider adapters,
+  credential handling, build/release process, reproducibility, and known
+  limitations.
+- AC-054.8: Branch protection and repository security settings require reviewed
+  changes and passing required checks before release, subject to capabilities
+  available to the repository owner/account.
+- AC-054.16: Third-party GitHub Actions are pinned to immutable full commit
+  identities or are replaced by reviewed repository-owned actions. Privileged
+  publishing jobs never execute untrusted pull-request code with write
+  permissions, npm credentials, signing identity, or release secrets.
+- AC-054.17: Pull-request validation runs untrusted code only with read-only
+  repository permissions and no publishing credentials. Release jobs execute
+  only source already merged to a protected branch/tag and consume immutable
+  validated artifacts.
+- AC-054.9: A deterministic compliance checklist links each public evidence
+  claim to a repository file, workflow, test, release asset, or external status.
+  Missing external approvals remain `NotRun` or `Blocked`, never Passed.
+- AC-054.18: Protection evidence records the exact repository revision,
+  workflow run/check identity, effective branch/tag/release rules, actor/bypass
+  configuration, and relevant security-setting API status. A settings file or
+  workflow definition alone is not proof that the control executed or was
+  enforced.
+- AC-054.19: Unavailable, disabled, skipped, cancelled, stale, or unverifiable
+  controls receive explicit non-passing status and cannot be summarized as
+  compliant by aggregate documentation.
+- AC-054.10: CFS or another consumer’s exception request remains an external
+  decision. Repository evidence may support a request but cannot substitute for
+  scenario eligibility, vulnerability justification, feed-owner action, or
+  DCISO approval.
+
+**Source:** S-55.

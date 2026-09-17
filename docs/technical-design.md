@@ -2,11 +2,12 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Implemented candidate; maintained with the code |
-| Current phase | Candidate validation; publication and DEV remain separately authorized |
-| Implements | [Requirements](requirements.md), FR-001 to FR-052 |
+| Status | Existing candidate baseline; FR-054 proposed architecture, not implementation evidence |
+| Current phase | Existing candidate validation; FR-054 Technical Design; publication and DEV remain separately authorized |
+| Implements | [Requirements](requirements.md), FR-001 to FR-054; FR-054 is not implemented |
 | Validated by | [Test Design / Test Plan](test-plan.md) |
-| Advancement to Coding | Authorized by the user |
+| FR-054 advancement to Technical Design | Authorized by the user on 2026-09-17 |
+| Advancement to Coding | Existing baseline authorized by the user; excludes FR-054 |
 
 For a short human review, start with the [Design Overview](design-overview.md).
 It is a derived view of this document, not a second specification. This detailed
@@ -210,6 +211,236 @@ path.
 
 Hook entries use direct `node` execution with argument arrays where supported;
 the installer resolves paths containing spaces without shell interpolation.
+
+### 3.1 Multi-channel distribution
+
+The release pipeline builds the npm `.tgz` first and treats its SHA-256 digest
+and inventory as the common framework payload identity. Platform distributions
+contain an extracted copy proven from that exact `.tgz`; they never rebuild
+framework source independently.
+
+Packaging uses an acyclic metadata sequence:
+
+```text
+exact npm payload
+  -> embedded payload-manifest.json
+  -> platform archives
+  -> Homebrew/WinGet metadata
+  -> external release-descriptor.json
+  -> SHA256SUMS rendered from the descriptor
+```
+
+Archives embed only `payload-manifest.json`, never the outer release descriptor
+or `SHA256SUMS`. The canonical external `release-descriptor.json` schema is:
+
+```json
+{
+  "schemaVersion": 1,
+  "name": "ai-sdlc-framework",
+  "version": "<semver>",
+  "sourceCommit": "<full-commit>",
+  "payload": {
+    "filename": "ai-sdlc-framework-<version>.tgz",
+    "sha256": "<digest>",
+    "inventoryDigest": "<digest>"
+  },
+  "files": [
+    {
+      "filename": "<exact-name>",
+      "kind": "archive|homebrew|winget|metadata",
+      "sha256": "<digest>",
+      "size": 123
+    }
+  ]
+}
+```
+
+Canonical JSON uses recursively sorted keys, UTF-8 LF, no timestamps, decimal
+byte sizes, and no duplicate filenames. The complete descriptor includes every
+archive and Homebrew/WinGet metadata file. `SHA256SUMS` is a deterministic text
+rendering of the descriptor file list plus the descriptor's own digest; it
+does not include itself. CI retains the descriptor and `SHA256SUMS` digests as
+workflow evidence so postpublication clients compare the exact published bytes
+with the prepublication result.
+
+Initial published artifact names are
+`ai-sdlc-framework-<version>-windows-x64.zip`,
+`...-macos-arm64.tar.gz`, and `...-macos-x64.tar.gz`. The Intel archive and
+its package-manager metadata are explicitly unverified and non-blocking until
+native Intel acceptance exists. Linux installer artifacts and metadata are not
+generated for the initial release asset set.
+
+`scripts/package-platforms.mjs` creates fixed-time, sorted, deterministic
+staging trees. Each tree contains `package/` extracted from the exact npm
+payload, the payload archive itself, the embedded payload manifest, license,
+platform metadata, and
+platform launchers. Verification independently rebuilds all files, compares
+outer archive digests, verifies the embedded payload and extracted inventory,
+rejects malformed/duplicate/extra entries, and enforces the documented
+launcher/metadata/mode/line-ending allowlist.
+
+The embedded payload inventory is an array sorted by POSIX path:
+
+```json
+{"path":"src/core.mjs","type":"file","size":123,"sha256":"...","mode":"0644"}
+```
+
+Directories, links, device entries, absolute/parent paths, duplicates, and
+unlisted files are rejected. Every `package/**` entry must match across all
+channels. The only allowed wrapper entries are
+`install.sh`, `install.ps1`, `bin/sdlc`, `bin/sdlc.exe`,
+`platform.json`, `payload-manifest.json`, the embedded `.tgz`, and license.
+Text launchers use LF on POSIX and CRLF only for PowerShell; executable modes
+are `0755` for POSIX launchers and `0644` otherwise.
+
+Downloaded code does not verify itself before execution. Direct-install
+documentation first downloads the release descriptor, `SHA256SUMS`, and target
+archive, then uses host-native `Get-FileHash` or `shasum`/`sha256sum` to compare
+the outer archive with the published checksum and descriptor. Only after that
+external check may the archive be extracted or its installer executed.
+Archive-contained launchers recheck the embedded payload before channel
+activation as defense in depth.
+
+Channel installation uses a separate user-owned root and lock:
+`~/.local/share/ai-sdlc-framework` on POSIX or
+`%LOCALAPPDATA%\ai-sdlc-framework` on Windows. It extracts into a unique staging
+directory, validates Node/runtime and payload inventory, then atomically renames
+the staging directory to the immutable version directory. A same-version,
+same-digest install is idempotent; a conflicting digest fails. The `current`
+launcher/link is replaced atomically only after version activation. Channel
+locks are released before invoking framework maintenance, establishing lock
+order `channel → release`, then separately `framework`; interrupted activation
+leaves the prior current version usable and bounded staging cleanup is safe.
+
+Standalone `install.sh` and `install.ps1` may invoke framework
+`install`/`--purge-existing` after channel activation. They locate the exact
+Node executable, require version 22+, and fail before channel or Copilot-home
+mutation when the runtime is absent, non-executable, wrong-architecture, or
+shadowed by an incompatible command.
+
+Homebrew owns its Cellar payload and linked launcher only. Candidate testing
+uses a generated local formula whose URL points to the candidate archive in a
+local HTTP fixture/cache; it runs real `brew install`, upgrade, unlink/link, and
+uninstall without public release dependency. Stable published formula metadata
+uses the final public arm64 and x64 release URLs and exact checksums. The
+repository documentation and release evidence identify the Intel path as
+unverified/non-blocking until native Intel acceptance of the exact candidate.
+Prerelease CI uses a test-only local formula but does not update stable tap
+metadata.
+
+WinGet uses the Windows archive with a small open-source native `sdlc.exe`
+launcher built for x64, because portable manifests do not support `.cmd` as the
+nested target. Its source is `cmd/sdlc-launcher/main.go`; CI pins the Go
+toolchain, uses `CGO_ENABLED=0`, `GOOS=windows`, `GOARCH=amd64`,
+`-trimpath`, and an empty build ID, rebuilds twice, and compares bytes. The
+archive already contains the extracted payload; the launcher
+resolves Node 22+ and invokes `package/bin/sdlc.mjs`. WinGet declares the Node
+LTS package dependency and owns only its portable archive/link. Local manifest
+validation establishes submission readiness; community acceptance and client
+discoverability remain postpublication evidence.
+
+Stable WinGet manifests reference the public stable asset. Prerelease Windows
+CI generates a test-only manifest pointing to the local candidate archive,
+validates its schema, digest, architecture, URLs, and embedded payload-integrity
+contract without executing the Windows installer, then discards it; stable WinGet
+metadata publication is not applicable to prereleases, while the native
+Windows standalone lifecycle remains deferred to the post-implementation
+Windows tester handoff. The Windows artifact still fails prepublication when
+its deterministic build, PE identity, schema, embedded payload integrity, or
+metadata binding is invalid.
+
+Channel switching resolves and invokes the new launcher by absolute path before
+removing the old package. Before any Homebrew install/upgrade command, switching
+captures the existing `sdlc` link target, owning keg/version, formula dependency
+state, and rollback command while the old keg and link are still intact. Every
+Homebrew operation in the transaction runs with install cleanup suppressed
+(`HOMEBREW_NO_INSTALL_CLEANUP=1`), and the switch verifies after installation
+that the captured old keg still exists with its recorded identity. If the
+installed Homebrew version cannot honor that retention contract, switching
+stops before promotion and reports the retained old channel rather than
+claiming rollback safety. It then installs with `--skip-link`, invokes the new
+Cellar launcher directly, and verifies framework update/doctor. Cleanup of the
+old keg is allowed only after successful link promotion and post-promotion
+doctor/hook verification. If the captured link belongs to a global npm
+installation, it is treated as an unsupported external/legacy channel and is
+not automatically removed. The documented npm channel uses `npx` or an
+extracted versioned payload and owns no persistent global `sdlc` link.
+If the existing link belongs to another Homebrew keg, `brew unlink` retains the
+old keg and payload until the new `brew link` succeeds. Link promotion runs
+when the destination is absent or when the existing target is proven owned by
+that old keg. An absent destination is the normal supported npm-to-Homebrew
+case. An unidentified existing target fails without replacement. A link/unlink
+failure restores the captured owned target while the old keg still exists and
+retains both payloads; it never removes an unidentified file.
+
+The reverse Homebrew-to-npm path uses the documented non-global `npx` or
+extracted-package entry by absolute path, updates/verifies `COPILOT_HOME`, and
+then optionally unlinks/uninstalls Homebrew. Before removal, it proves that the
+Node 22+ executable bound into installed hooks remains independently retained
+after Homebrew autoremove, retaining or installing a separately owned runtime
+when the formula dependency is the only provider. It then removes the formula
+and re-runs hook and doctor checks using the retained absolute runtime; failure
+restores the prior keg/link when possible and reports an incomplete switch
+rather than success. It does not create or compete for a global npm bin link.
+Global `npm install -g` is outside the supported channel contract and receives
+only manual ownership diagnostics.
+
+WinGet owns its scope-specific portable alias under
+`Microsoft\WinGet\Links` and performs same-PackageIdentifier upgrade;
+switches from another channel invoke the new WinGet install location directly,
+verify framework update/doctor, then remove the old channel. If validation
+fails, uninstall the new channel payload and retain the old payload; neither
+path rolls back an explicitly requested framework purge. PATH precedence is
+diagnosed but never used to choose the launcher during switching.
+
+The initial release validation matrix is:
+
+| Target | Initial release treatment |
+| --- | --- |
+| macOS Apple Silicon arm64 | Required native standalone and Homebrew install/update/doctor/uninstall/switching, hook, and checksum evidence |
+| Windows x64 | Deterministic artifact, PE, schema, metadata, and pre-execution payload-integrity validation required; native lifecycle deferred to a generated tester prompt |
+| macOS Intel x64 | Published deterministic standalone/Homebrew metadata; native acceptance is `NotRun` and non-blocking |
+| Linux x64 | Installer artifact, metadata, native CI, and publication are out of scope |
+
+The required macOS job records runner image/architecture plus `process.platform`,
+`process.arch`, and host-native architecture evidence. macOS jobs require
+`uname -m` and `sysctl.proc_translated`; Intel evidence fails under Rosetta and
+arm64 evidence requires native arm64. The launcher uses the same validated Node
+path for preflight and execution. Emulation cannot satisfy a native
+requirement. Release publication depends on the macOS arm64 native job and the
+Windows and macOS Intel x64 deterministic non-execution validation jobs;
+failed, skipped, cancelled, or absent mandatory evidence blocks it. Deferred
+Windows and macOS Intel native results remain `NotRun`, not Passed. Intel's
+native lifecycle is non-blocking; its artifact and dual-architecture Homebrew
+metadata validation is mandatory. The repository generates a self-contained
+Windows tester prompt after all implementation is complete. Linux is excluded
+from the release asset set rather than represented as a skipped mandatory job.
+
+Stable release metadata is generated only for stable versions. Prereleases may
+publish npm `next` and prerelease GitHub assets but do not update WinGet or
+Homebrew stable metadata. WinGet completion distinguishes locally valid,
+submission-ready manifests from later community repository acceptance and
+client discoverability.
+
+The prepublication job uploads one immutable `release-bundle` artifact
+containing every candidate asset, descriptor, checksum file, generated stable
+metadata, and source commit. Publisher jobs download only that bundle. GitHub
+Release begins as a draft, uploads assets idempotently only when existing asset
+digests match, publishes after all required destinations succeed, and retains
+explicit partial-publication state when npm or another destination succeeds
+first. Retry never rebuilds bytes.
+
+Postpublication acceptance runs from empty anonymous clients with fresh caches
+and no repository or npm credentials. It retrieves release metadata,
+`SHA256SUMS`, descriptor, and assets, verifies them against the persisted
+prepublication descriptor before execution, and exercises npm, direct
+standalone, and published Homebrew lifecycles. Stable releases require
+Homebrew acceptance; prereleases mark published-Homebrew acceptance
+not-applicable while retaining the native local-formula gate. WinGet client
+installation becomes passing only after community acceptance.
+Microsoft CFS quarantine, package exceptions, client network blocks, WinGet
+policy, and OS execution controls remain separate Blocked diagnostics; no
+installer changes or bypasses those controls.
 Installation documentation covers prerequisites, install/update/uninstall,
 activation, local-only Git use, repository configuration, and recovery.
 
@@ -225,13 +456,16 @@ Instructions/hooks take effect using the CLI's documented reload/restart rules.
 Cross-platform behavior is not inferred merely from writing documentation or
 executing a foreign-shell parser on another host.
 
-### 3.1 Distribution CI/CD
+### 3.2 Distribution CI/CD
 
 The repository's GitHub Actions workflow runs on pull requests, main-branch
 updates, version tags, and explicit manual dispatch using Node.js 22. It executes
 the existing static/source checks and deterministic tests before packaging.
-No dependency installation is needed because the runtime and build scripts use
-only Node.js built-ins plus the available npm CLI.
+The framework runtime and npm packager use only Node.js built-ins plus npm.
+Multi-channel release jobs additionally pin Go for the Windows launcher and use
+host-native archive, Homebrew, and WinGet validation tools only in their
+applicable matrix jobs; these are build-time tools, not framework runtime
+dependencies.
 
 `scripts/package.mjs` invokes `npm pack --ignore-scripts` twice in isolated
 destinations and requires identical SHA-256 digests. The package filename is
@@ -267,10 +501,12 @@ Copilot home containing spaces and pre-existing instructions, runs the installed
 `doctor`, verifies a same-package update is idempotent, and uninstalls. It checks
 that owned content is removed, user instructions are preserved, and seeded
 framework runtime content remains byte-for-byte unchanged after update and
-uninstall. The successful workflow uploads the single versioned `.tgz` as its
-project/version-named retained workflow artifact. On version tags, a separate
-least-privilege job downloads that validated artifact and publishes it to the
-matching GitHub Release. It never uses the real Copilot
+uninstall. The npm verifier feeds the multi-channel packager rather than publishing
+directly. The successful workflow uploads the immutable `release-bundle`
+described in section 3.1, including the `.tgz`, platform archives, descriptor,
+checksums, and package-manager metadata. On stable version tags, separate
+least-privilege publisher jobs download that exact bundle for npm, GitHub
+Release, Homebrew tap, and WinGet submission-ready output. It never uses the real Copilot
 home, provider credentials, cloud resources, network deployment, or LLM
 evaluation.
 The extraction step disables npm bin-link creation because verification invokes
@@ -282,7 +518,7 @@ disable update notifications, and force npm offline. This prevents a nominally
 local test from reading credentials, contacting the registry, or writing to the
 developer's real npm state.
 
-### 3.2 Focused engineering instruction pack
+### 3.3 Focused engineering instruction pack
 
 The source instruction pack lives under `assets/instructions/` and installs
 under `<copilot-home>/sdlc/instructions/`. Each file owns one task concern:
@@ -330,7 +566,7 @@ content, partial installation rolls back safe writes, and uninstall preserves
 modified files. Static and integration tests verify substantive content,
 cross-file references, package inclusion, installed locations, and removal.
 
-### 3.3 Host, shell, path, and process adapters
+### 3.4 Host, shell, path, and process adapters
 
 The framework has one canonical internal model and explicit adapters at native
 boundaries. `src/platform.mjs` owns pure platform descriptors, path comparison
@@ -2106,12 +2342,14 @@ with visible consequences and stated limits.
 | FR-039 | User-authorized PR creation/reuse, source/target resolution, publishing and merge boundaries, duplicate prevention (6.2, 7.5, 8.1) |
 | FR-040 | Per-environment PR requirements, current check provenance, independent artifact/review/merge readiness, PROD readiness reporting (7.2, 7.5, 10.2, 11, 12) |
 | FR-041 | Built-in `/review` candidate stage, candidate-bound evidence and invalidation, user completion, and publication/DEV gates (5.1, 7.2.1, 7.5, 8.1, 10.3, 12) |
-| FR-042 | Reproducible single-file project/version package, internal digest/inventory comparison, isolated lifecycle verification, and retained CI artifact (3.1) |
-| FR-043 | Dedicated technology-neutral knowledge, coding, testing, building, and reviewing guides with task-specific loading and repository precedence (3.2, 10.3) |
+| FR-042 | Reproducible single-file project/version package, internal digest/inventory comparison, isolated lifecycle verification, and retained CI artifact (3.2) |
+| FR-043 | Dedicated technology-neutral knowledge, coding, testing, building, and reviewing guides with task-specific loading and repository precedence (3.3, 10.3) |
 | FR-049 | Canonical environment resolution, scoped provider-label mappings, stage separation, and unmanaged unresolved execution (7.4, 8.1, 10.2) |
 | FR-050 | Provider-neutral execution identities, adapter-derived verified links, Azure DevOps reference mapping, extensible registration, and complete PR association (7.4, 7.5) |
-| FR-051 | Shared lifecycle-intent guidance, consistent focused-skill interpretation, useful stage work, and no fabricated override credit (3.2, 8, 10.3) |
+| FR-051 | Shared lifecycle-intent guidance, consistent focused-skill interpretation, useful stage work, and no fabricated override credit (3.3, 8, 10.3) |
 | FR-052 | Policy-selected STAGING owner/location, authorized fallback, managed execution boundaries, and owner-independent result reporting (7.2, 7.4, 8.1, 10.2) |
+| FR-053 | Shared multi-channel payload identity, standalone launchers, WinGet/Homebrew ownership, native release gates, and public-client acceptance (3.1, 3.2) |
+| FR-054 | Personal third-party governance, security gates, deterministic SBOMs, acyclic release evidence, workflow trust, effective repository controls, and public verification (17; T-53..T-59) |
 
 ## 15. Focused test impact
 
@@ -2148,6 +2386,12 @@ source and installed phase skill. T-50 covers STAGING execution-contract
 validation, owner/location policy, scoped fallback, truthful result reporting,
 completion boundaries, generated guidance, and source/installed wording.
 
+T-53..T-59 cover FR-054 as mapped in section 17.10 and the Test Plan's
+acceptance-criterion matrix. T-53..T-57 are deterministic repository/fixture
+contracts; T-58 and T-59 require separate real GitHub/public-release observations.
+All remain `NotRun` until executed. Technical Design does not execute them or
+authorize implementation, settings changes, publication, or consumer exceptions.
+
 Implementation runs these as targeted local tests. A supported CLI's hook payload
 smoke check is distinct from a model benchmark. Real cloud/pipeline integration
 that is not exercised remains unverified; fixture success does not substitute.
@@ -2178,3 +2422,542 @@ and [hooks](https://docs.github.com/en/copilot/reference/hooks-reference).
 Git metadata handling follows [git rev-parse](https://git-scm.com/docs/git-rev-parse)
 and [worktrees](https://git-scm.com/docs/git-worktree). Behavior involving Git
 subprocesses must account for [Git hooks](https://git-scm.com/docs/githooks).
+
+## 17. Third-party OSS trust and supply-chain evidence
+
+This is the proposed FR-054 architecture for T-53..T-59. Named new files below
+are implementation targets, not files or controls claimed to exist today.
+It extends the release-bundle boundary in sections 3.1-3.2 without changing
+installer ownership, Homebrew rollback/runtime retention, stable-only published
+Homebrew acceptance, WinGet readiness, native gates, or framework hook semantics.
+Repository security is enforced by GitHub/CI and owner-authorized procedures,
+not by advisory framework hooks. No Coding authorization is implied.
+
+### 17.1 Public identity, governance, and configuration
+
+The canonical identity is `urmich/ai-sdlc-framework`, maintained by Michael
+Urinovsky as personal/community third-party OSS under MIT. It is not Microsoft
+first-party software, sponsored/approved Microsoft distribution, or a promise
+of Microsoft/GitHub support or corporate availability. Contributor attribution
+and third-party licenses are retained; contribution does not imply copyright
+assignment to Microsoft or a requirement to sign a Microsoft CLA.
+
+| Planned surface | Contract |
+| --- | --- |
+| `config/oss-project.json`; `README.md`; `package.json`; `LICENSE` | One validated repository/name/owner/license identity; actual source, homepage, issues, discussions, private security, and conduct-reporting channels. Keep the requested Michael Urinovsky author/copyright. Placeholder contacts fail; channels must be owner-confirmed and their enablement/reachability separately observed. |
+| `GOVERNANCE.md`; `.github/CODEOWNERS` | Named actual maintainers/reviewers, decision and release authority, succession/contact procedure, and ownership of workflows/security policy. A sole maintainer or AI review is not fabricated independent GitHub approval. |
+| `SECURITY.md` | Supported release lines, GitHub private vulnerability reporting, report content, coordinated disclosure, best-effort response boundaries, and escalation limitations. No public issue containing undisclosed vulnerability details. An unavailable private path is a visible blocker, not an invented email address. |
+| `CONTRIBUTING.md`; `CODE_OF_CONDUCT.md`; `SUPPORT.md`; `.github/PULL_REQUEST_TEMPLATE.md`; `CHANGELOG.md` | Build/test/review and inbound MIT contribution rules, maintainer-owned conduct channels, community support, and user-facing release notes rather than a duplicate engineering revision log. Institutional support/contact claims are not copied from another project. |
+| `docs/supply-chain.md`; `THIRD_PARTY_NOTICES.md` | Threat/trusted-input boundaries, credentials, advisory hooks, adapters, install/update ownership, reproduction/verification commands, and limitations. Include notices for distributed Go runtime/standard-library code and any other redistributed material; preserve the project's MIT license separately. |
+| `config/security-policy.json`; `config/security-exceptions.json` | Versioned applicability, severity/license policy, required check identities, freshness limits, supported release lines, provenance mechanisms, and the reviewed exception records in section 17.6. Policy changes require matching reviewed-source evidence. |
+| `.github/dependabot.yml`; `config/build-tools.lock.json`; `config/action-pins.json` | Weekly npm and GitHub Actions updates; discover every actual manifest directory, including Go modules when present. Record exact Node/npm/Go, analysis/verifier/archive tools, query-pack versions and integrity, and action source identities. Tool versions without package-manager coverage receive scheduled update/advisory checks, not silent exclusion. |
+
+The stdlib-only Go launcher need not gain a module just to make a dashboard
+green: if there is no `go.mod`, record that fact and maintain the exact Go
+toolchain separately. Any later module adds its manifest/lock and gomod update
+coverage. npm runtime dependencies remain absent; development-only YAML/schema
+tooling is separately locked, inventoried, and excluded from the shipped runtime.
+An added runtime dependency requires the explicit reviewed requirements, SBOM,
+and release-evidence change in AC-054.4.
+
+`docs/supply-chain.md` distinguishes a first-party-only CFS scenario, for which
+this project is not first-party eligible, from other consumer decisions. Clean
+scans, SBOMs, personal ownership, or alternate channels do not establish scenario
+eligibility, vulnerability justification, feed-owner action, or DCISO approval.
+Evidence may support an independently authorized request; it never grants one,
+guarantees availability, or recommends bypassing quarantine/device controls.
+
+### 17.2 Components, interfaces, and evidence locations
+
+These build/review tools are Node ESM scripts outside the installed runtime.
+Common strict parsing, canonicalization, hashing, path validation, and status
+handling live in `scripts/lib/oss-evidence.mjs`; they reuse existing package
+inventory/digest contracts rather than creating a second packager.
+
+| Planned component | Inputs -> outputs/responsibility |
+| --- | --- |
+| `scripts/check-oss.mjs` | Repository documents/configuration and package inventory -> `oss-docs.json`, ecosystem/language coverage and source/test/package/security check declarations; T-53/T-54. |
+| `scripts/resolve-action-pins.mjs`; `scripts/check-workflow-trust.mjs` | Reviewed workflow/action graph and locked upstream definitions -> `actions-graph.json`, pin/permission/ref/artifact-path verdicts; T-55. Network resolution is a separate authorized maintenance step; local tests use frozen definitions. |
+| `scripts/generate-sbom.mjs` | Final software artifacts, actual inventories and locked/observed tool identities -> per-artifact `.cdx.json`, `build-dependencies.json`, and `supply-chain-index.json`; T-56. |
+| `scripts/security-gate.mjs`; `scripts/security-triage.mjs` | Complete scan/alert inventory, policy, verified exceptions and injected evaluation time -> `security-gate.json`, sanitized `triage.json`, and stable alert identities; T-54/T-58. |
+| `scripts/collect-repo-security.mjs` | Explicit repository/ref/commit/run identity and authorized read-only API observations -> `repository-security.json`; T-57/T-58. It never changes settings. |
+| `scripts/verify-release-evidence.mjs` | Expected release identity, downloaded files and verified attestation results -> `release-verification.json`; T-56/T-59. Verification tools and expected identity are trusted inputs, not downloaded executable helpers. |
+| `scripts/compliance-checklist.mjs` | Policy plus validated evidence envelopes -> `compliance.json` and `compliance.md`, with stable AC-054 claim IDs and evidence links; T-57. |
+| `schemas/oss/*.schema.json`; `schemas/vendor.lock.json` | Project config/exception/evidence schemas plus vendored CycloneDX 1.6 and all referenced schemas. Pin upstream versions/digests/licenses; validate offline with locked development-only YAML/JSON-schema tooling. |
+
+Local execution writes only to owned `.test-data/oss-trust/<case>/` trees with
+synthetic repositories, inert alerts, and a fake clock. Build outputs use
+isolated per-attempt staging directories, then the existing release-bundle
+assembler; do not pass an expanded evidence directory to the npm packager,
+whose owned-output allowlist remains unchanged.
+
+Observed records use `evidence/<sourceCommit>/<runId>-<attempt>/`. Their shared
+schema includes `schemaVersion`, `claimId`, repository, source commit, release
+version, descriptor digest when available, workflow/ref/run/job/check identity,
+observation/evaluation time, tool/policy blob identities, input evidence digests,
+`status`, diagnostic/reason, and authorized source links. Synthetic records
+carry `origin: fixture`; collectors use `origin: observed` or `owner-observed`.
+Only observed records may satisfy external claims. Reject duplicate JSON/YAML
+keys, unknown schema versions, path traversal, symlinks, incomplete pagination,
+and malformed identities; no partial response is a success-shaped empty list.
+Never persist tokens, secret values, or undisclosed report contents. Restricted
+details stay in authorized security records; public summaries expose only safe
+counts/references and explicitly describe their access/observation limitations.
+
+### 17.3 Deterministic SBOM schema and comparison
+
+Use CycloneDX JSON 1.6: `bomFormat: CycloneDX`, `specVersion: 1.6`, `version: 1`.
+Omit optional `serialNumber` and `metadata.timestamp`; do not invent a creation
+time to obtain reproducibility. The root component identifies the finished
+software artifact, version, SHA-256, source repository/commit, and license.
+Unique `bom-ref` values derive from canonical component identity, version or
+declared range, distribution role, platform, and path/digest where applicable.
+
+Independently enumerate actual archive entries and reconcile them with the
+payload manifest, package manifests/locks, and native build information.
+Include shipped files/components, transitive runtime packages if introduced,
+and the embedded Go runtime/stdlib at the actual compiler version. File hashes,
+license/notice references, and occurrence paths must match the shipped bytes.
+Represent external client-supplied Node as external runtime with supported range
+`>=22`, not a fictitious measured client version. Record the build's actual
+Node version separately. External build tools and GitHub Actions have explicit
+`sdlc:distribution=external` and `sdlc:role=build-tool` properties, exact
+versions/commits/digests, and a separate build graph in `build-dependencies.json`.
+The CycloneDX runtime dependency graph does not describe compiler/CI tools as
+installed runtime packages. Unknown component/license coverage is non-passing,
+not silently omitted or described as a dependency-free supply chain.
+
+Canonicalization validates before serializing: recursively sort object keys by
+ordinal code-point order; use UTF-8 without BOM and exactly one final LF; retain
+all defined values; reject duplicate component IDs/paths and non-finite numbers.
+Sort only schema-defined set arrays: components by `bom-ref`, dependency edges
+by reference, `dependsOn` lists by ID, hashes by algorithm/value, properties by
+name/value, licenses by normalized expression/ID, and file occurrences by POSIX
+path. Normalize generator-owned relative paths, not arbitrary user text.
+No locale sorting, wall-clock fields, host absolute paths, random IDs, or
+execution run IDs enter deterministic documents. SBOM schema validation and
+independent inventory completeness checks are both required.
+
+Build A and B from the same full commit and exact toolchain in separate empty
+staging trees, without reusing A's generated outputs. Reuse the native matrix
+and packager in sections 3.1-3.2, including the Go twice-build check. Generate
+inventories/SBOMs independently and compare canonical bytes and SHA-256 for
+every artifact and deterministic sidecar. `reproducibility.json` records source,
+toolchain/architecture, both digest sets, and equality; it does not hash itself.
+Schema/completeness validation precedes equality, so two equally empty or wrong
+SBOMs cannot pass. Live scans, API observations, signatures, and postpublication
+results have real times/run identities and are excluded from reproducible-byte
+claims rather than stripped to manufacture equality.
+
+### 17.4 Acyclic installer release-bundle integration
+
+Keep the section 3.1 payload/archive format and descriptor schema version 1.
+Add deterministic sidecars as descriptor entries with `kind: metadata`:
+
+```text
+npm payload -> embedded payload-manifest -> platform archives
+  -> stable Homebrew/WinGet metadata
+  -> artifact inventories + per-software-artifact SBOMs + build-dependencies
+  -> supply-chain-index -> reproducibility report
+  -> external release-descriptor.json -> SHA256SUMS
+  -> provenance/SBOM attestations + sanitized prepublication observations
+  -> bundle-index.json -> upload one immutable release-bundle
+  -> external upload receipt -> publishers -> postpublication observations
+```
+
+Gate dependencies follow the same direction. Merge-required checks exclude
+publication jobs. The prepublication gate consumes completed source/native/
+security checks and current T-58 control evidence, not its own completion,
+the future upload receipt, or T-59. After signing, verify the generated
+attestations before finalizing/uploading the bundle; publishers require the
+finalizer's completed run and external upload receipt. T-59 can run only after
+publication. It stays required but pending, not falsely passed or not-applicable,
+while an explicitly scoped prepublication verdict permits authorized publication.
+Full release acceptance/compliance remains incomplete until T-59 succeeds.
+
+`supply-chain-index.json` maps exact software filenames to their SBOMs, licenses,
+source/version and dependency/inventory evidence. Channel manifests link to the
+software/SBOM they install. Evidence files are not recursively given SBOMs of
+their own; the index does not refer forward to the reproducibility report.
+Neither software archives nor their SBOMs contain the descriptor,
+checksums, attestations, bundle index, or later observation results.
+`THIRD_PARTY_NOTICES.md` is included through the npm payload allowlist in the
+implementation change, so all wrappers inherit it through `package/` without
+introducing a second wrapper inventory or altering channel ownership.
+
+The descriptor lists all deterministic product/channel/evidence files, including
+SBOMs, index, notices and the reproducibility report, but never itself.
+`SHA256SUMS` renders that list plus the descriptor's digest, never its own.
+Attestation subjects are an explicit frozen list of those files, the descriptor,
+and `SHA256SUMS`; additionally bind each software artifact to its matching SBOM
+with an SBOM attestation. Signatures and live observations occur afterward,
+outside the descriptor/checksum graph. Do not regenerate archives or append
+their attestation bytes into an already-hashed archive.
+
+The trusted finalizer adds attestations under `attestations/<subject-digest>/`
+and sanitized observation records, then writes `bundle-index.json` containing
+exact filenames, sizes, SHA-256 values and the descriptor digest for everything
+else in the bundle. The index excludes itself. Its digest, GitHub artifact ID,
+platform artifact digest, source commit, producing workflow/run/attempt and
+descriptor digest form the upload receipt retained outside the uploaded bundle.
+An upload-assigned artifact ID is never embedded in that artifact.
+
+Publisher jobs identify the bundle by producing repository/run/attempt and
+artifact ID, not by the reusable name `release-bundle`. Verify the service
+digest, index and each subject before credentials are used to publish. Consume
+only those bytes; never execute bundled scripts, npm lifecycle hooks, Ruby
+formula code, or installer tests in privileged publishing jobs. Retain the
+draft/idempotent/partial-publication/retry rules of section 3.1.
+Retry reuses the immutable bundle; a fresh gate receipt can reference it without
+rewriting it. Postpublication observations/checklists are separate append-only
+run artifacts or separately identified evidence assets, never mutations of the
+published descriptor, SBOM, archive, or checksum list.
+
+### 17.5 Workflow trust, action pinning, and security analysis
+
+| Planned workflow/job | Trigger and trust boundary |
+| --- | --- |
+| Existing `.github/workflows/ci.yml` validation/matrix | PRs, protected-source updates/tags and authorized dispatch. Existing source/tests/package/native gates plus T-53..T-57; fresh isolated runners, read-only repository token, no publishing credentials. PR artifacts are validation-only and cannot become release bundles. |
+| `.github/workflows/security.yml` | PRs, protected-source updates/version tags, daily `17 6 * * *` UTC, and authorized dispatch. Analyze JavaScript/TypeScript and Go, dependency changes and supported-release vulnerabilities. Untrusted analysis jobs remain read-only; trusted-source SARIF upload/triage notification jobs have narrowly scoped permissions. |
+| `.github/workflows/release-evidence.yml` reusable finalizer | Called only by the authorized release path for reviewed protected-source commits. Trusted fixed workflow/scripts collect current evidence, gate, attest and assemble the bundle. OIDC/attestation write permissions exist only in its signing job; no PR event can invoke a privileged execution path. |
+| Existing publisher jobs | Protected release context and any configured environment approval; separate npm/GitHub/tap privileges. Download validated immutable bundles and publish data with lifecycle execution disabled. No untrusted checkout/build occurs with credentials. |
+| `.github/workflows/oss-observe.yml` | Reusable postpublication T-59 job in the authorized release chain; explicit dispatch for T-58/T-59. Do not rely solely on a release event generated with `GITHUB_TOKEN` to trigger another workflow. Read-only consumer/setting permissions; no automatic settings mutation. |
+
+The action scanner parses YAML structurally, including job/step `uses`,
+reusable workflows, defaults, permissions, environments and referenced local
+composite actions. Every remote action/workflow reference uses a full 40-hex
+commit, including GitHub-owned actions; a tag comment is documentation only.
+Walk nested upstream definitions at their pinned commits using the locked graph,
+and local definitions from the exact reviewed source tree. Detect cycles with
+a visited `(repository, commit, path)` set and bounded depth/size; unresolved
+definitions, graph drift, unsafe paths or a nested mutable ref fail. Container
+actions/tools require image digests or reviewed builds with locked inputs;
+script-downloaded executables require tool-lock checksums, not `curl latest`.
+The separate resolver refreshes snapshots through an owner-reviewed PR.
+
+Use pinned `github/codeql-action` with `javascript-typescript` and `go`
+categories, recorded CodeQL/query-pack identities and the security-extended
+suite. Analyze `.mjs`/JS/TS across the shipped code and the Go Windows launcher
+through the same pinned Go build/target/flags as section 3.1. An absent extraction
+or empty database is not a successful scan. PowerShell uses pinned
+PSScriptAnalyzer; POSIX scripts use pinned ShellCheck plus launcher security
+contract tests. Any shipped cmd shim has fixed-template/escaping tests; CodeQL
+is not claimed to analyze PowerShell, shell, or cmd. A newly introduced shipped
+language without a mapped analysis/check is a coverage failure.
+
+PR analysis uses no repository write permissions or secrets: CodeQL emits SARIF
+with upload disabled and local policy evaluation gates the PR. Protected-source
+analysis may upload SARIF with `security-events: write`; its source was already
+reviewed. Never take a PR artifact into a privileged `workflow_run` job and
+execute its scripts. PR checks evaluate exception/policy changes against the
+trusted base policy and flag them for owner review, not self-approval.
+The policy validator and scanner configuration also come from that reviewed
+base/pinned workflow, with PR contents in a separate data checkout; a modified
+PR checker cannot certify itself. Candidate checker changes are tested
+unprivileged and require owner review before becoming trusted. The authoritative
+release gate reruns trusted checks rather than treating arbitrary PR job names
+or self-reported green output as independent evidence.
+
+Dependency review compares provider-resolved base/head commits whenever package
+manifests, locks, workflow/action definitions or tool pins change. Use pinned
+`actions/dependency-review-action` where the dependency graph supports the
+ecosystem; combine its results with the workflow/tool inventory for unsupported
+surfaces, rather than calling them clean. Reject high/critical additions and
+licenses outside the reviewed allowlist. When no dependency/workflow/tool change
+occurred, record an explicit not-applicable disposition; API failure, missing
+graph or unsupported required
+coverage is `NotRun`/`Blocked`, not an empty successful review. Weekly Dependabot
+updates and scheduled checks include development/build dependencies even though
+the installed npm runtime has none.
+
+Reviewed source means the full candidate commit is reachable from the resolved
+protected release branch, with matching required reviews/checks; a tag name or
+protected tag alone is insufficient. Verify tag peeling, workflow revision,
+run attempt, bundle origin and digest. Pin reusable finalizers to a reviewed
+commit and record that signer identity separately from the candidate commit.
+Repository/admin changes and compromised trusted runners remain explicit trust
+limitations; writable policy files do not provide an independent trust root.
+
+### 17.6 Release gates, exceptions, and post-release triage
+
+`security-gate.mjs` merges full, paginated current candidate SARIF, dependency
+advisories, Go binary/toolchain advisories, relevant repository alerts, and
+triage/dismissal evidence. Normalize aliases to stable fingerprints while
+retaining source identities and affected component/path/version scope.
+Release policy and exception records come from the current owner-designated
+protected policy ref, recorded independently from the artifact source commit;
+the candidate cannot select an older, more permissive policy snapshot.
+Its explicit modes separate a PR's local SARIF/dependency-change check from the
+complete release gate and scheduled observation. Read-only PR mode cannot claim
+release readiness or require access to private repository-alert credentials.
+Unknown severity/applicability or unavailable required advisory coverage remains
+`NotRun`/`Blocked` pending supported evidence/triage, not a low-risk default.
+Evaluate all unresolved actionable high/critical findings affecting the
+candidate, including prior releases/baselines, not just the PR diff. A dismissal
+or an empty recent scan does not erase an actionable historical finding without
+resolution/not-affected evidence for the current candidate.
+
+The strict `config/security-exceptions.json` schema has `schemaVersion: 1` and
+unique entries with `id`, `findingIds`, `repository`, affected component/path,
+bounded release-version scope, `owner`, `rationale`, `remediation` (action and
+tracking reference), UTC `expiresAt`, and `reviewEvidence` (provider review/PR
+reference). The later collector resolves the approval, reviewed policy blob and
+merge identities; the tracked file does not embed its own blob/commit hash.
+The array is named `exceptions`. `id`, `owner` and `rationale` are nonempty
+strings; `findingIds` is a nonempty unique string array; `repository` is the
+exact canonical owner/repo. `scope` contains unique `componentIds` and POSIX
+`paths` arrays (at least one populated) and a nonempty `releaseVersions` array
+of exact SemVer strings, never open-ended ranges. `remediation` has nonempty
+`action` and an authorized `trackingReference` URL. `reviewEvidence` identifies
+the canonical repository and positive integer `pullRequest`; provider-resolved
+reviews supply the actual approval time/actor. `expiresAt` is a valid UTC
+RFC 3339 timestamp. Schemas reject additional fields and duplicate IDs.
+No unrestricted wildcard scope, unreviewed self-attestation or missing value is
+accepted. Public files use safe identifiers; confidential justification lives
+behind an authorized security-record reference, not in the public repository.
+The collector verifies the review's actor/decision/content and merge ancestry.
+
+The gate captures one trusted UTC evaluation instant and permits an exception
+only if every scope matches and `now < expiresAt`; equality is expired.
+Release time comes from the trusted execution context, never a caller-supplied
+fixture clock or a timestamp chosen by the exception author.
+Approval must precede evaluation/expiry, and the default policy limits validity
+to 30 days from verified approval. Renewal requires new reviewed evidence, not
+editing an issue label or replaying a previous passing gate. `security-gate.json`
+binds the exception/policy blob digests and observation inputs to the candidate
+commit, descriptor, run and evaluation instant. Tracked exception files never
+contain their own enclosing commit hash: scope is bounded by finding/component/
+release version, and the later receipt binds the actual candidate, avoiding a
+self-referential commit dependency. Exceptions do not mark findings resolved.
+
+Release uses same-candidate analysis no older than 24 hours and refreshes
+repository/alert/protection observations within 15 minutes before each
+privileged publication attempt. Re-evaluate expiry at that boundary, including
+retries; stale evidence or an expired exception blocks. Fixed-policy updates,
+changed candidate bytes, signer/workflow changes, or changed protection/bypass
+state invalidate the prior verdict.
+
+Daily scheduled jobs analyze protected source and inventories of every release
+line supported by `SECURITY.md`, including already shipped Go binaries with
+pinned `govulncheck` and current Go vulnerability data. Include npm/build/Action
+and Node/Go tool advisories; periodically compare pinned tools with supported
+security updates. Historical source inspection runs in unprivileged isolated
+jobs, not under notification/publishing credentials. `triage.json` records
+`new`, `triaged`, `fix-planned`, `excepted`, `resolved`, or `false-positive`,
+stable finding identity, affected releases, owner, source observation, and
+review/remediation links. GitHub issues or private advisories hold durable
+owner decisions; run artifacts retain observations, not an unaudited replacement
+for those decisions. Only a trusted default-branch notification job may write
+sanitized public issues; undisclosed details remain private.
+
+A zero-alert observation is valid evidence; do not seed a real vulnerability.
+Missing schedules, incomplete scans, failed notifications or a scheduled
+observation older than 36 hours remain visibly incomplete/stale and route to
+the maintainer. Triage alone does not waive a high/critical release finding.
+Scheduling/triage expectations are operating targets, not a promised community
+support SLA. Tests advance a fake clock rather than waiting for real schedules.
+
+### 17.7 Effective repository controls and secret handling
+
+The owner procedure in `docs/supply-chain.md` configures required reviewed PRs
+and named current checks on the actual default/release branches, dismissal of
+stale approvals, restrictions on force-push/deletion and release-tag creation,
+and applicable environment approvals. Apply requirements to administrators
+where supported; record all bypass actors. Protect workflows, policy,
+exceptions, and publishing configuration with real code ownership/review.
+If an independent required reviewer or account capability is unavailable, do
+not fabricate approval or auto-enable a bypass; record the blocker.
+
+The read-only collector resolves repository ID/name, branch/ref and peeled
+commit, then reads effective rulesets (including inherited/applicable rules),
+legacy branch protection, tag/release/environment restrictions, bypass actors,
+and actual review/check decisions. Record response status, source URL, observed
+time, rule IDs and effective values together with exact source/workflow/run/
+attempt/job/check IDs and policy/tool identities. Include `security_and_analysis`,
+private-reporting enablement, dependency/CodeQL coverage, and secret-control
+observations supported by that account/API. Fetch all pages; a 403/404 is not
+proof of a disabled feature or a successful empty rule/alert list. Missing API
+coverage requires clearly attributed owner observation or remains blocked.
+
+Secret scanning detects/reports leaks; repository push protection prevents
+supported pushes and has separately recorded enablement/bypass behavior.
+Personal push protection is not evidence that repository push protection is
+enabled. Keep alert counts/states, dismissal reasons, rotation/remediation
+references and capability limits distinct. Treat actionable exposed credentials
+as critical findings; neither enabling scanning nor a green workflow resolves
+an existing leak. Never copy secret values into fixtures, public logs, checklists
+or release bundles, and never test protection by uploading real credentials.
+
+T-58 reads existing effective enforcement decisions or uses separately
+authorized benign owner validation without weakening protections. A local
+settings file, workflow declaration, inaccessible endpoint, stale screenshot,
+or wrong-revision run is not proof of current enforcement. Public reporting
+distinguishes automated API evidence, owner-observed evidence and unverified
+limitations; GitHub controls remain external to the framework's override model.
+
+### 17.8 Provenance generation and downloaded verification
+
+After the release gate, pinned `actions/attest` produces SLSA v1 build provenance
+for the frozen subjects and matching CycloneDX SBOM attestations. Only the
+trusted finalizer's signing job has OIDC/attestation permissions. Capture the
+source repository/commit and reusable signer workflow/commit independently;
+checking out arbitrary source in a workflow for a different ref cannot silently
+claim that the workflow's own commit built the candidate. The finalizer checks
+the originating build run and candidate source before issuing attestations.
+
+The capability matrix records the actual hosting/account/mechanism: GitHub
+public-repository artifact attestations, private/internal Enterprise Cloud
+attestations, and npm trusted-publishing provenance are separate mechanisms.
+Do not infer availability solely from public/private visibility. Unsupported
+mechanisms remain `NotRun` with `Blocked` details. Missing/invalid provenance
+where required fails; an API outage is not an unsupported-feature exception.
+No full compliance claim or silent relaxation of existing npm provenance
+requirements follows from a capability limitation.
+
+T-59 obtains assets anonymously through the existing public channel contracts;
+collects evidence through the documented consumer path; and records any
+verifier authentication requirement separately from asset availability.
+Use a pinned, independently installed GitHub CLI, not a verifier from the
+downloaded bundle. The wrapper invokes the documented
+`gh attestation verify` interface with `--repo`, `--source-digest`,
+`--signer-workflow`, `--signer-digest`, the expected
+`--cert-oidc-issuer`, `--predicate-type`, and `--format json`; use `--bundle`
+for downloaded attestation bundles and the appropriate trusted roots.
+Expected values come from the approved candidate/upload receipt and reviewed
+signer policy, not from the artifact being verified.
+
+Require cryptographic certificate/signature/timestamp validation and a matching
+subject SHA-256/name. Compare the verified certificate's repository/source
+commit and signer identity with the expected full values, then check the
+verified statement's predicate and SBOM/artifact associations. User-controlled
+predicate text alone cannot establish identity. Preserve exact verified results
+and digest/link references in `release-verification.json`; a successful result
+for another subject is not sufficient.
+
+npm verification separately checks the registry's integrity/provenance for the
+downloaded `.tgz` and requires the same candidate bytes. Use a supported pinned
+npm provenance verifier (including `npm audit signatures` in an isolated
+consumer project) and assert that this package actually has a verified
+attestation, rather than treating a zero-attestation summary as success.
+Registry metadata must bind the expected source/workflow/commit/digest too;
+the GitHub Release attestation is not a substitute for npm's required one.
+On mismatch, fail acceptance without rewriting/removing published bytes; retain
+partial-publication state and require an authorized remediation/new release.
+Provenance proves origin/integrity, not absence of vulnerabilities, OS code
+signing/notarization, a SLSA level not established here, or corporate approval.
+
+### 17.9 Checklist semantics and compatibility/migration
+
+Each checklist item has stable `AC-054.n` identity, applicability, local versus
+external evidence class, `Passed`/`Failed`/`NotRun`, diagnostic/reason, source
+revision/run/time, and linked input digests. Missing/unavailable/disabled/
+skipped/cancelled/stale/unverifiable evidence cannot be summarized as compliant.
+Each of the 19 AC items has named evidence slots with their own class,
+requiredness and result; mixed local/external claims require both. A failed
+required slot makes the item Failed; otherwise a missing/inconclusive required
+slot makes it NotRun with its blocker. Only all required slots passing can make
+the item Passed. Missing slots cannot disappear during aggregation.
+Policy defines explicit `pr`, `prepublication`, `postpublication`, and
+`scheduled` evaluation profiles. Reports separate `stageVerdict` from
+`overallVerdict`: before publication, T-59 slots remain NotRun with an
+awaiting-publication reason, so overall compliance is not Passed even when the
+prepublication stage passes. They become stage-required in postpublication;
+there is no circular requirement to download an unpublished artifact before
+authorizing its publication.
+Known adverse observations are `Failed`; unavailable/inconclusive execution is
+`NotRun` with a separate `Blocked` diagnostic. An explicit not-applicable
+disposition needs policy evidence and is never displayed as a passed control.
+Failed or unavailable prepublication-required controls prevent release; conditional capability
+limitations stay listed even when a separately authorized distribution is
+permitted. External CFS/DCISO decisions have their own evidence items and are
+never synthesized from a local aggregate.
+They are not prerequisites for ordinary OSS publication; they belong only to
+a separately authorized consumer profile. Passing AC-054.10 establishes honest
+boundary wording, not approval of a consumer request, whose outcome stays
+separately NotRun/Blocked until observed.
+
+Generate JSON and Markdown from the same sorted validated records with an
+injected evaluation time. Same inputs yield identical output; later real
+observations produce new run-bound outputs, not retroactively edited claims.
+Local negative-case tests may pass by rejecting bad evidence, but their fixture
+origin cannot satisfy T-58/T-59. Planned paths in this section, documentation
+checks, and owner approval of the design itself do not turn any test green.
+Script exits distinguish success (0), observed failure (1), and unavailable
+evaluation (2) for the explicit evaluation profile; required CI gates reject
+both nonzero outcomes. A successful prepublication exit cannot rewrite pending
+postpublication items or the overall verdict. The existing
+runtime/CLI conformance and Test Plan status contracts are unchanged.
+
+Implementation is staged behind subsequent Coding authorization: add documents/
+schemas/fixtures first, then local generators/checks, then gated workflows and
+owner-authorized external observations. Register the new targeted tests under
+the existing Node test runner and add build-only tooling as locked dev
+dependencies when needed. Do not install dependencies or create those files
+during this Technical Design step.
+
+Bootstrap reviewed reusable finalizer/validator definitions before pinning their
+full commit in a later caller-workflow change. A workflow file cannot name the
+hash of the same commit that introduces that reference. Keep the gates visibly
+unavailable until this two-commit bootstrap and actual owner settings are ready;
+do not temporarily use a mutable branch reference or permissive publication path.
+
+Keep descriptor version 1 with additional `kind: metadata` entries and the
+existing checksum rendering. Readers must validate every listed digest and
+must not execute or silently omit new metadata; unsupported required evidence
+versions fail visibly. Existing archives, installer state, locks, hook semantics,
+ordinary update/uninstall, and Homebrew/WinGet contracts do not change. Adding
+notices through a future versioned npm payload uses normal shared-payload
+verification/migration. Existing releases without FR-054 evidence are labelled
+legacy/unverified; never mint historical attestations or edit immutable assets
+to suggest they previously passed. Local old-package lifecycle support remains
+separate from eligibility for a new fully evidenced release.
+
+### 17.10 Planned tests and complete acceptance traceability
+
+| Formal scenario | Planned implementation and focused cases |
+| --- | --- |
+| T-53 | `test/oss-governance.test.mjs`: actual/missing/inconsistent documents, contacts and metadata; negated versus affirmative institutional claims, private reporting and support boundaries, third-party notices, first-party-only CFS non-eligibility and no invented approval. |
+| T-54 | `test/security-gates.test.mjs`: ecosystem/language coverage; dependency changes and API failure; prior/new findings, resolved scope, reviewed valid exception, wrong scope/review, maximum duration, expiry before/at/after boundary and retry, stale policy/fixture-clock rejection, schedules, zero/new alerts and stale/untriaged outcomes. |
+| T-55 | `test/workflow-trust.test.mjs`: full versus short/mutable refs, nested actions/reusable workflows and cycles, graph drift, permission inheritance, untrusted PR/downstream artifact paths, protected tag without reviewed ancestry, wrong run/artifact identity and data-only publishers. |
+| T-56 | `test/release-evidence.test.mjs`: valid/invalid CycloneDX, missing/extra/duplicate/misclassified components, licenses and Go build scope, independent A/B equality/mismatch, source/digest binding, acyclic descriptor/SBOM/index graph, corrupt/wrong-identity/zero-attestation verifier fixtures, and unchanged installer bundle contracts. |
+| T-57 | `test/compliance-evidence.test.mjs`: deterministic status aggregation, fixture-origin rejection, incomplete pagination, wrong revision/run/attempt, changed bypass settings, access-denied/unsupported/stale controls, distinct secret controls, pending postpublication versus prepublication eligibility, and separate absent consumer decisions. |
+| T-58 | `oss-observe.yml` plus owner procedure: actual channel enablement/reachability, effective settings and review/check enforcement, secret/alert state and scheduled runs for the candidate; `NotRun`/`Blocked` until observed. |
+| T-59 | Reusable postpublication observation: fresh downloaded npm/platform bytes, SBOMs/checksums and verified GitHub/npm provenance; corruption only in isolated copies, stable/prerelease installer acceptance unchanged; `NotRun`/`Blocked` until publication and observation. |
+
+Tests use injected clocks and recorded-shape API/SARIF/attestation fixtures;
+local verifier fixtures do not impersonate a live GitHub attestation. Preserve
+the T-51/T-52 scenarios and existing package/installer regression tests; run them
+when implementation changes release-bundle behavior. New cases cover schema
+version rejection and legacy releases without retroactive passing evidence.
+
+| Acceptance criterion | Design/procedure | Formal tests |
+| --- | --- | --- |
+| AC-054.1 | Canonical identity and observed channels (17.1, 17.7) | T-53, T-58 |
+| AC-054.2 | Supported versions/private reporting/response boundaries (17.1, 17.7) | T-53, T-58 |
+| AC-054.3 | Governance/contribution/conduct/support/ownership/releases (17.1) | T-53 |
+| AC-054.4 | Manifest discovery, updates, runtime dependency policy (17.1, 17.5) | T-54, T-58 |
+| AC-054.5 | Existing CI plus analysis, dependency review and SBOM gates (17.2-17.5) | T-54, T-55, T-56, T-58 |
+| AC-054.6 | Source/version/license/inventory/digest/SBOM bundle and provenance (17.3, 17.4, 17.8) | T-56, T-59 |
+| AC-054.7 | Threat/credential/provider/hook/install/reproduction limitations (17.1, 17.5, 17.8) | T-53 |
+| AC-054.8 | Protected reviewed source, exact checks and effective rules (17.5, 17.7) | T-55, T-57, T-58 |
+| AC-054.9 | Deterministic linked checklist and external decision separation (17.2, 17.9) | T-57, T-59 |
+| AC-054.10 | Personal third-party and CFS/DCISO non-authority (17.1, 17.9) | T-53, T-57 |
+| AC-054.11 | Full unresolved-finding gate, reviewed scoped exceptions/expiry (17.5, 17.6) | T-54, T-58 |
+| AC-054.12 | Distinct secret scanning/push protection and alert evidence (17.7) | T-57, T-58 |
+| AC-054.13 | Scheduled supported-release discovery and persistent triage (17.6) | T-54, T-58 |
+| AC-054.14 | Validated complete CycloneDX and twice-build equality (17.3, 17.4) | T-56, T-59 |
+| AC-054.15 | Downloaded subject/repository/commit/signer verification (17.8) | T-56, T-59 |
+| AC-054.16 | Full-SHA/nested graph and privileged execution boundaries (17.5) | T-55, T-58 |
+| AC-054.17 | Read-only PRs, reviewed-source immutable release artifacts (17.4, 17.5) | T-55, T-58 |
+| AC-054.18 | Revision/run/rule/bypass/API-bound effective evidence (17.2, 17.7) | T-57, T-58 |
+| AC-054.19 | Explicit non-passing outcomes, freshness and aggregate truth (17.6, 17.9) | T-54, T-57, T-58, T-59 |
+
+Implementation must confirm tool/account support against the authoritative
+[CodeQL language documentation](https://docs.github.com/en/code-security/concepts/code-scanning/codeql/codeql-code-scanning),
+[dependency review documentation](https://docs.github.com/en/code-security/concepts/supply-chain-security/dependency-review),
+[GitHub attestation action](https://github.com/actions/attest),
+[GitHub CLI verification contract](https://cli.github.com/manual/gh_attestation_verify),
+[CycloneDX schema](https://github.com/CycloneDX/specification/blob/master/schema/bom-1.6.schema.json),
+and [Go vulnerability tooling](https://go.dev/doc/security/vuln/).
+These are reference locations, not mutable build dependencies: implementation
+locks the reviewed versions/commits/digests and retains capability limitations.

@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
+{{testNotice}}PackageIdentifier: {{identifier}}
+PackageVersion: {{version}}
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+- RelativeFilePath: bin\sdlc.exe
+  PortableCommandAlias: {{command}}
+Scope: user
+MinimumOSVersion: 10.0.17763.0
+UnsupportedOSArchitectures:
+- x86
+- arm
+- arm64
+UpgradeBehavior: install
+Commands:
+- {{command}}
+Dependencies:
+  PackageDependencies:
+  - PackageIdentifier: OpenJS.NodeJS.LTS
+    MinimumVersion: 22.0.0
+Installers:
+- Architecture: x64
+  InstallerUrl: {{url}}
+  InstallerSha256: {{sha256}}
+ManifestType: installer
+ManifestVersion: 1.10.0

@@ -1,0 +1,74 @@
+name: Release acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Release candidate run ID from the saved handoff
+        type: string
+        required: true
+      bundle_artifact_id:
+        description: Exact immutable release-bundle artifact ID (not a name or wildcard)
+        type: string
+        required: true
+      bundle_sha256:
+        description: Saved prepublication bundle manifest SHA-256
+        type: string
+        required: true
+      source_commit:
+        description: Full source commit from the saved handoff
+        type: string
+        required: true
+      check_npm:
+        description: Require anonymous npm payload and isolated npm lifecycle acceptance
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    working-directory: source
+
+jobs:
+  anonymous-acceptance:
+    runs-on: macos-15
+    timeout-minutes: 30
+    environment: release-acceptance
+    env:
+      EXPECTED_BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
+      EXPECTED_SOURCE_COMMIT: ${{ inputs.source_commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: source
+          ref: ${{ inputs.source_commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ inputs.bundle_artifact_id }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+          path: source/.test-data/release-bundle
+          merge-multiple: true
+      - name: Verify saved evidence, anonymously download, then execute native Apple Silicon lifecycle
+        env:
+          CHECK_NPM: ${{ inputs.check_npm }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/.test-data/acceptance-scratch"
+          export TMPDIR="$GITHUB_WORKSPACE/.test-data/acceptance-scratch"
+          node scripts/accept-release.mjs --directory .test-data/release-bundle \
+            --output-file .test-data/acceptance-result.json --npm "$CHECK_NPM"
+      - name: Retain postpublication results separately from prepublication evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/.test-data/acceptance-result.json
+          if-no-files-found: error
+          retention-days: 90

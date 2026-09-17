@@ -1,0 +1,20 @@
+{
+  "goVersion": "go1.27.1",
+  "target": "windows/amd64",
+  "environment": {
+    "CGO_ENABLED": "0",
+    "GOARCH": "amd64",
+    "GOOS": "windows",
+    "GOAMD64": "v1",
+    "GOENV": "off",
+    "GOEXPERIMENT": "",
+    "GOFLAGS": "",
+    "GOFIPS140": "off",
+    "GOTOOLCHAIN": "local",
+    "GOWORK": "off",
+    "GOPROXY": "off",
+    "GOSUMDB": "off",
+    "GO111MODULE": "on"
+  },
+  "flags": ["-trimpath", "-buildvcs=false", "-ldflags=-buildid="]
+}

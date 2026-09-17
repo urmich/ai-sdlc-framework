@@ -19,6 +19,12 @@ AI coding agents are naturally good at proposing solutions quickly. That speed
 can create rework when intent, acceptance conditions, test strategy, operational
 constraints, or user authority are still unclear.
 
+The common failure mode is not that the generated code is syntactically poor.
+It is that the agent confidently optimizes for an incomplete interpretation:
+the first plausible architecture, the easiest test, the most familiar
+technology, or a successful build that does not prove the requested outcome.
+Fast implementation then amplifies an early assumption.
+
 This framework changes the default sequence:
 
 1. Define the right outcome and its observable Definition of Done.
@@ -28,6 +34,45 @@ This framework changes the default sequence:
 5. Review the exact candidate before publication or remote validation.
 6. Promote through DEV, Staging, and PROD readiness only with explicit user
    authority and current evidence.
+
+## How the framework reduces bias and suboptimal results
+
+The framework does not claim that one lifecycle is universally correct. It
+changes the default reasoning order and keeps assumptions, evidence, and user
+authority visible:
+
+- **Outcome before implementation.** Requirement-specific acceptance conditions
+  force the agent to distinguish the requested result from its first solution
+  idea.
+- **Evidence before architecture.** Test Design asks how each outcome can be
+  disproved or confirmed before Technical Design selects components.
+- **Multiple authoritative artifacts.** Requirements, Test Plans, Technical
+  Designs, repository instructions, provider facts, and source history remain
+  distinct. One convenient document cannot silently replace another.
+- **Explicit uncertainty.** Missing requirements, unsupported tools, unavailable
+  environments, stale facts, and conflicting instructions remain visible rather
+  than being converted into confident defaults.
+- **Candidate-bound validation.** Test evidence, Review, artifacts, deployments,
+  and PR checks are tied to exact source, configuration, and Test Plan identity.
+  A changed candidate invalidates stale confidence.
+- **Unit-first correction loop.** Every implementation fix restarts local
+  evidence from the smallest required tests before broader checks.
+- **Independent candidate Review.** The validated candidate receives a separate
+  `/review` pass before its first publication or remote validation.
+- **Provider adapters instead of guessed equivalence.** Generic lifecycle
+  concepts are translated through concrete provider contracts, reducing
+  provider-field guessing and rejecting observations or run links whose
+  identities do not match.
+- **Human-governed boundaries.** The user approves consequential transitions
+  and may explicitly override any lifecycle recommendation. Overrides remain
+  visible and cannot manufacture external permission or passing evidence.
+- **Recovery without narrative invention.** Durable identities, bounded records,
+  and reconciliation restore what is proven after interruption without asking
+  the model to reconstruct history from memory.
+
+The intended result is not more ceremony. It is fewer expensive iterations
+caused by solving the wrong problem, testing the wrong thing, or promoting stale
+evidence.
 
 ## Core behavior
 
@@ -78,6 +123,14 @@ macOS/Linux shells, Windows PowerShell, and Windows Command Prompt:
 
 ```sh
 npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@latest sdlc install
+```
+
+For acceptance testing of the current release, pin the exact version used by
+the [Azure DevOps acceptance test](docs/ado-acceptance-test.md):
+
+```sh
+npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@0.3.0 sdlc install --purge-existing
+node "<COPILOT_HOME>/sdlc/bin/sdlc.mjs" doctor --home "<COPILOT_HOME>"
 ```
 
 This downloads the package to npm's cache and installs the managed instructions,
@@ -425,13 +478,36 @@ verification rebuilds the expected package from the same source, compares its
 digest and inventory with the distributable, then exercises install, doctor,
 idempotent update, and uninstall in an isolated Copilot home.
 
-`.github/workflows/ci.yml` runs checks, tests, packaging, verification, and
-artifact retention for pull requests, `main`, version tags, and manual runs.
-A successful version-tag run publishes the same verified `.tgz` to the public
-npm registry with provenance and uploads it to the matching GitHub Release.
-Before the first tag, configure the workflow as an npm trusted publisher.
-GitHub-hosted runners must
-be enabled for the repository.
+`.github/workflows/ci.yml` validates pull requests, `main`, and manual runs.
+The separate [release workflow](docs/release-ci.md) builds a frozen candidate on
+version tags or manual dispatch. Mandatory gates are native macOS Apple Silicon
+arm64 **standalone and Homebrew** lifecycle and deterministic Windows x64 cross-build/schema/payload/WinGet
+metadata/pre-JS payload-integrity validation; native Windows is not claimed.
+Published standalone archives are **Windows x64, macOS arm64 and macOS Intel x64**.
+Intel archive reproducibility plus architecture-specific Homebrew URL/checksum
+validation and real host Homebrew audit/style are mandatory non-execution
+checks. Both macOS gates reject incorrect/missing Node runtime dependency metadata.
+Intel native lifecycle remains
+`NotRun` and non-blocking; Linux installer archives remain excluded.
+Stable Homebrew metadata includes both macOS architectures.
+
+Successful gates produce one immutable `release-bundle` artifact. Publication
+requires explicit manual inputs and protected `release`/`npm` environments:
+GitHub assets stay in a draft, and npm receives the identical verified `.tgz`.
+Tag builds alone never publish. Configure the approved public asset repository,
+runner access and npm trusted publishing before enabling those handoffs.
+The protected npm job is data-only and tokenless: GitHub-hosted Node 24,
+npm >=11.15, and OIDC with automatic public-repository provenance. npm trust
+targets the actual caller **`release.yml`**, with environment **`npm`** on the
+publishing job in reusable **`npm-publish.yml`**; both caller and called job
+permit `id-token: write`.
+The job upgrades an older npm through an integrity-pinned, script-disabled tool
+install, asserts effective auth config has no credentials, and requires matching
+provenance metadata after publication. It has no automatic token fallback.
+Homebrew generation has an integration interface but no duplicated implementation.
+Only after completed native validation can a sealed review bundle include the
+candidate-bound T-60 Windows tester handoff. Missing Homebrew integration blocks
+the native gate; pending T-60 content completeness blocks publication.
 
 ## Documentation
 
@@ -443,6 +519,8 @@ be enabled for the repository.
 | [Technical Design](docs/technical-design.md) | Detailed implementation, state, authorization, recovery, and evidence contracts |
 | [CLI reference](docs/cli.md) | Installation, commands, structured inputs, and operational behavior |
 | [Provider adapter guide](docs/provider-adapters.md) | Generic execution identity, Azure DevOps adapter, and extension contract |
+| [Azure DevOps acceptance test](docs/ado-acceptance-test.md) | Agent prompt and evidence checklist for a safe existing-repository handoff |
+| [Release CI and acceptance](docs/release-ci.md) | Scoped gates, immutable bundle, draft/npm handoffs, and postpublication evidence |
 
 ## Repository organization
 
@@ -451,7 +529,7 @@ be enabled for the repository.
 - `docs/`: requirements, Test Plan, detailed design, and human overview
 - `scripts/`: source checks and reproducible packaging tools
 - `test/`: deterministic framework tests and the calculator dry run
-- `.github/workflows/ci.yml`: validation and package-retention workflow
+- `.github/workflows/`: validation, scoped release candidates, and explicit live acceptance
 
 ## Current limits
 

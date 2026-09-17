@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
+{{testNotice}}PackageIdentifier: {{identifier}}
+PackageVersion: {{version}}
+PackageLocale: en-US
+Publisher: AI SDLC Framework contributors
+PackageName: {{packageName}}
+License: MIT
+ShortDescription: Offline, receipt-bound SDLC workflow for GitHub Copilot CLI
+Moniker: {{command}}
+Tags:
+- copilot
+- developer-tools
+- sdlc
+ManifestType: defaultLocale
+ManifestVersion: 1.10.0

@@ -1,7 +1,8 @@
 {
   "name": "ai-sdlc-framework",
-  "version": "0.3.0",
+  "version": "0.3.1-rc.0",
   "description": "Offline, receipt-bound SDLC workflow for GitHub Copilot CLI",
+  "author": "Michael Urinovsky",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -12,14 +13,21 @@
     "registry": "https://registry.npmjs.org"
   },
   "type": "module",
-  "engines": { "node": ">=22" },
-  "bin": { "sdlc": "./bin/sdlc.mjs" },
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "sdlc": "./bin/sdlc.mjs"
+  },
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "test:coverage": "node --test --experimental-test-coverage test/*.test.mjs",
     "check": "node scripts/check.mjs",
     "package:artifact": "node scripts/package.mjs",
+    "package:platforms": "node scripts/package-platforms.mjs",
     "verify:package": "node scripts/verify-package.mjs",
+    "verify:platforms": "node scripts/verify-platform-package.mjs",
+    "test:distribution": "node --test test/distribution-channels.test.mjs",
     "doctor": "node bin/sdlc.mjs doctor",
     "install:copilot": "node bin/sdlc.mjs install",
     "uninstall:copilot": "node bin/sdlc.mjs uninstall"
@@ -29,6 +37,14 @@
     "./monitors": "./src/monitors.mjs",
     "./store": "./src/store.mjs"
   },
-  "files": ["bin", "src", "assets", "README.md", "docs/cli.md",
-    "docs/provider-adapters.md"]
+  "files": [
+    "bin",
+    "src",
+    "assets",
+    "packaging/standalone",
+    "README.md",
+    "docs/cli.md",
+    "docs/provider-adapters.md",
+    "docs/ado-acceptance-test.md"
+  ]
 }
