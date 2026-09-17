@@ -160,7 +160,7 @@ below in a normal terminal outside that Copilot session.
 ### Update on macOS or Linux
 
 ```sh
-VERSION="1.3.0"
+VERSION="0.3.0"
 DOWNLOAD_DIR="$HOME/Downloads/ai-sdlc-framework-$VERSION"
 PACKAGE_ROOT="$HOME/.local/share/ai-sdlc-framework/$VERSION"
 COPILOT_HOME="${COPILOT_HOME:-$HOME/.copilot}"
@@ -194,7 +194,7 @@ node "$COPILOT_HOME/sdlc/bin/sdlc.mjs" \
 ### Update on Windows PowerShell
 
 ```powershell
-$Version = "1.3.0"
+$Version = "0.3.0"
 $DownloadDir = Join-Path $HOME "Downloads\ai-sdlc-framework-$Version"
 $PackageRoot = Join-Path $env:LOCALAPPDATA "ai-sdlc-framework\$Version"
 $CopilotHome = if ($env:COPILOT_HOME) {
@@ -231,7 +231,7 @@ node (Join-Path $CopilotHome "sdlc\bin\sdlc.mjs") `
 ### Update on Windows Command Prompt
 
 ```bat
-set "VERSION=1.3.0"
+set "VERSION=0.3.0"
 set "DOWNLOAD_DIR=%USERPROFILE%\Downloads\ai-sdlc-framework-%VERSION%"
 set "PACKAGE_ROOT=%LOCALAPPDATA%\ai-sdlc-framework\%VERSION%"
 if defined COPILOT_HOME (set "FRAMEWORK_HOME=%COPILOT_HOME%") else (set "FRAMEWORK_HOME=%USERPROFILE%\.copilot")
