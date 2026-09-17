@@ -91,18 +91,41 @@ jobs:
     # macos-15 is Apple Silicon. The gate verifies Node, machine architecture and absence of Rosetta.
     # Intel runs mandatory deterministic archive/formula checks on Linux; native Intel remains NotRun.
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 35
+    timeout-minutes: 45
     env:
       EXPECTED_SOURCE_COMMIT: ${{ needs.candidate.outputs.source_commit }}
       EXPECTED_DESCRIPTOR_SHA256: ${{ needs.candidate.outputs.descriptor_sha256 }}
       EXPECTED_CHECKSUMS_SHA256: ${{ needs.candidate.outputs.checksums_sha256 }}
-      # Provision isolated host brew + audit/style dependencies on both macOS and Ubuntu before these gates.
-      SDLC_HOMEBREW_BREW: ${{ matrix.target == 'macos-x64' && vars.RELEASE_HOMEBREW_INTEL_BREW || matrix.target == 'macos-arm64' && vars.RELEASE_HOMEBREW_BREW || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
           path: source
           persist-credentials: false
+      - if: startsWith(matrix.target, 'macos-')
+        name: Provision pinned workspace-local Homebrew
+        env:
+          HOMEBREW_BREW_COMMIT: 99fd9a8eed4ff942c448da0c1f11156302441e4a
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/source/.test-data/homebrew"
+          test ! -e "$root"
+          git init -q "$root"
+          git -C "$root" remote add origin https://github.com/Homebrew/brew.git
+          git -C "$root" fetch --quiet --depth=1 origin "$HOMEBREW_BREW_COMMIT"
+          git -C "$root" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$root" rev-parse HEAD)" = "$HOMEBREW_BREW_COMMIT"
+          brew="$root/bin/brew"
+          test -x "$brew"
+          echo "SDLC_HOMEBREW_BREW=$brew" >> "$GITHUB_ENV"
+          if test "$RELEASE_TARGET" = macos-arm64; then
+            env HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 \
+              HOMEBREW_NO_INSTALL_CLEANUP=1 "$brew" install node@22
+            node_prefix="$(env HOMEBREW_NO_AUTO_UPDATE=1 "$brew" --prefix node@22)"
+            test -x "$node_prefix/bin/node"
+            test "$("$node_prefix/bin/node" -p 'process.platform')" = darwin
+            test "$("$node_prefix/bin/node" -p 'process.arch')" = arm64
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

@@ -760,6 +760,11 @@ test('release workflow statically separates validation, sealing, opt-in publicat
   assert.match(workflow, /target: windows-x64\s+runner: ubuntu-24\.04/u);
   assert.match(workflow, /target: macos-x64\s+runner: ubuntu-24\.04/u);
   assert.match(workflow, /needs: \[candidate, release-gates\]/u);
+  assert.match(workflow, /HOMEBREW_BREW_COMMIT: 99fd9a8eed4ff942c448da0c1f11156302441e4a/u);
+  assert.match(workflow, /git -C "\$root" fetch --quiet --depth=1 origin "\$HOMEBREW_BREW_COMMIT"/u);
+  assert.match(workflow, /SDLC_HOMEBREW_BREW=\$brew/u);
+  assert.match(workflow, /"\$brew" install node@22/u);
+  assert.doesNotMatch(workflow, /RELEASE_HOMEBREW_(?:INTEL_)?BREW/u);
   assert.match(workflow, /github\.event_name == 'workflow_dispatch' && inputs\.publish_draft/u);
   assert.match(workflow, /github\.event_name == 'workflow_dispatch' && inputs\.publish_npm/u);
   assert.doesNotMatch(workflow, /windows-latest|--clobber|--draft=false|mktemp|linux-x64/u);
