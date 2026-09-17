@@ -264,12 +264,11 @@ workflow evidence so postpublication clients compare the exact published bytes
 with the prepublication result.
 
 Initial published artifact names are
-`ai-sdlc-framework-<version>-windows-x64.zip` and
-`...-macos-arm64.tar.gz`. The packager may generate
-`...-macos-x64.tar.gz` as explicitly unverified preview output, but it is not
-included in supported Homebrew metadata before native Intel acceptance.
-Linux installer artifacts and metadata are not generated for the initial
-release asset set.
+`ai-sdlc-framework-<version>-windows-x64.zip`,
+`...-macos-arm64.tar.gz`, and `...-macos-x64.tar.gz`. The Intel archive and
+its package-manager metadata are explicitly unverified and non-blocking until
+native Intel acceptance exists. Linux installer artifacts and metadata are not
+generated for the initial release asset set.
 
 `scripts/package-platforms.mjs` creates fixed-time, sorted, deterministic
 staging trees. Each tree contains `package/` extracted from the exact npm
@@ -323,10 +322,11 @@ Homebrew owns its Cellar payload and linked launcher only. Candidate testing
 uses a generated local formula whose URL points to the candidate archive in a
 local HTTP fixture/cache; it runs real `brew install`, upgrade, unlink/link, and
 uninstall without public release dependency. Stable published formula metadata
-uses the final public arm64 release URL and checksum and declares the initial
-formula arm64-only. An x64 URL/checksum stanza is added only after native Intel
-acceptance of the exact candidate. Prerelease CI uses a test-only local formula
-but does not update stable tap metadata.
+uses the final public arm64 and x64 release URLs and exact checksums. The
+repository documentation and release evidence identify the Intel path as
+unverified/non-blocking until native Intel acceptance of the exact candidate.
+Prerelease CI uses a test-only local formula but does not update stable tap
+metadata.
 
 WinGet uses the Windows archive with a small open-source native `sdlc.exe`
 launcher built for x64, because portable manifests do not support `.cmd` as the
@@ -399,7 +399,7 @@ The initial release validation matrix is:
 | --- | --- |
 | macOS Apple Silicon arm64 | Required native standalone and Homebrew install/update/doctor/uninstall/switching, hook, and checksum evidence |
 | Windows x64 | Deterministic artifact, PE, schema, metadata, and pre-execution payload-integrity validation required; native lifecycle deferred to a generated tester prompt |
-| macOS Intel x64 | Artifact may be generated, but native acceptance is `NotRun` and non-blocking |
+| macOS Intel x64 | Published deterministic standalone/Homebrew metadata; native acceptance is `NotRun` and non-blocking |
 | Linux x64 | Installer artifact, metadata, native CI, and publication are out of scope |
 
 The required macOS job records runner image/architecture plus `process.platform`,
@@ -408,11 +408,13 @@ The required macOS job records runner image/architecture plus `process.platform`
 arm64 evidence requires native arm64. The launcher uses the same validated Node
 path for preflight and execution. Emulation cannot satisfy a native
 requirement. Release publication depends on the macOS arm64 native job and the
-Windows non-execution validation job; failed, skipped, cancelled, or absent
-mandatory evidence blocks it. Deferred Windows and macOS Intel native results
-remain `NotRun`, not Passed. The repository generates a self-contained Windows
-tester prompt after all implementation is complete. Linux is excluded from the
-release asset set rather than represented as a skipped mandatory job.
+Windows and macOS Intel x64 deterministic non-execution validation jobs;
+failed, skipped, cancelled, or absent mandatory evidence blocks it. Deferred
+Windows and macOS Intel native results remain `NotRun`, not Passed. Intel's
+native lifecycle is non-blocking; its artifact and dual-architecture Homebrew
+metadata validation is mandatory. The repository generates a self-contained
+Windows tester prompt after all implementation is complete. Linux is excluded
+from the release asset set rather than represented as a skipped mandatory job.
 
 Stable release metadata is generated only for stable versions. Prereleases may
 publish npm `next` and prerelease GitHub assets but do not update WinGet or

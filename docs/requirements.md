@@ -275,7 +275,7 @@ formalized in section 6. All sources below concern framework behavior.
 | S-53 | 2026-09-16 | Staging access is environment-specific. Dedicated secured machines and user-owned testing are supported policy choices, not universal framework assumptions. The selected environment contract determines location, owner, automation, and available agent execution. This supersedes S-33's universal wording. |
 | S-54 | 2026-09-17 | Distribute the OSS framework through npm, standalone platform archives/installers, WinGet, Homebrew, and direct release downloads. Every channel must install the same verified framework version and preserve clean migration, doctor, update, uninstall, ownership, and restart behavior. Build the channels in parallel where their shared contract permits it. |
 | S-55 | 2026-09-17 | Make the personal third-party OSS repository ready for external supply-chain review without implying Microsoft ownership. Add transparent governance, security reporting, support, contribution, release integrity, dependency maintenance, vulnerability scanning, SBOM, and reproducibility evidence comparable to mature OSS projects. |
-| S-56 | 2026-09-17 | For the time-bounded initial multi-channel release, require native macOS Apple Silicon validation on the available real host. Defer native Windows installation and verification to an explicit tester handoff after the remaining implementation is complete. Treat macOS Intel as unverified and Linux installers as out of scope; neither blocks this release. |
+| S-56 | 2026-09-17 | For the time-bounded initial multi-channel release, require native macOS Apple Silicon validation on the available real host. Publish macOS Intel artifacts and metadata as explicitly unverified, non-blocking output. Defer native Windows installation and verification to an explicit tester handoff after the remaining implementation is complete. Treat Linux installers as out of scope. |
 
 ## 6. Framework requirements
 
@@ -2209,13 +2209,13 @@ behavior as the npm package.
 **Definition of Done**
 
 - AC-053.1: The initial versioned multi-channel release produces the npm
-  package plus deterministic Windows x64 and macOS Apple Silicon arm64
-  standalone archives. A macOS Intel x64 archive may be generated as explicit
-  unverified preview output but is not published as supported Homebrew
-  metadata until native acceptance exists. Linux installer archives and
-  metadata are outside the initial release scope. The framework payload is
-  architecture-neutral JavaScript; supported execution requires a Node 22+
-  runtime available for the host architecture.
+  package plus deterministic Windows x64, macOS Apple Silicon arm64, and macOS
+  Intel x64 standalone archives. Intel artifacts and package-manager metadata
+  are published with explicit unverified/non-blocking status until native
+  acceptance exists. Linux installer archives and metadata are outside the
+  initial release scope. The framework payload is architecture-neutral
+  JavaScript; supported execution requires a Node 22+ runtime available for the
+  host architecture.
 - AC-053.2: Standalone archives contain the framework payload, platform
   launcher/installer, license, version metadata, and cryptographic checksum
   references. They do not require access to npmjs.org during installation.
