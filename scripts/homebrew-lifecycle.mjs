@@ -6,7 +6,7 @@ import { createServer } from 'node:http';
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import { generateHomebrewFormula } from '../packaging/homebrew/generate-formula.mjs';
-import { assertNativeMacHost, runHomebrewCommand, switchFromHomebrew, switchToHomebrew, verifyHomebrewHooks } from './homebrew-switch.mjs';
+import { assertNativeMacHost, runHomebrewCommand, switchFromHomebrew, switchToHomebrew, verifyCopiedHomebrewInstallation } from './homebrew-switch.mjs';
 
 const execute = runHomebrewCommand;
 
@@ -56,6 +56,10 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     const entry = { command, args };
     evidence.commands.push(entry);
     try {
+      if (command === brew) {
+        entry.noInstallCleanup = (options.env ?? environment).HOMEBREW_NO_INSTALL_CLEANUP;
+        assert.equal(entry.noInstallCleanup, '1', 'Every brew operation must suppress install cleanup');
+      }
       const channelOnly = command === brew && ['install', 'upgrade', 'uninstall', 'autoremove', 'tab'].includes(args[0]);
       const before = channelOnly ? await snapshot(environment.COPILOT_HOME) : undefined;
       const output = await execute(command, args,
@@ -149,6 +153,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     await assert.rejects(fs.lstat(path.join(prefix, 'bin', 'sdlc')), { code: 'ENOENT' });
     const switched = await switchToHomebrew({ brew, formula: formulaName, home, environment, run });
     assert.equal(switched.linked, true);
+    assert.equal(switched.postSwitchVerified, true);
     const launcher = switched.launcher;
     assert.equal((await json(launcher, ['doctor'])).frameworkVersion, candidate.version);
     const installedHome = await snapshot(home);
@@ -188,12 +193,15 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
       brew, formula: formulaName, home, previousFormula: previousName, environment, run,
     });
     assert.equal(switchedOwned.previousRetained, true);
+    assert.equal(switchedOwned.postSwitchVerified, true);
+    assert.equal(switchedOwned.oldPackageCleanupAllowed, true);
     await fs.access(path.join(oldKeg, 'bin', 'sdlc'));
-    assert.deepEqual(await snapshot(home), installedHome);
+    const beforeOldRemoval = await snapshot(home);
     await runBrew(['uninstall', '--formula', previousName]);
     installed.delete(previousName);
-    assert.deepEqual(await snapshot(home), installedHome, 'Removing old channel changed replacement');
-    assert.equal((await json(launcher, ['doctor'])).findings.length, 0);
+    assert.deepEqual(await snapshot(home), beforeOldRemoval, 'Removing old channel changed replacement');
+    await verifyCopiedHomebrewInstallation({ home, node, frameworkVersion: candidate.version,
+      forbiddenKegs: [oldKeg], run, environment });
 
     const next = await generate(upgrade, upgradeDirectory ?? candidateDirectory);
     const upgradedFormula = upgradeDirectory ? next.contents :
@@ -202,6 +210,9 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     await fs.writeFile(path.join(work, 'upgraded-ai-sdlc-framework.rb'), upgradedFormula);
     const upgraded = await switchToHomebrew({ brew, formula: formulaName, home, environment, run });
     const rollbackState = JSON.parse(await fs.readFile(upgraded.stateFile, 'utf8'));
+    assert.equal(upgraded.postSwitchVerified, true);
+    assert.equal(rollbackState.retentionVerifiedBeforePromotion, true);
+    assert.equal(rollbackState.oldPackageCleanupAllowed, true);
     assert.equal(rollbackState.targetKeg, path.dirname(path.dirname(launcher)),
       'Upgrade did not capture its old keg before brew install');
     assert.equal(rollbackState.capturedLink.absolute, launcher);
@@ -220,13 +231,10 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     });
     installed.delete(formulaName);
     assert.equal(removed.oldPackageRemoved, true);
+    assert.equal(removed.postSwitchVerified, true);
     await runBrew(['autoremove']);
-    const copiedCli = path.join(home, 'sdlc', 'bin', 'sdlc.mjs');
-    const afterAutoremove = await json(removed.node, [copiedCli, 'doctor']);
-    assert.equal(afterAutoremove.frameworkVersion, upgrade.version);
-    await verifyHomebrewHooks({ doctor: afterAutoremove, forbiddenKegs: [upgradedKeg],
-      node: removed.node, run, environment, executeHooks: true });
-    assert.equal((await json(removed.node, [copiedCli, 'doctor'])).findings.length, 0);
+    await verifyCopiedHomebrewInstallation({ home, node: removed.node, frameworkVersion: upgrade.version,
+      forbiddenKegs: [upgradedKeg], run, environment });
     const entry = path.join(extracted, 'bin', 'sdlc.mjs');
     await json(node, [entry, 'uninstall']);
     assert.equal(await fs.readFile(path.join(home, 'sdlc', 'runtime', 'keep.json'), 'utf8'), '{"retained":true}\n');

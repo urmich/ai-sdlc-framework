@@ -191,7 +191,18 @@ export async function captureSwitchState({ prefix, cellar, formula, previousForm
   }
 }
 
-export async function preserveCapturedKegs(state) {
+export async function verifyCapturedKegs(state) {
+  try {
+    await preserveCapturedKegs(state, { restoreMissing: false });
+  } catch (error) {
+    const unsupported = new Error(`Captured keg retention is unsupported: ${error.message}`,
+      { cause: error });
+    unsupported.code = 'HOMEBREW_RETENTION_UNSUPPORTED';
+    throw unsupported;
+  }
+}
+
+export async function preserveCapturedKegs(state, { restoreMissing = true } = {}) {
   for (const keg of state.kegs) {
     try {
       if (!(await fs.lstat(keg.path)).isDirectory() || await fs.realpath(keg.path) !== keg.path) {
@@ -199,6 +210,7 @@ export async function preserveCapturedKegs(state) {
       }
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
+      if (!restoreMissing) throw new Error(`Homebrew did not retain the captured keg: ${keg.path}`, { cause: error });
       await fs.mkdir(path.dirname(keg.path), { recursive: true });
       if (await fs.realpath(path.dirname(keg.path)) !== path.dirname(keg.path)) {
         throw new Error(`Captured keg parent was replaced: ${keg.path}`);

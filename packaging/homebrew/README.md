@@ -87,10 +87,13 @@ The runner records JSON evidence and the exact generated formulas under its
 new `--root`. With one bundle it exercises a real formula-revision upgrade
 using the same verified payload; add `--upgrade-dir NEXT_BUNDLE` to exercise a
 version-changing upgrade. CI should use successive candidate versions too.
-The test disables automatic install cleanup but does not rely on that flag for
-rollback: the switch helper captures the old state first and backs up the old
-kegs and dependency closure. Regression fixtures make `brew install` unlink and
-delete old kegs before failing. The native reverse test deliberately marks Node
+Every brew operation in a switch sets `HOMEBREW_NO_INSTALL_CLEANUP=1`, including
+read/link/unlink operations and reverse switching. After candidate installation,
+the helper requires captured old kegs and dependency identities to remain
+intact before promotion. Regression fixtures delete or change old kegs despite
+that setting and must stop before promotion; rollback backups are for recovery,
+not a way to turn unsupported retention into a successful switch.
+The native reverse test deliberately marks Node
 as dependency-only, requires the helper to retain it independently, removes all
 old formula versions, runs real `brew autoremove`, then executes the copied
 hooks and doctor again.
@@ -150,10 +153,18 @@ The helper verifies the old Cellar location and captures the link, unlinks the
 old keg only after the snapshot, and links the new one after framework checks.
 The snapshot includes all installed versions of the affected formulas,
 dependency keg contents, receipt identities, and Homebrew's opt/linked-keg
-symlinks. If install cleans an old keg, its captured bytes are restored before
-framework maintenance; failures restore the exact old version/link rather than
-asking `brew link` to select whatever version is now newest. Both payloads
-remain available until the user elects to remove the old one.
+symlinks. If install removes or changes an old keg, retention is unsupported:
+the operation stops before framework maintenance or link promotion. Failure
+recovery may restore missing captured bytes and the exact old version/link;
+it never silently repairs an unsupported install and proceeds to promotion.
+
+After successful link promotion, the helper executes the copied Copilot-home
+hooks and doctor, proves they do not depend on the old or new channel payload,
+and rechecks retained old keg identities. Only then does it return
+`postSwitchVerified: true` and `oldPackageCleanupAllowed: true`. Old package
+cleanup is not automatic and must not precede these post-promotion checks.
+Both payloads remain available until the user elects to remove the old one.
+The native lifecycle reruns copied hooks/doctor after that removal as well.
 
 Snapshots and phase records live outside `COPILOT_HOME`, under
 `$(brew --prefix)/var/ai-sdlc-framework-switch/`. A switch lock serializes these
@@ -198,6 +209,8 @@ failure restores the captured channel where possible or explicitly reports
 incomplete recovery. No global npm link is created. The helper does not run a
 global autoremove on the user's behalf; the isolated native test runs it to
 prove dependency-only removal cannot take the retained hook runtime with it.
+Every completed switch in either direction must pass copied hooks/doctor;
+pre-removal or pre-promotion checks alone never establish completion.
 
 Microsoft CFS quarantine, approved waiting/package-exception procedures,
 registry denial, GitHub download restrictions, Homebrew availability and OS

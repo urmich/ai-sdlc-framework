@@ -56,6 +56,7 @@ async function setup(t, behavior = {}) {
   const calls = [];
   let installedNew = false;
   let removed = false;
+  let promoted = false;
   let captured;
   const json = value => ({ stdout: JSON.stringify(value), stderr: '' });
   async function writeHooks() {
@@ -65,11 +66,12 @@ async function setup(t, behavior = {}) {
       }] },
     }));
   }
-  const run = async (command, args) => {
-    calls.push({ command, args });
+  const run = async (command, args, options = {}) => {
+    calls.push({ command, args, noInstallCleanup: options.env?.HOMEBREW_NO_INSTALL_CLEANUP });
     if (command === '/usr/bin/uname') return { stdout: process.arch === 'arm64' ? 'arm64' : 'x86_64' };
     if (command === '/usr/sbin/sysctl') return { stdout: behavior.translated ?? '0' };
     if (command === 'fake-brew') {
+      assert.equal(options.env?.HOMEBREW_NO_INSTALL_CLEANUP, '1', 'Every brew operation must suppress install cleanup');
       if (args[0] === '--prefix') return {
         stdout: args[1] === undefined ? prefix : args[1] === 'node@22' ? nodeKeg : installedNew ? newKeg : oldKeg,
       };
@@ -87,7 +89,8 @@ async function setup(t, behavior = {}) {
       }
       if (args[0] === 'install') {
         await fs.unlink(destination);
-        await fs.rm(oldKeg, { recursive: true });
+        if (behavior.removeOld || behavior.failInstall) await fs.rm(oldKeg, { recursive: true });
+        if (behavior.modifyOld) await fs.appendFile(path.join(oldKeg, 'bin', 'sdlc'), 'unexpected mutation');
         if (behavior.removeDependency) await fs.rm(nodeKeg, { recursive: true });
         if (behavior.failInstall) throw new Error('brew install failed after cleaning the old keg');
         await keg(newKeg, '0.4.0');
@@ -104,6 +107,7 @@ async function setup(t, behavior = {}) {
         }
       } else if (args[0] === 'link') {
         await fs.symlink(target(newKeg), destination);
+        promoted = true;
       } else if (args[0] === 'unlink') {
         try { await fs.unlink(destination); }
         catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -124,11 +128,13 @@ async function setup(t, behavior = {}) {
       const action = args[1];
       if (action === 'hook') {
         if (removed && behavior.failPostRemovalHook) throw new Error('hook failed after channel removal');
+        if (promoted && behavior.failPostPromotionHook) throw new Error('hook failed after link promotion');
         return json({});
       }
       if (action === 'install') { await writeHooks(); return json({ installed: true }); }
       if (action === 'doctor') return json({
-        installed: true, home, frameworkVersion: '0.4.0', findings: [],
+        installed: true, home, frameworkVersion: '0.4.0',
+        findings: promoted && behavior.failPostPromotionDoctor ? ['post-promotion doctor failed'] : [],
       });
     }
     if (command === path.join(newKeg, 'bin', 'sdlc')) {
@@ -142,11 +148,12 @@ async function setup(t, behavior = {}) {
   };
   return { root, prefix, cellar, oldKeg, newKeg, nodeKeg, node, destination,
     home, sourceRoot, formula, run, calls, target, captured: () => captured,
-    options: { brew: 'fake-brew', formula, home, sourceRoot, run } };
+    options: { brew: 'fake-brew', formula, home, sourceRoot, run,
+      environment: { ...process.env, HOMEBREW_NO_INSTALL_CLEANUP: '0' } } };
 }
 
-test('T-51 switching captures old version/dependencies before brew can unlink and clean it', nativeMac, async t => {
-  const input = await setup(t, { removeDependency: true });
+test('T-51 switching verifies retained old kegs and runs copied hooks/doctor after promotion', nativeMac, async t => {
+  const input = await setup(t);
   const result = await switchToHomebrew(input.options);
   assert.equal(result.linked, true);
   assert.equal(await fs.readlink(input.destination), input.target(input.newKeg));
@@ -155,6 +162,44 @@ test('T-51 switching captures old version/dependencies before brew can unlink an
   const state = JSON.parse(await fs.readFile(result.stateFile, 'utf8'));
   assert.equal(state.phase, 'complete');
   assert.equal(state.previousKeg, input.oldKeg);
+  assert.equal(state.retentionVerifiedBeforePromotion, true);
+  assert.equal(result.postSwitchVerified, true);
+  assert.equal(result.oldPackageCleanupAllowed, true);
+  const promotedIndex = input.calls.findIndex(call => call.args[0] === 'link');
+  const postPromotion = input.calls.slice(promotedIndex + 1);
+  assert.ok(postPromotion.some(call => call.command === input.node && call.args[1] === 'hook'));
+  assert.ok(postPromotion.some(call => call.command === input.node && call.args[1] === 'doctor'));
+  assert.ok(!postPromotion.some(call => call.command.startsWith(input.oldKeg)));
+  assert.ok(!input.calls.some(call => ['uninstall', 'cleanup'].includes(call.args[0])));
+});
+
+test('T-51 unsupported old-keg retention aborts before framework mutation or promotion', nativeMac, async t => {
+  for (const behavior of [{ removeOld: true }, { removeDependency: true }, { modifyOld: true }]) {
+    const input = await setup(t, behavior);
+    await assert.rejects(switchToHomebrew(input.options), error => {
+      assert.equal(error.cause.code, 'HOMEBREW_RETENTION_UNSUPPORTED');
+      return true;
+    });
+    assert.ok(!input.calls.some(call => call.args[0] === 'link'));
+    assert.ok(!input.calls.some(call => call.command === path.join(input.newKeg, 'bin', 'sdlc')));
+    if (!behavior.modifyOld) {
+      assert.equal(await fs.readlink(input.destination), input.target(input.oldKeg));
+      assert.equal(await fs.readFile(input.node, 'utf8'), 'native node fixture\n');
+    }
+  }
+});
+
+test('T-51 failed post-promotion hooks or doctor roll back without old-keg cleanup', nativeMac, async t => {
+  for (const behavior of [{ failPostPromotionHook: true }, { failPostPromotionDoctor: true }]) {
+    const input = await setup(t, behavior);
+    await assert.rejects(switchToHomebrew(input.options), error => {
+      assert.equal(error.code, 'HOMEBREW_SWITCH_FAILED');
+      return true;
+    });
+    assert.equal(await fs.readlink(input.destination), input.target(input.oldKeg));
+    assert.ok(!input.calls.some(call => ['uninstall', 'cleanup'].includes(call.args[0])));
+    await fs.access(path.join(input.oldKeg, 'bin', 'sdlc'));
+  }
 });
 
 test('T-51 install and doctor failure restore the exact pre-install keg and link, not the new version', nativeMac, async t => {
@@ -186,6 +231,7 @@ test('T-51 reverse switching retains dependency-only Node before removal and exe
   const input = await setup(t);
   const result = await switchFromHomebrew(input.options);
   assert.equal(result.oldPackageRemoved, true);
+  assert.equal(result.postSwitchVerified, true);
   assert.equal(JSON.parse(await fs.readFile(path.join(input.nodeKeg, 'INSTALL_RECEIPT.json'), 'utf8')).installed_on_request, true);
   const removedIndex = input.calls.findIndex(call => call.args[0] === 'uninstall');
   assert.ok(input.calls.findIndex(call => call.args[0] === 'tab') < removedIndex);

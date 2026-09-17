@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import {
   advanceSwitchState, captureSwitchState, findInstalledKeg, finishSwitchState,
-  linkState, ownsLauncher, preserveCapturedKegs,
+  linkState, ownsLauncher, verifyCapturedKegs,
 } from '../packaging/homebrew/switch-state.mjs';
 
 const execute = promisify(execFile);
@@ -142,6 +142,22 @@ export async function verifyHomebrewHooks({ doctor, forbiddenKegs = [], node, ru
   }
 }
 
+export async function verifyCopiedHomebrewInstallation({
+  home, node, frameworkVersion, forbiddenKegs = [], run = runHomebrewCommand,
+  environment = process.env,
+}) {
+  const executable = await nodeIdentity(node, run, environment);
+  const copiedCli = path.join(home, 'sdlc', 'bin', 'sdlc.mjs');
+  const doctor = async () => JSON.parse((await run(executable,
+    [copiedCli, 'doctor', '--home', home], { env: environment })).stdout);
+  await verifyHomebrewHooks({ doctor: await doctor(), forbiddenKegs, node: executable,
+    run, environment, executeHooks: true });
+  const afterHooks = await doctor();
+  await verifyHomebrewHooks({ doctor: afterHooks, forbiddenKegs, node: executable });
+  if (afterHooks.frameworkVersion !== frameworkVersion) throw new Error('Post-switch framework version changed');
+  return afterHooks;
+}
+
 export async function switchToHomebrew({
   brew = 'brew', formula = 'urmich/ai-sdlc-framework/ai-sdlc-framework',
   home, previousFormula, purgeExisting = false, environment = process.env,
@@ -160,7 +176,8 @@ export async function switchToHomebrew({
     await runBrew(['install', '--formula', '--skip-link', formula]);
     newKeg = await findInstalledKeg(runBrew, formula, cellar);
     state.newKeg = newKeg;
-    await preserveCapturedKegs(state);
+    await verifyCapturedKegs(state);
+    state.retentionVerifiedBeforePromotion = true;
     await advanceSwitchState(state, 'installing-framework');
     const launcher = path.join(newKeg, 'bin', 'sdlc');
     const flags = home ? ['--home', path.resolve(home)] : [];
@@ -173,12 +190,22 @@ export async function switchToHomebrew({
       throw new Error('New Homebrew launcher failed install/version verification');
     }
     await verifyHomebrewHooks({ doctor, forbiddenKegs: [newKeg, state.previousKeg] });
+    await verifyCapturedKegs(state);
     await advanceSwitchState(state, 'promoting-new-link');
     const promoted = await promoteHomebrewLink({ prefix, formula, newKeg,
       previousFormula: state.previousFormula, previousKeg: state.previousKeg,
       capturedLink: state.capturedLink, runBrew });
+    await advanceSwitchState(state, 'verifying-promoted-channel');
+    const runtimeKeg = await findInstalledKeg(runBrew, 'node@22', cellar);
+    const node = path.join(runtimeKeg, 'bin', 'node');
+    await verifyCopiedHomebrewInstallation({ home: doctor.home, node, frameworkVersion: pkg.version,
+      forbiddenKegs: [newKeg, state.previousKeg], run, environment: env });
+    await verifyCapturedKegs(state);
+    state.postSwitchVerified = true;
+    state.oldPackageCleanupAllowed = true;
     result = { ...promoted, launcher, frameworkVersion: doctor.frameworkVersion,
-      restartRequired: true, oldPackageRemoved: false };
+      restartRequired: true, oldPackageRemoved: false, postSwitchVerified: true,
+      oldPackageCleanupAllowed: true };
   } catch (error) {
     return finishSwitchState(state, { error, newKeg });
   }
@@ -232,16 +259,11 @@ export async function switchFromHomebrew({
     await runBrew(['unlink', formula]);
     await runBrew(['uninstall', '--force', '--formula', formula]);
     await advanceSwitchState(state, 'verifying-after-removal');
-    const copiedCli = path.join(doctor.home, 'sdlc', 'bin', 'sdlc.mjs');
-    await nodeIdentity(node, run, env);
-    const afterRemoval = await invoke(copiedCli, ['doctor']);
-    await verifyHomebrewHooks({ doctor: afterRemoval, forbiddenKegs: [state.targetKeg], node,
-      run, environment: env, executeHooks: true });
-    const finalDoctor = await invoke(copiedCli, ['doctor']);
-    await verifyHomebrewHooks({ doctor: finalDoctor, forbiddenKegs: [state.targetKeg], node });
-    if (finalDoctor.frameworkVersion !== pkg.version) throw new Error('Post-removal framework version changed');
+    await verifyCopiedHomebrewInstallation({ home: doctor.home, node, frameworkVersion: pkg.version,
+      forbiddenKegs: [state.targetKeg], run, environment: env });
+    state.postSwitchVerified = true;
     result = { switched: true, oldPackageRemoved: true, node, home: doctor.home,
-      restartRequired: true, frameworkVersion: pkg.version };
+      restartRequired: true, frameworkVersion: pkg.version, postSwitchVerified: true };
   } catch (error) {
     return finishSwitchState(state, { error });
   }
