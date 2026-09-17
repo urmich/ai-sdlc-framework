@@ -98,11 +98,12 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
       ? JSON.parse(await fs.readFile(path.join(upgradeDirectory, 'release-descriptor.json'), 'utf8')) : candidate;
     const served = new Map();
     for (const [descriptor, directory] of [[candidate, candidateDirectory], [upgrade, upgradeDirectory ?? candidateDirectory]]) {
-      for (const file of descriptor.files.filter(file => file.kind === 'archive')) {
-        const bytes = await fs.readFile(path.join(directory, file.filename));
-        if (served.has(file.filename)) assert.deepEqual(served.get(file.filename), bytes);
-        served.set(file.filename, bytes);
-      }
+      await generateHomebrewFormula({ descriptor, artifactDirectory: directory, mode: 'candidate',
+        candidateBaseUrl: 'http://127.0.0.1:1/', architectures: [process.arch] });
+      const filename = `ai-sdlc-framework-${descriptor.version}-macos-${process.arch}.tar.gz`;
+      const bytes = await fs.readFile(path.join(directory, filename));
+      if (served.has(filename)) assert.deepEqual(served.get(filename), bytes);
+      served.set(filename, bytes);
     }
     server = createServer((request, response) => {
       const bytes = served.get(request.url?.slice(1));
@@ -115,7 +116,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
       server.listen(0, '127.0.0.1', resolve);
     });
     const candidateBaseUrl = `http://127.0.0.1:${server.address().port}/`;
-    assert.equal((await fetch(`${candidateBaseUrl}${candidate.files.find(file => file.filename.includes('-macos-arm64.')).filename}`)).status, 200);
+    assert.equal((await fetch(`${candidateBaseUrl}ai-sdlc-framework-${candidate.version}-macos-${process.arch}.tar.gz`)).status, 200);
     tap = `local/sdlc-${randomUUID().replaceAll('-', '')}`;
     tapRoot = path.join(repository, 'Library', 'Taps', 'local', `homebrew-${tap.split('/')[1]}`);
     await fs.mkdir(path.join(tapRoot, 'Formula'), { recursive: true });
@@ -125,17 +126,20 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     const formulaName = `${tap}/ai-sdlc-framework`;
     const generate = (descriptor, artifactDirectory, mode = 'candidate') =>
       generateHomebrewFormula({ descriptor, artifactDirectory, mode,
-        ...(mode === 'candidate' ? { candidateBaseUrl } : {}) });
-    if (!candidate.version.includes('-')) {
+        ...(mode === 'candidate' ? { candidateBaseUrl, architectures: [process.arch] } : {}) });
+    if (!candidate.version.includes('-') && process.arch === 'arm64') {
       const stable = await generate(candidate, candidateDirectory, 'stable');
       await fs.writeFile(formulaFile, stable.contents);
       await fs.writeFile(path.join(work, 'stable-ai-sdlc-framework.rb'), stable.contents);
       await runBrew(['style', formulaFile]);
       await runBrew(['audit', '--strict', '--formula', formulaName]);
       evidence.stableMetadataAudit = 'passed';
-    } else {
+    } else if (candidate.version.includes('-')) {
       evidence.stableMetadataAudit = 'not-applicable-prerelease';
       evidence.publicAcceptance = 'not-applicable-prerelease';
+    } else {
+      evidence.stableMetadataAudit = 'not-applicable-unverified-architecture';
+      evidence.publicAcceptance = 'not-applicable-unverified-architecture';
     }
     const local = await generate(candidate, candidateDirectory);
     await fs.writeFile(formulaFile, local.contents);

@@ -28,16 +28,16 @@ async function fixture(t, version = '0.3.0') {
   return { root, descriptor, artifactDirectory: root };
 }
 
-test('T-51 Homebrew stable metadata binds both public architecture assets and lifecycle ownership', async t => {
+test('T-51 initial stable Homebrew metadata binds only arm64 and preserves lifecycle ownership', async t => {
   const input = await fixture(t);
   const first = await generateHomebrewFormula(input);
   assert.deepEqual(await generateHomebrewFormula(input), first);
   assert.equal(first.sha256, digest(first.contents));
   assert.equal(first.size, Buffer.byteLength(first.contents));
-  for (const [arch, block] of [['arm64', 'on_arm'], ['x64', 'on_intel']]) {
-    const record = input.descriptor.files.find(file => file.filename.includes(`-${arch}.`));
-    assert.ok(first.contents.includes(`${block} do\n      url "https://github.com/urmich/ai-sdlc-framework/releases/download/v0.3.0/${record.filename}"\n      sha256 "${record.sha256}"`));
-  }
+  const record = input.descriptor.files.find(file => file.filename.includes('-arm64.'));
+  assert.ok(first.contents.includes(`  url "https://github.com/urmich/ai-sdlc-framework/releases/download/v0.3.0/${record.filename}"\n  sha256 "${record.sha256}"`));
+  assert.match(first.contents, /depends_on arch: :arm64/u);
+  assert.doesNotMatch(first.contents, /on_intel|macos-x64|x86_64/u);
   assert.match(first.contents, /depends_on "node@22"/u);
   assert.match(first.contents, /libexec.install Dir\["\*"\]/u);
   assert.match(first.contents, /skip_clean "libexec"/u);
@@ -47,6 +47,32 @@ test('T-51 Homebrew stable metadata binds both public architecture assets and li
   const install = first.contents.split('  def install\n')[1].split('  end\n')[0];
   assert.doesNotMatch(install, /COPILOT_HOME|system|purge|uninstall/u);
   assert.doesNotMatch(first.contents, /def (post_install|uninstall)|latest|--overwrite/u);
+  await fs.unlink(path.join(input.root, input.descriptor.files[0].filename));
+  assert.deepEqual(await generateHomebrewFormula(input), first, 'An absent Intel artifact must not block stable arm64 metadata');
+  input.descriptor.files = [record];
+  assert.deepEqual(await generateHomebrewFormula(input), first);
+  for (const architectures of [['x64'], ['arm64', 'x64']]) {
+    await assert.rejects(generateHomebrewFormula({ ...input, architectures }), /arm64-only until native Intel acceptance/u);
+  }
+});
+
+test('T-51 explicit local candidate formulas can still exercise Intel without stable support claims', async t => {
+  const input = await fixture(t);
+  const options = { ...input, mode: 'candidate', candidateBaseUrl: 'http://127.0.0.1:8123/',
+    architectures: ['arm64', 'x64'] };
+  const formula = await generateHomebrewFormula(options);
+  assert.deepEqual(await generateHomebrewFormula({ ...options, architectures: ['x64', 'arm64'] }), formula);
+  for (const [arch, block] of [['arm64', 'on_arm'], ['x64', 'on_intel']]) {
+    const record = input.descriptor.files.find(file => file.filename.includes(`-${arch}.`));
+    assert.ok(formula.contents.includes(`${block} do\n      url "http://127.0.0.1:8123/${record.filename}"`));
+    assert.ok(formula.contents.includes(`sha256 "${record.sha256}"`));
+  }
+  const intel = await generateHomebrewFormula({ ...options, architectures: ['x64'] });
+  assert.match(intel.contents, /depends_on arch: :x86_64/u);
+  assert.doesNotMatch(intel.contents, /macos-arm64/u);
+  for (const architectures of [[], ['arm64', 'arm64'], ['riscv64']]) {
+    await assert.rejects(generateHomebrewFormula({ ...options, architectures }), /unique supported/u);
+  }
 });
 
 test('T-51 Homebrew rejects missing, swapped, corrupt, stale and ambiguous metadata before output', async t => {
@@ -58,14 +84,14 @@ test('T-51 Homebrew rejects missing, swapped, corrupt, stale and ambiguous metad
   };
   await assert.rejects(mutated(d => d.files.pop()), /Missing macOS/u);
   await assert.rejects(mutated(d => d.files.push(d.files[0])), /duplicate/u);
-  await assert.rejects(mutated(d => { d.files[0].sha256 = d.files[1].sha256; }), /checksum/u);
-  await assert.rejects(mutated(d => { d.files[0].size++; }), /checksum or size/u);
+  await assert.rejects(mutated(d => { d.files[1].sha256 = d.files[0].sha256; }), /checksum/u);
+  await assert.rejects(mutated(d => { d.files[1].size++; }), /checksum or size/u);
   await assert.rejects(mutated(d => { d.version = '0.4.0'; }), /Invalid versioned/u);
   await assert.rejects(mutated(d => { d.files[0].filename = '../archive.tar.gz'; }), /Invalid/u);
   await assert.rejects(mutated(d => { d.sourceCommit = 'main'; }), /Invalid/u);
   await assert.rejects(mutated(d => { d.files[0].sha256 = ''; }), /Invalid/u);
   await assert.rejects(generateHomebrewFormula({ ...input, artifactDirectory: undefined }), /directory/u);
-  const file = path.join(input.root, input.descriptor.files[0].filename);
+  const file = path.join(input.root, input.descriptor.files[1].filename);
   await fs.appendFile(file, 'corruption');
   await assert.rejects(generateHomebrewFormula(input), /checksum or size/u);
 });

@@ -21,15 +21,20 @@ const formula = await generateHomebrewFormula({ descriptor, artifactDirectory })
 // Include formula metadata in the final release descriptor (exclude contents/mode).
 ```
 
-The generator rehashes both macOS archives and checks their exact filenames,
-sizes and architecture-specific digests. The shared platform verifier remains
+Initial stable publication is **macOS arm64 only**. The generator defaults to
+`architectures: ['arm64']`, requires only the exact arm64 archive, rehashes it,
+and checks its filename, size and digest. An absent Intel archive does not block
+stable metadata. The formula explicitly requires `arch: :arm64` and contains no
+Intel URL or stanza. Stable requests containing x64 are rejected until native
+Intel acceptance authorizes a later support expansion.
+
+The shared platform verifier remains
 responsible for the archive inventory, embedded payload, version and platform
 identity. Both are required release gates.
 
 Stable output references exactly:
 
 ```text
-https://github.com/urmich/ai-sdlc-framework/releases/download/v<VERSION>/ai-sdlc-framework-<VERSION>-macos-x64.tar.gz
 https://github.com/urmich/ai-sdlc-framework/releases/download/v<VERSION>/ai-sdlc-framework-<VERSION>-macos-arm64.tar.gz
 ```
 
@@ -63,13 +68,21 @@ prerelease tap. Serve the exact candidate archive directory locally. Local
 candidate formulas must not be included in the stable release descriptor or
 published tap. Public formulas are generated separately, without that argument.
 
-Run `scripts/homebrew-lifecycle.mjs` on each native macOS architecture, using an
+Candidate generation also defaults to arm64. Optional local-only Intel or dual
+formulas can be generated through the API with `mode: 'candidate'` and
+`architectures: ['x64']` or `['arm64', 'x64']`; these do not establish or publish
+stable Intel support. Intel artifacts/metadata remain unverified and non-blocking.
+
+Run `scripts/homebrew-lifecycle.mjs` on native macOS arm64, using an
 isolated Homebrew prefix and independently verified candidate bundles. The
 script exercises real brew style/audit, install with `--skip-link`, formula
 test, explicit framework lifecycle, upgrade and uninstall. It snapshots an
 isolated Copilot home around package-manager operations. The runner requires
-actual `darwin`/`x64` or `darwin`/`arm64`, `uname -m`, and no Rosetta translation.
-Local evidence does not satisfy T-52 or the other architecture's native gate.
+actual `darwin`, `uname -m`, and no Rosetta translation. It selects only the
+host's archive for its local formula; an arm64 smoke needs no Intel, Windows,
+WinGet or Linux input. A future optional native Intel run exercises a candidate
+formula only and does not generate supported stable Intel metadata.
+Local evidence does not satisfy T-52.
 
 ```sh
 node scripts/homebrew-lifecycle.mjs \
@@ -223,8 +236,10 @@ never guaranteed to evade those controls.
 Stable T-52 acceptance remains **NotRun** until separately authorized publication and clean,
 anonymous clients verify exact descriptor/checksum/asset bytes and real
 published tap install/upgrade/uninstall with empty caches. The local candidate
-gate neither publishes nor claims public tap availability. Stable publication
-requires both native macOS gates and postpublication Homebrew acceptance;
-prerelease published-Homebrew acceptance is **not applicable**. Prereleases must
+gate neither publishes nor claims public tap availability. Initial stable
+publication requires native macOS arm64 and its postpublication Homebrew
+acceptance. Intel remains unverified/non-blocking and excluded from the
+supported stable formula until native acceptance; Linux is out of scope.
+Prerelease published-Homebrew acceptance is **not applicable**. Prereleases must
 still pass the local-formula T-51 native tests; they never require or update a
 published stable Homebrew formula.

@@ -32,10 +32,19 @@ function validateDescriptor(descriptor) {
 
 /** Accepts the archive-stage descriptor subset; the final descriptor adds this formula. */
 export async function generateHomebrewFormula({
-  descriptor, artifactDirectory, mode = 'stable', candidateBaseUrl,
+  descriptor, artifactDirectory, mode = 'stable', candidateBaseUrl, architectures = ['arm64'],
 } = {}) {
   validateDescriptor(descriptor);
   if (!['stable', 'candidate'].includes(mode)) throw new Error('Unknown Homebrew metadata mode');
+  if (!Array.isArray(architectures) || !architectures.length ||
+      new Set(architectures).size !== architectures.length ||
+      architectures.some(arch => !['arm64', 'x64'].includes(arch))) {
+    throw new Error('Select unique supported Homebrew candidate architectures');
+  }
+  if (mode === 'stable' && (architectures.length !== 1 || architectures[0] !== 'arm64')) {
+    throw new Error('Stable Homebrew output is arm64-only until native Intel acceptance');
+  }
+  const selected = ['arm64', 'x64'].filter(arch => architectures.includes(arch));
   if (mode === 'stable' && descriptor.version.includes('-')) {
     throw new Error('Prereleases must not generate stable Homebrew metadata');
   }
@@ -53,7 +62,7 @@ export async function generateHomebrewFormula({
     throw new Error('Stable metadata cannot contain a candidate URL');
   }
   const archives = {};
-  for (const arch of ['arm64', 'x64']) {
+  for (const arch of selected) {
     const filename = `${NAME}-${descriptor.version}-macos-${arch}.tar.gz`;
     const record = descriptor.files.find(file => file.filename === filename);
     if (record?.kind !== 'archive') throw new Error(`Missing macOS ${arch} archive: ${filename}`);
@@ -65,28 +74,25 @@ export async function generateHomebrewFormula({
     }
     archives[arch] = { ...record, url: `${base}${filename}` };
   }
-  const candidateVersion = mode === 'candidate'
-    ? `      version "${descriptor.version}" if version.to_s != "${descriptor.version}"\n` : '';
+  const sourceLines = (arch, indent) => `${indent}url "${archives[arch].url}"
+${mode === 'candidate' ? `${indent}version "${descriptor.version}" if version.to_s != "${descriptor.version}"\n` : ''}${indent}sha256 "${archives[arch].sha256}"
+`;
+  const single = selected.length === 1;
+  const conditionalSources = single ? '' : `  on_macos do
+${selected.map(arch => `    ${arch === 'arm64' ? 'on_arm' : 'on_intel'} do
+${sourceLines(arch, '      ')}    end
+`).join('')}  end
+
+`;
   const contents = `${mode === 'candidate' ? '# Test-only local candidate; never publish to the stable tap.\n' : ''}class AiSdlcFramework < Formula
   desc "Offline, receipt-bound SDLC workflow for GitHub Copilot CLI"
   homepage "${REPOSITORY}"
-  license "MIT"
+${single ? sourceLines(selected[0], '  ') : ''}  license "MIT"
 
-  depends_on :macos
+${single ? `  depends_on arch: :${selected[0] === 'arm64' ? 'arm64' : 'x86_64'}\n` : ''}  depends_on :macos
   depends_on "node@22"
 
-  on_macos do
-    on_arm do
-      url "${archives.arm64.url}"
-${candidateVersion}      sha256 "${archives.arm64.sha256}"
-    end
-    on_intel do
-      url "${archives.x64.url}"
-${candidateVersion}      sha256 "${archives.x64.sha256}"
-    end
-  end
-
-  # The embedded payload manifest binds these bytes, including Node shebangs.
+${conditionalSources}  # The embedded payload manifest binds these bytes, including Node shebangs.
   skip_clean "libexec"
 
   def install
