@@ -93,7 +93,8 @@ export async function acceptRelease({ directory, outputFile, npm = 'false', hook
   requirePublicationReady(bundle);
   const root = path.join(ROOT, '.test-data', `release-acceptance-${randomUUID()}`);
   await fs.mkdir(root, { recursive: true });
-  const result = { schemaVersion: 1, identity: bundle.identity, status: 'NotRun',
+  const result = { schemaVersion: 1, identity: bundle.identity,
+    verifierCommit: process.env.ACCEPTANCE_VERIFIER_COMMIT ?? null, status: 'NotRun',
     publicAssets: { status: 'NotRun' }, nativeMacosArm64: 'NotRun',
     nativeWindows: 'NotRun', nativeMacosIntel: 'NotRun',
     npm: { status: 'NotRun' }, homebrew: bundle.context.prerelease ?

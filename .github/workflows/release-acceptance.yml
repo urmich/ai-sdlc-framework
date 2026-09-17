@@ -40,11 +40,11 @@ jobs:
     env:
       EXPECTED_BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
       EXPECTED_SOURCE_COMMIT: ${{ inputs.source_commit }}
+      ACCEPTANCE_VERIFIER_COMMIT: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           path: source
-          ref: ${{ inputs.source_commit }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:

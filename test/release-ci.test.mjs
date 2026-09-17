@@ -800,4 +800,6 @@ test('release workflow statically separates validation, sealing, opt-in publicat
   const acceptance = await fs.readFile('.github/workflows/release-acceptance.yml', 'utf8');
   assert.match(acceptance, /artifact-ids: \$\{\{ inputs\.bundle_artifact_id \}\}/u);
   assert.match(acceptance, /EXPECTED_BUNDLE_SHA256/u);
+  assert.match(acceptance, /ACCEPTANCE_VERIFIER_COMMIT: \$\{\{ github\.sha \}\}/u);
+  assert.doesNotMatch(acceptance, /ref: \$\{\{ inputs\.source_commit \}\}/u);
 });
