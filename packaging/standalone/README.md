@@ -29,8 +29,10 @@ Exports for release orchestration:
   metadataFiles, environment, targets})`: deterministic archives and metadata.
 - `writeReleaseMetadata({outputDir, artifact, sourceCommit, metadataFiles,
   targets})`: finalize metadata **after** Homebrew/WinGet generators consume
-  archive digests. Each metadata item is `{file, kind, filename?}`; kind is
-  `homebrew`, `winget`, or `metadata`. Output filenames are flat and unique.
+  archive digests. Each metadata item is `{file, kind, filename?}`; generator
+  output may use `artifact` instead of `file` and supply `sha256`/`size`, which
+  are verified before inclusion. Kind is `homebrew`, `winget`, or `metadata`.
+  Output filenames are flat and unique.
   The CLI `--metadata path.json` accepts this array.
 - `verifyRelease({outputDir, windowsLauncher, environment, targets})`:
   full inventory verification and fresh npm/platform rebuild. The descriptor

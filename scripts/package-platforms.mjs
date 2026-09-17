@@ -16,6 +16,12 @@ function filenameOnly(filename) {
   return filename;
 }
 
+function metadataSource(item) {
+  const file = item.file ?? item.artifact;
+  if (typeof file !== 'string' || !file) throw new Error('Release metadata requires a file or artifact path');
+  return file;
+}
+
 async function writeOwned(file, bytes) {
   try {
     const stat = await fs.lstat(file);
@@ -64,7 +70,13 @@ export async function writeReleaseMetadata({ outputDir, artifact, sourceCommit, 
     if (manifest.version.includes('-') && ['homebrew', 'winget'].includes(item.kind)) {
       throw new Error('Prereleases cannot include stable package-manager metadata');
     }
-    await add(item.filename ?? path.basename(item.file), item.kind, await fs.readFile(item.file));
+    const file = metadataSource(item);
+    const bytes = await fs.readFile(file);
+    if (item.sha256 !== undefined && item.sha256 !== sha256(bytes) ||
+        item.size !== undefined && item.size !== bytes.length) {
+      throw new Error('Generated release metadata does not match its supplied digest or size');
+    }
+    await add(item.filename ?? path.basename(file), item.kind, bytes);
   }
   files.sort((a, b) => comparePath(a.filename, b.filename));
   const descriptor = { schemaVersion: 1, name: manifest.name, version: manifest.version,
@@ -88,7 +100,7 @@ export async function buildPlatforms({ artifact, outputDir = path.join(ROOT, 'di
   const payloadFilename = `${pkg.name}-${pkg.version}.tgz`;
   const allowed = new Set([payloadFilename, 'release-descriptor.json', 'SHA256SUMS',
     ...targets.map(target => `${pkg.name}-${pkg.version}-${target}.${TARGETS[target].extension}`),
-    ...metadataFiles.map(item => filenameOnly(item.filename ?? path.basename(item.file)))]);
+    ...metadataFiles.map(item => filenameOnly(item.filename ?? path.basename(metadataSource(item))))]);
   await fs.mkdir(output, { recursive: true });
   if (!(await fs.lstat(output)).isDirectory() || (await fs.lstat(output)).isSymbolicLink()) {
     throw new Error('Release output must be a literal directory');

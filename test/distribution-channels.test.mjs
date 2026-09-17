@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { buildPackage } from '../scripts/package.mjs';
-import { buildPlatforms, renderChecksums } from '../scripts/package-platforms.mjs';
+import { buildPlatforms, renderChecksums, writeReleaseMetadata } from '../scripts/package-platforms.mjs';
 import { verifyPlatformPackage, verifyRelease, verifyReleaseChecksums } from '../scripts/verify-platform-package.mjs';
 import { canonical, inventory, readTarGzip, readZip, sha256, tarGzip, zip } from '../packaging/standalone/archive.mjs';
 import { extractEntries, platformEntries, TARGETS, verifyEntries, verifyTree } from '../packaging/standalone/protocol.mjs';
@@ -181,6 +181,23 @@ test('T-52 anonymous single-asset verification binds the saved prepublication ev
   await fs.writeFile(path.join(directory, 'release-descriptor.json'), canonical(descriptor));
   await fs.writeFile(path.join(directory, 'SHA256SUMS'), renderChecksums(descriptor));
   await assert.rejects(verifyPlatformPackage({ artifact: options.artifact }), /Wrong-version/u);
+});
+
+test('T-51 metadata finalization consumes generator artifact records without circular descriptor inputs', async () => {
+  const directory = path.join(root, 'metadata release');
+  await fs.cp(built.outputDir, directory, { recursive: true });
+  const file = path.join(root, 'candidate-fixture.yaml');
+  const contents = Buffer.from('fixture: generator-contract\n');
+  await fs.writeFile(file, contents);
+  const item = { artifact: file, filename: 'candidate-fixture.yaml',
+    kind: 'metadata', sha256: sha256(contents), size: contents.length };
+  const args = { outputDir: directory, artifact: payload.artifact,
+    sourceCommit: built.descriptor.sourceCommit, targets };
+  const finalized = await writeReleaseMetadata({ ...args, metadataFiles: [item] });
+  assert.equal(finalized.descriptor.files.find(entry => entry.filename === item.filename).sha256, item.sha256);
+  assert.equal((await verifyReleaseChecksums({ outputDir: directory })).descriptorSha256, finalized.descriptorSha256);
+  await assert.rejects(writeReleaseMetadata({ ...args, metadataFiles: [{ ...item, sha256: '0'.repeat(64) }] }), /supplied digest/u);
+  await assert.rejects(writeReleaseMetadata({ ...args, metadataFiles: [item, item] }), /Duplicate/u);
 });
 
 test('T-51 npm-denied standalone lifecycle preserves unrelated content and runtime until explicit purge',
