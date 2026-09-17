@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Browser Calculator</title>
+  <script>
+    (() => {
+      const param = new URLSearchParams(window.location.search).get("scoutTheme");
+      const theme =
+        param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", theme);
+    })();
+  </script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+</head>
+<body>
+  <main class="page-shell">
+    <section class="calculator-card" aria-labelledby="calculator-title">
+      <header class="calculator-header">
+        <div>
+          <p class="eyebrow">Local browser tool</p>
+          <h1 id="calculator-title">Calculator</h1>
+        </div>
+        <span id="status-badge" class="status-badge" aria-live="polite">Ready</span>
+      </header>
+
+      <output id="display" class="display" role="status" tabindex="0" aria-live="polite"
+        aria-atomic="true" aria-label="Calculator display">
+        <span id="display-value" class="display-value">0</span>
+      </output>
+
+      <div class="keypad" aria-label="Calculator keypad">
+        <button type="button" class="utility" data-action="clear">AC</button>
+        <button type="button" class="utility" data-action="sign"
+          aria-label="Toggle positive or negative">+/-</button>
+        <button type="button" class="utility" data-action="percent"
+          aria-label="Percent">%</button>
+        <button type="button" class="operator" data-action="operator"
+          data-value="/" aria-label="Divide">/</button>
+
+        <button type="button" data-action="digit" data-value="7">7</button>
+        <button type="button" data-action="digit" data-value="8">8</button>
+        <button type="button" data-action="digit" data-value="9">9</button>
+        <button type="button" class="operator" data-action="operator"
+          data-value="*" aria-label="Multiply">*</button>
+
+        <button type="button" data-action="digit" data-value="4">4</button>
+        <button type="button" data-action="digit" data-value="5">5</button>
+        <button type="button" data-action="digit" data-value="6">6</button>
+        <button type="button" class="operator" data-action="operator"
+          data-value="-" aria-label="Subtract">-</button>
+
+        <button type="button" data-action="digit" data-value="1">1</button>
+        <button type="button" data-action="digit" data-value="2">2</button>
+        <button type="button" data-action="digit" data-value="3">3</button>
+        <button type="button" class="operator" data-action="operator"
+          data-value="+" aria-label="Add">+</button>
+
+        <button type="button" class="zero" data-action="digit" data-value="0">0</button>
+        <button type="button" data-action="decimal" aria-label="Decimal point">.</button>
+        <button type="button" class="equals" data-action="equals"
+          aria-label="Calculate result">=</button>
+
+        <button type="button" class="delete" data-action="backspace"
+          aria-label="Delete last digit">Delete</button>
+      </div>
+
+      <p class="keyboard-help">Keyboard: 0-9, +, -, *, /, Enter, Escape, Backspace</p>
+    </section>
+  </main>
+  <script src="calculator.js"></script>
+</body>
+</html>

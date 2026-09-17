@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      artifact_name: ${{ steps.package.outputs.artifact_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check source and assets
+        run: npm run check
+      - name: Run deterministic tests
+        run: npm test
+      - name: Build reproducible package
+        id: package
+        run: |
+          npm run package:artifact
+          node -e "const fs=require('node:fs');const p=require('./package.json');fs.appendFileSync(process.env.GITHUB_OUTPUT,'artifact_name='+p.name+'-'+p.version+'\n')"
+      - name: Verify isolated installation lifecycle
+        run: npm run verify:package
+      - name: Retain installable distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: validate-package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download validated distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.validate-package.outputs.artifact_name }}
+          path: dist
+      - name: Publish tagged GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          test "$GITHUB_REF_NAME" = "v$PACKAGE_VERSION" ||
+            { echo "Tag $GITHUB_REF_NAME does not match package version $PACKAGE_VERSION" >&2; exit 1; }
+          if printf '%s' "$PACKAGE_VERSION" | grep -q -- '-'; then
+            RELEASE_KIND='--prerelease'
+          else
+            RELEASE_KIND='--latest'
+          fi
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          if test "$RELEASE_KIND" = '--prerelease'; then
+            gh release edit "$GITHUB_REF_NAME" --draft=false \
+              --prerelease --latest=false
+          else
+            gh release edit "$GITHUB_REF_NAME" --draft=false \
+              --prerelease=false --latest
+          fi
+          gh release upload "$GITHUB_REF_NAME" --clobber dist/*
+  publish-npm:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: validate-package
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify npm repository identity
+        env:
+          EXPECTED_REPOSITORY_URL: https://github.com/${{ github.repository }}.git
+        run: |
+          node -e "const p=require('./package.json');if(p.repository?.url!==process.env.EXPECTED_REPOSITORY_URL)throw new Error('package.json repository.url must match the publishing repository')"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+      - name: Download validated distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.validate-package.outputs.artifact_name }}
+          path: dist
+      - name: Publish public npm package
+        run: |
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          test "$GITHUB_REF_NAME" = "v$PACKAGE_VERSION" ||
+            { echo "Tag $GITHUB_REF_NAME does not match package version $PACKAGE_VERSION" >&2; exit 1; }
+          DIST_TAG="$(node -p "require('./package.json').version.includes('-') ? 'next' : 'latest'")"
+          npm publish "dist/${{ needs.validate-package.outputs.artifact_name }}.tgz" \
+            --access public --provenance --tag "$DIST_TAG"

@@ -1,0 +1,8 @@
+{
+  "name": "framework-test-browser-calculator",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}
