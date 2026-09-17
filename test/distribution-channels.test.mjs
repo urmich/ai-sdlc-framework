@@ -39,7 +39,8 @@ test.before(async () => {
   environment.TMPDIR = process.env.TMPDIR;
   payload = await buildPackage({ outputDir: path.join(root, 'npm'), environment });
   built = await buildPlatforms({ artifact: payload.artifact, outputDir: path.join(root, 'release'),
-    windowsLauncher, environment, targets });
+    windowsLauncher, environment, targets,
+    sourceCommit: process.env.SDLC_RELEASE_SOURCE_COMMIT });
   if (process.env.SDLC_RELEASE_DIR) {
     const candidate = await verifyRelease({ outputDir: process.env.SDLC_RELEASE_DIR, targets, rebuild: false });
     assert.equal(candidate.descriptor.sourceCommit, built.descriptor.sourceCommit);
@@ -128,7 +129,8 @@ test('T-51 independent builds reproduce exact npm payload, archives, descriptor 
   assert.deepEqual(second.descriptor, built.descriptor);
   assert.equal(second.descriptorSha256, built.descriptorSha256);
   assert.equal(second.checksumsSha256, built.checksumsSha256);
-  const verified = await verifyRelease({ outputDir: built.outputDir, environment, windowsLauncher, targets });
+  const verified = await verifyRelease({ outputDir: built.outputDir, environment, windowsLauncher, targets,
+    sourceCommit: built.descriptor.sourceCommit });
   assert.equal(verified.verified, true);
   assert.equal(verified.rebuilt, true);
   for (const archive of built.archives) {
