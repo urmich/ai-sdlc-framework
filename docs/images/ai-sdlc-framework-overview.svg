@@ -103,10 +103,10 @@
   <rect x="650" y="640" width="500" height="165" rx="22" class="neutral"/>
   <circle cx="673" cy="663" r="14" fill="#495057"/>
   <text x="673" y="667" class="step">6</text>
-  <text x="900" y="693" class="box-title">Independent candidate review</text>
+  <text x="900" y="693" class="box-title">Independent code review</text>
   <text x="900" y="735" class="box-copy">
-    <tspan x="900">Review the exact validated change set</tspan>
-    <tspan x="900" dy="24">Update and revalidate when evidence changes</tspan>
+    <tspan x="900">Inspect the exact locally validated change set</tspan>
+    <tspan x="900" dy="24">Fix findings, then rerun local validation</tspan>
   </text>
 
   <rect x="1230" y="220" width="500" height="165" rx="22" class="release"/>

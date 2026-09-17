@@ -234,7 +234,7 @@
       "y": 705,
       "width": 300,
       "height": 80,
-      "text": "Independent candidate review\nReview the exact validated change set",
+      "text": "Independent code review\nInspect the exact locally validated change set\nFix findings, then rerun local validation",
       "fontSize": 18,
       "fontFamily": 2,
       "strokeColor": "#000000",
