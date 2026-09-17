@@ -2,23 +2,26 @@
 
 ## Release policy
 
-The authoritative requirements are the approved `ec3b2e7` scope change
-(cherry-picked here as `4cf9570`), especially AC-053.10, AC-053.17, T-51 and T-60.
+The approved `ec3b2e7` scope change (cherry-picked here as `4cf9570`) establishes
+the native ARM64 and deferred Windows/T-60 boundaries. The subsequent user
+adjustment of 2026-09-17 authorizes Intel standalone publication and x64 Homebrew
+metadata, overriding that earlier commit's Intel preview/arm64-only restrictions.
+Intel deterministic archive/formula checks are now mandatory; Intel native
+lifecycle remains explicitly `NotRun` and non-blocking.
 
 | Target | Prepublication requirement | Published installer |
 | --- | --- | --- |
 | macOS Apple Silicon `macos-arm64` | **Mandatory native standalone and Homebrew lifecycle**, native Node/machine/anti-Rosetta checks, enforced network/npm-denied standalone lifecycle with negative controls | Yes |
 | Windows `windows-x64` | **Mandatory deterministic cross-build/PE/schema/URL/metadata/pre-JS payload-integrity checks**, plus validation of deferred T-60 identity inputs | Yes; no native execution claim |
-| macOS Intel `macos-x64` | Unsupported; explicit native `NotRun`, non-blocking | **No**; any separately generated preview is excluded from supported release and Homebrew metadata |
+| macOS Intel `macos-x64` | **Mandatory deterministic archive/formula URL/checksum/architecture checks**, with explicit native lifecycle `NotRun` and non-blocking | Yes, including architecture-specific Homebrew metadata; no native acceptance claim |
 | Linux `linux-x64` | Out of scope | **No** |
 
 The generic platform library's `complete` flag describes its four supported
-targets. Initial release eligibility instead uses exactly **two platform
-archives: Windows x64 and macOS arm64**, plus the same npm tgz, and the required
+targets. Release eligibility instead uses exactly **three platform
+archives: Windows x64, macOS arm64 and macOS x64**, plus the same npm tgz, and the required
 gates above. Linux is outside this release entirely. Generic codec fixtures do
-not create supported releases. Intel preview generation is optional developer
-work outside this workflow; previews must never enter the immutable supported
-release or stable Homebrew metadata.
+not create supported releases. Intel artifacts and formula stanzas are included
+in the same immutable release, subject to deterministic non-execution evidence.
 The Windows gate never invokes a PE executable, WinGet, Wine, or a native
 Windows runner. Its host Go test selector runs only pre-JS payload/inventory
 integrity and shared canonical-schema tests, not launcher/lifecycle execution.
@@ -30,9 +33,12 @@ Windows installation. WinGet remains `contract-validated`; community submission,
 The gate also checks the actual runtime/machine: a label migration, unavailable
 Seatbelt, blocked negative control, or missing required native evidence fails
 closed. No proxy-only substitute or policy modification is permitted. There is
-no Intel runner, job or artifact prerequisite. Sealing records unsupported Intel
-as `NotRun` directly when no optional status record exists, without claiming
-execution on any host.
+no native Intel runner or native lifecycle prerequisite. The mandatory Intel job
+runs on Ubuntu, reads/rebuilds archives, and validates generated formula text as
+data. It never runs Intel launchers, Ruby, brew, or an Intel lifecycle. The job's
+overall result can be `Passed` only with all deterministic evidence while its
+`nativeValidation` remains `NotRun`. Missing or failed deterministic Intel
+evidence blocks sealing; no synthesized Intel result replaces a missing job.
 
 ## Workflows and exact-byte ordering
 
@@ -49,14 +55,15 @@ execution on any host.
    never replace it.
 3. `buildLauncher` uses exact Go **1.27.1**, isolated caches, fixed flags, no
    module/toolchain downloads, two independent Windows AMD64 builds and PE
-   verification. `buildPlatforms` wraps the exact tgz for only the two
+   verification. `buildPlatforms` wraps the exact tgz for only the three
    release targets. `verifyRelease` independently rebuilds and checks inventory.
 4. WinGet consumes the verified Windows ZIP record (name/size/SHA-256), not the
    final descriptor. Stable versions generate all three deterministic manifests.
    Prereleases validate conspicuous test-only loopback manifests outside assets;
    those files are never published or submitted.
-5. The optional Homebrew interface consumes only the verified **macOS arm64**
-   archive record and must produce an explicitly arm64-only stable formula.
+5. The Homebrew integration interface consumes verified **macOS arm64 and x64**
+   archive records and must produce matching architecture-specific formula
+   stanzas. Intel metadata is no longer withheld pending native acceptance.
    Then, and only then, `writeReleaseMetadata` writes the **final descriptor**
    covering npm, platform archives and stable manager metadata, followed by
    **SHA256SUMS** covering those files and the descriptor. There is no hash cycle.
@@ -70,14 +77,16 @@ execution on any host.
    The native lifecycle extracts the downloaded archive; independent test
    builds must first reproduce its exact payload/platform digests.
 8. Sealing first requires completed native standalone **and Homebrew** evidence
-   from macOS arm64 and the Windows cross-only gate. Only then does it generate
+   from macOS arm64, the Windows cross-only gate, and Intel deterministic
+   archive/formula evidence. Only then does it generate
    the candidate-bound T-60 document under `handoff/`, **outside `assets/`**,
    avoiding a final-descriptor/prompt hash cycle. The resulting immutable review
    bundle includes explicit publication readiness.
    Its inventory binds `assets/`, deferred identity inputs, `handoff/`,
    `context.json`, and `evidence/` with exact sizes
    and hashes. Unexpected files, symlinks, empty directories, stale evidence,
-   Windows native claims, and Intel/Linux archives fail verification.
+   Windows/Intel native claims, mismatched architecture stanzas, and Linux
+   archives fail verification.
 
 While T-60 content completeness remains `PendingIntegration`/`NotRun`, the bundle
 records `publicationReady: false`. All production draft, npm and acceptance
@@ -101,8 +110,9 @@ rebuilding or resealing anything.
 
 No Homebrew implementation is copied into release CI. Until a later cherry-pick,
 candidate preparation can write `homebrew-input.json` and record `NotIntegrated`,
-but **the required native job cannot pass and the release cannot be sealed or
-published**. A passing standalone test is not a substitute for Homebrew. The
+but **the required ARM64 native and Intel formula jobs cannot pass and the
+release cannot be sealed or published**. A passing standalone/archive test is
+not a substitute for Homebrew. The
 staged generator interface is:
 
 ```js
@@ -111,6 +121,7 @@ const formula = await generateHomebrewFormula({
   descriptor, // verified archive-stage descriptor, before manager metadata
   artifactDirectory, // resolved candidate assets directory
   mode: 'stable',
+  architectures: ['arm64', 'x64'],
 });
 // Existing return: {filename, kind:'homebrew', contents, sha256, size, mode}.
 ```
@@ -119,13 +130,23 @@ This is the committed Homebrew branch's existing API, not a new generator.
 `homebrew-input.json` stores the archive-stage descriptor and relative
 `artifactDirectory: "assets"`; consumers resolve that path against the candidate.
 `prepareRelease({homebrewGenerator})` also accepts that function directly.
-The descriptor contains **no Intel archive**. The adapter writes returned
-contents only after checking the exact arm64 URL/digest, one architecture guard
-(`depends_on arch: :arm64`), absence of Intel metadata, and shared size/hash
-checks. The earlier dual-architecture generator will fail closed until its
-arm64-only corrective cherry-pick arrives; do not supply an Intel preview to
-work around that failure. Native Intel acceptance and a deliberate support-policy
-change are prerequisites for later adding Intel to stable Homebrew metadata.
+The descriptor contains both macOS archives. The adapter statically checks the
+generator's bounded `on_macos` / `on_arm` / `on_intel` source stanzas: each exact
+versioned URL and SHA-256 must appear under its matching architecture. Missing,
+duplicate, swapped or overriding sources, an arm64-only guard, Linux sources,
+or a missing Node dependency fail validation. No Ruby/formula execution is
+used to establish Intel evidence.
+
+The Intel gate independently packs the source npm payload and compares its bytes
+to the frozen tgz, rebuilds both macOS archives twice, checks archive hashes and
+sizes, and verifies the Intel platform identity as `darwin/x64`. It then calls
+the existing generator twice in separate directories using the archive-stage
+descriptor, compares the entire generated formula bytes via their hashes/sizes,
+and requires the stable formula to equal the frozen release metadata. Its
+evidence binds both architecture records, the Intel archive and final formula
+back to the candidate before sealing. A missing generator is `NotRun`/`Blocked`,
+not an implicit pass. Prereleases use two deterministic test-only loopback
+candidate formulas outside release assets and never publish stable metadata.
 The current Homebrew implementation fixes the public destination to
 `urmich/ai-sdlc-framework`; another approved destination fails closed until that
 workstream adds an explicit repository parameter. It also rejects build-metadata
@@ -295,7 +316,9 @@ node scripts/release-gate.mjs --candidate-dir .test-data/candidate \
 # Only on actual native Apple Silicon; fails closed if isolation is unavailable:
 node scripts/release-gate.mjs --candidate-dir .test-data/candidate \
   --evidence-dir .test-data/evidence --target macos-arm64
-# Intel needs no job: sealing adds an explicit unsupported/NotRun record.
+# Mandatory deterministic Intel archive/formula checks; no native execution:
+node scripts/release-gate.mjs --candidate-dir .test-data/candidate \
+  --evidence-dir .test-data/evidence --target macos-x64
 node scripts/release-bundle.mjs seal --candidate-dir .test-data/candidate \
   --evidence-dir .test-data/evidence --output-dir .test-data/release-bundle
 ```

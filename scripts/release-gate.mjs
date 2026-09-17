@@ -11,9 +11,11 @@ import { runtimePreflight } from '../packaging/standalone/runtime.mjs';
 import { buildLauncher } from '../packaging/winget/build-launcher.mjs';
 import { validateManifests } from '../packaging/winget/validate.mjs';
 import { renderManifests } from '../packaging/winget/generate.mjs';
-import { verifyRelease } from './verify-platform-package.mjs';
+import { verifyPlatformPackage, verifyRelease } from './verify-platform-package.mjs';
+import { buildPackage } from './package.mjs';
+import { buildPlatforms } from './package-platforms.mjs';
 import { verifyPackage } from './verify-package.mjs';
-import { ROOT, RELEASE_TARGETS, RELEASE_GATE_TARGETS, RELEASE_SCOPE, archiveRecord, options,
+import { ROOT, MACOS_ARCHITECTURES, RELEASE_TARGETS, RELEASE_GATE_TARGETS, RELEASE_SCOPE, archiveRecord, homebrewMetadata, options,
   readJson, trustedEnvironment, verifyCandidate, writeJson } from './release-bundle.mjs';
 
 const execute = promisify(execFile);
@@ -26,7 +28,7 @@ function integrationBlocked(message) {
 export async function verifyNativeHomebrew({ candidate, candidateDir, scratch,
   brew = process.env.SDLC_HOMEBREW_BREW, verifyLifecycle } = {}) {
   if (!candidate.context.prerelease && candidate.context.homebrew.status !== 'Generated') {
-    throw integrationBlocked('Mandatory native Homebrew validation requires the integrated arm64-only stable generator');
+    throw integrationBlocked('Mandatory native Homebrew validation requires the integrated dual-architecture stable generator');
   }
   if (!verifyLifecycle) {
     const modulePath = path.join(ROOT, 'scripts/homebrew-lifecycle.mjs');
@@ -55,6 +57,52 @@ export async function verifyNativeHomebrew({ candidate, candidateDir, scratch,
   }
 }
 
+export async function verifyMacosArchives({ candidate, candidateDir, scratch, environment = process.env }) {
+  const assets = path.resolve(candidateDir, 'assets');
+  const fresh = await buildPackage({ outputDir: path.join(scratch, 'fresh-npm'), environment });
+  if (fresh.sha256 !== candidate.context.identity.payloadSha256) throw new Error('Intel archive payload differs from the current source');
+  const artifacts = [path.join(assets, candidate.descriptor.payload.filename), fresh.artifact];
+  for (const [index, artifact] of artifacts.entries()) {
+    const rebuilt = await buildPlatforms({ artifact, outputDir: path.join(scratch, `macos-rebuild-${index}`),
+      sourceCommit: candidate.context.identity.sourceCommit, targets: MACOS_ARCHITECTURES.map(arch => `macos-${arch}`), environment });
+    for (const arch of MACOS_ARCHITECTURES) {
+      const record = archiveRecord(candidate, `macos-${arch}`);
+      const actual = rebuilt.archives.find(file => file.target === `macos-${arch}`);
+      if (actual.sha256 !== record.sha256 || actual.size !== record.size) throw new Error(`Independent macOS ${arch} archive rebuild mismatch`);
+    }
+  }
+  const archive = archiveRecord(candidate, 'macos-x64');
+  const verified = await verifyPlatformPackage({ artifact: path.join(assets, archive.filename),
+    expectedPlatform: 'darwin', expectedArch: 'x64',
+    expectedDescriptorSha256: candidate.context.identity.descriptorSha256,
+    expectedChecksumsSha256: candidate.context.identity.checksumsSha256 });
+  return { validation: 'Passed', target: verified.target, platform: 'darwin', arch: 'x64',
+    filename: verified.filename, sha256: verified.sha256, size: archive.size,
+    payloadSha256: verified.payloadSha256, inventoryDigest: verified.inventoryDigest };
+}
+
+export async function verifyIntelFormula({ candidate, candidateDir, scratch, generator }) {
+  const descriptor = { ...candidate.descriptor, files: candidate.descriptor.files.filter(file => file.kind === 'archive') };
+  const options = { descriptor, artifactDirectory: path.resolve(candidateDir, 'assets'),
+    repository: candidate.context.releaseRepository, generator,
+    ...(candidate.context.prerelease ? { mode: 'candidate', candidateBaseUrl: 'http://127.0.0.1:8765/' } : {}) };
+  const results = [];
+  for (const iteration of ['first', 'second']) {
+    const result = await homebrewMetadata({ ...options, outputDir: path.join(scratch, `intel-formula-${iteration}`) });
+    if (result.status !== 'Generated') throw integrationBlocked('Mandatory Intel formula validation requires the integrated dual-architecture Homebrew generator');
+    results.push(result);
+  }
+  const records = results.map(result => result.files.map(({ artifact, ...record }) => record));
+  if (canonical(records[0]) !== canonical(records[1])) throw new Error('Independent Intel Homebrew formula generations differ');
+  if (!candidate.context.prerelease &&
+      canonical(records[0]) !== canonical(candidate.descriptor.files.filter(file => file.kind === 'homebrew'))) {
+    throw new Error('Rebuilt Intel formula differs from frozen public Homebrew metadata');
+  }
+  return { ...results[0].validation, deterministicGeneration: 'Passed', formula: records[0][0],
+    publication: candidate.context.prerelease ? 'NotPublishedPrerelease' : 'StableMetadata',
+    nativeValidation: 'NotRun' };
+}
+
 async function command(executable, args, env, cwd = ROOT) {
   const result = await execute(executable, args, { cwd, env, timeout: 20 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 });
   process.stdout.write(result.stdout);
@@ -79,7 +127,10 @@ export async function runGate({ candidateDir, evidenceDir, target, ...expected }
     NODE_OPTIONS: '', NODE_PATH: '' };
   try {
     if (target === 'macos-x64') {
-      result.reason = 'Intel is unsupported and NotRun: no release archive or stable Homebrew metadata is published.';
+      result.deterministicArchive = await verifyMacosArchives({ candidate, candidateDir, scratch, environment: env });
+      result.homebrew = await verifyIntelFormula({ candidate, candidateDir, scratch });
+      result.reason = 'Intel archive and architecture-specific formula metadata were checked as data only; no Intel launcher, Ruby, brew, or native lifecycle was executed.';
+      result.status = 'Passed';
       return result;
     }
     const assets = path.resolve(candidateDir, 'assets');

@@ -20,9 +20,10 @@ Use the version from `package.json`, not a separately chosen channel version.
 The generic default build supports all four targets. Its `complete` flag means
 all library targets, not release eligibility. The current
 [release orchestration policy](../../docs/release-ci.md) explicitly selects
-`macos-arm64,windows-x64` and excludes Intel and Linux publication. Intel may be
-generated separately as an unsupported preview, never merged into the supported
-release or stable Homebrew metadata. Initial stable Homebrew is arm64-only. CI verifies
+`macos-arm64,macos-x64,windows-x64` and excludes Linux publication. Intel standalone
+archives and stable Homebrew metadata are published after mandatory deterministic
+archive/formula URL/checksum/architecture validation, without claiming native
+Intel lifecycle acceptance. CI verifies
 that exact allowlist and separate required evidence instead of using `complete`.
 Other ad hoc target subsets do not establish release eligibility.
 The output directory must contain only the exact owned candidate filenames.
@@ -160,8 +161,8 @@ This channel neither changes those controls nor promises a bypass.
 Set `SDLC_DISTRIBUTION_TARGET` to the actual native target when requiring native
 evidence. The current release's only mandatory native target is `macos-arm64`, covering
 both standalone and Homebrew lifecycle;
-Windows is cross-validated and Intel is unsupported with native evidence
-explicitly `NotRun`; no Intel archive enters the supported release.
+Windows is cross-validated; Intel archive/formula evidence is mandatory and
+non-execution-only. Native Intel lifecycle remains explicitly `NotRun`.
 The test asserts actual
 `process.platform`, `process.arch`, native machine architecture and absence of
 Rosetta. Set `SDLC_WINDOWS_LAUNCHER` to the independently rebuilt Windows
@@ -192,8 +193,9 @@ validated per-process network-and-npm-filesystem isolation adapter and remains
 `NotRun` for this specific gate. Proxy settings, global firewall edits, or a
 foreign-OS container cannot substitute for the missing native evidence.
 
-Retain the required arm64/native and Windows/cross-validation results, explicit
-Intel `NotRun`, and descriptor/checksum digests in one immutable release bundle.
+Retain the required arm64/native, Windows/cross-validation and Intel/deterministic
+archive/formula results, with explicit Intel native `NotRun`, and descriptor/checksum
+digests in one immutable release bundle.
 Native Homebrew/WinGet validation and anonymous live acceptance are distinct
 evidence; local package tests do not establish public availability or
 package-manager acceptance. Missing native Homebrew integration is a release

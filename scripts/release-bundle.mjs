@@ -14,12 +14,13 @@ import { buildPlatforms, writeReleaseMetadata } from './package-platforms.mjs';
 import { verifyRelease } from './verify-platform-package.mjs';
 
 export const ROOT = fileURLToPath(new URL('../', import.meta.url));
-export const RELEASE_TARGETS = Object.freeze(['macos-arm64', 'windows-x64']);
-export const RELEASE_GATE_TARGETS = Object.freeze(['macos-arm64', 'macos-x64', 'windows-x64']);
+export const MACOS_ARCHITECTURES = Object.freeze(['arm64', 'x64']);
+export const RELEASE_TARGETS = Object.freeze(['macos-arm64', 'macos-x64', 'windows-x64']);
+export const RELEASE_GATE_TARGETS = RELEASE_TARGETS;
 export const RELEASE_SCOPE = Object.freeze({
   'macos-arm64': { required: true, validation: 'native-lifecycle', publish: true },
   'windows-x64': { required: true, validation: 'cross-build-schema-payload-metadata', native: 'NotRun', publish: true },
-  'macos-x64': { required: false, validation: 'NotRun', publish: false, supported: false, homebrew: false },
+  'macos-x64': { required: true, validation: 'deterministic-archive-formula', native: 'NotRun', publish: true, homebrew: true },
   'linux-x64': { required: false, validation: 'OutOfScope', publish: false },
 });
 
@@ -76,7 +77,7 @@ export async function verifyCandidate(directory, { allowGeneratedPrompt = false,
       context.prerelease !== isPrerelease(release.descriptor.version)) throw new Error('Candidate identity or release scope mismatch');
   const formulas = release.descriptor.files.filter(file => file.kind === 'homebrew');
   if (formulas.length > 1 || formulas.some(file => file.filename !== 'ai-sdlc-framework.rb')) {
-    throw new Error('Initial Homebrew metadata must contain only the arm64 formula');
+    throw new Error('Homebrew metadata must contain only the dual-architecture formula');
   }
   if (!context.prerelease && context.homebrew?.status === 'Generated' && formulas.length !== 1) {
     throw new Error('Generated stable Homebrew metadata is missing from the candidate');
@@ -104,19 +105,50 @@ export async function verifyCandidate(directory, { allowGeneratedPrompt = false,
   return { ...release, context, testerInput };
 }
 
-export function validateInitialHomebrewFormula({ descriptor, repository, contents }) {
-  const archive = archiveRecord({ descriptor }, 'macos-arm64');
-  const expectedUrl = `https://github.com/${releaseRepository(repository)}/releases/download/v${descriptor.version}/${archive.filename}`;
-  const actualUrls = [...contents.matchAll(/^\s+url "([^"]+)"$/gmu)].map(match => match[1]);
-  if (canonical(actualUrls) !== canonical([expectedUrl])) throw new Error('Homebrew formula URLs differ from the approved release repository');
-  if (!/^\s*depends_on\s+arch:\s*:arm64\s*$/mu.test(contents) || /\bon_intel\b|\bmacos-x64\b/u.test(contents)) {
-    throw new Error('Initial stable Homebrew metadata must explicitly support arm64 only');
+export function validateInitialHomebrewFormula({ descriptor, repository, contents, mode = 'stable', candidateBaseUrl }) {
+  if (!['stable', 'candidate'].includes(mode)) throw new Error('Unknown Homebrew metadata mode');
+  let base = `https://github.com/${releaseRepository(repository)}/releases/download/v${descriptor.version}/`;
+  if (mode === 'candidate') {
+    const url = new URL(candidateBaseUrl);
+    if (url.protocol !== 'http:' || !['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname) ||
+        !url.port || url.username || url.password || url.search || url.hash ||
+        !/^\/[a-zA-Z0-9/_-]*$/u.test(url.pathname) || !url.pathname.endsWith('/')) {
+      throw new Error('Test-only Homebrew metadata requires an explicit loopback base URL');
+    }
+    base = url.href;
+  } else if (isPrerelease(descriptor.version) || candidateBaseUrl !== undefined) {
+    throw new Error('Stable Homebrew metadata cannot use prereleases or candidate URLs');
   }
-  const digests = [...contents.matchAll(/^\s+sha256 "([a-f0-9]{64})"\s*$/gmu)].map(match => match[1]);
-  if (canonical(digests) !== canonical([archive.sha256])) throw new Error('Homebrew formula must bind the exact arm64 archive digest');
+  const records = MACOS_ARCHITECTURES.map(arch => {
+    const archive = archiveRecord({ descriptor }, `macos-${arch}`);
+    return { arch, ...archive, url: `${base}${archive.filename}` };
+  });
+  // Validate the generator's bounded source DSL as data; never execute Ruby, brew, or a target launcher.
+  const expectedSources = ['on_macos do', ...records.flatMap(record => [
+    `${record.arch === 'arm64' ? 'on_arm' : 'on_intel'} do`, `url "${record.url}"`,
+    ...(mode === 'candidate' ? [`version "${descriptor.version}" if version.to_s != "${descriptor.version}"`] : []),
+    `sha256 "${record.sha256}"`, 'end',
+  ]), 'end'].join('\n');
+  const sources = [...contents.matchAll(/^  on_macos do\n[\s\S]*?^  end[ \t]*$/gmu)];
+  if (sources.length !== 1 || sources[0][0].split('\n').map(line => line.trim()).join('\n') !== expectedSources ||
+      [...contents.matchAll(/^\s*(?:on_arm|on_intel) do\s*$/gmu)].length !== 2 ||
+      /^\s*depends_on\s+arch:/mu.test(contents) || /\bon_linux\b/u.test(contents)) {
+    throw new Error('Homebrew architecture stanzas must bind each arm64/x64 URL and checksum to its matching architecture');
+  }
+  const actualUrls = [...contents.matchAll(/^\s*url "([^"]+)"[ \t]*$/gmu)].map(match => match[1]);
+  const digests = [...contents.matchAll(/^\s*sha256 "([a-f0-9]{64})"[ \t]*$/gmu)].map(match => match[1]);
+  if (canonical(actualUrls) !== canonical(records.map(record => record.url)) ||
+      canonical(digests) !== canonical(records.map(record => record.sha256)) ||
+      !/^\s*depends_on :macos[ \t]*$/mu.test(contents) ||
+      !/^\s*depends_on "node@22"[ \t]*$/mu.test(contents) ||
+      (mode === 'candidate' && !contents.startsWith('# Test-only local candidate; never publish to the stable tap.\n'))) {
+    throw new Error('Homebrew formula URL/checksum/architecture or Node dependency contract mismatch');
+  }
+  return { validation: 'Passed', mode, architectures: records, nativeValidation: 'NotRun' };
 }
 
-export async function homebrewMetadata({ descriptor, artifactDirectory, outputDir, repository, generator }) {
+export async function homebrewMetadata({ descriptor, artifactDirectory, outputDir, repository, generator,
+  mode = 'stable', candidateBaseUrl }) {
   const modulePath = path.join(ROOT, 'packaging/homebrew/generate-formula.mjs');
   if (!generator) {
     const present = await fs.stat(modulePath).catch(error => {
@@ -127,18 +159,19 @@ export async function homebrewMetadata({ descriptor, artifactDirectory, outputDi
     generator = (await import(pathToFileURL(modulePath).href)).generateHomebrewFormula;
   }
   if (typeof generator !== 'function') throw new Error('Homebrew module must export generateHomebrewFormula');
-  const formula = await generator({ descriptor, artifactDirectory, mode: 'stable' });
+  const formula = await generator({ descriptor, artifactDirectory, mode, architectures: [...MACOS_ARCHITECTURES],
+    ...(candidateBaseUrl ? { candidateBaseUrl } : {}) });
   if (formula.filename !== 'ai-sdlc-framework.rb' || formula.kind !== 'homebrew' ||
-      formula.mode !== 'stable' || typeof formula.contents !== 'string' ||
+      formula.mode !== mode || typeof formula.contents !== 'string' ||
       formula.sha256 !== sha256(Buffer.from(formula.contents)) || formula.size !== Buffer.byteLength(formula.contents)) {
-    throw new Error('generateHomebrewFormula returned an invalid stable formula record');
+    throw new Error('generateHomebrewFormula returned an invalid formula record');
   }
-  validateInitialHomebrewFormula({ descriptor, repository, contents: formula.contents });
+  const validation = validateInitialHomebrewFormula({ descriptor, repository, contents: formula.contents, mode, candidateBaseUrl });
   await emptyDirectory(outputDir);
   const artifact = path.join(outputDir, formula.filename);
   await fs.writeFile(artifact, formula.contents, { flag: 'wx' });
-  const { contents, mode, ...record } = formula;
-  return { status: 'Generated', nativeValidation: 'NotRun', files: [{ ...record, artifact }] };
+  const { contents, mode: generatedMode, ...record } = formula;
+  return { status: 'Generated', nativeValidation: 'NotRun', validation, files: [{ ...record, artifact }] };
 }
 
 export async function prepareRelease({ outputDir, repository, sourceCommit, environment = process.env,
@@ -172,7 +205,7 @@ export async function prepareRelease({ outputDir, repository, sourceCommit, envi
   const winget = await validateManifests({ ...wingetOptions, manifestDir: path.join(directory, 'winget') });
   await writeJson(path.join(directory, 'winget-input.json'), wingetInput);
   const homebrewInput = { descriptor: initial.descriptor, artifactDirectory: 'assets',
-    mode: prerelease ? 'candidate' : 'stable' };
+    mode: prerelease ? 'candidate' : 'stable', architectures: [...MACOS_ARCHITECTURES] };
   await writeJson(path.join(directory, 'homebrew-input.json'), homebrewInput);
   const homebrew = prerelease ? { status: 'NotPublishedPrerelease', files: [] } :
     await homebrewMetadata({ descriptor: initial.descriptor, artifactDirectory: assets,
@@ -188,7 +221,7 @@ export async function prepareRelease({ outputDir, repository, sourceCommit, envi
   await writeJson(path.join(directory, INPUT_FILENAME), testerInput);
   const context = { schemaVersion: 1, releaseRepository: repository, identity: evidenceIdentity(final),
     scope: RELEASE_SCOPE, prerelease, launcher: { sha256: launcher.sha256, toolchain: launcher.toolchain },
-    winget, homebrew: { status: homebrew.status, nativeValidation: 'NotRun', supportedArchitectures: ['arm64'] },
+    winget, homebrew: { status: homebrew.status, nativeValidation: 'NotRun', supportedArchitectures: [...MACOS_ARCHITECTURES] },
     windowsTesterPrompt: { generationStatus: 'DeferredUntilRequiredValidation',
       contentStatus: 'PendingIntegration', nativeExecution: 'NotRun' },
     publicAssets: 'NotRun', npmPublication: 'NotRun', communityAcceptance: 'NotRun' };
@@ -204,7 +237,15 @@ export function validateGates(gates, identity) {
         gate.required !== RELEASE_SCOPE[target].required ||
         gate.validation !== RELEASE_SCOPE[target].validation) throw new Error(`Missing or stale gate: ${target}`);
     if (gate.required && gate.status !== 'Passed') throw new Error(`Required gate did not pass: ${target}`);
-    if (target === 'macos-x64' && gate.status !== 'NotRun') throw new Error('Intel native evidence must explicitly remain NotRun');
+    if (target === 'macos-x64' && (gate.nativeValidation !== 'NotRun' ||
+        gate.deterministicArchive?.validation !== 'Passed' || gate.deterministicArchive?.target !== 'macos-x64' ||
+        gate.deterministicArchive?.platform !== 'darwin' || gate.deterministicArchive?.arch !== 'x64' ||
+        gate.deterministicArchive?.payloadSha256 !== identity.payloadSha256 ||
+        gate.homebrew?.validation !== 'Passed' || gate.homebrew?.deterministicGeneration !== 'Passed' ||
+        gate.homebrew?.nativeValidation !== 'NotRun' ||
+        canonical(gate.homebrew?.architectures?.map(record => record.arch)) !== canonical(MACOS_ARCHITECTURES))) {
+      throw new Error('Missing mandatory non-execution Intel archive/formula evidence; Intel native must remain NotRun');
+    }
     if (target === 'windows-x64' && gate.nativeValidation !== 'NotRun') throw new Error('Cross-build cannot claim native Windows evidence');
     if (target === 'macos-arm64' && (gate.nativeValidation !== 'Passed' ||
         gate.networkDeniedLifecycle !== 'Passed' || gate.host?.platform !== 'darwin' || gate.host?.arch !== 'arm64' ||
@@ -227,6 +268,24 @@ export function validateGates(gates, identity) {
 
 export function windowsTesterReadiness(candidate, gates) {
   validateGates(gates, candidate.context.identity);
+  const intel = gates.find(gate => gate.target === 'macos-x64');
+  const archive = archiveRecord(candidate, 'macos-x64');
+  const expectedIntelArchive = { validation: 'Passed', target: 'macos-x64', platform: 'darwin', arch: 'x64',
+    filename: archive.filename, sha256: archive.sha256, size: archive.size,
+    payloadSha256: candidate.context.identity.payloadSha256, inventoryDigest: candidate.descriptor.payload.inventoryDigest };
+  const expectedMode = candidate.context.prerelease ? 'candidate' : 'stable';
+  const base = candidate.context.prerelease ? 'http://127.0.0.1:8765/' :
+    `https://github.com/${candidate.context.releaseRepository}/releases/download/v${candidate.descriptor.version}/`;
+  const expectedArchitectures = MACOS_ARCHITECTURES.map(arch => {
+    const record = archiveRecord(candidate, `macos-${arch}`);
+    return { arch, ...record, url: `${base}${record.filename}` };
+  });
+  if (canonical(intel.deterministicArchive) !== canonical(expectedIntelArchive) ||
+      intel.homebrew.mode !== expectedMode || canonical(intel.homebrew.architectures) !== canonical(expectedArchitectures) ||
+      (!candidate.context.prerelease &&
+        canonical([intel.homebrew.formula]) !== canonical(candidate.descriptor.files.filter(file => file.kind === 'homebrew')))) {
+    throw new Error('Intel archive/formula evidence is not bound to the exact candidate metadata');
+  }
   if (!candidate.context.prerelease && candidate.context.homebrew?.status !== 'Generated') {
     throw new Error('Stable Homebrew implementation and metadata must be integrated before T-60 generation');
   }
@@ -289,11 +348,6 @@ export async function sealBundle({ candidateDir, evidenceDir, outputDir, runId }
   const candidate = await verifyCandidate(candidateDir);
   const gateFiles = await selectGateFiles(evidenceDir, runId);
   const gates = await Promise.all(gateFiles.map(readJson));
-  if (!gates.some(gate => gate.target === 'macos-x64')) {
-    gates.push({ schemaVersion: 1, target: 'macos-x64', required: false, validation: 'NotRun',
-      identity: candidate.context.identity, status: 'NotRun', nativeValidation: 'NotRun',
-      reason: 'Unsupported and excluded from publication/Homebrew metadata; no Intel runner or native validation requested.' });
-  }
   validateGates(gates, candidate.context.identity);
   const readiness = windowsTesterReadiness(candidate, gates);
   await emptyDirectory(outputDir);

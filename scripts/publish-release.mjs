@@ -63,7 +63,7 @@ export async function publishApprovedDraft({ directory, repository, bundle }, ap
         `Source: ${bundle.identity.sourceCommit}\nDescriptor SHA-256: ${bundle.identity.descriptorSha256}\n` +
         `SHA256SUMS SHA-256: ${bundle.identity.checksumsSha256}\n\n` +
         'macOS arm64 native lifecycle is required. Windows evidence is cross-build/schema/payload/metadata only; ' +
-        'native Windows is NotRun. macOS Intel is unsupported/NotRun and is excluded along with Linux installers. ' +
+        'native Windows is NotRun. macOS Intel archive/formula checks are deterministic only; native Intel remains NotRun. Linux installers are excluded. ' +
         'Native macOS standalone/Homebrew evidence is required; package-manager community acceptance remains separate.\n\n' +
         'This workflow never makes the draft public. Review before manually publishing, then run Release acceptance.',
     } });

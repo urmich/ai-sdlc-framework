@@ -84,10 +84,12 @@ jobs:
         include:
           - target: macos-arm64
             runner: macos-15
+          - target: macos-x64
+            runner: ubuntu-24.04
           - target: windows-x64
             runner: ubuntu-24.04
     # macos-15 is Apple Silicon. The gate verifies Node, machine architecture and absence of Rosetta.
-    # Sealing records unsupported Intel as NotRun without allocating or depending on an Intel job.
+    # Intel runs mandatory deterministic archive/formula checks on Linux; native Intel remains NotRun.
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
     env:
@@ -125,7 +127,7 @@ jobs:
           artifact-ids: ${{ needs.candidate.outputs.artifact_id }}
           path: source/.test-data/candidate
           merge-multiple: true
-      - name: Require native standalone/Homebrew or cross-only Windows validation
+      - name: Require ARM64 native, Intel deterministic archive/formula, or Windows cross-only evidence
         env:
           RELEASE_TARGET: ${{ matrix.target }}
         run: |

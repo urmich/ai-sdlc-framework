@@ -518,9 +518,11 @@ The separate [release workflow](docs/release-ci.md) builds a frozen candidate on
 version tags or manual dispatch. Mandatory gates are native macOS Apple Silicon
 arm64 **standalone and Homebrew** lifecycle and deterministic Windows x64 cross-build/schema/payload/WinGet
 metadata/pre-JS payload-integrity validation; native Windows is not claimed.
-Published standalone archives are **Windows x64 and macOS arm64 only**.
-macOS Intel is unsupported/`NotRun` and non-blocking; Intel and Linux installer
-archives are excluded. Initial stable Homebrew metadata is arm64-only.
+Published standalone archives are **Windows x64, macOS arm64 and macOS Intel x64**.
+Intel archive reproducibility plus architecture-specific Homebrew URL/checksum
+validation is a mandatory non-execution gate. Intel native lifecycle remains
+`NotRun` and non-blocking; Linux installer archives remain excluded.
+Stable Homebrew metadata includes both macOS architectures.
 
 Successful gates produce one immutable `release-bundle` artifact. Publication
 requires explicit manual inputs and protected `release`/`npm` environments:
