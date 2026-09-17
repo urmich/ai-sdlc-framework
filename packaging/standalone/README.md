@@ -107,8 +107,29 @@ Install/update invokes the new launcher by absolute path, never a shadowing
 `sdlc` on PATH. Framework hooks reference the installed Copilot-home copy and
 the validated absolute Node executable, not the downloaded archive or old
 channel. Remove an old package only after the replacement launcher's
-install/update and doctor have succeeded. Ordinary uninstall preserves
-framework runtime state and unrelated Copilot content. `--purge-existing` and
+install/update and doctor have succeeded **and** its hook-bound Node runtime
+is independently retained. These standalone commands never remove a previous
+package, its Node runtime, or package-manager dependencies.
+
+For Homebrew switching, capture the old link target, keg, version, Node
+dependencies and recoverable rollback state **before any `brew install` or
+`brew upgrade`**. `--skip-link` does not guarantee that Homebrew will retain an
+old link or keg: installation can unlink or clean it before later verification.
+Keep rollback artifacts available until the complete switch is verified.
+
+Before Homebrew-to-npm or Homebrew-to-extracted/standalone removal, retain or
+install an independently owned native Node 22+ runtime, including its runtime
+dependencies. Merely selecting another symlink to the same autoremove-eligible
+Homebrew Node keg is not independent retention. Execute the replacement's
+absolute entry with that retained Node, and verify that every installed hook
+binds to its surviving real executable path. Run the installed hooks and
+`doctor` before removal, then run **both again after** formula removal and
+dependency autoremove. A pre-removal doctor alone cannot establish success.
+On failure, restore the captured package/link/runtime state where possible and
+report the migration incomplete; never report a successful switch or pretend
+an explicitly requested purge was rolled back.
+
+Ordinary uninstall preserves framework runtime state and unrelated Copilot content. `--purge-existing` and
 `uninstall --purge` are explicit, destructive framework operations; a reported
 partial purge is not silently rolled back. These commands do not remove
 standalone channel versions. Removing a channel payload separately never
@@ -134,3 +155,6 @@ Retain all four mandatory native results and descriptor/checksum digests.
 Native Homebrew/WinGet validation, publication from one immutable bundle, and
 anonymous live acceptance are orchestration responsibilities; local package
 tests do not establish public availability or package-manager acceptance.
+Published Homebrew T-52 acceptance applies only to stable releases.
+Prereleases retain the native local-formula T-51 gate and never claim
+published-Homebrew acceptance or update stable package-manager metadata.

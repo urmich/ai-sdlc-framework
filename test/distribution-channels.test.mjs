@@ -73,6 +73,28 @@ async function installer(f, args, env = environment) {
   return JSON.parse(result.stdout);
 }
 
+async function verifyRetainedHookRuntime(f, removedRoots) {
+  const hooks = JSON.parse(await fs.readFile(path.join(f.home, 'hooks/sdlc.json'), 'utf8'));
+  const retainedNode = await fs.realpath(process.execPath);
+  for (const handler of Object.values(hooks.hooks).flat()) {
+    assert.equal(handler.exec, retainedNode);
+    for (const removedRoot of removedRoots) {
+      assert.ok(!retainedNode.startsWith(`${path.resolve(removedRoot)}${path.sep}`));
+    }
+  }
+  const handler = hooks.hooks.sessionStart[0];
+  const input = path.join(f.directory, 'post-removal-hook-input.json');
+  await fs.writeFile(input, JSON.stringify({ sessionId: 'retained-runtime-migration', cwd: f.directory }));
+  const hook = await execute(handler.exec, [...handler.args, '--input-file', input], { env: environment });
+  assert.match(JSON.parse(hook.stdout).additionalContext, /AI SDLC lifecycle/u);
+  const health = await execute(handler.exec, [path.join(f.home, 'sdlc/bin/sdlc.mjs'),
+    'doctor', '--home', f.home], { env: environment });
+  const result = JSON.parse(health.stdout);
+  assert.equal(result.installed, true);
+  assert.equal(result.findings.length, 0);
+  return result;
+}
+
 test('T-51 explicit native CI target must match actual native Node runtime', async () => {
   assert.ok(hostTarget, `Unverified platform: ${process.platform}/${process.arch}`);
   if (process.env.SDLC_DISTRIBUTION_TARGET) {
@@ -265,12 +287,10 @@ test('T-51 channel-only installs and channel removal never mutate the Copilot ho
     assert.equal(path.isAbsolute(activation.launcher), true);
     assert.deepEqual(await fs.readdir(f.home), ['copilot-instructions.md']);
     await installer(f, ['install']);
+    await verifyRetainedHookRuntime(f, [f.channelRoot, f.source]);
     await fs.rm(f.channelRoot, { recursive: true });
     await fs.rm(f.source, { recursive: true });
-    const { stdout } = await execute(process.execPath,
-      [path.join(f.home, 'sdlc/bin/sdlc.mjs'), 'doctor', '--home', f.home], { env: environment });
-    assert.equal(JSON.parse(stdout).installed, true);
-    assert.equal(JSON.parse(stdout).findings.length, 0);
+    await verifyRetainedHookRuntime(f, [f.channelRoot, f.source]);
   });
 
 test('T-51 corrupt and wrong-architecture runtime/payload fail before channel or Copilot mutation',
@@ -334,11 +354,12 @@ test('T-51 valid same-version conflicts and interrupted version switching preser
     assert.equal((await installer(f, ['doctor'])).frameworkVersion, built.descriptor.version);
     await installer({ ...f, source: newSource }, ['update']);
     assert.equal((await installer({ ...f, source: newSource }, ['doctor'])).frameworkVersion, '99.0.0');
+    await verifyRetainedHookRuntime(f, [oldVersion, f.source]);
     await fs.rm(oldVersion, { recursive: true });
     await fs.rm(f.source, { recursive: true });
     const hooks = JSON.parse(await fs.readFile(path.join(f.home, 'hooks/sdlc.json'), 'utf8'));
     assert.ok(!JSON.stringify(hooks).includes(oldVersion));
-    assert.equal((await installer({ ...f, source: newSource }, ['doctor'])).findings.length, 0);
+    assert.equal((await verifyRetainedHookRuntime(f, [oldVersion, f.source])).frameworkVersion, '99.0.0');
   });
 
 test('T-51 install-versus-purge serializes framework maintenance without damaging the channel',
