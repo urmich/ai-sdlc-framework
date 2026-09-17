@@ -6,21 +6,12 @@
       <stop offset="0" stop-color="#f8f9fa"/>
       <stop offset="1" stop-color="#f3f0ff"/>
     </linearGradient>
-    <marker id="arrow-blue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
-      <path d="M0 0 L12 6 L0 12 z" fill="#1864ab"/>
-    </marker>
-    <marker id="arrow-green" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
-      <path d="M0 0 L12 6 L0 12 z" fill="#2b8a3e"/>
-    </marker>
-    <marker id="arrow-orange" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
-      <path d="M0 0 L12 6 L0 12 z" fill="#e67700"/>
-    </marker>
     <style>
       .title { font: 700 48px Inter, Arial, sans-serif; fill: #16191d; text-anchor: middle; }
       .subtitle { font: 600 24px Inter, Arial, sans-serif; fill: #364152; text-anchor: middle; }
       .section { font: 700 22px Inter, Arial, sans-serif; fill: #364152; letter-spacing: 2px; }
       .box-title { font: 700 25px Inter, Arial, sans-serif; fill: #111827; text-anchor: middle; }
-      .box-copy { font: 18px Inter, Arial, sans-serif; fill: #364152; text-anchor: middle; }
+      .box-copy { font: 16px Inter, Arial, sans-serif; fill: #364152; text-anchor: middle; }
       .gate { font: 700 14px Inter, Arial, sans-serif; fill: #9c4a00; text-anchor: middle; letter-spacing: 1px; }
       .outcome { font: 700 29px Inter, Arial, sans-serif; fill: #111827; text-anchor: middle; }
       .support { font: 18px Inter, Arial, sans-serif; fill: #364152; text-anchor: middle; }
@@ -31,10 +22,6 @@
       .release { fill: #fff3bf; stroke: #e67700; stroke-width: 3; }
       .neutral { fill: #ffffff; stroke: #adb5bd; stroke-width: 2; }
       .decision { fill: #fff4e6; stroke: #f08c00; stroke-width: 2; }
-      .blue-line { fill: none; stroke: #1864ab; stroke-width: 4; marker-end: url(#arrow-blue); }
-      .green-line { fill: none; stroke: #2b8a3e; stroke-width: 4; marker-end: url(#arrow-green); }
-      .orange-line { fill: none; stroke: #e67700; stroke-width: 4; marker-end: url(#arrow-orange); }
-      .loop { fill: none; stroke: #2b8a3e; stroke-width: 3; stroke-dasharray: 10 9; marker-end: url(#arrow-green); }
     </style>
   </defs>
 
@@ -51,75 +38,80 @@
 
   <rect x="95" y="235" width="500" height="120" rx="22" class="define"/>
   <text x="345" y="282" class="box-title">Requirements + acceptance criteria</text>
-  <text x="345" y="320" class="box-copy">Clarify intent, constraints, assumptions, and observable success</text>
+  <text x="345" y="315" class="box-copy">
+    <tspan x="345">Clarify intent, constraints, and assumptions</tspan>
+    <tspan x="345" dy="24">Define observable success</tspan>
+  </text>
 
   <rect x="242" y="370" width="206" height="38" rx="19" class="decision"/>
   <text x="345" y="395" class="gate">HUMAN DECISION</text>
 
   <rect x="95" y="425" width="500" height="120" rx="22" class="test"/>
   <text x="345" y="472" class="box-title">Test strategy + living evidence plan</text>
-  <text x="345" y="510" class="box-copy">Map every acceptance criterion to proof and failure conditions</text>
+  <text x="345" y="505" class="box-copy">
+    <tspan x="345">Map every acceptance criterion to evidence</tspan>
+    <tspan x="345" dy="24">Define positive and negative outcomes</tspan>
+  </text>
 
   <rect x="242" y="560" width="206" height="38" rx="19" class="decision"/>
   <text x="345" y="585" class="gate">HUMAN DECISION</text>
 
   <rect x="95" y="615" width="500" height="120" rx="22" class="define"/>
   <text x="345" y="662" class="box-title">Technical design</text>
-  <text x="345" y="700" class="box-copy">Select architecture only after outcomes and evidence are clear</text>
+  <text x="345" y="695" class="box-copy">
+    <tspan x="345">Select architecture after outcomes</tspan>
+    <tspan x="345" dy="24">and evidence are clear</tspan>
+  </text>
 
   <rect x="242" y="750" width="206" height="38" rx="19" class="decision"/>
   <text x="345" y="775" class="gate">HUMAN DECISION</text>
 
-  <path d="M345 355 L345 370" class="blue-line"/>
-  <path d="M345 408 L345 425" class="blue-line"/>
-  <path d="M345 545 L345 560" class="blue-line"/>
-  <path d="M345 598 L345 615" class="blue-line"/>
-  <path d="M345 735 L345 750" class="blue-line"/>
-
   <rect x="700" y="300" width="500" height="140" rx="22" class="build"/>
   <text x="950" y="354" class="box-title">Incremental implementation</text>
-  <text x="950" y="394" class="box-copy">Build against approved intent and preserve traceability</text>
+  <text x="950" y="390" class="box-copy">
+    <tspan x="950">Build against approved intent</tspan>
+    <tspan x="950" dy="24">Preserve end-to-end traceability</tspan>
+  </text>
 
   <rect x="700" y="545" width="500" height="140" rx="22" class="build"/>
   <text x="950" y="599" class="box-title">Unit-first local verification</text>
-  <text x="950" y="639" class="box-copy">Every correction starts a fresh, candidate-bound evidence cycle</text>
+  <text x="950" y="635" class="box-copy">
+    <tspan x="950">Every correction starts a fresh</tspan>
+    <tspan x="950" dy="24">candidate-bound evidence cycle</tspan>
+  </text>
 
   <rect x="780" y="720" width="340" height="95" rx="22" class="neutral"/>
   <text x="950" y="758" class="box-title">Independent candidate review</text>
   <text x="950" y="790" class="box-copy">Review the exact validated change set</text>
 
-  <path d="M950 440 L950 545" class="green-line"/>
-  <path d="M950 685 L950 720" class="green-line"/>
-  <path d="M710 600 C645 600 645 370 700 370" class="loop"/>
-  <text x="645" y="500" class="box-copy" transform="rotate(-90 645 500)">fix, learn, and revalidate</text>
-  <path d="M1120 767 C1240 767 1240 370 1200 370" class="loop"/>
-  <text x="1250" y="565" class="box-copy" transform="rotate(90 1250 565)">review finding: update and revalidate</text>
-
-  <path d="M448 769 L650 769 L650 370 L700 370" class="blue-line"/>
+  <text x="950" y="840" class="support">Repeat implementation and verification whenever evidence changes</text>
 
   <rect x="1320" y="235" width="405" height="120" rx="22" class="release"/>
   <text x="1522" y="282" class="box-title">Development validation</text>
-  <text x="1522" y="320" class="box-copy">Build, deploy, and test with explicit authorization</text>
+  <text x="1522" y="315" class="box-copy">
+    <tspan x="1522">Build, deploy, and test</tspan>
+    <tspan x="1522" dy="24">with explicit authorization</tspan>
+  </text>
 
   <rect x="1419" y="370" width="206" height="38" rx="19" class="decision"/>
   <text x="1522" y="395" class="gate">HUMAN DECISION</text>
 
   <rect x="1320" y="425" width="405" height="120" rx="22" class="release"/>
   <text x="1522" y="472" class="box-title">Pre-production validation</text>
-  <text x="1522" y="510" class="box-copy">Policy-selected owner, environment, and evidence</text>
+  <text x="1522" y="505" class="box-copy">
+    <tspan x="1522">Policy-selected owner and environment</tspan>
+    <tspan x="1522" dy="24">Candidate-bound validation evidence</tspan>
+  </text>
 
   <rect x="1419" y="560" width="206" height="38" rx="19" class="decision"/>
   <text x="1522" y="585" class="gate">HUMAN DECISION</text>
 
   <rect x="1320" y="615" width="405" height="120" rx="22" class="build"/>
   <text x="1522" y="662" class="box-title">Release readiness</text>
-  <text x="1522" y="700" class="box-copy">Current review, automation, policy, and artifact evidence</text>
-
-  <path d="M1522 355 L1522 370" class="orange-line"/>
-  <path d="M1522 408 L1522 425" class="orange-line"/>
-  <path d="M1522 545 L1522 560" class="orange-line"/>
-  <path d="M1522 598 L1522 615" class="green-line"/>
-  <path d="M1120 767 L1275 767 L1275 295 L1320 295" class="orange-line"/>
+  <text x="1522" y="695" class="box-copy">
+    <tspan x="1522">Current review, automation, policy,</tspan>
+    <tspan x="1522" dy="24">and artifact evidence</tspan>
+  </text>
 
   <rect x="95" y="865" width="1630" height="135" rx="26" class="neutral"/>
   <text x="910" y="913" class="outcome">Less assumption-driven bias  →  fewer avoidable failures  →  less rework  →  higher delivery confidence</text>
