@@ -117,7 +117,8 @@ export async function acceptRelease({ directory, outputFile, npm = 'false', hook
       TMPDIR: root, TMP: root, TEMP: root, npm_config_cache: path.join(root, 'npm-cache'),
       npm_config_userconfig: path.join(root, 'npmrc'), npm_config_offline: 'true',
       SDLC_DISTRIBUTION_TARGET: 'macos-arm64', SDLC_DISTRIBUTION_TARGETS: RELEASE_TARGETS.join(','),
-      SDLC_RELEASE_DIR: downloaded, SDLC_WINDOWS_LAUNCHER: path.join(extracted, 'bin/sdlc.exe') });
+      SDLC_RELEASE_DIR: downloaded, SDLC_RELEASE_SOURCE_COMMIT: bundle.identity.sourceCommit,
+      SDLC_WINDOWS_LAUNCHER: path.join(extracted, 'bin/sdlc.exe') });
     await fs.mkdir(env.HOME);
     await fs.writeFile(env.npm_config_userconfig, '');
     const lifecycle = await execute(process.execPath, ['--test', 'test/distribution-channels.test.mjs'], {
