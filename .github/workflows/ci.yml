@@ -6,6 +6,12 @@ on:
     branches: [main]
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      publish_npm:
+        description: Publish the validated package to npm
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -79,7 +85,7 @@ jobs:
           fi
           gh release upload "$GITHUB_REF_NAME" --clobber dist/*
   publish-npm:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish_npm)
     needs: validate-package
     runs-on: ubuntu-latest
     environment: npm
@@ -107,8 +113,10 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           PACKAGE_VERSION="$(node -p "require('./package.json').version")"
-          test "$GITHUB_REF_NAME" = "v$PACKAGE_VERSION" ||
-            { echo "Tag $GITHUB_REF_NAME does not match package version $PACKAGE_VERSION" >&2; exit 1; }
+          if test "$GITHUB_REF_TYPE" = 'tag'; then
+            test "$GITHUB_REF_NAME" = "v$PACKAGE_VERSION" ||
+              { echo "Tag $GITHUB_REF_NAME does not match package version $PACKAGE_VERSION" >&2; exit 1; }
+          fi
           DIST_TAG="$(node -p "require('./package.json').version.includes('-') ? 'next' : 'latest'")"
-          npm publish "dist/${{ needs.validate-package.outputs.artifact_name }}.tgz" \
+          npm publish "./dist/${{ needs.validate-package.outputs.artifact_name }}.tgz" \
             --access public --provenance --tag "$DIST_TAG"
