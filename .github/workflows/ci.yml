@@ -103,6 +103,8 @@ jobs:
           name: ${{ needs.validate-package.outputs.artifact_name }}
           path: dist
       - name: Publish public npm package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           PACKAGE_VERSION="$(node -p "require('./package.json').version")"
           test "$GITHUB_REF_NAME" = "v$PACKAGE_VERSION" ||
