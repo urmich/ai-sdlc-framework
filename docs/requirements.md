@@ -274,6 +274,7 @@ formalized in section 6. All sources below concern framework behavior.
 | S-52 | 2026-09-16 | Every focused lifecycle skill must use the same unmistakable-intent rule as the global framework instructions. Requests to implement, fix, test, publish, or act immediately activate the normal flow and do not by themselves skip Requirements, Test Design, or Technical Design. |
 | S-53 | 2026-09-16 | Staging access is environment-specific. Dedicated secured machines and user-owned testing are supported policy choices, not universal framework assumptions. The selected environment contract determines location, owner, automation, and available agent execution. This supersedes S-33's universal wording. |
 | S-54 | 2026-09-17 | Distribute the OSS framework through npm, standalone platform archives/installers, WinGet, Homebrew, and direct release downloads. Every channel must install the same verified framework version and preserve clean migration, doctor, update, uninstall, ownership, and restart behavior. Build the channels in parallel where their shared contract permits it. |
+| S-55 | 2026-09-17 | Make the personal third-party OSS repository ready for external supply-chain review without implying Microsoft ownership. Add transparent governance, security reporting, support, contribution, release integrity, dependency maintenance, vulnerability scanning, SBOM, and reproducibility evidence comparable to mature OSS projects. |
 
 ## 6. Framework requirements
 
@@ -2283,3 +2284,94 @@ behavior as the npm package.
   guidance; another channel is never guaranteed to bypass policy.
 
 **Source:** S-54.
+
+### 6.26 Third-party OSS trust and supply-chain evidence
+
+#### FR-054 - Publish transparent security and governance evidence
+
+The repository must provide complete, truthful evidence for review as a
+personal third-party OSS project. It must not claim Microsoft ownership,
+first-party status, sponsorship, approval, CFS exemption, or guaranteed
+corporate availability.
+
+**Definition of Done**
+
+- AC-054.1: Repository, package, license, security, support, and contribution
+  metadata identify the project as personal/community-maintained third-party
+  OSS and name the actual public source, issue, discussion, and vulnerability
+  reporting channels.
+- AC-054.2: `SECURITY.md` defines supported versions, private vulnerability
+  reporting, required report content, disclosure expectations, and response
+  boundaries without promising unsupported service levels.
+- AC-054.3: `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SUPPORT.md`,
+  `CODEOWNERS`, pull-request guidance, and `CHANGELOG.md` define contribution,
+  review, conduct, support, ownership, and release expectations.
+- AC-054.4: Automated dependency maintenance covers GitHub Actions and every
+  package ecosystem actually used. The runtime remains dependency-free unless
+  an explicit reviewed change updates requirements, SBOM, and release evidence.
+- AC-054.5: CI performs source checks, tests, package verification, dependency
+  review where applicable, static security analysis, secret scanning through
+  repository controls, and deterministic SBOM generation.
+- AC-054.11: CodeQL or an equivalent static-analysis job covers every shipped
+  JavaScript/TypeScript and native-launcher language. Every release candidate
+  re-evaluates all unresolved actionable high/critical findings. Release is
+  blocked unless each finding is resolved or covered by a currently valid,
+  reviewed, time-bounded exception recording owner, rationale, scope, expiry,
+  and remediation. Expired exceptions fail the gate. Dependency review runs
+  when dependency or workflow manifests change and blocks
+  disallowed/high-risk additions under documented policy.
+- AC-054.12: Repository evidence distinguishes secret scanning alerts from push
+  protection. Enabled controls, unresolved alerts, dismissed-alert rationale,
+  and unavailable account-tier features are reported separately. A configured
+  but skipped/disabled/unverifiable control is not Passed.
+- AC-054.13: Ongoing scheduled security checks detect newly disclosed
+  vulnerabilities after release. Alerts receive an explicit triage state and
+  cannot be silently ignored by a green historical release workflow.
+- AC-054.6: Every released artifact is bound to source commit, version,
+  inventory, SHA-256, license, and SBOM. Public-repository releases publish
+  supported provenance/attestations when the repository/account mechanism
+  permits it; unsupported mechanisms report that limitation rather than
+  fabricating provenance.
+- AC-054.14: The SBOM uses a documented machine-readable SPDX or CycloneDX
+  version, validates against its schema, includes every shipped component and
+  runtime dependency, distinguishes external runtime/toolchain/GitHub Actions
+  build dependencies from shipped dependencies, and is generated twice with
+  identical canonical content for the same source/toolchain. A dependency-free
+  runtime is not described as a dependency-free supply chain.
+- AC-054.15: Postpublication acceptance verifies the downloaded artifact
+  attestation/provenance against the expected repository, full source commit,
+  workflow identity, and artifact digest. Missing or mismatched provenance is
+  rejected where provenance is required and reported NotRun/Blocked where the
+  hosting/account mechanism cannot provide it.
+- AC-054.7: The repository documents threat boundaries, trusted inputs,
+  installation/update ownership, hook advisory semantics, provider adapters,
+  credential handling, build/release process, reproducibility, and known
+  limitations.
+- AC-054.8: Branch protection and repository security settings require reviewed
+  changes and passing required checks before release, subject to capabilities
+  available to the repository owner/account.
+- AC-054.16: Third-party GitHub Actions are pinned to immutable full commit
+  identities or are replaced by reviewed repository-owned actions. Privileged
+  publishing jobs never execute untrusted pull-request code with write
+  permissions, npm credentials, signing identity, or release secrets.
+- AC-054.17: Pull-request validation runs untrusted code only with read-only
+  repository permissions and no publishing credentials. Release jobs execute
+  only source already merged to a protected branch/tag and consume immutable
+  validated artifacts.
+- AC-054.9: A deterministic compliance checklist links each public evidence
+  claim to a repository file, workflow, test, release asset, or external status.
+  Missing external approvals remain `NotRun` or `Blocked`, never Passed.
+- AC-054.18: Protection evidence records the exact repository revision,
+  workflow run/check identity, effective branch/tag/release rules, actor/bypass
+  configuration, and relevant security-setting API status. A settings file or
+  workflow definition alone is not proof that the control executed or was
+  enforced.
+- AC-054.19: Unavailable, disabled, skipped, cancelled, stale, or unverifiable
+  controls receive explicit non-passing status and cannot be summarized as
+  compliant by aggregate documentation.
+- AC-054.10: CFS or another consumer’s exception request remains an external
+  decision. Repository evidence may support a request but cannot substitute for
+  scenario eligibility, vulnerability justification, feed-owner action, or
+  DCISO approval.
+
+**Source:** S-55.
