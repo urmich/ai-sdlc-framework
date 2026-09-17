@@ -294,23 +294,84 @@ manager-integration limitations and channel policy. Then run live acceptance.
 ### npm
 
 `publish_npm` is a separate explicit handoff, not an automatic tag side effect.
-Configure npm trusted publishing for **`release.yml`**, its `npm` environment,
-the actual public source repository, and Node 24/current npm. An approved
-`NPM_TOKEN` is an optional fallback. `package.json` repository identity must match
-the publishing source repository. Public-source publication requests provenance;
-private source does not claim public provenance.
+The publishing job uses **GitHub-hosted Node 24 and npm >=11.15.0**, with OIDC
+only. There is no `NODE_AUTH_TOKEN`, npm token secret, inherited secret set, or
+token-based fallback. An older npm version fails closed; update the approved
+hosted Node 24 tooling rather than installing application dependencies or
+switching authentication inside the privileged job.
 
-The job verifies the downloaded bundle and passes only
-`assets/ai-sdlc-framework-<version>.tgz` to `npm publish --ignore-scripts`.
+The exact trust configuration for this implementation is:
+
+| Field | Value |
+| --- | --- |
+| Package | `ai-sdlc-framework` |
+| Repository | `urmich/ai-sdlc-framework` (public) |
+| **Actual caller workflow filename** | **`release.yml`** |
+| Reusable called workflow | `.github/workflows/npm-publish.yml` |
+| Actual publishing job | `npm-publish.yml` → `publish` |
+| Protected environment on that job | **`npm`** |
+
+After implementation is integrated, the parent/maintainer can run this
+**interactive** command from an authenticated npm >=11.15 session. This task
+does not run it or create a trust relationship:
+
+```sh
+npm trust github ai-sdlc-framework --repo urmich/ai-sdlc-framework --file release.yml --env npm --allow-publish
+```
+
+npm validates the **actual caller's filename**, including reusable-workflow
+calls; do not register `npm-publish.yml` merely because it contains the publish
+command. The workflow checks `github.workflow_ref` against the expected
+`release.yml` caller. If another root workflow later becomes the actual caller,
+update that allowlist and the npm trust configuration to its filename instead.
+Both the caller's `npm-handoff` job and the called `publish` job explicitly grant
+`contents: read` and `id-token: write`; every intermediate reusable caller must
+also preserve that grant. The `environment: npm` declaration belongs on the
+actual called publishing job. Configure its required reviewers and allowed refs
+in GitHub; declaring an environment alone does not configure its protections.
+
+The permission boundary is explicit:
+
+1. `npm-readiness` executes repository verification code with **contents-read
+   only**, without OIDC permission. It verifies the immutable bundle, release
+   readiness, exact npm payload, public registry configuration and repository
+   identity, then emits digest-bound JSON handoff data.
+2. `npm-handoff` calls the reusable workflow with the exact artifact ID, bundle
+   digest, source commit and handoff JSON. It does not inherit secrets.
+3. The protected publishing job has **no checkout**, repository-script imports,
+   build, dependency installation, or package-code execution. Reviewed inline
+   workflow code verifies the hosted runtime/caller, hashes all downloaded data,
+   reads package metadata to stdout without extraction/execution, and copies
+   only the exact approved tgz into a fresh publication directory. Its npm user
+   and global configuration contain no authentication or provenance overrides.
+   Lifecycle scripts are disabled. Package-level registry/auth/provenance
+   overrides are rejected.
+
+Only then does the job invoke `npm publish --ignore-scripts` on those exact bytes.
 Stable versions use `latest`; prereleases use `next` (build metadata containing
 a dash does not make a version prerelease). It never repacks, bumps versions,
 or changes package contents. An already published version is a no-op **only**
 after anonymous SHA-256 and registry SHA-512-integrity comparison; different bytes
 fail. An identical existing version does not rewind/move dist-tags.
 
+For this public repository, npm trusted publishing provides **automatic
+provenance**. There is no manual `--provenance` flag and no disabling override.
+This is npm's OIDC behavior, not a claim that a local test produced or externally
+verified an attestation. GitHub artifact signing, if integrated separately, must
+use a separate job with its own `attestations: write` permission; that permission
+does not belong in the npm publishing job.
+
+The old `node scripts/publish-release.mjs npm` path is deliberately disabled.
+Only the protected data-only workflow publishes npm packages. Local tests
+simulate caller/tool metadata and registry responses; they never mint real OIDC
+credentials, register npm trust, or publish.
+
 There is no claim of transactional rollback between GitHub and npm. Record each
 channel's real state; resume from the same bundle. Publishing npm does not make
 a GitHub draft public.
+
+References: [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
+and [npm trust CLI](https://docs.npmjs.com/cli/v11/commands/npm-trust/).
 
 ## Postpublication acceptance hooks
 

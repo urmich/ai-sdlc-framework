@@ -13,7 +13,8 @@ import { buildPlatforms, writeReleaseMetadata } from '../scripts/package-platfor
 import { RELEASE_SCOPE, RELEASE_TARGETS, RELEASE_GATE_TARGETS, archiveRecord, evidenceIdentity, options,
   homebrewMetadata, releaseRepository, sealBundle, selectGateFiles, validateGates, verifyBundle,
   prepareRelease, verifyCandidate, windowsTesterInput, windowsTesterReadiness, writeJson } from '../scripts/release-bundle.mjs';
-import { publishApprovedDraft, publishApprovedNpm, publishDraft, publishNpm, verifyRegistryPayload } from '../scripts/publish-release.mjs';
+import { publishApprovedDraft, publishDraft, verifyRegistryPayload } from '../scripts/publish-release.mjs';
+import { npmHandoffFromVerifiedBundle, prepareNpmHandoff } from '../scripts/npm-handoff.mjs';
 import { downloadPublicAssets } from '../scripts/accept-release.mjs';
 import { verifyIntelFormula, verifyMacosArchives, verifyNativeHomebrew } from '../scripts/release-gate.mjs';
 import { verifyHomebrewQuality } from '../scripts/homebrew-quality.mjs';
@@ -619,12 +620,11 @@ function githubFixture(bundle, directory) {
 
 test('pending T-60 completeness blocks real publisher entrypoints and forged readiness is rejected', async t => {
   const f = await fixture(t);
-  await sealBundle(f);
+  const sealed = await sealBundle(f);
   await assert.rejects(publishDraft({ directory: f.outputDir, repository },
     async () => assert.fail('No GitHub request is allowed before readiness')), /Publication blocked/u);
-  await assert.rejects(publishNpm({ directory: f.outputDir, sourceRepository: repository }, {
-    fetcher: async () => assert.fail('No npm query is allowed before readiness'),
-  }), /Publication blocked/u);
+  await assert.rejects(prepareNpmHandoff({ directory: f.outputDir, sourceRepository: repository,
+    expectedBundleSha256: sealed.bundleSha256 }), /Publication blocked/u);
   const manifest = JSON.parse(await fs.readFile(path.join(f.outputDir, 'bundle.json'), 'utf8'));
   await fs.writeFile(path.join(f.outputDir, 'bundle.json'), canonical({ ...manifest, publicationReady: true }));
   await assert.rejects(verifyBundle({ directory: f.outputDir }), /readiness mismatch/u);
@@ -689,9 +689,9 @@ test('anonymous public acceptance compares saved hashes before extraction or nat
     async () => new Response('', { status: 404 })), /unavailable/u);
 });
 
-test('approved npm transport reuses the exact bundled tgz and identical public versions never republish', async t => {
+test('read-only npm handoff binds the exact bundle, package and approved public repository', async t => {
   const f = await fixture(t);
-  await sealBundle(f);
+  const sealed = await sealBundle(f);
   const bytes = await fs.readFile(payload.artifact);
   const pkg = JSON.parse(readTarGzip(bytes).find(entry => entry.path === 'package/package.json').data);
   const metadata = { name: pkg.name, version: pkg.version, dist: {
@@ -700,21 +700,14 @@ test('approved npm transport reuses the exact bundled tgz and identical public v
   const fetcher = async url => new Response(String(url).endsWith('.tgz') ? bytes : JSON.stringify(metadata));
   const sourceRepository = pkg.repository.url.slice('https://github.com/'.length, -4);
   const bundle = { ...await verifyBundle({ directory: f.outputDir }), publicationReady: true };
-  const result = await publishApprovedNpm({ directory: f.outputDir, sourceRepository, bundle }, {
-    fetcher, run: () => assert.fail('An identical existing npm version must not be republished'),
-  });
-  assert.equal(result.status, 'AlreadyPublishedIdentical');
-  let published = false;
-  await publishApprovedNpm({ directory: f.outputDir, sourceRepository, bundle }, {
-    fetcher: async url => !published ? new Response('', { status: 404 }) : fetcher(url),
-    run: async (_command, args) => {
-      const index = args.indexOf('publish');
-      assert.equal(await fs.readFile(args[index + 1]).then(sha256), payload.sha256);
-      assert.ok(args.includes('--ignore-scripts'));
-      published = true;
-    },
-    sleep: () => assert.fail('Mock registry is immediately consistent'),
-  });
+  const result = await npmHandoffFromVerifiedBundle({ directory: f.outputDir, sourceRepository, bundle,
+    bundleSha256: sealed.bundleSha256 });
+  assert.equal(result.filename, payload.filename);
+  assert.equal(result.sha256, payload.sha256);
+  assert.equal(result.integrity, metadata.dist.integrity);
+  assert.equal(result.bundleSha256, sealed.bundleSha256);
+  await assert.rejects(npmHandoffFromVerifiedBundle({ directory: f.outputDir, sourceRepository: 'wrong/repo', bundle,
+    bundleSha256: sealed.bundleSha256 }), /trusted source repository/u);
   await assert.rejects(verifyRegistryPayload(metadata, { name: pkg.name, version: pkg.version,
     sha256: '0'.repeat(64) }, fetcher), /immutable release payload/u);
 });

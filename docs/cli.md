@@ -87,11 +87,14 @@ npm run verify:package
 ```
 
 The build creates only `dist/ai-sdlc-framework-<version>.tgz`. Packaging is
-repeated and must produce the same SHA-256 digest. Version-tag CI publishes
-that exact validated archive to public npm with provenance and attaches it to
-the matching GitHub Release. Repository metadata must match the publishing
-repository, and npm trusted publishing must be configured before the first
-tag. Verification rebuilds the expected package from the same source, compares
+repeated and must produce the same SHA-256 digest. Version-tag CI prepares a
+validated candidate but never publishes automatically. The separately approved
+release handoffs retain those exact bytes. npm publication uses the protected,
+data-only reusable workflow on GitHub-hosted Node 24/npm >=11.15, without an npm
+token; public trusted publishing provides automatic provenance. Configure npm
+trust for actual caller `release.yml`, repository `urmich/ai-sdlc-framework`, and
+environment `npm`, not for the reusable `npm-publish.yml` filename. See the
+[release handoff guide](release-ci.md). Verification rebuilds the expected package from the same source, compares
 digest, identity, sizes, and complete file inventory, then installs the
 local archive into an isolated npm prefix, then
 exercises install, doctor, idempotent update, and uninstall against an isolated

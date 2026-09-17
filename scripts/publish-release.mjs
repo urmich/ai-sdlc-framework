@@ -1,15 +1,10 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { isPrerelease } from '../packaging/standalone/protocol.mjs';
-import { readTarGzip, sha256 } from '../packaging/standalone/archive.mjs';
-import { npmInvocation } from './package.mjs';
+import { sha256 } from '../packaging/standalone/archive.mjs';
 import { options, releaseRepository, requirePublicationReady, trustedEnvironment, verifyBundle } from './release-bundle.mjs';
-
-const execute = promisify(execFile);
 
 export async function githubRequest(route, { method = 'GET', body, bytes, binary = false } = {}) {
   const upload = route.startsWith('/uploads/');
@@ -126,49 +121,10 @@ export async function verifyRegistryPayload(metadata, { name, version, sha256: e
   return bytes;
 }
 
-export async function publishNpm({ directory, sourceRepository, ...expected }, {
-  fetcher = fetch, run = execute, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
-} = {}) {
-  const bundle = await verifyBundle({ directory, ...expected });
-  requirePublicationReady(bundle);
-  return publishApprovedNpm({ directory, sourceRepository, bundle }, { fetcher, run, sleep });
-}
-
-export async function publishApprovedNpm({ directory, sourceRepository, bundle }, {
-  fetcher = fetch, run = execute, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
-} = {}) {
-  requirePublicationReady(bundle);
-  const artifact = path.resolve(directory, 'assets', bundle.descriptor.payload.filename);
-  const entries = readTarGzip(await fs.readFile(artifact));
-  const pkg = JSON.parse(entries.find(entry => entry.path === 'package/package.json').data);
-  releaseRepository(sourceRepository);
-  if (pkg.repository?.url !== `https://github.com/${sourceRepository}.git` || pkg.version !== bundle.identity.version) {
-    throw new Error('npm repository identity/version must match the publishing source repository');
-  }
-  const identity = { name: pkg.name, version: pkg.version, sha256: bundle.identity.payloadSha256 };
-  const existing = await registryPackage(pkg.name, pkg.version, fetcher);
-  if (existing) {
-    await verifyRegistryPayload(existing, identity, fetcher);
-    return { status: 'AlreadyPublishedIdentical', version: pkg.version, distTagsChanged: false };
-  }
-  const tag = isPrerelease(pkg.version) ? 'next' : 'latest';
-  const invocation = npmInvocation(['publish', artifact, '--ignore-scripts', '--access', 'public', '--tag', tag,
-    ...(process.env.REPOSITORY_PRIVATE === 'false' ? ['--provenance'] : [])]);
-  await run(invocation.command, invocation.args, { env: process.env, maxBuffer: 4 * 1024 * 1024 });
-  for (let attempt = 0; attempt < 6; attempt++) {
-    const published = await registryPackage(pkg.name, pkg.version, fetcher);
-    if (published) {
-      await verifyRegistryPayload(published, identity, fetcher);
-      return { status: 'PublishedAndBytesVerified', version: pkg.version, distTag: tag };
-    }
-    await sleep(10_000);
-  }
-  throw new Error('npm publish returned but anonymous registry evidence is not yet available');
-}
-
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  const command = { draft: publishDraft, npm: publishNpm }[process.argv[2]];
-  if (!command) throw new Error('Expected draft or npm publication handoff');
+  if (process.argv[2] === 'npm') throw new Error('npm publication runs only in the protected data-only npm-publish.yml workflow called by release.yml');
+  const command = { draft: publishDraft }[process.argv[2]];
+  if (!command) throw new Error('Expected draft publication handoff');
   if (!process.env.EXPECTED_BUNDLE_SHA256) throw new Error('Publication requires the trusted immutable bundle digest');
   console.log(JSON.stringify(await command({
     ...options(process.argv.slice(3)), ...trustedEnvironment(),

@@ -531,6 +531,11 @@ requires explicit manual inputs and protected `release`/`npm` environments:
 GitHub assets stay in a draft, and npm receives the identical verified `.tgz`.
 Tag builds alone never publish. Configure the approved public asset repository,
 runner access and npm trusted publishing before enabling those handoffs.
+The protected npm job is data-only and tokenless: GitHub-hosted Node 24,
+npm >=11.15, and OIDC with automatic public-repository provenance. npm trust
+targets the actual caller **`release.yml`**, with environment **`npm`** on the
+publishing job in reusable **`npm-publish.yml`**; both caller and called job
+permit `id-token: write`.
 Homebrew generation has an integration interface but no duplicated implementation.
 Only after completed native validation can a sealed review bundle include the
 candidate-bound T-60 Windows tester handoff. Missing Homebrew integration blocks

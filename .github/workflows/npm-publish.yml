@@ -1,0 +1,266 @@
+name: Protected npm OIDC publication
+
+on:
+  workflow_call:
+    inputs:
+      bundle_artifact_id:
+        type: string
+        required: true
+      bundle_sha256:
+        type: string
+        required: true
+      source_commit:
+        type: string
+        required: true
+      npm_handoff:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: .
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Protection belongs on the actual publishing job, not the reusable caller.
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      NPM_CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
+      NPM_SOURCE_PRIVATE: ${{ github.event.repository.private }}
+      NPM_TRUST_ENVIRONMENT: npm
+      EXPECTED_BUNDLE_ARTIFACT_ID: ${{ inputs.bundle_artifact_id }}
+      EXPECTED_SOURCE_COMMIT: ${{ inputs.source_commit }}
+      EXPECTED_BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
+      EXPECTED_NPM_HANDOFF: ${{ inputs.npm_handoff }}
+    steps:
+      # No checkout, repository scripts, dependency install, or package execution in this job.
+      # Artifact signing permissions belong in a different job. npm adds OIDC provenance automatically.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          check-latest: true
+      - name: Verify hosted tooling and the actual npm-trusted caller
+        run: |
+          node --input-type=module <<'NPM_OIDC_PREFLIGHT'
+          import fs from 'node:fs/promises';
+          import path from 'node:path';
+          import { execFileSync } from 'node:child_process';
+          const env = process.env;
+          if (env.GITHUB_ACTIONS !== 'true' || env.RUNNER_ENVIRONMENT !== 'github-hosted' ||
+              env.GITHUB_REPOSITORY !== 'urmich/ai-sdlc-framework' || env.NPM_SOURCE_PRIVATE !== 'false' ||
+              env.NPM_TRUST_ENVIRONMENT !== 'npm' ||
+              !/^[1-9]\d*$/u.test(env.EXPECTED_BUNDLE_ARTIFACT_ID ?? '') ||
+              !/^urmich\/ai-sdlc-framework\/\.github\/workflows\/release\.yml@refs\/(?:heads|tags)\/.+$/u.test(env.NPM_CALLER_WORKFLOW_REF ?? '') ||
+              !/^[a-f0-9]{40}$/u.test(env.EXPECTED_SOURCE_COMMIT ?? '') || env.GITHUB_SHA !== env.EXPECTED_SOURCE_COMMIT ||
+              !env.ACTIONS_ID_TOKEN_REQUEST_URL || !env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) {
+            throw new Error('npm OIDC requires the public trusted repository, actual release.yml caller, npm environment, exact source and hosted OIDC permissions');
+          }
+          if (!/^24\.\d+\.\d+$/u.test(process.versions.node)) throw new Error('npm publication requires stable Node.js 24');
+          for (const [key, value] of Object.entries(env)) {
+            if (/^(?:node_auth_token|npm_token|npm_auth_token|npm_id_token)$/iu.test(key) ||
+                /^npm_config_/iu.test(key) && /auth|token/iu.test(key)) {
+              throw new Error('Long-lived or pre-supplied npm authentication is forbidden');
+            }
+            if (/^npm_config_provenance$/iu.test(key) && value !== 'true') throw new Error('Automatic npm provenance must not be disabled');
+          }
+          const work = path.join(env.GITHUB_WORKSPACE, 'npm-work');
+          await fs.mkdir(work);
+          await fs.mkdir(path.join(work, 'home'));
+          await fs.mkdir(path.join(work, 'cache'));
+          const userConfig = path.join(work, 'user.npmrc');
+          const globalConfig = path.join(work, 'global.npmrc');
+          await fs.writeFile(userConfig, 'registry=https://registry.npmjs.org/\nignore-scripts=true\n', { flag: 'wx' });
+          await fs.writeFile(globalConfig, '', { flag: 'wx' });
+          const controlled = { HOME: path.join(work, 'home'), NPM_CONFIG_USERCONFIG: userConfig,
+            NPM_CONFIG_GLOBALCONFIG: globalConfig, NPM_CONFIG_CACHE: path.join(work, 'cache'),
+            NPM_CONFIG_REGISTRY: 'https://registry.npmjs.org', NPM_CONFIG_IGNORE_SCRIPTS: 'true',
+            NPM_CONFIG_UPDATE_NOTIFIER: 'false', NPM_CONFIG_AUDIT: 'false', NPM_CONFIG_FUND: 'false' };
+          const clean = Object.fromEntries(Object.entries(env).filter(([key]) => !/^npm_/iu.test(key)));
+          const npmVersion = execFileSync('npm', ['--version'], { cwd: work, env: { ...clean, ...controlled }, encoding: 'utf8' }).trim();
+          const version = /^(\d+)\.(\d+)\.(\d+)$/u.exec(npmVersion);
+          if (!version || Number(version[1]) < 11 || Number(version[1]) === 11 && Number(version[2]) < 15) {
+            throw new Error('Trusted publishing requires npm >=11.15.0; update the hosted Node 24 tooling, never fall back to a token');
+          }
+          await fs.appendFile(env.GITHUB_ENV, Object.entries(controlled).map(([key, value]) => `${key}=${value}\n`).join(''));
+          console.log(JSON.stringify({ callerFilename: 'release.yml', calledFilename: 'npm-publish.yml',
+            environment: 'npm', node: process.versions.node, npm: npmVersion, authentication: 'OIDC only',
+            provenance: 'Automatic for public-repository trusted publishing' }));
+          NPM_OIDC_PREFLIGHT
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ inputs.bundle_artifact_id }}
+          path: bundle-data
+          merge-multiple: true
+      - name: Verify immutable data and copy only the exact approved tgz
+        run: |
+          node --input-type=module <<'NPM_DATA_VERIFY'
+          import fs from 'node:fs/promises';
+          import path from 'node:path';
+          import { createHash } from 'node:crypto';
+          import { execFileSync } from 'node:child_process';
+          const hash = (bytes, algorithm = 'sha256', encoding = 'hex') => createHash(algorithm).update(bytes).digest(encoding);
+          const root = path.join(process.env.GITHUB_WORKSPACE, 'bundle-data');
+          const work = path.join(process.env.GITHUB_WORKSPACE, 'npm-work');
+          const handoff = JSON.parse(process.env.EXPECTED_NPM_HANDOFF);
+          if (Object.keys(handoff).sort().join(',') !== 'bundleSha256,distTag,filename,integrity,packageName,schemaVersion,sha256,size,sourceCommit,sourceRepository,version' ||
+              handoff.schemaVersion !== 1 || handoff.sourceRepository !== 'urmich/ai-sdlc-framework' ||
+              handoff.sourceCommit !== process.env.EXPECTED_SOURCE_COMMIT || handoff.sourceCommit !== process.env.GITHUB_SHA ||
+              handoff.bundleSha256 !== process.env.EXPECTED_BUNDLE_SHA256 ||
+              !/^[a-f0-9]{64}$/u.test(handoff.bundleSha256 ?? '') || !/^[a-f0-9]{64}$/u.test(handoff.sha256 ?? '') ||
+              handoff.packageName !== 'ai-sdlc-framework' || !Number.isSafeInteger(handoff.size) || handoff.size <= 0) {
+            throw new Error('Invalid approved npm handoff identity');
+          }
+          const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u.exec(handoff.version ?? '');
+          if (!semver || semver[4]?.split('.').some(value => /^0\d+$/u.test(value)) ||
+              handoff.filename !== `${handoff.packageName}-${handoff.version}.tgz` ||
+              handoff.distTag !== (semver[4] ? 'next' : 'latest')) throw new Error('Invalid package filename, SemVer or dist-tag');
+          async function regular(file, maximum = 128 * 1024 * 1024) {
+            const stat = await fs.lstat(file);
+            if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maximum) throw new Error('Nonregular or oversized publication data');
+            return fs.readFile(file);
+          }
+          const rootStat = await fs.lstat(root);
+          if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error('Bundle root must be a literal directory');
+          const manifestBytes = await regular(path.join(root, 'bundle.json'), 4 * 1024 * 1024);
+          if (hash(manifestBytes) !== handoff.bundleSha256) throw new Error('Immutable bundle manifest digest mismatch');
+          const bundle = JSON.parse(manifestBytes);
+          if (bundle.schemaVersion !== 1 || bundle.publicationReady !== true ||
+              bundle.identity.sourceCommit !== handoff.sourceCommit || bundle.identity.version !== handoff.version ||
+              bundle.identity.payloadSha256 !== handoff.sha256 || !Array.isArray(bundle.files) || bundle.files.length > 256) {
+            throw new Error('Bundle readiness or source identity mismatch');
+          }
+          const expected = new Map();
+          for (const file of bundle.files) {
+            if (typeof file.filename !== 'string' || file.filename.startsWith('/') ||
+                !/^[A-Za-z0-9_./+-]+$/u.test(file.filename) ||
+                file.filename.split('/').some(part => !part || part === '.' || part === '..') ||
+                file.filename === 'bundle.json' || expected.has(file.filename.toLowerCase()) ||
+                !/^[a-f0-9]{64}$/u.test(file.sha256 ?? '') || !Number.isSafeInteger(file.size) || file.size < 0) {
+              throw new Error('Unsafe or duplicate bundle data record');
+            }
+            expected.set(file.filename.toLowerCase(), file);
+          }
+          let seen = 0;
+          async function inspect(prefix = '') {
+            const entries = await fs.readdir(path.join(root, prefix), { withFileTypes: true });
+            if (prefix && !entries.length) throw new Error('Unlisted empty bundle directory');
+            for (const entry of entries) {
+              const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+              if (entry.isDirectory()) await inspect(relative);
+              else if (relative !== 'bundle.json') {
+                const record = expected.get(relative.toLowerCase());
+                if (!record || record.filename !== relative) throw new Error('Unlisted bundle data');
+                const bytes = await regular(path.join(root, relative));
+                if (bytes.length !== record.size || hash(bytes) !== record.sha256) throw new Error('Bundle file digest mismatch');
+                seen++;
+              } else if (!entry.isFile()) throw new Error('Bundle manifest is not a regular file');
+            }
+          }
+          await inspect();
+          if (seen !== expected.size) throw new Error('Missing bundle data');
+          const descriptorBytes = await regular(path.join(root, 'assets/release-descriptor.json'), 4 * 1024 * 1024);
+          const checksumBytes = await regular(path.join(root, 'assets/SHA256SUMS'), 4 * 1024 * 1024);
+          if (hash(descriptorBytes) !== bundle.identity.descriptorSha256 || hash(checksumBytes) !== bundle.identity.checksumsSha256) {
+            throw new Error('Final release metadata changed');
+          }
+          const descriptor = JSON.parse(descriptorBytes);
+          if (descriptor.name !== handoff.packageName || descriptor.version !== handoff.version ||
+              descriptor.sourceCommit !== handoff.sourceCommit || descriptor.payload.filename !== handoff.filename ||
+              descriptor.payload.sha256 !== handoff.sha256) throw new Error('Release descriptor does not bind the npm payload');
+          const source = path.join(root, 'assets', handoff.filename);
+          const payload = await regular(source);
+          if (payload.length !== handoff.size || hash(payload) !== handoff.sha256 ||
+              `sha512-${hash(payload, 'sha512', 'base64')}` !== handoff.integrity) throw new Error('Exact tgz integrity mismatch');
+          // Read package metadata to stdout as data only: never extract or import package code.
+          const pkg = JSON.parse(execFileSync('tar', ['-xOzf', source, 'package/package.json'],
+            { encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, timeout: 30_000 }));
+          if (pkg.name !== handoff.packageName || pkg.version !== handoff.version ||
+              pkg.repository?.url !== 'https://github.com/urmich/ai-sdlc-framework.git' ||
+              Object.keys(pkg.publishConfig ?? {}).sort().join(',') !== 'access,registry' ||
+              pkg.publishConfig.access !== 'public' || pkg.publishConfig.registry !== 'https://registry.npmjs.org') {
+            throw new Error('Package registry, repository or publication configuration is not approved');
+          }
+          await fs.writeFile(path.join(work, handoff.filename), payload, { flag: 'wx' });
+          await fs.writeFile(path.join(work, 'publication.json'), JSON.stringify(handoff), { flag: 'wx' });
+          console.log(JSON.stringify({ verified: true, filename: handoff.filename, sha256: handoff.sha256, sourceCommit: handoff.sourceCommit }));
+          NPM_DATA_VERIFY
+      - name: Publish exact tgz through OIDC only, with automatic npm provenance
+        working-directory: npm-work
+        run: |
+          node --input-type=module <<'NPM_OIDC_PUBLISH'
+          import fs from 'node:fs/promises';
+          import path from 'node:path';
+          import { createHash } from 'node:crypto';
+          import { execFile } from 'node:child_process';
+          import { promisify } from 'node:util';
+          const execute = promisify(execFile);
+          const data = JSON.parse(await fs.readFile('publication.json', 'utf8'));
+          for (const key of Object.keys(process.env)) {
+            if (/^(?:node_auth_token|npm_token|npm_auth_token|npm_id_token)$/iu.test(key) ||
+                /^npm_config_/iu.test(key) && /auth|token/iu.test(key)) throw new Error('npm token authentication is forbidden');
+          }
+          const npmEnvironment = {
+            ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^npm_/iu.test(key))),
+            HOME: path.resolve('home'), NPM_CONFIG_USERCONFIG: path.resolve('user.npmrc'),
+            NPM_CONFIG_GLOBALCONFIG: path.resolve('global.npmrc'), NPM_CONFIG_CACHE: path.resolve('cache'),
+            NPM_CONFIG_REGISTRY: 'https://registry.npmjs.org', NPM_CONFIG_IGNORE_SCRIPTS: 'true',
+            NPM_CONFIG_UPDATE_NOTIFIER: 'false', NPM_CONFIG_AUDIT: 'false', NPM_CONFIG_FUND: 'false',
+          };
+          const hash = (bytes, algorithm = 'sha256', encoding = 'hex') => createHash(algorithm).update(bytes).digest(encoding);
+          const payload = await fs.readFile(data.filename);
+          if (hash(payload) !== data.sha256 || `sha512-${hash(payload, 'sha512', 'base64')}` !== data.integrity) {
+            throw new Error('Approved payload changed before npm handoff');
+          }
+          async function registryVersion() {
+            const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(data.packageName)}/${encodeURIComponent(data.version)}`);
+            if (response.status === 404) return null;
+            if (!response.ok) throw new Error(`Anonymous npm query failed: ${response.status}`);
+            return response.json();
+          }
+          async function verifyPublished(metadata) {
+            const url = new URL(metadata.dist?.tarball);
+            if (metadata.name !== data.packageName || metadata.version !== data.version ||
+                url.protocol !== 'https:' || url.hostname !== 'registry.npmjs.org' ||
+                url.username || url.password || url.search || url.hash || metadata.dist.integrity !== data.integrity) {
+              throw new Error('Existing npm version differs from the approved package identity');
+            }
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`Anonymous npm tarball fetch failed: ${response.status}`);
+            const bytes = Buffer.from(await response.arrayBuffer());
+            if (hash(bytes) !== data.sha256 || `sha512-${hash(bytes, 'sha512', 'base64')}` !== data.integrity) {
+              throw new Error('Published npm bytes differ from the immutable candidate');
+            }
+          }
+          const existing = await registryVersion();
+          if (existing) {
+            await verifyPublished(existing);
+            console.log(JSON.stringify({ status: 'AlreadyPublishedIdentical', version: data.version, distTagsChanged: false }));
+          } else {
+            const result = await execute('npm', ['publish', `./${data.filename}`, '--ignore-scripts', '--access', 'public',
+              '--tag', data.distTag, '--registry', 'https://registry.npmjs.org'],
+            { env: npmEnvironment, timeout: 300_000, maxBuffer: 4 * 1024 * 1024 });
+            process.stdout.write(result.stdout);
+            process.stderr.write(result.stderr);
+            let verified = false;
+            for (let attempt = 0; attempt < 6; attempt++) {
+              const published = await registryVersion();
+              if (published) {
+                await verifyPublished(published);
+                verified = true;
+                break;
+              }
+              if (attempt < 5) await new Promise(resolve => setTimeout(resolve, 10_000));
+            }
+            if (!verified) throw new Error('npm returned success but anonymous exact-version evidence is unavailable');
+            console.log(JSON.stringify({ status: 'PublishedAndBytesVerified', version: data.version,
+              authentication: 'OIDC', provenance: 'Automatic public trusted-publisher provenance' }));
+          }
+          NPM_OIDC_PUBLISH

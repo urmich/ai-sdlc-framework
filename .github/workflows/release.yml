@@ -227,15 +227,15 @@ jobs:
           node scripts/publish-release.mjs draft --directory .test-data/release-bundle \
             --repository "$RELEASE_REPOSITORY"
 
-  npm-handoff:
+  npm-readiness:
     if: github.event_name == 'workflow_dispatch' && inputs.publish_npm
     needs: [candidate, release-bundle]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    environment: npm
     permissions:
       contents: read
-      id-token: write
+    outputs:
+      handoff: ${{ steps.handoff.outputs.handoff }}
     env:
       EXPECTED_BUNDLE_SHA256: ${{ needs.release-bundle.outputs.bundle_sha256 }}
       EXPECTED_SOURCE_COMMIT: ${{ needs.candidate.outputs.source_commit }}
@@ -247,17 +247,30 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          registry-url: https://registry.npmjs.org
       - uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ needs.release-bundle.outputs.artifact_id }}
           path: source/.test-data/release-bundle
           merge-multiple: true
-      - name: Publish only the verified tgz; identical versions are a no-op, differing bytes fail
+      - name: Validate readiness and prepare npm identity data without OIDC permission
+        id: handoff
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           SOURCE_REPOSITORY: ${{ github.repository }}
-          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         run: |
-          node scripts/publish-release.mjs npm --directory .test-data/release-bundle \
+          node scripts/npm-handoff.mjs --directory .test-data/release-bundle \
             --source-repository "$SOURCE_REPOSITORY"
+
+  npm-handoff:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_npm
+    needs: [candidate, release-bundle, npm-readiness]
+    # npm validates this actual caller filename: release.yml, not npm-publish.yml.
+    # Both caller and called publishing jobs must permit OIDC; signing permissions stay separate.
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/npm-publish.yml
+    with:
+      bundle_artifact_id: ${{ needs.release-bundle.outputs.artifact_id }}
+      bundle_sha256: ${{ needs.release-bundle.outputs.bundle_sha256 }}
+      source_commit: ${{ needs.candidate.outputs.source_commit }}
+      npm_handoff: ${{ needs.npm-readiness.outputs.handoff }}
