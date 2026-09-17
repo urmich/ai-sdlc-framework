@@ -168,7 +168,20 @@ The helper verifies the old Cellar location and captures the link, unlinks the
 old keg only after the snapshot, and links the new one after framework checks.
 The snapshot includes all installed versions of the affected formulas,
 dependency keg contents, receipt identities, and Homebrew's opt/linked-keg
-symlinks. If install removes or changes an old keg, retention is unsupported:
+symlinks. Original receipt dependency versions remain recorded as provenance.
+The snapshot captures verified currently resolved dependency kegs and includes
+historical receipt kegs only when still present. Normal dependency upgrade and
+cleanup may retire those historical versions; their absence alone does not
+block switching. Missing or unidentified current dependencies still fail.
+
+The intended candidate version and formula revision come from `brew info`
+before installation, independently of the current `opt` link. The helper
+verifies and invokes that exact candidate Cellar path even when a failed
+promotion left it installed while rollback restored `opt` to the old version.
+A retry cannot silently reinstall or promote the old version because
+`brew install` reported the new candidate already installed.
+
+If install removes or changes a captured old keg, retention is unsupported:
 the operation stops before framework maintenance or link promotion. Failure
 recovery may restore missing captured bytes and the exact old version/link;
 it never silently repairs an unsupported install and proceeds to promotion.

@@ -215,6 +215,29 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
       next.contents.replace('  license "MIT"\n', '  license "MIT"\n  revision 1\n');
     await fs.writeFile(formulaFile, upgradedFormula);
     await fs.writeFile(path.join(work, 'upgraded-ai-sdlc-framework.rb'), upgradedFormula);
+    let failedPromotionState;
+    await assert.rejects(switchToHomebrew({
+      brew, formula: formulaName, home, environment,
+      run: async (command, args, options) => {
+        if (command === brew && args[0] === 'link' && args[1] === formulaName) {
+          assert.equal(options.env.HOMEBREW_NO_INSTALL_CLEANUP, '1');
+          evidence.commands.push({ command, args, success: false,
+            noInstallCleanup: options.env.HOMEBREW_NO_INSTALL_CLEANUP,
+            faultInjected: 'one candidate promotion fails to exercise rollback and retry' });
+          throw new Error('Injected candidate promotion failure');
+        }
+        return run(command, args, options);
+      },
+    }), error => {
+      assert.equal(error.code, 'HOMEBREW_SWITCH_FAILED');
+      assert.match(error.message, /Injected candidate promotion failure/u);
+      failedPromotionState = error.details.stateFile;
+      return true;
+    });
+    const failedState = JSON.parse(await fs.readFile(failedPromotionState, 'utf8'));
+    const priorKeg = path.dirname(path.dirname(launcher));
+    assert.equal(await fs.realpath((await runBrew(['--prefix', formulaName])).stdout.trim()), priorKeg);
+    await fs.access(path.join(failedState.requestedCandidate.keg, 'INSTALL_RECEIPT.json'));
     const upgraded = await switchToHomebrew({ brew, formula: formulaName, home, environment, run });
     const rollbackState = JSON.parse(await fs.readFile(upgraded.stateFile, 'utf8'));
     assert.equal(upgraded.postSwitchVerified, true);
@@ -223,6 +246,10 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     assert.equal(rollbackState.targetKeg, path.dirname(path.dirname(launcher)),
       'Upgrade did not capture its old keg before brew install');
     assert.equal(rollbackState.capturedLink.absolute, launcher);
+    assert.equal(upgraded.launcher, path.join(failedState.requestedCandidate.keg, 'bin', 'sdlc'));
+    assert.equal(upgraded.candidateVersion, failedState.requestedCandidate.pkgVersion);
+    evidence.failedPromotionRetry = { passed: true, priorKeg,
+      candidateKeg: failedState.requestedCandidate.keg, candidateVersion: upgraded.candidateVersion };
     const upgradedKeg = await fs.realpath((await runBrew(['--prefix', formulaName])).stdout.trim());
     assert.notEqual(upgradedKeg, path.dirname(path.dirname(launcher)), 'Homebrew did not replace the keg');
     const upgradedLauncher = path.join(upgradedKeg, 'bin', 'sdlc');

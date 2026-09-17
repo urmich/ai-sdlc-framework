@@ -90,8 +90,8 @@ async function acquireState(prefix) {
   }
 }
 
-export async function findInstalledKeg(runBrew, formula, cellar, { optional = false } = {}) {
-  const prefix = (await runBrew(['--prefix', formula])).stdout.trim();
+export async function findInstalledKeg(runBrew, formula, cellar, { optional = false, expectedKeg } = {}) {
+  const prefix = expectedKeg ?? (await runBrew(['--prefix', formula])).stdout.trim();
   let keg;
   try { keg = await fs.realpath(prefix); }
   catch (error) {
@@ -99,7 +99,8 @@ export async function findInstalledKeg(runBrew, formula, cellar, { optional = fa
     throw error;
   }
   const components = path.relative(cellar, keg).split(path.sep);
-  if (components.length !== 2 || !components.every(leaf)) {
+  if (components.length !== 2 || !components.every(leaf) ||
+      components[0] !== formula.split('/').at(-1) || (expectedKeg && keg !== expectedKeg)) {
     throw new Error('Formula prefix is not an installed Homebrew Cellar keg');
   }
   const receipt = JSON.parse(await fs.readFile(path.join(keg, 'INSTALL_RECEIPT.json'), 'utf8'));
@@ -109,6 +110,22 @@ export async function findInstalledKeg(runBrew, formula, cellar, { optional = fa
     throw new Error(`Installed keg belongs to ${fullName}, not ${formula}`);
   }
   return keg;
+}
+
+export async function resolveHomebrewCandidate(runBrew, formula, cellar) {
+  const metadata = JSON.parse((await runBrew(['info', '--json=v2', '--formula', formula])).stdout);
+  const info = metadata.formulae?.length === 1 ? metadata.formulae[0] : undefined;
+  if (!info || !leaf(info.name) || info.name !== formula.split('/').at(-1) ||
+      (formula.includes('/') && info.full_name !== formula) ||
+      typeof info.versions?.stable !== 'string' ||
+      !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u.test(info.versions.stable) ||
+      !Number.isSafeInteger(info.revision) || info.revision < 0) {
+    throw new Error('Homebrew did not identify one exact stable candidate version/revision');
+  }
+  const version = info.versions.stable;
+  const pkgVersion = `${version}${info.revision ? `_${info.revision}` : ''}`;
+  return { name: info.name, version, revision: info.revision,
+    pkgVersion, keg: path.join(cellar, info.name, pkgVersion) };
 }
 
 /** Capture every rollback input before the first mutating Homebrew command. */
@@ -141,6 +158,7 @@ export async function captureSwitchState({ prefix, cellar, formula, previousForm
       state.installedVersions.push({ directory, versions: versions.sort() });
     }
     const seen = new Set();
+    const currentDependencies = new Map();
     for (const keg of queue) {
       if (seen.has(keg)) continue;
       seen.add(keg);
@@ -161,12 +179,33 @@ export async function captureSwitchState({ prefix, cellar, formula, previousForm
       if (sha256(await fs.readFile(path.join(backup, 'INSTALL_RECEIPT.json'))) !== sha256(receiptBytes)) {
         throw new Error(`Keg receipt changed while capturing rollback state: ${keg}`);
       }
+      const dependencies = [];
       state.kegs.push({ path: keg, name: components[0], version: components[1],
-        receipt, receiptSha256: sha256(receiptBytes), backup, files });
+        receipt, receiptSha256: sha256(receiptBytes), backup, files, dependencies });
       for (const dependency of receipt.runtime_dependencies) {
         const name = dependency.full_name?.split('/').at(-1);
-        if (!leaf(name) || !leaf(dependency.pkg_version)) throw new Error('Invalid dependency rollback identity');
-        queue.push(path.join(cellar, name, dependency.pkg_version));
+        if (!leaf(name) || !leaf(dependency.pkg_version) ||
+            !/^(?:[a-zA-Z0-9][a-zA-Z0-9_-]*\/[a-zA-Z0-9][a-zA-Z0-9_-]*\/)?[a-zA-Z0-9][a-zA-Z0-9@+_.-]*$/u.test(dependency.full_name)) {
+          throw new Error('Invalid dependency rollback identity');
+        }
+        if (!currentDependencies.has(dependency.full_name)) {
+          currentDependencies.set(dependency.full_name,
+            await findInstalledKeg(runBrew, dependency.full_name, cellar));
+        }
+        const currentKeg = currentDependencies.get(dependency.full_name);
+        const historicalKeg = path.join(cellar, name, dependency.pkg_version);
+        let historicalPresent;
+        try {
+          await fs.lstat(historicalKeg);
+          historicalPresent = true;
+        } catch (error) {
+          if (error.code !== 'ENOENT') throw error;
+          historicalPresent = false;
+        }
+        dependencies.push({ fullName: dependency.full_name, recordedVersion: dependency.pkg_version,
+          historicalKeg, historicalPresent, currentKeg });
+        queue.push(currentKeg);
+        if (historicalPresent) queue.push(historicalKeg);
       }
       for (const file of [path.join(prefix, 'opt', components[0]),
         path.join(prefix, 'var', 'homebrew', 'linked', components[0])]) {

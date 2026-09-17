@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import {
   advanceSwitchState, captureSwitchState, findInstalledKeg, finishSwitchState,
-  linkState, ownsLauncher, verifyCapturedKegs,
+  linkState, ownsLauncher, resolveHomebrewCandidate, verifyCapturedKegs,
 } from '../packaging/homebrew/switch-state.mjs';
 
 const execute = promisify(execFile);
@@ -172,9 +172,18 @@ export async function switchToHomebrew({
   let newKeg;
   let result;
   try {
+    const requestedCandidate = await resolveHomebrewCandidate(runBrew, formula, cellar);
+    state.requestedCandidate = requestedCandidate;
     await advanceSwitchState(state, 'installing-new-channel');
     await runBrew(['install', '--formula', '--skip-link', formula]);
-    newKeg = await findInstalledKeg(runBrew, formula, cellar);
+    if ((await resolveHomebrewCandidate(runBrew, formula, cellar)).keg !== requestedCandidate.keg) {
+      throw new Error('Homebrew candidate identity changed during installation');
+    }
+    newKeg = await findInstalledKeg(runBrew, formula, cellar, { expectedKeg: requestedCandidate.keg });
+    const receipt = JSON.parse(await fs.readFile(path.join(newKeg, 'INSTALL_RECEIPT.json'), 'utf8'));
+    if (receipt.source?.versions?.stable !== requestedCandidate.version) {
+      throw new Error('Installed candidate receipt does not match the requested version');
+    }
     state.newKeg = newKeg;
     await verifyCapturedKegs(state);
     state.retentionVerifiedBeforePromotion = true;
@@ -186,7 +195,8 @@ export async function switchToHomebrew({
     const install = await invocation(['install', ...flags, ...(purgeExisting ? ['--purge-existing'] : [])]);
     const doctor = await invocation(['doctor', ...flags]);
     const pkg = JSON.parse(await fs.readFile(path.join(newKeg, 'libexec', 'package', 'package.json'), 'utf8'));
-    if (!install.installed || doctor.frameworkVersion !== pkg.version) {
+    if (!install.installed || pkg.version !== requestedCandidate.version ||
+        doctor.frameworkVersion !== requestedCandidate.version) {
       throw new Error('New Homebrew launcher failed install/version verification');
     }
     await verifyHomebrewHooks({ doctor, forbiddenKegs: [newKeg, state.previousKeg] });
@@ -195,6 +205,9 @@ export async function switchToHomebrew({
     const promoted = await promoteHomebrewLink({ prefix, formula, newKeg,
       previousFormula: state.previousFormula, previousKeg: state.previousKeg,
       capturedLink: state.capturedLink, runBrew });
+    if (await findInstalledKeg(runBrew, formula, cellar) !== newKeg) {
+      throw new Error('Homebrew opt does not point to the requested candidate after promotion');
+    }
     await advanceSwitchState(state, 'verifying-promoted-channel');
     const runtimeKeg = await findInstalledKeg(runBrew, 'node@22', cellar);
     const node = path.join(runtimeKeg, 'bin', 'node');
@@ -205,7 +218,7 @@ export async function switchToHomebrew({
     state.oldPackageCleanupAllowed = true;
     result = { ...promoted, launcher, frameworkVersion: doctor.frameworkVersion,
       restartRequired: true, oldPackageRemoved: false, postSwitchVerified: true,
-      oldPackageCleanupAllowed: true };
+      oldPackageCleanupAllowed: true, candidateVersion: requestedCandidate.pkgVersion };
   } catch (error) {
     return finishSwitchState(state, { error, newKeg });
   }
