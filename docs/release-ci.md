@@ -5,15 +5,21 @@
 | Target | Prepublication requirement | Published installer |
 | --- | --- | --- |
 | macOS Apple Silicon `macos-arm64` | **Mandatory native lifecycle**, native Node/machine/anti-Rosetta checks, enforced network/npm-denied lifecycle with negative controls | Yes |
-| Windows `windows-x64` | **Mandatory deterministic cross-build**, exact payload integrity, host-run Go integrity tests, WinGet contract and official JSON schemas | Yes; no native execution claim |
-| macOS Intel `macos-x64` | Explicit native `NotRun`, non-blocking | Yes, integrity/rebuild verified only |
+| Windows `windows-x64` | **Mandatory deterministic cross-build/PE/schema/URL/metadata/pre-JS payload-integrity checks**, plus T-60 prompt binding validation | Yes; no native execution claim |
+| macOS Intel `macos-x64` | Unsupported; explicit native `NotRun`, non-blocking | **No**; any separately generated preview is excluded from supported release and Homebrew metadata |
 | Linux `linux-x64` | Out of scope | **No** |
 
 The generic platform library's `complete` flag describes its four supported
-targets. Release eligibility instead uses the explicit three-archive allowlist
-and the required gates above. Linux test fixtures are not release assets.
+targets. Initial release eligibility instead uses exactly **two platform
+archives: Windows x64 and macOS arm64**, plus the same npm tgz, and the required
+gates above. Linux is outside this release entirely. Generic codec fixtures do
+not create supported releases. Intel preview generation is optional developer
+work outside this workflow; previews must never enter the immutable supported
+release or stable Homebrew metadata.
 The Windows gate never invokes a PE executable, WinGet, Wine, or a native
-Windows runner. Host Go tests establish schema/payload interoperability, not
+Windows runner. Its host Go test selector runs only pre-JS payload/inventory
+integrity and shared canonical-schema tests, not launcher/lifecycle execution.
+These establish schema/payload interoperability, not
 Windows installation. WinGet remains `contract-validated`; community submission,
 `repository-ready` validation, client discovery, and native install are separate.
 
@@ -21,7 +27,9 @@ Windows installation. WinGet remains `contract-validated`; community submission,
 The gate also checks the actual runtime/machine: a label migration, unavailable
 Seatbelt, blocked negative control, or missing required native evidence fails
 closed. No proxy-only substitute or policy modification is permitted. There is
-no Intel runner cost or Intel native prerequisite; CI records `NotRun` explicitly.
+no Intel runner, job or artifact prerequisite. Sealing records unsupported Intel
+as `NotRun` directly when no optional status record exists, without claiming
+execution on any host.
 
 ## Workflows and exact-byte ordering
 
@@ -38,26 +46,30 @@ no Intel runner cost or Intel native prerequisite; CI records `NotRun` explicitl
    never replace it.
 3. `buildLauncher` uses exact Go **1.27.1**, isolated caches, fixed flags, no
    module/toolchain downloads, two independent Windows AMD64 builds and PE
-   verification. `buildPlatforms` wraps the exact tgz for only the three
+   verification. `buildPlatforms` wraps the exact tgz for only the two
    release targets. `verifyRelease` independently rebuilds and checks inventory.
 4. WinGet consumes the verified Windows ZIP record (name/size/SHA-256), not the
    final descriptor. Stable versions generate all three deterministic manifests.
    Prereleases validate conspicuous test-only loopback manifests outside assets;
    those files are never published or submitted.
-5. The optional Homebrew interface consumes only verified macOS archive records.
+5. The optional Homebrew interface consumes only the verified **macOS arm64**
+   archive record and must produce an explicitly arm64-only stable formula.
    Then, and only then, `writeReleaseMetadata` writes the **final descriptor**
    covering npm, platform archives and stable manager metadata, followed by
    **SHA256SUMS** covering those files and the descriptor. There is no hash cycle.
    Nothing rewrites these bytes after native/cross-validation starts.
-6. All matrix jobs download the same immutable candidate artifact by ID, bind it
+6. After the final descriptor and checksums exist, generate the candidate-bound
+   T-60 Windows tester prompt under `handoff/`, **outside `assets/`**. Its binding
+   can include both final digests without creating a descriptor/prompt hash cycle.
+7. All matrix jobs download the same immutable candidate artifact by ID, bind it
    to saved descriptor/checksum/source pins, and record candidate-bound evidence.
    The native lifecycle extracts the downloaded archive; independent test
    builds must first reproduce its exact payload/platform digests.
-7. Sealing requires both mandatory gates to pass, checks the explicit Intel
+8. Sealing requires both mandatory gates to pass, checks the explicit Intel
    `NotRun`, and emits one v4 immutable `release-bundle-<version>-<run>-<attempt>`.
-   Its inventory binds `assets/`, `context.json`, and `evidence/` with exact sizes
+   Its inventory binds `assets/`, `handoff/`, `context.json`, and `evidence/` with exact sizes
    and hashes. Unexpected files, symlinks, empty directories, stale evidence,
-   Windows native claims, and Linux archives fail verification.
+   Windows native claims, and Intel/Linux archives fail verification.
 
 The candidate artifact is intermediate, not a publication input. Only the
 sealed bundle is downloaded by publication jobs, by exact artifact ID. The
@@ -91,8 +103,13 @@ This is the committed Homebrew branch's existing API, not a new generator.
 `homebrew-input.json` stores the archive-stage descriptor and relative
 `artifactDirectory: "assets"`; consumers resolve that path against the candidate.
 `prepareRelease({homebrewGenerator})` also accepts that function directly.
-The adapter writes its returned contents and verifies the record, both macOS
-URLs, and the shared size/hash checks before final metadata generation.
+The descriptor contains **no Intel archive**. The adapter writes returned
+contents only after checking the exact arm64 URL/digest, one architecture guard
+(`depends_on arch: :arm64`), absence of Intel metadata, and shared size/hash
+checks. The earlier dual-architecture generator will fail closed until its
+arm64-only corrective cherry-pick arrives; do not supply an Intel preview to
+work around that failure. Native Intel acceptance and a deliberate support-policy
+change are prerequisites for later adding Intel to stable Homebrew metadata.
 The current Homebrew implementation fixes the public destination to
 `urmich/ai-sdlc-framework`; another approved destination fails closed until that
 workstream adds an explicit repository parameter. It also rejects build-metadata
@@ -111,6 +128,38 @@ isolated Homebrew prefix and project-local root. No system Homebrew mutation is
 implied by the generator interface.
 Do not advertise Homebrew availability merely because a draft or npm handoff
 succeeded without that integration.
+
+## T-60 Windows tester handoff
+
+`packaging/windows-tester/generate.mjs` exposes:
+
+```js
+generateWindowsTesterPrompt({ outputDir, identity, releaseRepository, inventoryDigest, archive });
+validateWindowsTesterPrompt({ outputDir, identity, releaseRepository, inventoryDigest, archive });
+renderWindowsTesterPrompt({ identity, releaseRepository, inventoryDigest, archive });
+```
+
+`windowsTesterInput(finalRelease, repository)` supplies the exact final source
+commit, version, npm SHA-256/inventory digest, descriptor/checksum SHA-256, Windows
+x64 archive filename/size/SHA-256, and approved repository. The generator derives
+version-specific public URLs, includes the source template's digest, and writes
+LF-only deterministic `windows-tester-prompt.md` and a canonical JSON binding.
+Validation recomputes both complete files and rejects stale source/version,
+URL/digest drift, missing/extra files, unresolved inputs, and modified content.
+
+The Windows job requires **generation/binding validation**, not execution of the
+prompt. It reports `generationValidation: Passed` only after validation while
+`nativeExecution: NotRun` and `contentStatus: PendingIntegration` remain explicit.
+The editable template `packaging/windows-tester/prompt.md.template` provides
+candidate identity and safety/evidence boundaries, not finalized native
+acceptance scenarios. Finalize its content after all installer integration,
+then regenerate and reseal a new candidate; never edit the immutable handoff
+in place or reinterpret generation success as T-60/native execution success.
+
+The handoff is retained inside the immutable CI bundle, not included in the
+release descriptor, SHA256SUMS, or automatic GitHub asset upload. This preserves
+final-digest binding without a hash cycle. A separately authorized native tester
+can consume it later; no native Windows execution is enabled by this hook.
 
 ## Explicit publication handoffs
 
@@ -209,8 +258,7 @@ node scripts/release-gate.mjs --candidate-dir .test-data/candidate \
 # Only on actual native Apple Silicon; fails closed if isolation is unavailable:
 node scripts/release-gate.mjs --candidate-dir .test-data/candidate \
   --evidence-dir .test-data/evidence --target macos-arm64
-node scripts/release-gate.mjs --candidate-dir .test-data/candidate \
-  --evidence-dir .test-data/evidence --target macos-x64
+# Intel needs no job: sealing adds an explicit unsupported/NotRun record.
 node scripts/release-bundle.mjs seal --candidate-dir .test-data/candidate \
   --evidence-dir .test-data/evidence --output-dir .test-data/release-bundle
 ```

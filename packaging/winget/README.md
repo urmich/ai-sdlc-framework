@@ -255,8 +255,9 @@ Integration requirements for the shared packager / CI owner:
 3. Generate stable manifests only after the ZIP digest exists; place their
    descriptor-ready records into the shared immutable release bundle.
 4. The [current release scope](../../docs/release-ci.md) requires deterministic
-   Windows x64 cross-build, host-run Go payload-integrity tests against the exact
-   ZIP, and contract plus official JSON-schema validation. It deliberately does
+   Windows x64 cross-build/PE checks, host-run Go **pre-JS payload-integrity**
+   tests against the exact ZIP, and URL/metadata contract plus official
+   JSON-schema validation. It deliberately does
    **not** execute the Windows launcher or WinGet client. Native Windows remains
    `NotRun`, and manifests remain `contract-validated`, not `repository-ready`.
    If native Windows validation is requested later, separately run launcher
@@ -273,3 +274,8 @@ Schema fetches happen before any network-denied lifecycle and are never installe
 network dependencies. This is schema evidence only:
 macOS cross-compilation and fixture tests cannot establish native Windows
 installation, WinGet community acceptance, or client availability.
+
+The release pipeline additionally generates and validates a deterministic
+[T-60 Windows tester handoff](../../docs/release-ci.md#t-60-windows-tester-handoff)
+against the final candidate digests. Prompt generation is not native execution:
+its native status stays `NotRun`, and final content remains `PendingIntegration`.

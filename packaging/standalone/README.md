@@ -20,7 +20,9 @@ Use the version from `package.json`, not a separately chosen channel version.
 The generic default build supports all four targets. Its `complete` flag means
 all library targets, not release eligibility. The current
 [release orchestration policy](../../docs/release-ci.md) explicitly selects
-`macos-arm64,macos-x64,windows-x64` and excludes Linux publication. It verifies
+`macos-arm64,windows-x64` and excludes Intel and Linux publication. Intel may be
+generated separately as an unsupported preview, never merged into the supported
+release or stable Homebrew metadata. Initial stable Homebrew is arm64-only. CI verifies
 that exact allowlist and separate required evidence instead of using `complete`.
 Other ad hoc target subsets do not establish release eligibility.
 The output directory must contain only the exact owned candidate filenames.
@@ -157,7 +159,8 @@ This channel neither changes those controls nor promises a bypass.
 
 Set `SDLC_DISTRIBUTION_TARGET` to the actual native target when requiring native
 evidence. The current release's only mandatory native target is `macos-arm64`;
-Windows is cross-validated and Intel native evidence is explicitly `NotRun`.
+Windows is cross-validated and Intel is unsupported with native evidence
+explicitly `NotRun`; no Intel archive enters the supported release.
 The test asserts actual
 `process.platform`, `process.arch`, native machine architecture and absence of
 Rosetta. Set `SDLC_WINDOWS_LAUNCHER` to the independently rebuilt Windows

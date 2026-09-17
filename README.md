@@ -517,8 +517,10 @@ idempotent update, and uninstall in an isolated Copilot home.
 The separate [release workflow](docs/release-ci.md) builds a frozen candidate on
 version tags or manual dispatch. Mandatory gates are native macOS Apple Silicon
 arm64 lifecycle and deterministic Windows x64 cross-build/schema/payload/WinGet
-metadata validation; native Windows is not claimed. macOS Intel is explicitly
-`NotRun` and non-blocking; Linux installer archives are excluded.
+metadata/pre-JS payload-integrity validation; native Windows is not claimed.
+Published standalone archives are **Windows x64 and macOS arm64 only**.
+macOS Intel is unsupported/`NotRun` and non-blocking; Intel and Linux installer
+archives are excluded. Initial stable Homebrew metadata is arm64-only.
 
 Successful gates produce one immutable `release-bundle` artifact. Publication
 requires explicit manual inputs and protected `release`/`npm` environments:
@@ -526,6 +528,8 @@ GitHub assets stay in a draft, and npm receives the identical verified `.tgz`.
 Tag builds alone never publish. Configure the approved public asset repository,
 runner access and npm trusted publishing before enabling those handoffs.
 Homebrew generation has an integration interface but no duplicated implementation.
+The sealed bundle also includes a deterministic candidate-bound T-60 Windows
+tester handoff, explicitly pending final integration and native execution.
 
 ## Documentation
 

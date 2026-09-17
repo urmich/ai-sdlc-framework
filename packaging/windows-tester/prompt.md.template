@@ -1,0 +1,44 @@
+# T-60 — candidate-bound Windows x64 tester handoff
+
+Content status: **PendingIntegration**. Native execution status: **NotRun**.
+This deterministic handoff is not a passed Windows test or a claim of WinGet
+community acceptance. Final lifecycle scenarios and approval instructions must
+be reviewed after installer integration before a tester executes them.
+
+## Exact candidate
+
+The following binding is generated from the final verified release, not from
+mutable branch names, latest-version URLs, or a second payload build:
+
+```json
+{{binding}}
+```
+
+## Tester prerequisites and evidence boundaries
+
+- Use an explicitly authorized, native Windows x64 machine with native Node.js
+  22+. Record the actual OS, processor, Node architecture/version, and tooling.
+  A cross-build, PE header check, schema check, simulated test, or another OS
+  cannot establish native Windows execution.
+- Obtain the descriptor, SHA256SUMS and exact ZIP through the bound URLs.
+  Compare the saved descriptor and checksum digests, then the ZIP size and
+  SHA-256 **before extraction or execution of any package JavaScript**.
+  Preserve the same embedded npm payload/inventory identity throughout testing.
+- Plan an isolated test home/channel and preserve existing user content. Do not
+  select a payload by PATH precedence or remove an old channel before verifying
+  its replacement and retained hook runtime. Destructive purge requires
+  separate explicit authorization.
+- Do not alter execution policy, quarantine/CFS controls, package exceptions,
+  global firewall rules, WinGet policy, or registry policy to make a test pass.
+  Report an unavailable prerequisite as NotRun with a separate blocked reason;
+  report failed assertions as Failed.
+- Keep standalone lifecycle, npm availability, WinGet contract/schema results,
+  native WinGet execution, community acceptance, and client discovery separate.
+  CI has verified only cross-build/PE/schema/URL/metadata/pre-JS payload integrity.
+
+## Pending integration checklist
+
+Finalize the approved installation, update, doctor, preservation, channel-switch,
+uninstall/purge, and retained-hook scenarios against this exact candidate.
+Capture commands, exit codes, output and candidate digests for each scenario.
+Do not mark T-60 Passed merely because this prompt generated or validated.

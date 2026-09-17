@@ -11,7 +11,7 @@ import { buildLauncher } from '../packaging/winget/build-launcher.mjs';
 import { validateManifests } from '../packaging/winget/validate.mjs';
 import { verifyRelease } from './verify-platform-package.mjs';
 import { verifyPackage } from './verify-package.mjs';
-import { ROOT, RELEASE_TARGETS, RELEASE_SCOPE, archiveRecord, options,
+import { ROOT, RELEASE_TARGETS, RELEASE_GATE_TARGETS, RELEASE_SCOPE, archiveRecord, options,
   readJson, trustedEnvironment, verifyCandidate, writeJson } from './release-bundle.mjs';
 
 const execute = promisify(execFile);
@@ -24,7 +24,7 @@ async function command(executable, args, env, cwd = ROOT) {
 }
 
 export async function runGate({ candidateDir, evidenceDir, target, ...expected }) {
-  if (!RELEASE_TARGETS.includes(target)) throw new Error('Target is outside the release scope');
+  if (!RELEASE_GATE_TARGETS.includes(target)) throw new Error('Target is outside the release scope');
   const candidate = await verifyCandidate(candidateDir, expected);
   const policy = RELEASE_SCOPE[target];
   const result = { schemaVersion: 1, target, required: policy.required, validation: policy.validation,
@@ -39,7 +39,7 @@ export async function runGate({ candidateDir, evidenceDir, target, ...expected }
     NODE_OPTIONS: '', NODE_PATH: '' };
   try {
     if (target === 'macos-x64') {
-      result.reason = 'Intel native lifecycle is explicitly NotRun and non-blocking under this release scope.';
+      result.reason = 'Intel is unsupported and NotRun: no release archive or stable Homebrew metadata is published.';
       return result;
     }
     const assets = path.resolve(candidateDir, 'assets');
@@ -79,11 +79,14 @@ export async function runGate({ candidateDir, evidenceDir, target, ...expected }
       delete goEnv.GOOS;
       delete goEnv.GOARCH;
       delete goEnv.GOCACHEPROG;
-      await command(process.env.SDLC_GO || 'go', ['test', './...'], goEnv, path.join(ROOT, 'cmd/sdlc-launcher'));
+      await command(process.env.SDLC_GO || 'go', ['test', '-run',
+        '^(TestNativePayload|TestInventoryRejects|TestSharedCanonicalArchiveContract)', './...'],
+      goEnv, path.join(ROOT, 'cmd/sdlc-launcher'));
       await command(process.env.SDLC_GO || 'go', ['vet', './...'], goEnv, path.join(ROOT, 'cmd/sdlc-launcher'));
-      await command(process.execPath, ['--test', 'test/winget.test.mjs', 'test/winget-smoke.test.mjs'], env);
+      await command(process.execPath, ['--test', 'test/winget.test.mjs'], env);
       result.deterministicCrossBuild = 'Passed';
       result.payloadIntegrity = 'Passed';
+      result.testerPrompt = candidate.testerPrompt;
       result.reason = 'No Windows executable, WinGet client, or Windows lifecycle was executed.';
     }
     result.status = 'Passed';

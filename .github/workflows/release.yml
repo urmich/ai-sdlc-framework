@@ -61,7 +61,7 @@ jobs:
           echo "TMPDIR=$GITHUB_WORKSPACE/.test-data/release-scratch" >> "$GITHUB_ENV"
       - run: npm run check
       - run: npm test
-      - name: Pack once, wrap exact tgz, generate metadata, then freeze descriptor and checksums
+      - name: Wrap exact tgz, freeze final metadata, then bind the T-60 tester handoff
         id: prepare
         run: |
           node scripts/release-bundle.mjs prepare \
@@ -86,10 +86,8 @@ jobs:
             runner: macos-15
           - target: windows-x64
             runner: ubuntu-24.04
-          - target: macos-x64
-            runner: ubuntu-24.04
     # macos-15 is Apple Silicon. The gate verifies Node, machine architecture and absence of Rosetta.
-    # Intel is an explicit NotRun record on Linux, NOT an emulated/native Intel test.
+    # Sealing records unsupported Intel as NotRun without allocating or depending on an Intel job.
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
     env:
@@ -125,7 +123,7 @@ jobs:
           artifact-ids: ${{ needs.candidate.outputs.artifact_id }}
           path: source/.test-data/candidate
           merge-multiple: true
-      - name: Execute scoped gate against the downloaded immutable candidate
+      - name: Execute scoped gate and validate the candidate-bound T-60 handoff
         env:
           RELEASE_TARGET: ${{ matrix.target }}
         run: |

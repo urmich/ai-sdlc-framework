@@ -6,10 +6,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readTarGzip, sha256, tarGzip } from '../packaging/standalone/archive.mjs';
 import { platformEntries } from '../packaging/standalone/protocol.mjs';
 import { generateManifests } from '../packaging/winget/generate.mjs';
+import { generateWindowsTesterPrompt, renderWindowsTesterPrompt,
+  validateWindowsTesterPrompt } from '../packaging/windows-tester/generate.mjs';
 import { buildPackage } from '../scripts/package.mjs';
 import { buildPlatforms, writeReleaseMetadata } from '../scripts/package-platforms.mjs';
-import { RELEASE_SCOPE, RELEASE_TARGETS, archiveRecord, evidenceIdentity, options,
-  homebrewMetadata, releaseRepository, sealBundle, selectGateFiles, validateGates, verifyBundle, verifyCandidate, writeJson } from '../scripts/release-bundle.mjs';
+import { RELEASE_SCOPE, RELEASE_TARGETS, RELEASE_GATE_TARGETS, archiveRecord, evidenceIdentity, options,
+  homebrewMetadata, releaseRepository, sealBundle, selectGateFiles, validateGates, verifyBundle,
+  verifyCandidate, windowsTesterInput, writeJson } from '../scripts/release-bundle.mjs';
 import { publishDraft, publishNpm, verifyRegistryPayload } from '../scripts/publish-release.mjs';
 import { downloadPublicAssets } from '../scripts/accept-release.mjs';
 
@@ -22,7 +25,7 @@ const sourceCommit = 'a'.repeat(40);
 
 function simulatedGates(identity) {
   // Unit fixtures only: these records never leave the per-test directory or represent a real CI run.
-  return RELEASE_TARGETS.map(target => ({
+  return RELEASE_GATE_TARGETS.map(target => ({
     schemaVersion: 1, target, identity, required: RELEASE_SCOPE[target].required,
     validation: RELEASE_SCOPE[target].validation,
     status: target === 'macos-x64' ? 'NotRun' : 'Passed',
@@ -30,7 +33,8 @@ function simulatedGates(identity) {
     ...(target === 'macos-arm64' ? { networkDeniedLifecycle: 'Passed', host: { platform: 'darwin', arch: 'arm64' } } : {}),
     ...(target === 'windows-x64' ? { deterministicCrossBuild: 'Passed', payloadIntegrity: 'Passed',
       schema: { schemaValidation: 'Passed' }, host: { platform: 'linux', arch: 'x64' },
-      winget: { contractValidation: 'Passed', nativeValidation: 'NotRun' } } : {}),
+      winget: { contractValidation: 'Passed', nativeValidation: 'NotRun' },
+      testerPrompt: { test: 'T-60', generationValidation: 'Passed', nativeExecution: 'NotRun', identity } } : {}),
   }));
 }
 
@@ -56,6 +60,7 @@ test.before(async () => {
     archive, archivePath: path.join(base, 'assets', archive.filename), outputDir: path.join(root, 'winget') });
   const final = await writeReleaseMetadata({ outputDir: path.join(base, 'assets'), artifact: payload.artifact,
     sourceCommit, targets: RELEASE_TARGETS, metadataFiles: winget.files });
+  await generateWindowsTesterPrompt({ outputDir: path.join(base, 'handoff'), ...windowsTesterInput(final, repository) });
   await writeJson(path.join(base, 'context.json'), { schemaVersion: 1, releaseRepository: repository,
     identity: evidenceIdentity(final), scope: RELEASE_SCOPE, prerelease: false, homebrew: { status: 'NotIntegrated' } });
 });
@@ -78,8 +83,11 @@ async function fixture(t) {
   return { directory, candidateDir, evidenceDir, outputDir, candidate };
 }
 
-test('release scope requires Apple Silicon native and Windows cross-validation; Intel is NotRun and Linux excluded', () => {
-  assert.deepEqual(RELEASE_TARGETS, ['macos-arm64', 'macos-x64', 'windows-x64']);
+test('only Apple Silicon and Windows archives publish; Intel is unsupported/NotRun and Linux excluded', () => {
+  assert.deepEqual(RELEASE_TARGETS, ['macos-arm64', 'windows-x64']);
+  assert.deepEqual(RELEASE_GATE_TARGETS, ['macos-arm64', 'macos-x64', 'windows-x64']);
+  assert.equal(RELEASE_SCOPE['macos-x64'].publish, false);
+  assert.equal(RELEASE_SCOPE['macos-x64'].homebrew, false);
   assert.equal(RELEASE_SCOPE['linux-x64'].publish, false);
   for (const invalid of ['', 'https://github.com/owner/repo', 'owner/../repo', 'owner/repo\nx']) {
     assert.throws(() => releaseRepository(invalid), /explicitly approved/u);
@@ -96,22 +104,27 @@ test('bundle seals exact payload and final manager metadata before descriptor/ch
   const bundle = await verifyBundle({ directory: f.outputDir, expectedBundleSha256: sealed.bundleSha256 });
   assert.equal(bundle.identity.payloadSha256, payload.sha256);
   assert.equal(bundle.descriptor.files.filter(file => file.kind === 'winget').length, 3);
+  assert.equal(bundle.descriptor.files.filter(file => file.kind === 'archive').length, 3);
   assert.ok(bundle.files.every(file => !file.filename.includes('linux')));
+  assert.ok(bundle.files.filter(file => file.filename.startsWith('assets/')).every(file => !file.filename.includes('macos-x64')));
   assert.equal(bundle.context.homebrew.status, 'NotIntegrated');
   const names = bundle.files.map(file => file.filename);
   assert.ok(names.includes('assets/release-descriptor.json'));
   assert.ok(names.includes('assets/SHA256SUMS'));
+  assert.ok(names.includes('handoff/windows-tester-prompt.md'));
+  assert.ok(!names.includes('assets/windows-tester-prompt.md'), 'Final-digest-bound prompts cannot enter the descriptor hash cycle');
   await assert.rejects(verifyBundle({ directory: f.outputDir, expectedBundleSha256: '0'.repeat(64) }), /digest mismatch/u);
   await assert.rejects(verifyCandidate(f.candidateDir, { sourceCommit: 'b'.repeat(40) }), /trusted evidence/u);
 });
 
-test('Homebrew adapter uses the committed generator contract and rejects a different public destination', async t => {
+test('Homebrew adapter requires an arm64-only formula and the approved public destination', async t => {
   const f = await fixture(t);
   const descriptor = f.candidate.descriptor;
   const generator = async input => {
     assert.deepEqual(input, { descriptor, artifactDirectory: path.join(f.candidateDir, 'assets'), mode: 'stable' });
-    const contents = ['macos-arm64', 'macos-x64'].map(target =>
-      `  url "https://github.com/${repository}/releases/download/v${descriptor.version}/${archiveRecord({ descriptor }, target).filename}"\n`).join('');
+    const contents = '  depends_on arch: :arm64\n' + ['macos-arm64'].map(target =>
+      `  url "https://github.com/${repository}/releases/download/v${descriptor.version}/${archiveRecord({ descriptor }, target).filename}"\n` +
+      `  sha256 "${archiveRecord({ descriptor }, target).sha256}"\n`).join('');
     return { filename: 'ai-sdlc-framework.rb', kind: 'homebrew', mode: 'stable',
       contents, sha256: sha256(Buffer.from(contents)), size: Buffer.byteLength(contents) };
   };
@@ -124,6 +137,70 @@ test('Homebrew adapter uses the committed generator contract and rejects a diffe
   await assert.rejects(homebrewMetadata({ ...args, repository: 'wrong/repo' }), /approved release repository/u);
   await assert.rejects(homebrewMetadata({ ...args, generator: async input =>
     ({ ...await generator(input), sha256: '0'.repeat(64) }) }), /invalid stable formula record/u);
+  for (const mutate of [
+    contents => contents.replace('  depends_on arch: :arm64\n', ''),
+    contents => `${contents}  on_intel do\n  end\n`,
+  ]) {
+    await assert.rejects(homebrewMetadata({ ...args, generator: async input => {
+      const formula = await generator(input);
+      const contents = mutate(formula.contents);
+      return { ...formula, contents, sha256: sha256(Buffer.from(contents)), size: Buffer.byteLength(contents) };
+    } }), /arm64 only/u);
+  }
+});
+
+test('candidate verification independently rejects checksum-consistent Intel Homebrew metadata', async t => {
+  const f = await fixture(t);
+  const archive = archiveRecord(f.candidate, 'macos-arm64');
+  const file = path.join(f.directory, 'ai-sdlc-framework.rb');
+  const armOnly = `  depends_on arch: :arm64\n  url "https://github.com/${repository}/releases/download/v${payload.version}/${archive.filename}"\n  sha256 "${archive.sha256}"\n`;
+  for (const intel of [false, true]) {
+    await fs.writeFile(file, armOnly + (intel ? '  on_intel do\n  end\n' : ''));
+    const metadataFiles = f.candidate.descriptor.files.filter(item => item.kind !== 'archive')
+      .map(item => ({ ...item, artifact: path.join(f.candidateDir, 'assets', item.filename) }));
+    const final = await writeReleaseMetadata({ outputDir: path.join(f.candidateDir, 'assets'),
+      artifact: payload.artifact, sourceCommit, targets: RELEASE_TARGETS,
+      metadataFiles: [...metadataFiles, { artifact: file, kind: 'homebrew' }] });
+    await fs.unlink(path.join(f.candidateDir, 'context.json'));
+    await writeJson(path.join(f.candidateDir, 'context.json'), { ...f.candidate.context,
+      identity: evidenceIdentity(final), homebrew: { status: 'Generated', nativeValidation: 'NotRun' } });
+    await fs.rm(path.join(f.candidateDir, 'handoff'), { recursive: true });
+    await generateWindowsTesterPrompt({ outputDir: path.join(f.candidateDir, 'handoff'), ...windowsTesterInput(final, repository) });
+    if (intel) await assert.rejects(verifyCandidate(f.candidateDir), /arm64 only/u);
+    else assert.equal((await verifyCandidate(f.candidateDir)).context.homebrew.status, 'Generated');
+  }
+});
+
+test('T-60 prompt deterministically binds final metadata and explicitly does not claim native execution', async t => {
+  const f = await fixture(t);
+  const input = windowsTesterInput(f.candidate, repository);
+  const first = renderWindowsTesterPrompt(input);
+  assert.deepEqual(first, renderWindowsTesterPrompt(structuredClone(input)));
+  for (const field of ['sourceCommit', 'payloadSha256', 'descriptorSha256', 'checksumsSha256']) {
+    assert.ok(first.contents.includes(input.identity[field]));
+  }
+  assert.ok(first.contents.includes(input.archive.sha256));
+  assert.ok(first.contents.includes(input.inventoryDigest));
+  assert.match(first.contents, /PendingIntegration/u);
+  assert.equal(first.manifest.nativeExecution, 'NotRun');
+  const outputDir = path.join(f.directory, 'prompt');
+  const result = await generateWindowsTesterPrompt({ ...input, outputDir });
+  assert.equal(result.generationValidation, 'Passed');
+  assert.equal(result.nativeExecution, 'NotRun');
+  await assert.rejects(validateWindowsTesterPrompt({ ...input, outputDir,
+    identity: { ...input.identity, checksumsSha256: '0'.repeat(64) } }), /not bound/u);
+  await assert.rejects(validateWindowsTesterPrompt({ ...input, outputDir,
+    releaseRepository: 'different/public-assets' }), /not bound/u);
+  await fs.appendFile(path.join(outputDir, 'windows-tester-prompt.md'), '\nNative execution: Passed\n');
+  await assert.rejects(validateWindowsTesterPrompt({ ...input, outputDir }), /not bound/u);
+  assert.throws(() => renderWindowsTesterPrompt({ ...input,
+    archive: { ...input.archive, filename: input.archive.filename.replace('windows-x64', 'macos-x64') } }), /exact Windows/u);
+});
+
+test('T-60 handoff cannot be missing from a frozen candidate', async t => {
+  const f = await fixture(t);
+  await fs.unlink(path.join(f.candidateDir, 'handoff/windows-tester-prompt.json'));
+  await assert.rejects(verifyCandidate(f.candidateDir), /T-60 handoff/u);
 });
 
 test('missing, failed, stale, skipped or emulated required evidence blocks sealing', async t => {
@@ -136,6 +213,7 @@ test('missing, failed, stale, skipped or emulated required evidence blocks seali
     values => { values[0].identity = { ...values[0].identity, payloadSha256: '0'.repeat(64) }; },
     values => { values.find(item => item.target === 'windows-x64').nativeValidation = 'Passed'; },
     values => { values.find(item => item.target === 'windows-x64').schema.schemaValidation = 'NotRun'; },
+    values => { values.find(item => item.target === 'windows-x64').testerPrompt.nativeExecution = 'Passed'; },
     values => { values.find(item => item.target === 'macos-x64').status = 'Passed'; },
   ]) {
     const copy = structuredClone(gates);
@@ -143,7 +221,18 @@ test('missing, failed, stale, skipped or emulated required evidence blocks seali
     assert.throws(() => validateGates(copy, f.candidate.context.identity));
   }
   await fs.unlink(path.join(f.evidenceDir, 'macos-arm64.json'));
-  await assert.rejects(sealBundle(f), /every scoped gate/u);
+  await assert.rejects(sealBundle(f), /every scoped mandatory gate/u);
+});
+
+test('Intel has no required job or artifact and is recorded as unsupported NotRun during sealing', async t => {
+  const f = await fixture(t);
+  await fs.unlink(path.join(f.evidenceDir, 'macos-x64.json'));
+  const sealed = await sealBundle(f);
+  await verifyBundle({ directory: f.outputDir, expectedBundleSha256: sealed.bundleSha256 });
+  const intel = JSON.parse(await fs.readFile(path.join(f.outputDir, 'evidence/macos-x64.json'), 'utf8'));
+  assert.equal(intel.status, 'NotRun');
+  assert.equal(intel.required, false);
+  assert.equal(intel.host, undefined, 'A generated NotRun record must not claim execution on any host');
 });
 
 test('partial workflow reruns retain prior successful targets but never hide a newer failed gate', async t => {
@@ -179,14 +268,18 @@ test('immutable bundle rejects modified, extra, empty-directory and linked conte
   await assert.rejects(verifyBundle({ directory: f.outputDir }), /files changed/u);
 });
 
-test('checksum-consistent Linux archives cannot enter a scoped candidate', async t => {
-  const f = await fixture(t);
-  const filename = `ai-sdlc-framework-${payload.version}-linux-x64.tar.gz`;
-  await fs.writeFile(path.join(f.candidateDir, 'assets', filename),
-    tarGzip(platformEntries(await fs.readFile(payload.artifact), 'linux-x64').entries));
-  await writeReleaseMetadata({ outputDir: path.join(f.candidateDir, 'assets'), artifact: payload.artifact,
-    sourceCommit, targets: [...RELEASE_TARGETS, 'linux-x64'] });
-  await assert.rejects(verifyCandidate(f.candidateDir), /Unlisted|wrong-platform/u);
+test('checksum-consistent Intel previews and Linux archives cannot enter the supported release', async t => {
+  for (const target of ['macos-x64', 'linux-x64']) {
+    const f = await fixture(t);
+    const filename = `ai-sdlc-framework-${payload.version}-${target}.tar.gz`;
+    await fs.writeFile(path.join(f.candidateDir, 'assets', filename),
+      tarGzip(platformEntries(await fs.readFile(payload.artifact), target).entries));
+    const metadataFiles = f.candidate.descriptor.files.filter(file => file.kind !== 'archive')
+      .map(file => ({ ...file, artifact: path.join(f.candidateDir, 'assets', file.filename) }));
+    await writeReleaseMetadata({ outputDir: path.join(f.candidateDir, 'assets'), artifact: payload.artifact,
+      sourceCommit, targets: [...RELEASE_TARGETS, target], metadataFiles });
+    await assert.rejects(verifyCandidate(f.candidateDir), /wrong-platform/u);
+  }
 });
 
 function githubFixture(bundle, directory) {
@@ -313,7 +406,7 @@ test('release workflow statically separates validation, sealing, opt-in publicat
   assert.doesNotMatch(ci, /publish-npm|publish-release|--clobber|gh release/u);
   assert.match(workflow, /target: macos-arm64\s+runner: macos-15/u);
   assert.match(workflow, /target: windows-x64\s+runner: ubuntu-24\.04/u);
-  assert.match(workflow, /target: macos-x64\s+runner: ubuntu-24\.04/u);
+  assert.doesNotMatch(workflow, /target: macos-x64/u);
   assert.match(workflow, /needs: \[candidate, release-gates\]/u);
   assert.match(workflow, /github\.event_name == 'workflow_dispatch' && inputs\.publish_draft/u);
   assert.match(workflow, /github\.event_name == 'workflow_dispatch' && inputs\.publish_npm/u);

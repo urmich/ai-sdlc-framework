@@ -7,16 +7,18 @@ import { isPrerelease, TARGETS } from '../packaging/standalone/protocol.mjs';
 import { buildLauncher } from '../packaging/winget/build-launcher.mjs';
 import { generateManifests } from '../packaging/winget/generate.mjs';
 import { validateManifests } from '../packaging/winget/validate.mjs';
+import { generateWindowsTesterPrompt, validateWindowsTesterPrompt } from '../packaging/windows-tester/generate.mjs';
 import { buildPackage } from './package.mjs';
 import { buildPlatforms, writeReleaseMetadata } from './package-platforms.mjs';
 import { verifyRelease } from './verify-platform-package.mjs';
 
 export const ROOT = fileURLToPath(new URL('../', import.meta.url));
-export const RELEASE_TARGETS = Object.freeze(['macos-arm64', 'macos-x64', 'windows-x64']);
+export const RELEASE_TARGETS = Object.freeze(['macos-arm64', 'windows-x64']);
+export const RELEASE_GATE_TARGETS = Object.freeze(['macos-arm64', 'macos-x64', 'windows-x64']);
 export const RELEASE_SCOPE = Object.freeze({
-  'macos-arm64': { required: true, validation: 'native-lifecycle' },
-  'windows-x64': { required: true, validation: 'cross-build-schema-payload-metadata', native: 'NotRun' },
-  'macos-x64': { required: false, validation: 'NotRun' },
+  'macos-arm64': { required: true, validation: 'native-lifecycle', publish: true },
+  'windows-x64': { required: true, validation: 'cross-build-schema-payload-metadata', native: 'NotRun', publish: true },
+  'macos-x64': { required: false, validation: 'NotRun', publish: false, supported: false, homebrew: false },
   'linux-x64': { required: false, validation: 'OutOfScope', publish: false },
 });
 
@@ -57,6 +59,11 @@ export function archiveRecord(release, target) {
   return record;
 }
 
+export function windowsTesterInput(release, repository) {
+  return { identity: evidenceIdentity(release), releaseRepository: releaseRepository(repository),
+    inventoryDigest: release.descriptor.payload.inventoryDigest, archive: archiveRecord(release, 'windows-x64') };
+}
+
 export async function verifyCandidate(directory, expected = {}) {
   const release = await verifyRelease({ outputDir: path.join(directory, 'assets'),
     targets: RELEASE_TARGETS, rebuild: false });
@@ -64,10 +71,32 @@ export async function verifyCandidate(directory, expected = {}) {
   releaseRepository(context.releaseRepository);
   if (canonical(context.identity) !== canonical(evidenceIdentity(release)) ||
       canonical(context.scope) !== canonical(RELEASE_SCOPE)) throw new Error('Candidate identity or release scope mismatch');
+  const formulas = release.descriptor.files.filter(file => file.kind === 'homebrew');
+  if (formulas.length > 1 || formulas.some(file => file.filename !== 'ai-sdlc-framework.rb')) {
+    throw new Error('Initial Homebrew metadata must contain only the arm64 formula');
+  }
+  for (const file of formulas) {
+    validateInitialHomebrewFormula({ descriptor: release.descriptor, repository: context.releaseRepository,
+      contents: await fs.readFile(path.join(directory, 'assets', file.filename), 'utf8') });
+  }
   for (const [key, value] of Object.entries(expected)) {
     if (value && context.identity[key] !== value) throw new Error(`Candidate ${key} differs from trusted evidence`);
   }
-  return { ...release, context };
+  const testerPrompt = await validateWindowsTesterPrompt({ outputDir: path.join(directory, 'handoff'),
+    ...windowsTesterInput(release, context.releaseRepository) });
+  return { ...release, context, testerPrompt };
+}
+
+export function validateInitialHomebrewFormula({ descriptor, repository, contents }) {
+  const archive = archiveRecord({ descriptor }, 'macos-arm64');
+  const expectedUrl = `https://github.com/${releaseRepository(repository)}/releases/download/v${descriptor.version}/${archive.filename}`;
+  const actualUrls = [...contents.matchAll(/^\s+url "([^"]+)"$/gmu)].map(match => match[1]);
+  if (canonical(actualUrls) !== canonical([expectedUrl])) throw new Error('Homebrew formula URLs differ from the approved release repository');
+  if (!/^\s*depends_on\s+arch:\s*:arm64\s*$/mu.test(contents) || /\bon_intel\b|\bmacos-x64\b/u.test(contents)) {
+    throw new Error('Initial stable Homebrew metadata must explicitly support arm64 only');
+  }
+  const digests = [...contents.matchAll(/^\s+sha256 "([a-f0-9]{64})"\s*$/gmu)].map(match => match[1]);
+  if (canonical(digests) !== canonical([archive.sha256])) throw new Error('Homebrew formula must bind the exact arm64 archive digest');
 }
 
 export async function homebrewMetadata({ descriptor, artifactDirectory, outputDir, repository, generator }) {
@@ -87,10 +116,7 @@ export async function homebrewMetadata({ descriptor, artifactDirectory, outputDi
       formula.sha256 !== sha256(Buffer.from(formula.contents)) || formula.size !== Buffer.byteLength(formula.contents)) {
     throw new Error('generateHomebrewFormula returned an invalid stable formula record');
   }
-  const actualUrls = [...formula.contents.matchAll(/^\s+url "([^"]+)"$/gmu)].map(match => match[1]).sort();
-  const expectedUrls = ['macos-arm64', 'macos-x64'].map(target =>
-    `https://github.com/${releaseRepository(repository)}/releases/download/v${descriptor.version}/${archiveRecord({ descriptor }, target).filename}`).sort();
-  if (canonical(actualUrls) !== canonical(expectedUrls)) throw new Error('Homebrew formula URLs differ from the approved release repository');
+  validateInitialHomebrewFormula({ descriptor, repository, contents: formula.contents });
   await emptyDirectory(outputDir);
   const artifact = path.join(outputDir, formula.filename);
   await fs.writeFile(artifact, formula.contents, { flag: 'wx' });
@@ -136,16 +162,19 @@ export async function prepareRelease({ outputDir, repository, sourceCommit, envi
     sourceCommit, targets: RELEASE_TARGETS, metadataFiles });
   await verifyRelease({ outputDir: assets, windowsLauncher: launcher.artifact,
     targets: RELEASE_TARGETS, sourceCommit, environment });
+  const testerPrompt = await generateWindowsTesterPrompt({ outputDir: path.join(directory, 'handoff'),
+    ...windowsTesterInput(final, repository) });
   const context = { schemaVersion: 1, releaseRepository: repository, identity: evidenceIdentity(final),
     scope: RELEASE_SCOPE, prerelease, launcher: { sha256: launcher.sha256, toolchain: launcher.toolchain },
-    winget, homebrew: { status: homebrew.status, nativeValidation: 'NotRun' },
+    winget, homebrew: { status: homebrew.status, nativeValidation: 'NotRun', supportedArchitectures: ['arm64'] },
+    windowsTesterPrompt: { contentStatus: testerPrompt.contentStatus, nativeExecution: 'NotRun' },
     publicAssets: 'NotRun', npmPublication: 'NotRun', communityAcceptance: 'NotRun' };
   await writeJson(path.join(directory, 'context.json'), context);
   return { ...context.identity, version: pkg.version, candidateDir: directory };
 }
 
 export function validateGates(gates, identity) {
-  for (const target of RELEASE_TARGETS) {
+  for (const target of RELEASE_GATE_TARGETS) {
     const gate = gates.find(item => item.target === target);
     if (!gate || gates.filter(item => item.target === target).length !== 1 ||
         canonical(gate.identity) !== canonical(identity) ||
@@ -161,11 +190,14 @@ export function validateGates(gates, identity) {
     if (target === 'windows-x64' && (gate.deterministicCrossBuild !== 'Passed' ||
         gate.payloadIntegrity !== 'Passed' || gate.schema?.schemaValidation !== 'Passed' ||
         gate.winget?.contractValidation !== 'Passed' || gate.winget?.nativeValidation !== 'NotRun' ||
+        gate.testerPrompt?.test !== 'T-60' || gate.testerPrompt?.generationValidation !== 'Passed' ||
+        gate.testerPrompt?.nativeExecution !== 'NotRun' ||
+        canonical(gate.testerPrompt?.identity) !== canonical(identity) ||
         !['linux', 'darwin'].includes(gate.host?.platform))) {
       throw new Error('Missing mandatory non-native Windows validation evidence');
     }
   }
-  if (gates.length !== RELEASE_TARGETS.length) throw new Error('Unexpected release gate');
+  if (gates.length !== RELEASE_GATE_TARGETS.length) throw new Error('Unexpected release gate');
 }
 
 async function inventoryTree(directory, prefix = '') {
@@ -190,8 +222,9 @@ async function inventoryTree(directory, prefix = '') {
 export async function selectGateFiles(evidenceDir, runId) {
   const names = (await fs.readdir(evidenceDir)).sort();
   if (!runId) {
-    if (canonical(names) !== canonical(RELEASE_TARGETS.map(target => `${target}.json`).sort())) {
-      throw new Error('A result from every scoped gate is required');
+    if (RELEASE_TARGETS.some(target => !names.includes(`${target}.json`)) ||
+        names.some(name => !RELEASE_GATE_TARGETS.some(target => name === `${target}.json`))) {
+      throw new Error('A result from every scoped mandatory gate is required');
     }
     return names.map(name => path.join(evidenceDir, name));
   }
@@ -208,17 +241,23 @@ export async function selectGateFiles(evidenceDir, runId) {
       latest.set(target, { file, attempt: Number(attempt) });
     }
   }
-  if (latest.size !== RELEASE_TARGETS.length) throw new Error('A result from every scoped gate is required');
-  return RELEASE_TARGETS.map(target => latest.get(target).file);
+  if (RELEASE_TARGETS.some(target => !latest.has(target))) throw new Error('A result from every scoped mandatory gate is required');
+  return RELEASE_GATE_TARGETS.filter(target => latest.has(target)).map(target => latest.get(target).file);
 }
 
 export async function sealBundle({ candidateDir, evidenceDir, outputDir, runId }) {
   const candidate = await verifyCandidate(candidateDir);
   const gateFiles = await selectGateFiles(evidenceDir, runId);
   const gates = await Promise.all(gateFiles.map(readJson));
+  if (!gates.some(gate => gate.target === 'macos-x64')) {
+    gates.push({ schemaVersion: 1, target: 'macos-x64', required: false, validation: 'NotRun',
+      identity: candidate.context.identity, status: 'NotRun', nativeValidation: 'NotRun',
+      reason: 'Unsupported and excluded from publication/Homebrew metadata; no Intel runner or native validation requested.' });
+  }
   validateGates(gates, candidate.context.identity);
   await emptyDirectory(outputDir);
   await fs.cp(path.join(candidateDir, 'assets'), path.join(outputDir, 'assets'), { recursive: true });
+  await fs.cp(path.join(candidateDir, 'handoff'), path.join(outputDir, 'handoff'), { recursive: true });
   await fs.copyFile(path.join(candidateDir, 'context.json'), path.join(outputDir, 'context.json'));
   for (const gate of gates) await writeJson(path.join(outputDir, 'evidence', `${gate.target}.json`), gate);
   const files = await inventoryTree(outputDir);
