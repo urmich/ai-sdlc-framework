@@ -52,10 +52,12 @@ Arguments are passed without a shell; stdin/stdout/stderr, the working
 directory, and the CLI exit code are preserved. Ordinary invocation does not
 itself install or purge framework state.
 
-The native archive launcher does not interpret a standalone channel's mutable
-`current.json`. A channel-owned dispatcher must validate that pointer and invoke
-the absolute immutable `versions/<version>/bin/sdlc.exe`; copying the native
-archive launcher to a payload-free channel root is not supported.
+The native archive launcher does not interpret channel-current pointers.
+Standalone promotion atomically replaces a channel-owned `current.ps1`
+dispatcher, which resolves the absolute immutable
+`versions/<version>/bin/sdlc.exe` from its own `$PSScriptRoot`. It requires no
+user-created symlink or administrator rights. Copying the native archive
+launcher to a payload-free channel root is not supported.
 
 ## Manifest input and output
 
