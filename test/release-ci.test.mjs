@@ -4,7 +4,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { canonical, readTarGzip, sha256, tarGzip } from '../packaging/standalone/archive.mjs';
-import { platformEntries } from '../packaging/standalone/protocol.mjs';
+import { isPrerelease, platformEntries } from '../packaging/standalone/protocol.mjs';
 import { generateManifests } from '../packaging/winget/generate.mjs';
 import { generateWindowsTesterPrompt, INPUT_FILENAME, renderWindowsTesterPrompt,
   validateWindowsTesterPrompt } from '../packaging/windows-tester/generate.mjs';
@@ -25,6 +25,9 @@ let payload;
 let originalTmp;
 const repository = 'example/public-releases';
 const sourceCommit = 'a'.repeat(40);
+const candidateBaseUrl = 'http://127.0.0.1:8765/';
+const packagePrerelease = isPrerelease(
+  JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8')).version);
 
 function fixtureFormula(descriptor, { mode = 'stable', candidateBaseUrl } = {}) {
   const base = mode === 'candidate' ? candidateBaseUrl :
@@ -66,6 +69,14 @@ async function mockQuality({ candidate, formulaPath, targetArch, mode }) {
 function simulatedGates(candidate) {
   const identity = candidate.context.identity;
   const intel = archiveRecord(candidate, 'macos-x64');
+  const mode = candidate.context.prerelease ? 'candidate' : 'stable';
+  const formulaBase = candidate.context.prerelease ? candidateBaseUrl :
+    `https://github.com/${repository}/releases/download/v${identity.version}/`;
+  const formula = candidate.descriptor.files.find(file => file.kind === 'homebrew') ?? (() => {
+    const contents = fixtureFormula(candidate.descriptor, { mode, candidateBaseUrl });
+    return { filename: 'ai-sdlc-framework.rb', kind: 'homebrew',
+      sha256: sha256(Buffer.from(contents)), size: Buffer.byteLength(contents) };
+  })();
   // Unit fixtures only: these records never leave the per-test directory or represent a real CI run.
   return RELEASE_GATE_TARGETS.map(target => ({
     schemaVersion: 1, target, identity, required: RELEASE_SCOPE[target].required,
@@ -76,7 +87,7 @@ function simulatedGates(candidate) {
       homebrew: { nativeValidation: 'Passed', evidence: { passed: true, platform: 'darwin',
         architecture: 'arm64', uname: 'arm64', homebrewRuntime: { platform: 'darwin', arch: 'arm64', major: 22 },
         commands: ['unit fixture only'] },
-      quality: simulatedQuality(candidate, candidate.descriptor.files.find(file => file.kind === 'homebrew'), 'arm64') } } : {}),
+      quality: simulatedQuality(candidate, formula, 'arm64', mode) } } : {}),
     ...(target === 'windows-x64' ? { deterministicCrossBuild: 'Passed', payloadIntegrity: 'Passed',
       schema: { schemaValidation: 'Passed' }, host: { platform: 'linux', arch: 'x64' },
       winget: { contractValidation: 'Passed', nativeValidation: 'NotRun' },
@@ -85,12 +96,12 @@ function simulatedGates(candidate) {
       deterministicArchive: { validation: 'Passed', target, platform: 'darwin', arch: 'x64',
         filename: intel.filename, sha256: intel.sha256, size: intel.size,
         payloadSha256: identity.payloadSha256, inventoryDigest: candidate.descriptor.payload.inventoryDigest },
-      homebrew: { validation: 'Passed', deterministicGeneration: 'Passed', mode: 'stable', nativeValidation: 'NotRun',
-        formula: candidate.descriptor.files.find(file => file.kind === 'homebrew'),
-        quality: simulatedQuality(candidate, candidate.descriptor.files.find(file => file.kind === 'homebrew'), 'x64'),
+      homebrew: { validation: 'Passed', deterministicGeneration: 'Passed', mode, nativeValidation: 'NotRun',
+        formula,
+        quality: simulatedQuality(candidate, formula, 'x64', mode),
         architectures: ['arm64', 'x64'].map(arch => {
           const archive = archiveRecord(candidate, `macos-${arch}`);
-          return { arch, ...archive, url: `https://github.com/${repository}/releases/download/v${identity.version}/${archive.filename}` };
+          return { arch, ...archive, url: `${formulaBase}${archive.filename}` };
         }) },
     } : {}),
   }));
@@ -113,17 +124,24 @@ test.before(async () => {
   base = path.join(root, 'base');
   const built = await buildPlatforms({ artifact: payload.artifact, outputDir: path.join(base, 'assets'),
     windowsLauncher: launcher, sourceCommit, targets: RELEASE_TARGETS });
+  const prerelease = isPrerelease(built.descriptor.version);
   const archive = archiveRecord(built, 'windows-x64');
   const winget = await generateManifests({ version: built.descriptor.version, releaseRepository: repository,
-    archive, archivePath: path.join(base, 'assets', archive.filename), outputDir: path.join(root, 'winget') });
+    archive, archivePath: path.join(base, 'assets', archive.filename), outputDir: path.join(root, 'winget'),
+    ...(prerelease ? { testOnly: true, candidateUrl: `${candidateBaseUrl}${archive.filename}` } : {}) });
   const formula = path.join(root, 'ai-sdlc-framework.rb');
-  await fs.writeFile(formula, fixtureFormula(built.descriptor));
+  await fs.writeFile(formula, fixtureFormula(built.descriptor,
+    prerelease ? { mode: 'candidate', candidateBaseUrl } : {}));
+  await fs.mkdir(path.join(base, 'homebrew'), { recursive: true });
+  await fs.copyFile(formula, path.join(base, 'homebrew', 'ai-sdlc-framework.rb'));
   const final = await writeReleaseMetadata({ outputDir: path.join(base, 'assets'), artifact: payload.artifact,
-    sourceCommit, targets: RELEASE_TARGETS, metadataFiles: [...winget.files, { artifact: formula, kind: 'homebrew' }] });
+    sourceCommit, targets: RELEASE_TARGETS,
+    metadataFiles: prerelease ? [] : [...winget.files, { artifact: formula, kind: 'homebrew' }] });
   await writeJson(path.join(base, INPUT_FILENAME), windowsTesterInput(final, repository, sha256(pe)));
   await writeJson(path.join(base, 'context.json'), { schemaVersion: 1, releaseRepository: repository,
-    identity: evidenceIdentity(final), scope: RELEASE_SCOPE, prerelease: false,
-    launcher: { sha256: sha256(pe) }, homebrew: { status: 'Generated' } });
+    identity: evidenceIdentity(final), scope: RELEASE_SCOPE, prerelease,
+    launcher: { sha256: sha256(pe) },
+    homebrew: { status: prerelease ? 'NotPublishedPrerelease' : 'Generated' } });
 });
 
 test.after(async () => {
@@ -174,11 +192,11 @@ test('bundle seals exact payload and final manager metadata before descriptor/ch
   const sealed = await sealBundle(f);
   const bundle = await verifyBundle({ directory: f.outputDir, expectedBundleSha256: sealed.bundleSha256 });
   assert.equal(bundle.identity.payloadSha256, payload.sha256);
-  assert.equal(bundle.descriptor.files.filter(file => file.kind === 'winget').length, 3);
+  assert.equal(bundle.descriptor.files.filter(file => file.kind === 'winget').length, packagePrerelease ? 0 : 3);
   assert.equal(bundle.descriptor.files.filter(file => file.kind === 'archive').length, 4);
   assert.ok(bundle.files.every(file => !file.filename.includes('linux')));
   assert.ok(bundle.files.some(file => file.filename === `assets/ai-sdlc-framework-${payload.version}-macos-x64.tar.gz`));
-  assert.equal(bundle.context.homebrew.status, 'Generated');
+  assert.equal(bundle.context.homebrew.status, packagePrerelease ? 'NotPublishedPrerelease' : 'Generated');
   assert.equal(bundle.publicationReady, false, 'Pending T-60 completeness cannot authorize publication');
   const names = bundle.files.map(file => file.filename);
   assert.ok(names.includes('assets/release-descriptor.json'));
@@ -189,7 +207,8 @@ test('bundle seals exact payload and final manager metadata before descriptor/ch
   await assert.rejects(verifyCandidate(f.candidateDir, { sourceCommit: 'b'.repeat(40) }), /trusted evidence/u);
 });
 
-test('Homebrew adapter requires separate arm64/x64 URL and checksum stanzas for the approved destination', async t => {
+test('Homebrew adapter requires separate arm64/x64 URL and checksum stanzas for the approved destination',
+  { skip: packagePrerelease ? 'Stable Homebrew publication metadata is not generated for prereleases' : false }, async t => {
   const f = await fixture(t);
   const descriptor = f.candidate.descriptor;
   const generator = async input => {
@@ -232,7 +251,8 @@ test('Homebrew adapter requires separate arm64/x64 URL and checksum stanzas for 
   }
 });
 
-test('candidate verification independently rejects checksum-consistent swapped Intel formula metadata', async t => {
+test('candidate verification independently rejects checksum-consistent swapped Intel formula metadata',
+  { skip: packagePrerelease ? 'Stable Homebrew publication metadata is not generated for prereleases' : false }, async t => {
   const f = await fixture(t);
   const file = path.join(f.directory, 'ai-sdlc-framework.rb');
   const correct = fixtureFormula(f.candidate.descriptor);
@@ -284,7 +304,7 @@ test('Intel cross-only gate reproduces archives and formula bytes without native
   ]) {
     const copy = structuredClone(gates);
     mutate(copy.find(gate => gate.target === 'macos-x64'));
-    assert.throws(() => windowsTesterReadiness(f.candidate, copy), /not bound/u);
+    assert.throws(() => windowsTesterReadiness(f.candidate, copy), /not bound|candidate-bound/u);
   }
 });
 
@@ -298,13 +318,15 @@ test('Intel formula validation rejects nondeterminism and differences from froze
       const contents = formula.contents + `# invocation ${++calls}\n`;
       return { ...formula, contents, sha256: sha256(Buffer.from(contents)), size: Buffer.byteLength(contents) };
     } }), /generations differ/u);
-  await assert.rejects(verifyIntelFormula({ candidate: f.candidate, candidateDir: f.candidateDir,
-    scratch: path.join(f.directory, 'frozen-mismatch'),
-    generator: async input => {
-      const formula = fixtureGenerator(input);
-      const contents = formula.contents + '# different implementation\n';
-      return { ...formula, contents, sha256: sha256(Buffer.from(contents)), size: Buffer.byteLength(contents) };
-    } }), /frozen public Homebrew/u);
+  if (!packagePrerelease) {
+    await assert.rejects(verifyIntelFormula({ candidate: f.candidate, candidateDir: f.candidateDir,
+      scratch: path.join(f.directory, 'frozen-mismatch'),
+      generator: async input => {
+        const formula = fixtureGenerator(input);
+        const contents = formula.contents + '# different implementation\n';
+        return { ...formula, contents, sha256: sha256(Buffer.from(contents)), size: Buffer.byteLength(contents) };
+      } }), /frozen public Homebrew/u);
+  }
 });
 
 test('Intel prerelease formula checks remain test-only and never require stable metadata', async t => {
@@ -355,14 +377,17 @@ async function qualityFixture(t) {
     return { stdout: '', stderr: '' };
   };
   return { ...f, prefix, brew, calls, run,
-    formulaPath: path.join(f.candidateDir, 'assets/ai-sdlc-framework.rb') };
+    formulaPath: path.join(f.candidateDir, 'homebrew/ai-sdlc-framework.rb'),
+    mode: f.candidate.context.prerelease ? 'candidate' : 'stable',
+    candidateBaseUrl: f.candidate.context.prerelease ? candidateBaseUrl : undefined };
 }
 
 test('Homebrew quality runner requires actual style and strict macOS/architecture audit commands without target execution', async t => {
   const f = await qualityFixture(t);
   for (const targetArch of ['arm64', 'x64']) {
     const quality = await verifyHomebrewQuality({ candidate: f.candidate, formulaPath: f.formulaPath,
-      mode: 'stable', targetArch, outputDir: path.join(f.directory, `quality-${targetArch}`),
+      mode: f.mode, candidateBaseUrl: f.candidateBaseUrl,
+      targetArch, outputDir: path.join(f.directory, `quality-${targetArch}`),
       brew: f.brew, run: f.run, environment: { ...process.env, HOMEBREW_TEST_SETTING: 'remove',
         NODE_AUTH_TOKEN: 'unit-test-placeholder', RUBOCOP_OPTS: '--except-cops=all',
         GIT_DIR: f.candidateDir, BUNDLE_PATH: '/unit-test-external-cache' } });
@@ -389,7 +414,7 @@ test('audit/style failures and formula mutation fail closed, with no native life
     const f = await qualityFixture(t);
     const outputDir = path.join(f.directory, 'failed-quality');
     await assert.rejects(verifyHomebrewQuality({ candidate: f.candidate, formulaPath: f.formulaPath,
-      mode: 'stable', targetArch: 'x64', outputDir, brew: f.brew,
+      mode: f.mode, candidateBaseUrl: f.candidateBaseUrl, targetArch: 'x64', outputDir, brew: f.brew,
       run: async (command, args, options) => {
         const result = await f.run(command, args, options);
         if (args[0] === failure) throw Object.assign(new Error(`${failure} offense`), { code: 1, stderr: 'offense' });
@@ -409,11 +434,13 @@ test('Node metadata and audit prerequisites are checked before lifecycle or targ
   const wrongFormula = path.join(f.directory, 'wrong-node.rb');
   await fs.writeFile(wrongFormula, (await fs.readFile(f.formulaPath, 'utf8')).replace('node@22', 'node@20'));
   await assert.rejects(verifyHomebrewQuality({ candidate: f.candidate, formulaPath: wrongFormula,
-    mode: 'stable', targetArch: 'arm64', outputDir: path.join(f.directory, 'wrong-node-quality'),
+    mode: f.mode, candidateBaseUrl: f.candidateBaseUrl,
+    targetArch: 'arm64', outputDir: path.join(f.directory, 'wrong-node-quality'),
     brew: f.brew, run: f.run }), /Node dependency contract/u);
   assert.equal(f.calls.length, 0);
   await assert.rejects(verifyHomebrewQuality({ candidate: f.candidate, formulaPath: f.formulaPath,
-    mode: 'stable', targetArch: 'x64', outputDir: path.join(f.directory, 'missing-tool'), brew: '' }),
+    mode: f.mode, candidateBaseUrl: f.candidateBaseUrl,
+    targetArch: 'x64', outputDir: path.join(f.directory, 'missing-tool'), brew: '' }),
   { code: 'RELEASE_INTEGRATION_BLOCKED' });
   await assert.rejects(verifyNativeHomebrew({ candidate: f.candidate, candidateDir: f.candidateDir,
     scratch: f.directory, brew: f.brew, verifyLifecycle: async () => assert.fail('Lifecycle must not run after failed metadata audit'),
@@ -428,7 +455,8 @@ test('Homebrew quality rejects linked scratch and tap parents without touching t
   await fs.writeFile(path.join(unrelated, 'keep'), 'keep');
   const link = path.join(f.directory, 'linked-output-parent');
   await fs.symlink(unrelated, link);
-  const args = { candidate: f.candidate, formulaPath: f.formulaPath, mode: 'stable',
+  const args = { candidate: f.candidate, formulaPath: f.formulaPath, mode: f.mode,
+    candidateBaseUrl: f.candidateBaseUrl,
     targetArch: 'x64', brew: f.brew, run: f.run };
   await assert.rejects(verifyHomebrewQuality({ ...args, outputDir: path.join(link, 'quality') }), /literal directory/u);
   assert.deepEqual(await fs.readdir(unrelated), ['keep']);
@@ -524,7 +552,8 @@ test('missing Homebrew integration blocks the required native gate; an adapter c
       return evidence;
     } });
   assert.equal(passed.nativeValidation, 'Passed');
-  await assert.rejects(verifyNativeHomebrew({ ...args, brew: path.join(f.directory, 'isolated/bin/brew'), verifyQuality: mockQuality,
+  await assert.rejects(verifyNativeHomebrew({ ...args, scratch: path.join(f.directory, 'bad-native'),
+    brew: path.join(f.directory, 'isolated/bin/brew'), verifyQuality: mockQuality,
     verifyLifecycle: async () => ({ ...evidence, architecture: 'x64' }) }), /did not pass/u);
 });
 
