@@ -513,13 +513,19 @@ verification rebuilds the expected package from the same source, compares its
 digest and inventory with the distributable, then exercises install, doctor,
 idempotent update, and uninstall in an isolated Copilot home.
 
-`.github/workflows/ci.yml` runs checks, tests, packaging, verification, and
-artifact retention for pull requests, `main`, version tags, and manual runs.
-A successful version-tag run publishes the same verified `.tgz` to the public
-npm registry with provenance and uploads it to the matching GitHub Release.
-Before the first tag, configure the workflow as an npm trusted publisher.
-GitHub-hosted runners must
-be enabled for the repository.
+`.github/workflows/ci.yml` validates pull requests, `main`, and manual runs.
+The separate [release workflow](docs/release-ci.md) builds a frozen candidate on
+version tags or manual dispatch. Mandatory gates are native macOS Apple Silicon
+arm64 lifecycle and deterministic Windows x64 cross-build/schema/payload/WinGet
+metadata validation; native Windows is not claimed. macOS Intel is explicitly
+`NotRun` and non-blocking; Linux installer archives are excluded.
+
+Successful gates produce one immutable `release-bundle` artifact. Publication
+requires explicit manual inputs and protected `release`/`npm` environments:
+GitHub assets stay in a draft, and npm receives the identical verified `.tgz`.
+Tag builds alone never publish. Configure the approved public asset repository,
+runner access and npm trusted publishing before enabling those handoffs.
+Homebrew generation has an integration interface but no duplicated implementation.
 
 ## Documentation
 
@@ -532,6 +538,7 @@ be enabled for the repository.
 | [CLI reference](docs/cli.md) | Installation, commands, structured inputs, and operational behavior |
 | [Provider adapter guide](docs/provider-adapters.md) | Generic execution identity, Azure DevOps adapter, and extension contract |
 | [Azure DevOps acceptance test](docs/ado-acceptance-test.md) | Agent prompt and evidence checklist for a safe existing-repository handoff |
+| [Release CI and acceptance](docs/release-ci.md) | Scoped gates, immutable bundle, draft/npm handoffs, and postpublication evidence |
 
 ## Repository organization
 
@@ -540,7 +547,7 @@ be enabled for the repository.
 - `docs/`: requirements, Test Plan, detailed design, and human overview
 - `scripts/`: source checks and reproducible packaging tools
 - `test/`: deterministic framework tests and the calculator dry run
-- `.github/workflows/ci.yml`: validation and package-retention workflow
+- `.github/workflows/`: validation, scoped release candidates, and explicit live acceptance
 
 ## Current limits
 

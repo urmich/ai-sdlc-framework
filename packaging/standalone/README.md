@@ -17,9 +17,12 @@ npm run test:distribution
 ```
 
 Use the version from `package.json`, not a separately chosen channel version.
-The default build requires all four targets. `--targets linux-x64`,
-`--targets macos-arm64`, or a comma-separated list produces an explicitly
-incomplete development bundle, never evidence for a complete release.
+The generic default build supports all four targets. Its `complete` flag means
+all library targets, not release eligibility. The current
+[release orchestration policy](../../docs/release-ci.md) explicitly selects
+`macos-arm64,macos-x64,windows-x64` and excludes Linux publication. It verifies
+that exact allowlist and separate required evidence instead of using `complete`.
+Other ad hoc target subsets do not establish release eligibility.
 The output directory must contain only the exact owned candidate filenames.
 Packaging never recursively clears an output directory.
 
@@ -152,14 +155,20 @@ This channel neither changes those controls nor promises a bypass.
 
 ## Native CI integration
 
-Set `SDLC_DISTRIBUTION_TARGET` to `windows-x64`, `macos-x64`, `macos-arm64`, or
-`linux-x64` in each release-blocking native job. The test asserts actual
+Set `SDLC_DISTRIBUTION_TARGET` to the actual native target when requiring native
+evidence. The current release's only mandatory native target is `macos-arm64`;
+Windows is cross-validated and Intel native evidence is explicitly `NotRun`.
+The test asserts actual
 `process.platform`, `process.arch`, native machine architecture and absence of
 Rosetta. Set `SDLC_WINDOWS_LAUNCHER` to the independently rebuilt Windows
 executable to include Windows ZIP/native lifecycle tests. Windows native CI
 fails rather than skips if the expected target is Windows and this input is
 missing. Without that input, local non-Windows tests verify the three POSIX
 archives and ZIP codec fixtures, not a native Windows release.
+`SDLC_DISTRIBUTION_TARGETS` selects the exact archive set.
+`SDLC_RELEASE_DIR` selects an already frozen/downloaded release: independent
+fixture builds must match its payload and platform archive digests, and native
+lifecycle extraction then uses the downloaded candidate bytes, not the fixtures.
 
 The npm-denied lifecycle runs inside an OS-enforced boundary, not a proxy or
 command-shim approximation. macOS uses Seatbelt to deny all network operations
@@ -179,10 +188,11 @@ validated per-process network-and-npm-filesystem isolation adapter and remains
 `NotRun` for this specific gate. Proxy settings, global firewall edits, or a
 foreign-OS container cannot substitute for the missing native evidence.
 
-Retain all four mandatory native results and descriptor/checksum digests.
-Native Homebrew/WinGet validation, publication from one immutable bundle, and
-anonymous live acceptance are orchestration responsibilities; local package
-tests do not establish public availability or package-manager acceptance.
-Published Homebrew T-52 acceptance applies only to stable releases.
-Prereleases retain the native local-formula T-51 gate and never claim
-published-Homebrew acceptance or update stable package-manager metadata.
+Retain the required arm64/native and Windows/cross-validation results, explicit
+Intel `NotRun`, and descriptor/checksum digests in one immutable release bundle.
+Native Homebrew/WinGet validation and anonymous live acceptance are distinct
+evidence; local package tests do not establish public availability or
+package-manager acceptance. Homebrew integration is tracked separately.
+Prereleases never include stable package-manager metadata or claim
+published-Homebrew acceptance. A future local-formula gate must retain its own
+prerelease evidence outside the release asset directory.

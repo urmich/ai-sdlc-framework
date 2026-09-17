@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "manifestVersion": "1.10.0",
+  "upstreamCommit": "5b62860167520b1503b3880d5a026809eb07c6f4",
+  "schemas": {
+    "defaultLocale": "77e406d25b35f908f70fb893335155e9e8a83aa59a6f3e9f959692e995e51e3c",
+    "installer": "cca7bea1fbdaa18a3d5231de7f9f896b1dd41283c33a03a0565771861d393b31",
+    "version": "330a3ece4ed602afb0c4f35290d14dec1e188e7b3c2fb330893ac3daac82b547"
+  }
+}

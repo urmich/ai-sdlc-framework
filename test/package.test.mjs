@@ -27,11 +27,17 @@ test('T-36 package is reproducible, integrity-bound and installable in isolation
   assert.deepEqual(await fs.readdir(path.dirname(built.artifact)), [built.filename]);
   const workflow = await fs.readFile('.github/workflows/ci.yml', 'utf8');
   for (const contract of ['npm run check', 'npm test', 'npm run package:artifact',
-    'npm run verify:package', 'actions/upload-artifact@v4', 'dist/*',
-    'id-token: write', '--provenance', 'EXPECTED_REPOSITORY_URL',
-    'GH_REPO: ${{ github.repository }}']) {
+    'npm run verify:package']) {
     assert.ok(workflow.includes(contract));
   }
+  const releaseWorkflow = await fs.readFile('.github/workflows/release.yml', 'utf8');
+  for (const contract of ['actions/upload-artifact@v4', 'artifact-ids:',
+    'id-token: write', 'scripts/publish-release.mjs npm', 'SOURCE_REPOSITORY: ${{ github.repository }}']) {
+    assert.ok(releaseWorkflow.includes(contract));
+  }
+  const publication = await fs.readFile('scripts/publish-release.mjs', 'utf8');
+  assert.ok(publication.includes('--provenance'));
+  assert.ok(publication.includes('pkg.repository?.url !== `https://github.com/${sourceRepository}.git`'));
   const sourceBefore = await fs.readFile('src/core.mjs');
   await assert.rejects(buildPackage({ outputDir: 'src' }),
     /empty or contain only owned distribution files/u);

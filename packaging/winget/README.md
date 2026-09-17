@@ -254,14 +254,22 @@ Integration requirements for the shared packager / CI owner:
    rebuild verification. Never rebuild the framework payload for WinGet.
 3. Generate stable manifests only after the ZIP digest exists; place their
    descriptor-ready records into the shared immutable release bundle.
-4. Native Windows gates must run Go tests, launcher tests, `--native` manifest
-   validation and the portable lifecycle smoke, including prerelease test-only
-   manifests. A missing or blocked required result must block publication.
+4. The [current release scope](../../docs/release-ci.md) requires deterministic
+   Windows x64 cross-build, host-run Go payload-integrity tests against the exact
+   ZIP, and contract plus official JSON-schema validation. It deliberately does
+   **not** execute the Windows launcher or WinGet client. Native Windows remains
+   `NotRun`, and manifests remain `contract-validated`, not `repository-ready`.
+   If native Windows validation is requested later, separately run launcher
+   tests, `--native` validation and portable lifecycle smoke; cross-build success
+   must never substitute for that evidence.
 5. Retain local/native validation separately from community submission and
    later anonymous WinGet discovery/install evidence. No remote mutation is
    performed by the build, generator, validator, or local test suite.
 
-Local development also validated all six rendered stable/test manifest files
-against the official WinGet 1.10.0 JSON schemas. This is schema evidence only:
+`scripts/validate-winget-schema.py` validates the candidate set against official
+WinGet 1.10.0 schemas pinned by upstream commit and SHA-256 in `schema-lock.json`.
+Its build-only Python dependencies are pinned in `.github/release-requirements.txt`.
+Schema fetches happen before any network-denied lifecycle and are never installer
+network dependencies. This is schema evidence only:
 macOS cross-compilation and fixture tests cannot establish native Windows
 installation, WinGet community acceptance, or client availability.

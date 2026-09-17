@@ -1,0 +1,257 @@
+name: Release candidate
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release_repository:
+        description: Approved public asset repository (owner/repository)
+        type: string
+        required: true
+      publish_draft:
+        description: Upload exact assets to a matching pre-existing tag as a draft only
+        type: boolean
+        default: false
+      publish_npm:
+        description: Hand the same verified tgz to npm (requires npm environment approval)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: source
+
+concurrency:
+  group: release-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Tag builds need an explicitly approved repository variable; never infer a private source repo.
+  RELEASE_REPOSITORY: ${{ inputs.release_repository || vars.RELEASE_REPOSITORY }}
+
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      source_commit: ${{ steps.prepare.outputs.sourceCommit }}
+      version: ${{ steps.prepare.outputs.version }}
+      descriptor_sha256: ${{ steps.prepare.outputs.descriptorSha256 }}
+      checksums_sha256: ${{ steps.prepare.outputs.checksumsSha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: source/cmd/sdlc-launcher/go.mod
+          cache: false
+      - name: Use project-local scratch storage
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/.test-data/release-scratch"
+          echo "TMPDIR=$GITHUB_WORKSPACE/.test-data/release-scratch" >> "$GITHUB_ENV"
+      - run: npm run check
+      - run: npm test
+      - name: Pack once, wrap exact tgz, generate metadata, then freeze descriptor and checksums
+        id: prepare
+        run: |
+          node scripts/release-bundle.mjs prepare \
+            --output-dir .test-data/candidate --repository "$RELEASE_REPOSITORY"
+      - name: Retain frozen candidate (never merge wildcard artifacts)
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/.test-data/candidate/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  release-gates:
+    needs: candidate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: macos-arm64
+            runner: macos-15
+          - target: windows-x64
+            runner: ubuntu-24.04
+          - target: macos-x64
+            runner: ubuntu-24.04
+    # macos-15 is Apple Silicon. The gate verifies Node, machine architecture and absence of Rosetta.
+    # Intel is an explicit NotRun record on Linux, NOT an emulated/native Intel test.
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    env:
+      EXPECTED_SOURCE_COMMIT: ${{ needs.candidate.outputs.source_commit }}
+      EXPECTED_DESCRIPTOR_SHA256: ${{ needs.candidate.outputs.descriptor_sha256 }}
+      EXPECTED_CHECKSUMS_SHA256: ${{ needs.candidate.outputs.checksums_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Use workspace-owned scratch storage
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/.test-data/gate-scratch"
+          echo "TMPDIR=$GITHUB_WORKSPACE/.test-data/gate-scratch" >> "$GITHUB_ENV"
+      - if: matrix.target == 'windows-x64'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: source/cmd/sdlc-launcher/go.mod
+          cache: false
+      - if: matrix.target == 'windows-x64'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - if: matrix.target == 'windows-x64'
+        name: Install pinned schema validation dependencies (not payload dependencies)
+        run: python3 -m pip install --disable-pip-version-check -r .github/release-requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.candidate.outputs.artifact_id }}
+          path: source/.test-data/candidate
+          merge-multiple: true
+      - name: Execute scoped gate against the downloaded immutable candidate
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          node scripts/release-gate.mjs --candidate-dir .test-data/candidate \
+            --evidence-dir .test-data/evidence --target "$RELEASE_TARGET"
+      - name: Retain truthful gate evidence, including failures and explicit NotRun
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/.test-data/evidence/*.json
+          if-no-files-found: error
+          retention-days: 30
+
+  release-bundle:
+    needs: [candidate, release-gates]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+      bundle_sha256: ${{ steps.seal.outputs.bundleSha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.candidate.outputs.artifact_id }}
+          path: source/.test-data/candidate
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-gate-*-${{ github.run_id }}-*
+          path: source/.test-data/evidence
+      - name: Verify mandatory results and seal the sole publication input
+        id: seal
+        run: |
+          node scripts/release-bundle.mjs seal --candidate-dir .test-data/candidate \
+            --evidence-dir .test-data/evidence --output-dir .test-data/release-bundle \
+            --run-id "$GITHUB_RUN_ID"
+      - uses: actions/upload-artifact@v4
+        id: upload
+        with:
+          name: release-bundle-${{ needs.candidate.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/.test-data/release-bundle/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+      - name: Save acceptance handoff
+        env:
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          BUNDLE_SHA256: ${{ steps.seal.outputs.bundleSha256 }}
+          SOURCE_COMMIT: ${{ needs.candidate.outputs.source_commit }}
+        run: |
+          printf '## Immutable release handoff\nRun: `%s`\nArtifact ID: `%s`\nArtifact ZIP digest: `%s`\nBundle manifest SHA-256: `%s`\nSource commit: `%s`\n' \
+            "$GITHUB_RUN_ID" "$ARTIFACT_ID" "$ARTIFACT_DIGEST" "$BUNDLE_SHA256" "$SOURCE_COMMIT" >> "$GITHUB_STEP_SUMMARY"
+
+  draft-assets:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_draft
+    needs: [candidate, release-bundle]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: write
+    env:
+      EXPECTED_BUNDLE_SHA256: ${{ needs.release-bundle.outputs.bundle_sha256 }}
+      EXPECTED_SOURCE_COMMIT: ${{ needs.candidate.outputs.source_commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.release-bundle.outputs.artifact_id }}
+          path: source/.test-data/release-bundle
+          merge-multiple: true
+      - name: Resume matching draft; compare existing bytes, never clobber or create tags
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_ASSETS_TOKEN || github.token }}
+        run: |
+          node scripts/publish-release.mjs draft --directory .test-data/release-bundle \
+            --repository "$RELEASE_REPOSITORY"
+
+  npm-handoff:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_npm
+    needs: [candidate, release-bundle]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_BUNDLE_SHA256: ${{ needs.release-bundle.outputs.bundle_sha256 }}
+      EXPECTED_SOURCE_COMMIT: ${{ needs.candidate.outputs.source_commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.release-bundle.outputs.artifact_id }}
+          path: source/.test-data/release-bundle
+          merge-multiple: true
+      - name: Publish only the verified tgz; identical versions are a no-op, differing bytes fail
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          node scripts/publish-release.mjs npm --directory .test-data/release-bundle \
+            --source-repository "$SOURCE_REPOSITORY"

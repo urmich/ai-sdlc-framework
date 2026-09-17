@@ -25,7 +25,8 @@ let nativeEntries;
 let originalTmp;
 let originalCopilotHome;
 const windowsLauncher = process.env.SDLC_WINDOWS_LAUNCHER;
-const targets = windowsLauncher ? Object.keys(TARGETS) : Object.keys(TARGETS).filter(target => target !== 'windows-x64');
+const targets = process.env.SDLC_DISTRIBUTION_TARGETS?.split(',') ??
+  (windowsLauncher ? Object.keys(TARGETS) : Object.keys(TARGETS).filter(target => target !== 'windows-x64'));
 
 test.before(async () => {
   root = path.resolve('.test-data', `distribution-${randomUUID()}`);
@@ -39,6 +40,15 @@ test.before(async () => {
   payload = await buildPackage({ outputDir: path.join(root, 'npm'), environment });
   built = await buildPlatforms({ artifact: payload.artifact, outputDir: path.join(root, 'release'),
     windowsLauncher, environment, targets });
+  if (process.env.SDLC_RELEASE_DIR) {
+    const candidate = await verifyRelease({ outputDir: process.env.SDLC_RELEASE_DIR, targets, rebuild: false });
+    assert.equal(candidate.descriptor.sourceCommit, built.descriptor.sourceCommit);
+    assert.equal(candidate.descriptor.payload.sha256, payload.sha256);
+    for (const archive of built.archives) {
+      assert.equal(candidate.descriptor.files.find(file => file.filename === archive.filename)?.sha256, archive.sha256);
+      archive.artifact = path.join(process.env.SDLC_RELEASE_DIR, archive.filename);
+    }
+  }
   if (hostTarget && targets.includes(hostTarget)) {
     const archive = built.archives.find(item => item.target === hostTarget);
     const bytes = await fs.readFile(archive.artifact);
