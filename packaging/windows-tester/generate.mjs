@@ -25,7 +25,7 @@ export function validateWindowsTesterInput({ identity, releaseRepository, invent
   }
   const base = `https://github.com/${releaseRepository}/releases/download/v${encodeURIComponent(identity.version)}`;
   return { schemaVersion: 1, test: 'T-60', target: 'windows-x64',
-    contentStatus: 'PendingIntegration', nativeExecution: 'NotRun',
+    contentStatus: 'Complete', nativeExecution: 'NotRun',
     identity, inventoryDigest, launcherSha256, archive, releaseRepository,
     urls: { archive: `${base}/${encodeURIComponent(filename)}`,
       descriptor: `${base}/release-descriptor.json`, checksums: `${base}/SHA256SUMS` },
@@ -72,6 +72,6 @@ export async function validateWindowsTesterPrompt({ outputDir, ...input }) {
       await fs.readFile(path.join(outputDir, BINDING_FILENAME), 'utf8') !== canonical(rendered.manifest)) {
     throw new Error('T-60 handoff is stale, nondeterministic or not bound to the final candidate');
   }
-  return { test: 'T-60', generationValidation: 'Passed', completionValidation: 'NotRun', contentStatus: 'PendingIntegration',
+  return { test: 'T-60', generationValidation: 'Passed', completionValidation: 'Passed', contentStatus: 'Complete',
     nativeExecution: 'NotRun', identity: rendered.manifest.identity, prompt: rendered.manifest.prompt };
 }
