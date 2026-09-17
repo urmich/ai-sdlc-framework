@@ -1,15 +1,14 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify, parseArgs } from 'node:util';
+import { parseArgs } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import { generateHomebrewFormula } from '../packaging/homebrew/generate-formula.mjs';
-import { switchToHomebrew } from './homebrew-switch.mjs';
+import { assertNativeMacHost, runHomebrewCommand, switchFromHomebrew, switchToHomebrew, verifyHomebrewHooks } from './homebrew-switch.mjs';
 
-const execute = promisify(execFile);
+const execute = runHomebrewCommand;
 
 async function snapshot(root, prefix = '') {
   const inventory = [];
@@ -29,18 +28,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
   assert.equal(process.platform, 'darwin', 'Homebrew lifecycle requires native macOS');
   assert.ok(['arm64', 'x64'].includes(process.arch), 'Unsupported native architecture');
   assert.ok(brew && candidateDirectory, 'Provide the isolated brew executable and candidate directory');
-  const expectedHost = process.arch === 'arm64' ? 'arm64' : 'x86_64';
-  const host = (await execute('/usr/bin/uname', ['-m'])).stdout.trim();
-  assert.equal(host, expectedHost, 'The process and hardware architectures differ');
-  let translated;
-  try {
-    translated = (await execute('/usr/sbin/sysctl', ['-n', 'sysctl.proc_translated'])).stdout.trim();
-    assert.equal(translated, '0', 'Rosetta is not native release evidence');
-  } catch (error) {
-    if (error.code !== 1 || process.arch !== 'x64' ||
-        !error.stderr?.includes('unknown oid')) throw error;
-    translated = 'unavailable on native Intel';
-  }
+  const { uname: host, translated } = await assertNativeMacHost();
   const work = path.resolve(root ?? path.join('.test-data', `homebrew-lifecycle-${randomUUID()}`));
   const relative = path.relative(path.resolve('.test-data'), work);
   assert.ok(relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative),
@@ -68,8 +56,12 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     const entry = { command, args };
     evidence.commands.push(entry);
     try {
+      const channelOnly = command === brew && ['install', 'upgrade', 'uninstall', 'autoremove', 'tab'].includes(args[0]);
+      const before = channelOnly ? await snapshot(environment.COPILOT_HOME) : undefined;
       const output = await execute(command, args,
         { maxBuffer: 16 * 1024 * 1024, ...options, env: options.env ?? environment });
+      if (before) assert.deepEqual(await snapshot(environment.COPILOT_HOME), before,
+        `brew ${args[0]} changed COPILOT_HOME`);
       Object.assign(entry, { success: true, ...output });
       return output;
     } catch (error) {
@@ -139,6 +131,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
       evidence.stableMetadataAudit = 'passed';
     } else {
       evidence.stableMetadataAudit = 'not-applicable-prerelease';
+      evidence.publicAcceptance = 'not-applicable-prerelease';
     }
     const local = await generate(candidate, candidateDirectory);
     await fs.writeFile(formulaFile, local.contents);
@@ -207,8 +200,11 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
       next.contents.replace('  license "MIT"\n', '  license "MIT"\n  revision 1\n');
     await fs.writeFile(formulaFile, upgradedFormula);
     await fs.writeFile(path.join(work, 'upgraded-ai-sdlc-framework.rb'), upgradedFormula);
-    await runBrew(['upgrade', '--formula', formulaName]);
-    assert.deepEqual(await snapshot(home), installedHome, 'brew upgrade changed COPILOT_HOME');
+    const upgraded = await switchToHomebrew({ brew, formula: formulaName, home, environment, run });
+    const rollbackState = JSON.parse(await fs.readFile(upgraded.stateFile, 'utf8'));
+    assert.equal(rollbackState.targetKeg, path.dirname(path.dirname(launcher)),
+      'Upgrade did not capture its old keg before brew install');
+    assert.equal(rollbackState.capturedLink.absolute, launcher);
     const upgradedKeg = await fs.realpath((await runBrew(['--prefix', formulaName])).stdout.trim());
     assert.notEqual(upgradedKeg, path.dirname(path.dirname(launcher)), 'Homebrew did not replace the keg');
     const upgradedLauncher = path.join(upgradedKeg, 'bin', 'sdlc');
@@ -218,15 +214,19 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
 
     const extracted = path.join(work, 'replacement npm payload');
     await fs.cp(path.join(upgradedKeg, 'libexec', 'package'), extracted, { recursive: true });
-    await json(node, [path.join(extracted, 'bin', 'sdlc.mjs'), 'install']);
-    assert.equal((await json(node, [path.join(extracted, 'bin', 'sdlc.mjs'), 'doctor'])).findings.length, 0);
-    const beforeRemoval = await snapshot(home);
-    await runBrew(['unlink', formulaName]);
-    await runBrew(['uninstall', '--force', '--formula', formulaName]);
+    await runBrew(['tab', '--no-installed-on-request', '--formula', 'node@22']);
+    const removed = await switchFromHomebrew({
+      brew, formula: formulaName, sourceRoot: extracted, home, environment, run,
+    });
     installed.delete(formulaName);
-    assert.deepEqual(await snapshot(home), beforeRemoval, 'brew uninstall changed COPILOT_HOME');
+    assert.equal(removed.oldPackageRemoved, true);
+    await runBrew(['autoremove']);
     const copiedCli = path.join(home, 'sdlc', 'bin', 'sdlc.mjs');
-    assert.equal((await json(node, [copiedCli, 'doctor'])).frameworkVersion, upgrade.version);
+    const afterAutoremove = await json(removed.node, [copiedCli, 'doctor']);
+    assert.equal(afterAutoremove.frameworkVersion, upgrade.version);
+    await verifyHomebrewHooks({ doctor: afterAutoremove, forbiddenKegs: [upgradedKeg],
+      node: removed.node, run, environment, executeHooks: true });
+    assert.equal((await json(removed.node, [copiedCli, 'doctor'])).findings.length, 0);
     const entry = path.join(extracted, 'bin', 'sdlc.mjs');
     await json(node, [entry, 'uninstall']);
     assert.equal(await fs.readFile(path.join(home, 'sdlc', 'runtime', 'keep.json'), 'utf8'), '{"retained":true}\n');

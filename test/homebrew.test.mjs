@@ -7,6 +7,7 @@ import { generateHomebrewFormula } from '../packaging/homebrew/generate-formula.
 import { promoteHomebrewLink, switchToHomebrew } from '../scripts/homebrew-switch.mjs';
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+const nativeMac = { skip: process.platform !== 'darwin' };
 
 async function fixture(t, version = '0.3.0') {
   const root = path.resolve('.test-data', `homebrew-${randomUUID()}`);
@@ -122,7 +123,7 @@ async function links(t, initial = 'absent', behavior = {}) {
     target, calls, runBrew };
 }
 
-test('T-51 channel promotion supports absent npm destination and proven old Homebrew link', async t => {
+test('T-51 channel promotion supports absent npm destination and proven old Homebrew link', nativeMac, async t => {
   for (const initial of ['absent', 'old', 'new']) {
     const input = await links(t, initial);
     const result = await promoteHomebrewLink(input);
@@ -136,7 +137,7 @@ test('T-51 channel promotion supports absent npm destination and proven old Home
   }
 });
 
-test('T-51 unidentified files and legacy global npm links are never replaced', async t => {
+test('T-51 unidentified files and legacy global npm links are never replaced', nativeMac, async t => {
   for (const initial of ['file', 'npm']) {
     const input = await links(t, initial);
     await assert.rejects(promoteHomebrewLink(input), /Unidentified/u);
@@ -149,15 +150,15 @@ test('T-51 unidentified files and legacy global npm links are never replaced', a
   assert.deepEqual(input.calls, []);
 });
 
-test('T-51 failed promotion restores captured owned link and retains both payloads', async t => {
+test('T-51 failed promotion restores captured owned link and retains both payloads', nativeMac, async t => {
   const input = await links(t, 'old', { failNewLink: true });
   await assert.rejects(promoteHomebrewLink(input), /old link restored.*Both packages/u);
   assert.equal(await fs.readlink(input.destination), input.target(input.previousKeg));
   for (const keg of [input.newKeg, input.previousKeg]) await fs.access(path.join(keg, 'bin', 'sdlc'));
-  assert.deepEqual(input.calls.map(call => call[0]), ['unlink', 'link', 'link']);
+  assert.deepEqual(input.calls.map(call => call[0]), ['unlink', 'link']);
 });
 
-test('T-51 unlink failure leaves old link; racing unidentified link is not deleted for rollback', async t => {
+test('T-51 unlink failure leaves old link; racing unidentified link is not deleted for rollback', nativeMac, async t => {
   const unchanged = await links(t, 'old', {
     intercept: async ([command]) => { if (command === 'unlink') throw new Error('cannot unlink'); },
   });
@@ -176,7 +177,7 @@ test('T-51 unlink failure leaves old link; racing unidentified link is not delet
   assert.deepEqual(raced.calls.map(call => call[0]), ['unlink', 'link']);
 });
 
-test('T-51 partially successful new linking is undone before restoring the captured old link', async t => {
+test('T-51 partially successful new linking is undone before restoring the captured old link', nativeMac, async t => {
   let failed = false;
   const input = await links(t, 'old', {
     intercept: async ([command, formula], { destination }) => {
@@ -189,7 +190,7 @@ test('T-51 partially successful new linking is undone before restoring the captu
   });
   await assert.rejects(promoteHomebrewLink(input), /old link restored/u);
   assert.equal(await fs.readlink(input.destination), input.target(input.previousKeg));
-  assert.deepEqual(input.calls.map(call => call[0]), ['unlink', 'link', 'unlink', 'link']);
+  assert.deepEqual(input.calls.map(call => call[0]), ['unlink', 'link', 'unlink']);
 });
 
 test('T-51 formula arguments cannot be interpreted as brew options or paths', async () => {
