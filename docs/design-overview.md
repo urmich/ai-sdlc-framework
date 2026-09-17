@@ -1,7 +1,8 @@
 # AI SDLC Framework - Human Design Overview
 
-**Review target:** 5-10 minutes. **Status:** Implementation candidate;
-publication and DEV remain separately authorized.
+**Review target:** 5-10 minutes. **Status:** Existing implementation candidate;
+FR-054 is proposed Technical Design only. Coding for FR-054, publication and DEV
+remain separately authorized.
 
 This is the short review view of the [detailed Technical Design](technical-design.md),
 not a second specification. It summarizes the same workflow and decisions.
@@ -163,6 +164,19 @@ Review the workflow, boundaries, and choices here; schemas and detailed contract
 remain in the authoritative design. The [Test Plan](test-plan.md) covers small,
 focused validation.
 
+## 7. Proposed personal OSS trust evidence
+
+[FR-054's architecture](technical-design.md#17-third-party-oss-trust-and-supply-chain-evidence)
+adds personal/community governance, complete security gates with expiring
+reviewed exceptions, deterministic SBOMs, pinned workflow trust boundaries,
+and downloaded provenance verification. It extends the installer's acyclic
+release-bundle evidence without changing channel ownership or rollback behavior.
+Real GitHub settings, scheduled runs, public provenance and consumer approvals
+remain distinct from local fixture success; unobserved results stay `NotRun`
+with explicit blockers. Michael Urinovsky's third-party project does not become
+Microsoft first-party or CFS/DCISO-approved through repository evidence.
+T-53..T-59 cover the proposal; no implementation or external control is claimed.
+
 **Source revision:** `technical-design.md` Git blob
-`c5f5261594325d18d8bfc62c13a430a59192abd0`.
+`8697952295811fa447a1261e46dc22b7f85b0f54`.
 Refresh this overview when that source changes; Git carries the history.

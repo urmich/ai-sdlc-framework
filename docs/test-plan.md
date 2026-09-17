@@ -2,12 +2,12 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Existing implementation candidate; FR-054 Test Design, not execution evidence |
-| Current phase | Existing candidate validation; FR-054 Test Design |
+| Status | Existing implementation candidate; FR-054 Technical Design, not execution evidence |
+| Current phase | Existing candidate validation; FR-054 Technical Design |
 | Validates | [Requirements](requirements.md), FR-001 to FR-054 |
-| Bound by | Existing baseline [Technical Design](technical-design.md); FR-054 Technical Design is not yet authorized |
+| Bound by | Existing baseline and FR-054 [Technical Design](technical-design.md#17-third-party-oss-trust-and-supply-chain-evidence) |
 | FR-054 advancement to Test Design | Authorized by the user on 2026-09-17 |
-| Advancement to Technical Design | Existing baseline authorized by the user on 2026-09-07; excludes FR-054 |
+| Advancement to Technical Design | Existing baseline authorized on 2026-09-07; FR-054 authorized by the user on 2026-09-17 |
 | Advancement to Coding | Existing baseline authorized by the user; excludes FR-054 |
 
 This is one living document, not separate Test Design and Test Plan files.
@@ -27,8 +27,8 @@ they are actually deterministic.
 
 FR-054 additionally maps every acceptance criterion explicitly in section 3.1.
 Its focused repository checks and external observations remain separate. This
-Test Design authorization does not authorize Technical Design, implementation,
-GitHub-setting changes, publication, or a consumer exception request.
+The subsequent FR-054 Technical Design authorization does not authorize
+implementation, GitHub-setting changes, publication, or a consumer exception request.
 
 Following the methodology before the framework is installed is useful design
 feedback, not proof its eventual implementation works. Post-installation
@@ -211,7 +211,7 @@ The one-minute cadence is tested with virtual time, not long-running AI sessions
 T-53..T-57 likewise use small deterministic fixtures and virtual time for
 exception expiry, evidence freshness, and scheduled vulnerability discovery.
 T-58..T-59 remain separately authorized observations, not an expensive campaign
-or a reason to implement Technical Design/code during this Test Design step.
+or authority to implement code or modify external controls during Technical Design.
 These are focused contract cases, not extra product scope. Add or refine a short
 case when implementation or observation exposes a new defect. Do not turn these
 checkpoints into a project simulation or silently
