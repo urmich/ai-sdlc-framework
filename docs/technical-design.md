@@ -210,6 +210,206 @@ path.
 
 Hook entries use direct `node` execution with argument arrays where supported;
 the installer resolves paths containing spaces without shell interpolation.
+
+### 3.1 Multi-channel distribution
+
+The release pipeline builds the npm `.tgz` first and treats its SHA-256 digest
+and inventory as the common framework payload identity. Platform distributions
+contain an extracted copy proven from that exact `.tgz`; they never rebuild
+framework source independently.
+
+Packaging uses an acyclic metadata sequence:
+
+```text
+exact npm payload
+  -> embedded payload-manifest.json
+  -> platform archives
+  -> Homebrew/WinGet metadata
+  -> external release-descriptor.json
+  -> SHA256SUMS rendered from the descriptor
+```
+
+Archives embed only `payload-manifest.json`, never the outer release descriptor
+or `SHA256SUMS`. The canonical external `release-descriptor.json` schema is:
+
+```json
+{
+  "schemaVersion": 1,
+  "name": "ai-sdlc-framework",
+  "version": "<semver>",
+  "sourceCommit": "<full-commit>",
+  "payload": {
+    "filename": "ai-sdlc-framework-<version>.tgz",
+    "sha256": "<digest>",
+    "inventoryDigest": "<digest>"
+  },
+  "files": [
+    {
+      "filename": "<exact-name>",
+      "kind": "archive|homebrew|winget|metadata",
+      "sha256": "<digest>",
+      "size": 123
+    }
+  ]
+}
+```
+
+Canonical JSON uses recursively sorted keys, UTF-8 LF, no timestamps, decimal
+byte sizes, and no duplicate filenames. The complete descriptor includes every
+archive and Homebrew/WinGet metadata file. `SHA256SUMS` is a deterministic text
+rendering of the descriptor file list plus the descriptor's own digest; it
+does not include itself. CI retains the descriptor and `SHA256SUMS` digests as
+workflow evidence so postpublication clients compare the exact published bytes
+with the prepublication result.
+
+Artifact names are
+`ai-sdlc-framework-<version>-windows-x64.zip`,
+`...-macos-x64.tar.gz`, `...-macos-arm64.tar.gz`, and
+`...-linux-x64.tar.gz`.
+
+`scripts/package-platforms.mjs` creates fixed-time, sorted, deterministic
+staging trees. Each tree contains `package/` extracted from the exact npm
+payload, the payload archive itself, the embedded payload manifest, license,
+platform metadata, and
+platform launchers. Verification independently rebuilds all files, compares
+outer archive digests, verifies the embedded payload and extracted inventory,
+rejects malformed/duplicate/extra entries, and enforces the documented
+launcher/metadata/mode/line-ending allowlist.
+
+The embedded payload inventory is an array sorted by POSIX path:
+
+```json
+{"path":"src/core.mjs","type":"file","size":123,"sha256":"...","mode":"0644"}
+```
+
+Directories, links, device entries, absolute/parent paths, duplicates, and
+unlisted files are rejected. Every `package/**` entry must match across all
+channels. The only allowed wrapper entries are
+`install.sh`, `install.ps1`, `bin/sdlc`, `bin/sdlc.exe`,
+`platform.json`, `payload-manifest.json`, the embedded `.tgz`, and license.
+Text launchers use LF on POSIX and CRLF only for PowerShell; executable modes
+are `0755` for POSIX launchers and `0644` otherwise.
+
+Downloaded code does not verify itself before execution. Direct-install
+documentation first downloads the release descriptor, `SHA256SUMS`, and target
+archive, then uses host-native `Get-FileHash` or `shasum`/`sha256sum` to compare
+the outer archive with the published checksum and descriptor. Only after that
+external check may the archive be extracted or its installer executed.
+Archive-contained launchers recheck the embedded payload before channel
+activation as defense in depth.
+
+Channel installation uses a separate user-owned root and lock:
+`~/.local/share/ai-sdlc-framework` on POSIX or
+`%LOCALAPPDATA%\ai-sdlc-framework` on Windows. It extracts into a unique staging
+directory, validates Node/runtime and payload inventory, then atomically renames
+the staging directory to the immutable version directory. A same-version,
+same-digest install is idempotent; a conflicting digest fails. The `current`
+launcher/link is replaced atomically only after version activation. Channel
+locks are released before invoking framework maintenance, establishing lock
+order `channel → release`, then separately `framework`; interrupted activation
+leaves the prior current version usable and bounded staging cleanup is safe.
+
+Standalone `install.sh` and `install.ps1` may invoke framework
+`install`/`--purge-existing` after channel activation. They locate the exact
+Node executable, require version 22+, and fail before channel or Copilot-home
+mutation when the runtime is absent, non-executable, wrong-architecture, or
+shadowed by an incompatible command.
+
+Homebrew owns its Cellar payload and linked launcher only. Candidate testing
+uses a generated local formula whose URL points to the candidate archive in a
+local HTTP fixture/cache; it runs real `brew install`, upgrade, unlink/link, and
+uninstall without public release dependency. Stable published formula metadata
+uses final public release URLs and exact x64/arm64 checksums. Prerelease CI uses
+a test-only local formula but does not update stable tap metadata.
+
+WinGet uses the Windows archive with a small open-source native `sdlc.exe`
+launcher built for x64, because portable manifests do not support `.cmd` as the
+nested target. Its source is `cmd/sdlc-launcher/main.go`; CI pins the Go
+toolchain, uses `CGO_ENABLED=0`, `GOOS=windows`, `GOARCH=amd64`,
+`-trimpath`, and an empty build ID, rebuilds twice, and compares bytes. The
+archive already contains the extracted payload; the launcher
+resolves Node 22+ and invokes `package/bin/sdlc.mjs`. WinGet declares the Node
+LTS package dependency and owns only its portable archive/link. Local manifest
+validation establishes submission readiness; community acceptance and client
+discoverability remain postpublication evidence.
+
+Stable WinGet manifests reference the public stable asset. Prerelease Windows
+CI generates a test-only manifest pointing to the local candidate archive,
+validates its schema/digest/installer behavior, and discards it; stable WinGet
+metadata publication is not applicable to prereleases, while the native
+Windows standalone lifecycle remains release-blocking.
+
+Channel switching resolves and invokes the new launcher by absolute path before
+removing the old package. Homebrew switching installs with `--skip-link`,
+invokes the new Cellar launcher directly, verifies framework update/doctor, then
+captures the existing `sdlc` link target. If that link belongs to a global npm
+installation, it is treated as an unsupported external/legacy channel and is
+not automatically removed. The documented npm channel uses `npx` or an
+extracted versioned payload and owns no persistent global `sdlc` link.
+If the existing link belongs to another Homebrew keg, `brew unlink` retains the
+old keg and payload until the new `brew link` succeeds. Link promotion runs
+when the destination is absent or when the existing target is proven owned by
+that old keg. An absent destination is the normal supported npm-to-Homebrew
+case. An unidentified existing target fails without replacement. A link/unlink
+failure restores the captured owned target while the old keg still exists and
+retains both payloads; it never removes an unidentified file.
+
+The reverse Homebrew-to-npm path uses the documented non-global `npx` or
+extracted-package entry by absolute path, updates/verifies `COPILOT_HOME`, and
+then optionally unlinks/uninstalls Homebrew. It does not create or compete for
+a global npm bin link. Global `npm install -g` is outside the supported channel
+contract and receives only manual ownership diagnostics.
+
+WinGet owns its scope-specific portable alias under
+`Microsoft\WinGet\Links` and performs same-PackageIdentifier upgrade;
+switches from another channel invoke the new WinGet install location directly,
+verify framework update/doctor, then remove the old channel. If validation
+fails, uninstall the new channel payload and retain the old payload; neither
+path rolls back an explicitly requested framework purge. PATH precedence is
+diagnosed but never used to choose the launcher during switching.
+
+The release-blocking native matrix is:
+
+| Job | Required evidence |
+| --- | --- |
+| Linux x64 | standalone archive, npm-denied install, lifecycle, payload/checksum verification |
+| Windows x64 | PowerShell standalone, cmd launcher, WinGet manifest validation, paths with spaces, hooks |
+| macOS Intel x64 | standalone and Homebrew install/update/uninstall |
+| macOS Apple Silicon arm64 | standalone and Homebrew install/update/uninstall |
+
+Each job records runner image/architecture plus `process.platform`,
+`process.arch`, and host-native architecture evidence. macOS jobs require
+`uname -m` and `sysctl.proc_translated`; Intel evidence fails under Rosetta and
+arm64 evidence requires native arm64. The launcher uses the same validated Node
+path for preflight and execution. Emulation cannot satisfy a native
+requirement. Release publication depends on every mandatory job; a failed,
+skipped, cancelled, or absent result blocks it.
+
+Stable release metadata is generated only for stable versions. Prereleases may
+publish npm `next` and prerelease GitHub assets but do not update WinGet or
+Homebrew stable metadata. WinGet completion distinguishes locally valid,
+submission-ready manifests from later community repository acceptance and
+client discoverability.
+
+The prepublication job uploads one immutable `release-bundle` artifact
+containing every candidate asset, descriptor, checksum file, generated stable
+metadata, and source commit. Publisher jobs download only that bundle. GitHub
+Release begins as a draft, uploads assets idempotently only when existing asset
+digests match, publishes after all required destinations succeed, and retains
+explicit partial-publication state when npm or another destination succeeds
+first. Retry never rebuilds bytes.
+
+Postpublication acceptance runs from empty anonymous clients with fresh caches
+and no repository or npm credentials. It retrieves release metadata,
+`SHA256SUMS`, descriptor, and assets, verifies them against the persisted
+prepublication descriptor before execution, and exercises npm, direct
+standalone, and published Homebrew lifecycles. Stable releases require
+Homebrew acceptance; prereleases mark published-Homebrew acceptance
+not-applicable while retaining the native local-formula gate. WinGet client
+installation becomes passing only after community acceptance.
+Microsoft CFS quarantine, package exceptions, client network blocks, WinGet
+policy, and OS execution controls remain separate Blocked diagnostics; no
+installer changes or bypasses those controls.
 Installation documentation covers prerequisites, install/update/uninstall,
 activation, local-only Git use, repository configuration, and recovery.
 
@@ -225,13 +425,16 @@ Instructions/hooks take effect using the CLI's documented reload/restart rules.
 Cross-platform behavior is not inferred merely from writing documentation or
 executing a foreign-shell parser on another host.
 
-### 3.1 Distribution CI/CD
+### 3.2 Distribution CI/CD
 
 The repository's GitHub Actions workflow runs on pull requests, main-branch
 updates, version tags, and explicit manual dispatch using Node.js 22. It executes
 the existing static/source checks and deterministic tests before packaging.
-No dependency installation is needed because the runtime and build scripts use
-only Node.js built-ins plus the available npm CLI.
+The framework runtime and npm packager use only Node.js built-ins plus npm.
+Multi-channel release jobs additionally pin Go for the Windows launcher and use
+host-native archive, Homebrew, and WinGet validation tools only in their
+applicable matrix jobs; these are build-time tools, not framework runtime
+dependencies.
 
 `scripts/package.mjs` invokes `npm pack --ignore-scripts` twice in isolated
 destinations and requires identical SHA-256 digests. The package filename is
@@ -267,10 +470,12 @@ Copilot home containing spaces and pre-existing instructions, runs the installed
 `doctor`, verifies a same-package update is idempotent, and uninstalls. It checks
 that owned content is removed, user instructions are preserved, and seeded
 framework runtime content remains byte-for-byte unchanged after update and
-uninstall. The successful workflow uploads the single versioned `.tgz` as its
-project/version-named retained workflow artifact. On version tags, a separate
-least-privilege job downloads that validated artifact and publishes it to the
-matching GitHub Release. It never uses the real Copilot
+uninstall. The npm verifier feeds the multi-channel packager rather than publishing
+directly. The successful workflow uploads the immutable `release-bundle`
+described in section 3.1, including the `.tgz`, platform archives, descriptor,
+checksums, and package-manager metadata. On stable version tags, separate
+least-privilege publisher jobs download that exact bundle for npm, GitHub
+Release, Homebrew tap, and WinGet submission-ready output. It never uses the real Copilot
 home, provider credentials, cloud resources, network deployment, or LLM
 evaluation.
 The extraction step disables npm bin-link creation because verification invokes
@@ -282,7 +487,7 @@ disable update notifications, and force npm offline. This prevents a nominally
 local test from reading credentials, contacting the registry, or writing to the
 developer's real npm state.
 
-### 3.2 Focused engineering instruction pack
+### 3.3 Focused engineering instruction pack
 
 The source instruction pack lives under `assets/instructions/` and installs
 under `<copilot-home>/sdlc/instructions/`. Each file owns one task concern:
@@ -330,7 +535,7 @@ content, partial installation rolls back safe writes, and uninstall preserves
 modified files. Static and integration tests verify substantive content,
 cross-file references, package inclusion, installed locations, and removal.
 
-### 3.3 Host, shell, path, and process adapters
+### 3.4 Host, shell, path, and process adapters
 
 The framework has one canonical internal model and explicit adapters at native
 boundaries. `src/platform.mjs` owns pure platform descriptors, path comparison
@@ -2106,12 +2311,13 @@ with visible consequences and stated limits.
 | FR-039 | User-authorized PR creation/reuse, source/target resolution, publishing and merge boundaries, duplicate prevention (6.2, 7.5, 8.1) |
 | FR-040 | Per-environment PR requirements, current check provenance, independent artifact/review/merge readiness, PROD readiness reporting (7.2, 7.5, 10.2, 11, 12) |
 | FR-041 | Built-in `/review` candidate stage, candidate-bound evidence and invalidation, user completion, and publication/DEV gates (5.1, 7.2.1, 7.5, 8.1, 10.3, 12) |
-| FR-042 | Reproducible single-file project/version package, internal digest/inventory comparison, isolated lifecycle verification, and retained CI artifact (3.1) |
-| FR-043 | Dedicated technology-neutral knowledge, coding, testing, building, and reviewing guides with task-specific loading and repository precedence (3.2, 10.3) |
+| FR-042 | Reproducible single-file project/version package, internal digest/inventory comparison, isolated lifecycle verification, and retained CI artifact (3.2) |
+| FR-043 | Dedicated technology-neutral knowledge, coding, testing, building, and reviewing guides with task-specific loading and repository precedence (3.3, 10.3) |
 | FR-049 | Canonical environment resolution, scoped provider-label mappings, stage separation, and unmanaged unresolved execution (7.4, 8.1, 10.2) |
 | FR-050 | Provider-neutral execution identities, adapter-derived verified links, Azure DevOps reference mapping, extensible registration, and complete PR association (7.4, 7.5) |
-| FR-051 | Shared lifecycle-intent guidance, consistent focused-skill interpretation, useful stage work, and no fabricated override credit (3.2, 8, 10.3) |
+| FR-051 | Shared lifecycle-intent guidance, consistent focused-skill interpretation, useful stage work, and no fabricated override credit (3.3, 8, 10.3) |
 | FR-052 | Policy-selected STAGING owner/location, authorized fallback, managed execution boundaries, and owner-independent result reporting (7.2, 7.4, 8.1, 10.2) |
+| FR-053 | Shared multi-channel payload identity, standalone launchers, WinGet/Homebrew ownership, native release gates, and public-client acceptance (3.1, 3.2) |
 
 ## 15. Focused test impact
 

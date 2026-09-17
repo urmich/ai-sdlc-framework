@@ -273,6 +273,7 @@ formalized in section 6. All sources below concern framework behavior.
 | S-51 | 2026-09-16 | Pipeline monitoring and links must use a provider-neutral execution identity plus concrete provider adapters. Ship an Azure DevOps reference adapter, make additional adapters independently extensible, and document the exact adapter contract so agents never invent provider translations or verify a URL by accessibility alone. |
 | S-52 | 2026-09-16 | Every focused lifecycle skill must use the same unmistakable-intent rule as the global framework instructions. Requests to implement, fix, test, publish, or act immediately activate the normal flow and do not by themselves skip Requirements, Test Design, or Technical Design. |
 | S-53 | 2026-09-16 | Staging access is environment-specific. Dedicated secured machines and user-owned testing are supported policy choices, not universal framework assumptions. The selected environment contract determines location, owner, automation, and available agent execution. This supersedes S-33's universal wording. |
+| S-54 | 2026-09-17 | Distribute the OSS framework through npm, standalone platform archives/installers, WinGet, Homebrew, and direct release downloads. Every channel must install the same verified framework version and preserve clean migration, doctor, update, uninstall, ownership, and restart behavior. Build the channels in parallel where their shared contract permits it. |
 
 ## 6. Framework requirements
 
@@ -1610,7 +1611,9 @@ project name and version rather than naming the artifact after the CI/CD process
 - AC-042.2: Packaging produces exactly one archive named
   `ai-sdlc-framework-<version>.tgz`, derived from package metadata. Tests,
   repository metadata, generated runtime state, and unrelated local files are
-  excluded from the installable archive.
+  excluded from the npm installable archive. Additional platform distribution
+  wrappers under FR-053 are separate release artifacts derived from that same
+  validated payload.
 - AC-042.3: Repeating packaging for the same source and toolchain produces the
   same SHA-256 digest. CI retains deterministic package identity, size, file
   inventory, and digest data internally and compares the distributable against a
@@ -2191,3 +2194,92 @@ requirements while preserving explicit promotion and completion boundaries.
   STAGING execution policy validation.
 
 **Source:** S-53.
+
+### 6.25 Multi-channel public distribution
+
+#### FR-053 - Provide standalone, WinGet, and Homebrew installation channels
+
+The framework must be installable without direct npm-registry access through
+verified standalone release artifacts, WinGet on Windows, and Homebrew on
+macOS. All channels must install the same framework payload and lifecycle
+behavior as the npm package.
+
+**Definition of Done**
+
+- AC-053.1: One versioned release produces the npm package plus deterministic
+  standalone archives for Windows, macOS, and Linux. The framework payload is
+  architecture-neutral JavaScript; supported execution requires a Node 22+
+  runtime available for the host architecture.
+- AC-053.2: Standalone archives contain the framework payload, platform
+  launcher/installer, license, version metadata, and cryptographic checksum
+  references. They do not require access to npmjs.org during installation.
+- AC-053.3: Standalone installation may require a documented supported Node.js
+  runtime, but it validates Node 22 or later before mutating `COPILOT_HOME`.
+  WinGet and Homebrew declare or install their applicable Node dependency and
+  every launcher verifies the actual selected runtime before any framework or
+  Copilot-home mutation. A missing, shadowed, or incompatible runtime preserves
+  the existing installation. npm-independent does not mean Node-free or fully
+  offline.
+- AC-053.4: Every channel supports normal install/update, explicit
+  `--purge-existing` clean migration, `doctor`, ordinary state-preserving
+  uninstall, and explicit purge through the same underlying CLI contracts.
+- AC-053.15: Standalone installers may explicitly install into
+  `COPILOT_HOME`. WinGet and Homebrew own only their channel-managed
+  launcher/payload location; users then invoke that launcher’s `sdlc install`
+  or `sdlc install --purge-existing` command to mutate `COPILOT_HOME`.
+  Package-manager upgrade replaces only the channel payload. Package-manager
+  uninstall never silently removes Copilot-home state or performs purge.
+- AC-053.16: Switching channels is supported by installing the new channel
+  payload first, running its explicit framework install/update or clean
+  migration, and only then removing the old channel payload. Removing an old
+  package afterward cannot delete the replacement Copilot-home installation.
+- AC-053.5: All channels preserve unrelated Copilot content, use ownership
+  manifests, require restart after installation/update, and never claim hooks
+  were hot-reloaded.
+- AC-053.6: WinGet manifests identify the exact public Windows installer URL,
+  version, architecture, installer type, SHA-256 digest, upgrade behavior, and
+  uninstall command. Manifest validation passes before publication.
+- AC-053.7: Homebrew formula/cask metadata identifies the exact public macOS
+  artifact URL, version, architecture-specific SHA-256 digest, Node dependency,
+  install/update behavior, and uninstall cleanup. Audit/style validation passes
+  before publication.
+- AC-053.8: Direct release assets and package-manager metadata are publicly
+  reachable without source-repository collaborator access. Publishing therefore
+  uses a public repository or another explicitly approved public artifact host.
+- AC-053.9: CI builds each artifact from the validated source revision, verifies
+  archive inventory and checksums, verifies a shared payload manifest/digest
+  across npm and every wrapper, and permits only documented platform launcher,
+  metadata, and line-ending differences. Direct-download tests verify the
+  published checksum before execution. A checksum or payload mismatch fails
+  before installation or destructive migration. CI installs each mandatory
+  native channel into an isolated Copilot home and prevents release publication
+  when any required artifact or metadata is inconsistent.
+- AC-053.10: Native Windows CI exercises PowerShell and Command Prompt
+  installation, update, doctor, uninstall, clean migration, paths with spaces,
+  and hook command payloads on Windows x64. Native macOS CI exercises the
+  standalone and Homebrew paths on both Intel x64 and Apple Silicon arm64.
+  Native Linux x64 CI exercises the standalone shell path. These four native
+  host/architecture combinations are release-blocking; other Node-supported
+  architectures are marked unverified until native runners are available.
+- AC-053.11: One release version is used consistently across npm, GitHub
+  Release assets, standalone metadata, WinGet, and Homebrew. Prerelease channels
+  do not become stable/latest channels. Initial WinGet and Homebrew metadata is
+  stable-release-only.
+- AC-053.12: Documentation presents npm as the simplest general path, explains
+  corporate quarantine separately, and provides equivalent standalone, WinGet,
+  Homebrew, direct archive, update, and uninstall commands without describing
+  any channel as a security-control bypass.
+- AC-053.13: Standalone archives are complete only when published as publicly
+  reachable release assets and successfully installed from a clean client.
+  Homebrew is complete when its supported tap/formula is publicly reachable and
+  `brew install`/upgrade/uninstall are verified. WinGet metadata is
+  repository-ready when local manifest validation passes, but public-client
+  availability is reported separately until the community repository accepts
+  the submission.
+- AC-053.14: Microsoft CFS quarantine, package exceptions, client-device
+  registry access, WinGet policy, and OS download/execution controls remain
+  separate external controls under FR-045.3. Blocked clients report the exact
+  control and use only approved waiting, exception, or alternate-channel
+  guidance; another channel is never guaranteed to bypass policy.
+
+**Source:** S-54.

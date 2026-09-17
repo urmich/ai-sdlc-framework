@@ -125,3 +125,69 @@ jobs:
           fi
           npm publish "./dist/${{ needs.validate-package.outputs.artifact_name }}.tgz" \
             --access public --tag "$DIST_TAG" "${PROVENANCE_ARGS[@]}"
+          CONSUMER_ROOT="$(mktemp -d)"
+          PUBLISHED_HOME="$CONSUMER_ROOT/copilot-home"
+          PUBLISHED_CACHE="$CONSUMER_ROOT/npm-cache"
+          PUBLISHED_NPMRC="$CONSUMER_ROOT/npmrc"
+          mkdir -p "$PUBLISHED_HOME/sdlc/runtime" "$PUBLISHED_CACHE"
+          printf 'registry=https://registry.npmjs.org/\n' > "$PUBLISHED_NPMRC"
+          printf 'Preserve consumer instructions.\n' \
+            > "$PUBLISHED_HOME/copilot-instructions.md"
+          printf '{"retained":true}\n' \
+            > "$PUBLISHED_HOME/sdlc/runtime/preexisting.json"
+          cd "$CONSUMER_ROOT"
+          for attempt in 1 2 3 4 5 6; do
+            if env -u NODE_AUTH_TOKEN NPM_CONFIG_USERCONFIG="$PUBLISHED_NPMRC" \
+              NPM_CONFIG_CACHE="$PUBLISHED_CACHE" npm view \
+              "ai-sdlc-framework@$PACKAGE_VERSION" version \
+              --registry=https://registry.npmjs.org >/dev/null; then
+              break
+            fi
+            test "$attempt" -lt 6 || exit 1
+            sleep 10
+          done
+          env -u NODE_AUTH_TOKEN NPM_CONFIG_USERCONFIG="$PUBLISHED_NPMRC" \
+            NPM_CONFIG_CACHE="$PUBLISHED_CACHE" \
+            npx --yes --registry=https://registry.npmjs.org \
+            --package="ai-sdlc-framework@$PACKAGE_VERSION" \
+            sdlc install --home "$PUBLISHED_HOME"
+          node "$PUBLISHED_HOME/sdlc/bin/sdlc.mjs" doctor \
+            --home "$PUBLISHED_HOME" > doctor.json
+          node -e "const r=require('./doctor.json');if(!r.installed||r.frameworkVersion!==process.argv[1]||r.findings.length)process.exit(1)" "$PACKAGE_VERSION"
+          env -u NODE_AUTH_TOKEN NPM_CONFIG_USERCONFIG="$PUBLISHED_NPMRC" \
+            NPM_CONFIG_CACHE="$PUBLISHED_CACHE" \
+            npx --yes --registry=https://registry.npmjs.org \
+            --package="ai-sdlc-framework@$PACKAGE_VERSION" \
+            sdlc update --home "$PUBLISHED_HOME" > update.json
+          node -e "const r=require('./update.json');if(!r.installed||r.changedFiles.length)process.exit(1)"
+          node "$PUBLISHED_HOME/sdlc/bin/sdlc.mjs" doctor \
+            --home "$PUBLISHED_HOME" > update-doctor.json
+          node -e "const r=require('./update-doctor.json');if(!r.installed||r.frameworkVersion!==process.argv[1]||r.findings.length)process.exit(1)" "$PACKAGE_VERSION"
+          node "$PUBLISHED_HOME/sdlc/bin/sdlc.mjs" uninstall \
+            --home "$PUBLISHED_HOME" > uninstall.json
+          node -e "const fs=require('node:fs');const r=require('./uninstall.json');if(!r.uninstalled||r.preserved.length||fs.readFileSync(process.argv[1],'utf8')!=='{\"retained\":true}\\n'||fs.existsSync(process.argv[2])||fs.existsSync(process.argv[3])||!fs.readFileSync(process.argv[4],'utf8').includes('Preserve consumer instructions.'))process.exit(1)" \
+            "$PUBLISHED_HOME/sdlc/runtime/preexisting.json" \
+            "$PUBLISHED_HOME/sdlc/install-manifest.json" \
+            "$PUBLISHED_HOME/hooks/sdlc.json" \
+            "$PUBLISHED_HOME/copilot-instructions.md"
+          env -u NODE_AUTH_TOKEN NPM_CONFIG_USERCONFIG="$PUBLISHED_NPMRC" \
+            NPM_CONFIG_CACHE="$PUBLISHED_CACHE" \
+            npx --yes --registry=https://registry.npmjs.org \
+            --package="ai-sdlc-framework@$PACKAGE_VERSION" \
+            sdlc install --purge-existing --home "$PUBLISHED_HOME"
+          node "$PUBLISHED_HOME/sdlc/bin/sdlc.mjs" doctor \
+            --home "$PUBLISHED_HOME" > clean-doctor.json
+          node -e "const fs=require('node:fs');const r=require('./clean-doctor.json');if(!r.installed||r.frameworkVersion!==process.argv[1]||r.findings.length||fs.existsSync(process.argv[2]))process.exit(1)" \
+            "$PACKAGE_VERSION" \
+            "$PUBLISHED_HOME/sdlc/runtime/preexisting.json"
+          node "$PUBLISHED_HOME/sdlc/bin/sdlc.mjs" uninstall --purge \
+            --home "$PUBLISHED_HOME"
+          env -u NODE_AUTH_TOKEN NPM_CONFIG_USERCONFIG="$PUBLISHED_NPMRC" \
+            NPM_CONFIG_CACHE="$PUBLISHED_CACHE" \
+            npx --yes --registry=https://registry.npmjs.org \
+            --package="ai-sdlc-framework@$PACKAGE_VERSION" \
+            sdlc doctor --home "$PUBLISHED_HOME" > final-doctor.json
+          node -e "const fs=require('node:fs');const r=require('./final-doctor.json');if(r.installed||fs.existsSync(process.argv[1])||fs.existsSync(process.argv[2])||fs.existsSync(process.argv[3])||!fs.readFileSync(process.argv[4],'utf8').includes('Preserve consumer instructions.'))process.exit(1)" \
+            "$PUBLISHED_HOME/sdlc" "$PUBLISHED_HOME/hooks/sdlc.json" \
+            "$PUBLISHED_HOME/skills/sdlc" \
+            "$PUBLISHED_HOME/copilot-instructions.md"

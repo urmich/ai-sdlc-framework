@@ -6,14 +6,40 @@ requirement-specific definitions of done, planned evidence, and an approved
 technical design before implementation begins.
 
 ```mermaid
-flowchart LR
-  R[Requirements] --> T[Test Plan]
-  T --> D[Technical Design]
-  D --> C[Coding and local validation]
-  C --> V[Candidate Review]
-  V --> DEV[DEV]
-  DEV --> S[STAGING]
-  S --> P[Production readiness]
+flowchart TB
+  subgraph DEFINE["1. Define the right outcome"]
+    direction LR
+    R["Requirements + Definition of Done<br/>Clarify intent; expose ambiguity"]
+    T["Test Design → living Test Plan<br/>Map every requirement to evidence"]
+    D["Technical Design<br/>Design only after outcomes and tests are clear"]
+    R -->|"user approval"| T
+    T -->|"user approval"| D
+  end
+
+  subgraph BUILD["2. Build with fast feedback"]
+    direction LR
+    C["Coding<br/>Implement against approved intent"]
+    L["Unit-first local validation<br/>Every fix starts a fresh evidence cycle"]
+    V["Candidate Review<br/>Review the exact validated candidate"]
+    C --> L
+    L --> V
+    L -. "fix and revalidate" .-> C
+    V -. "finding and revalidate" .-> C
+  end
+
+  subgraph PROMOTE["3. Promote with confidence"]
+    direction LR
+    E["Development environment<br/>Build → deploy → test"]
+    S["Pre-production environment<br/>Policy-selected validation owner/location"]
+    P["Production readiness<br/>Current evidence and policy; recommendation by default"]
+    E -->|"completion + authorization"| S
+    S -->|"completion + readiness checks"| P
+  end
+
+  D -->|"user approval"| C
+  V -->|"explicit remote authorization"| E
+  O["Less solution-first bias → less rework → faster delivery + higher quality"]
+  P --> O
 ```
 
 The framework combines installable Copilot instructions and skills with an
@@ -28,6 +54,12 @@ AI coding agents are naturally good at proposing solutions quickly. That speed
 can create rework when intent, acceptance conditions, test strategy, operational
 constraints, or user authority are still unclear.
 
+The common failure mode is not that the generated code is syntactically poor.
+It is that the agent confidently optimizes for an incomplete interpretation:
+the first plausible architecture, the easiest test, the most familiar
+technology, or a successful build that does not prove the requested outcome.
+Fast implementation then amplifies an early assumption.
+
 This framework changes the default sequence:
 
 1. Define the right outcome and its observable Definition of Done.
@@ -37,6 +69,45 @@ This framework changes the default sequence:
 5. Review the exact candidate before publication or remote validation.
 6. Promote through DEV, Staging, and PROD readiness only with explicit user
    authority and current evidence.
+
+## How the framework reduces bias and suboptimal results
+
+The framework does not claim that one lifecycle is universally correct. It
+changes the default reasoning order and keeps assumptions, evidence, and user
+authority visible:
+
+- **Outcome before implementation.** Requirement-specific acceptance conditions
+  force the agent to distinguish the requested result from its first solution
+  idea.
+- **Evidence before architecture.** Test Design asks how each outcome can be
+  disproved or confirmed before Technical Design selects components.
+- **Multiple authoritative artifacts.** Requirements, Test Plans, Technical
+  Designs, repository instructions, provider facts, and source history remain
+  distinct. One convenient document cannot silently replace another.
+- **Explicit uncertainty.** Missing requirements, unsupported tools, unavailable
+  environments, stale facts, and conflicting instructions remain visible rather
+  than being converted into confident defaults.
+- **Candidate-bound validation.** Test evidence, Review, artifacts, deployments,
+  and PR checks are tied to exact source, configuration, and Test Plan identity.
+  A changed candidate invalidates stale confidence.
+- **Unit-first correction loop.** Every implementation fix restarts local
+  evidence from the smallest required tests before broader checks.
+- **Independent candidate Review.** The validated candidate receives a separate
+  `/review` pass before its first publication or remote validation.
+- **Provider adapters instead of guessed equivalence.** Generic lifecycle
+  concepts are translated through concrete provider contracts, reducing
+  provider-field guessing and rejecting observations or run links whose
+  identities do not match.
+- **Human-governed boundaries.** The user approves consequential transitions
+  and may explicitly override any lifecycle recommendation. Overrides remain
+  visible and cannot manufacture external permission or passing evidence.
+- **Recovery without narrative invention.** Durable identities, bounded records,
+  and reconciliation restore what is proven after interruption without asking
+  the model to reconstruct history from memory.
+
+The intended result is not more ceremony. It is fewer expensive iterations
+caused by solving the wrong problem, testing the wrong thing, or promoting stale
+evidence.
 
 ## Core behavior
 
@@ -87,6 +158,14 @@ macOS/Linux shells, Windows PowerShell, and Windows Command Prompt:
 
 ```sh
 npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@latest sdlc install
+```
+
+For acceptance testing of the current release, pin the exact version used by
+the [Azure DevOps acceptance test](docs/ado-acceptance-test.md):
+
+```sh
+npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@0.3.0 sdlc install --purge-existing
+node "<COPILOT_HOME>/sdlc/bin/sdlc.mjs" doctor --home "<COPILOT_HOME>"
 ```
 
 This downloads the package to npm's cache and installs the managed instructions,
@@ -452,6 +531,7 @@ be enabled for the repository.
 | [Technical Design](docs/technical-design.md) | Detailed implementation, state, authorization, recovery, and evidence contracts |
 | [CLI reference](docs/cli.md) | Installation, commands, structured inputs, and operational behavior |
 | [Provider adapter guide](docs/provider-adapters.md) | Generic execution identity, Azure DevOps adapter, and extension contract |
+| [Azure DevOps acceptance test](docs/ado-acceptance-test.md) | Agent prompt and evidence checklist for a safe existing-repository handoff |
 
 ## Repository organization
 

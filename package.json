@@ -30,5 +30,5 @@
     "./store": "./src/store.mjs"
   },
   "files": ["bin", "src", "assets", "README.md", "docs/cli.md",
-    "docs/provider-adapters.md"]
+    "docs/provider-adapters.md", "docs/ado-acceptance-test.md"]
 }
