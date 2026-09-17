@@ -1,9 +1,9 @@
 # T-60 — candidate-bound Windows x64 tester handoff
 
-Content status: **PendingIntegration**. Native execution status: **NotRun**.
+Content status: **Complete**. Native execution status: **NotRun**.
 This deterministic handoff is not a passed Windows test or a claim of WinGet
-community acceptance. Final lifecycle scenarios and approval instructions must
-be reviewed after installer integration before a tester executes them.
+community acceptance. It contains the complete approved procedure for a native
+Windows x64 tester. Record actual results separately.
 
 ## Exact candidate
 
@@ -36,9 +36,181 @@ mutable branch names, latest-version URLs, or a second payload build:
   native WinGet execution, community acceptance, and client discovery separate.
   CI has verified only cross-build/PE/schema/URL/metadata/pre-JS payload integrity.
 
-## Pending integration checklist
+## Starting state for this handoff
 
-Finalize the approved installation, update, doctor, preservation, channel-switch,
-uninstall/purge, and retained-hook scenarios against this exact candidate.
-Capture commands, exit codes, output and candidate digests for each scenario.
-Do not mark T-60 Passed merely because this prompt generated or validated.
+- The repository may already be cloned, but installation and verification use
+  the exact published release bytes identified above, not checkout files.
+- GitHub Copilot CLI is installed.
+- The previous private framework generation may be installed as **v1.2.4**.
+- Run migration from an external PowerShell window with **all GitHub Copilot CLI
+  processes closed**. Do not delete active hook/runtime files from inside a
+  Copilot session.
+- GitHub authentication is needed only for repository or workflow operations.
+  Do not store an npm publishing token or run `npm publish` on this machine;
+  publication is performed by GitHub Actions through npm OIDC.
+
+## 1. Start evidence capture and verify the native host
+
+Save this prompt and its companion `windows-tester-prompt.json` in one directory,
+open PowerShell 7 or Windows PowerShell 5.1 there, and run:
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$Evidence = Join-Path $PWD 'windows-evidence'
+New-Item -ItemType Directory -Force -Path $Evidence | Out-Null
+Start-Transcript -Path (Join-Path $Evidence 'transcript.txt') -Force
+
+$Binding = Get-Content -LiteralPath '.\windows-tester-prompt.json' -Raw | ConvertFrom-Json
+$HostEvidence = [ordered]@{
+  os = [Environment]::OSVersion.VersionString
+  processorArchitecture = $env:PROCESSOR_ARCHITECTURE
+  nodeVersion = (& node --version)
+  nodePlatform = (& node -p 'process.platform')
+  nodeArchitecture = (& node -p 'process.arch')
+  powershell = $PSVersionTable.PSVersion.ToString()
+}
+$HostEvidence | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Evidence 'host.json') -Encoding utf8
+if ($HostEvidence.nodePlatform -ne 'win32' -or $HostEvidence.nodeArchitecture -ne 'x64') {
+  throw 'Native Windows x64 Node.js is required'
+}
+if ([int]((& node -p 'process.versions.node.split(`.`)[0]')) -lt 22) {
+  throw 'Node.js 22 or later is required'
+}
+```
+
+Do not change execution policy to make the test pass. Report an execution-policy
+restriction as `NotRun` with a separate `Blocked` reason.
+
+## 2. Download and verify before extraction
+
+```powershell
+$Work = Join-Path $env:TEMP 'AI SDLC Framework Windows Test'
+Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path $Work | Out-Null
+
+$Descriptor = Join-Path $Work 'release-descriptor.json'
+$Checksums = Join-Path $Work 'SHA256SUMS'
+$Archive = Join-Path $Work $Binding.archive.filename
+Invoke-WebRequest -Uri $Binding.urls.descriptor -OutFile $Descriptor
+Invoke-WebRequest -Uri $Binding.urls.checksums -OutFile $Checksums
+Invoke-WebRequest -Uri $Binding.urls.archive -OutFile $Archive
+
+function Assert-Sha256([string]$Path, [string]$Expected) {
+  $Actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($Actual -ne $Expected.ToLowerInvariant()) {
+    throw "SHA-256 mismatch for $Path"
+  }
+}
+Assert-Sha256 $Descriptor $Binding.identity.descriptorSha256
+Assert-Sha256 $Checksums $Binding.identity.checksumsSha256
+Assert-Sha256 $Archive $Binding.archive.sha256
+if ((Get-Item -LiteralPath $Archive).Length -ne [int64]$Binding.archive.size) {
+  throw 'Windows archive size mismatch'
+}
+if (-not (Select-String -LiteralPath $Checksums -SimpleMatch $Binding.archive.sha256,
+    $Binding.archive.filename -Quiet)) {
+  throw 'SHA256SUMS does not bind the expected Windows archive'
+}
+```
+
+If the release assets are not yet public, record this phase as `NotRun` with
+`Blocked: release assets unavailable`; do not substitute checkout bytes or a
+mutable `latest` URL.
+
+## 3. Isolated standalone lifecycle
+
+Only after every download check passes:
+
+```powershell
+$Extracted = Join-Path $Work 'extracted'
+Expand-Archive -LiteralPath $Archive -DestinationPath $Extracted
+$Installer = Join-Path $Extracted 'install.ps1'
+$TestHome = Join-Path $Work 'copilot home'
+$TestChannel = Join-Path $Work 'standalone channel'
+New-Item -ItemType Directory -Force -Path $TestHome | Out-Null
+Set-Content -LiteralPath (Join-Path $TestHome 'unrelated-user-file.txt') -Value 'preserve-me'
+
+& $Installer install --channel-root $TestChannel --home $TestHome
+if ($LASTEXITCODE) { throw 'Isolated install failed' }
+& $Installer doctor --channel-root $TestChannel --home $TestHome |
+  Tee-Object -FilePath (Join-Path $Evidence 'isolated-doctor.json')
+if ($LASTEXITCODE) { throw 'Isolated doctor failed' }
+& $Installer update --channel-root $TestChannel --home $TestHome
+if ($LASTEXITCODE) { throw 'Isolated update failed' }
+& $Installer uninstall --channel-root $TestChannel --home $TestHome
+if ($LASTEXITCODE) { throw 'Isolated ordinary uninstall failed' }
+if (-not (Test-Path -LiteralPath (Join-Path $TestHome 'unrelated-user-file.txt'))) {
+  throw 'Ordinary uninstall removed unrelated content'
+}
+& $Installer install --purge-existing --channel-root $TestChannel --home $TestHome
+if ($LASTEXITCODE) { throw 'Isolated clean migration failed' }
+& $Installer uninstall --purge --channel-root $TestChannel --home $TestHome
+if ($LASTEXITCODE) { throw 'Isolated purge failed' }
+if (-not (Test-Path -LiteralPath (Join-Path $TestHome 'unrelated-user-file.txt'))) {
+  throw 'Purge removed unrelated content'
+}
+```
+
+## 4. Replace the installed private v1.2.4 generation
+
+Close every GitHub Copilot CLI process. From the external PowerShell window:
+
+```powershell
+$CopilotHome = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else {
+  Join-Path $HOME '.copilot'
+}
+$ActualChannel = Join-Path $env:LOCALAPPDATA 'ai-sdlc-framework'
+
+& $Installer install --purge-existing --channel-root $ActualChannel --home $CopilotHome
+if ($LASTEXITCODE) { throw 'v1.2.4 to OSS clean migration failed' }
+& $Installer doctor --channel-root $ActualChannel --home $CopilotHome |
+  Tee-Object -FilePath (Join-Path $Evidence 'post-migration-doctor.json')
+if ($LASTEXITCODE) { throw 'Post-migration doctor failed' }
+```
+
+`--purge-existing` intentionally removes the previous framework installation and
+its framework runtime state. It must preserve unrelated Copilot instructions and
+other user content. Do not run it without accepting that framework-state reset.
+
+## 5. Restart Copilot CLI and verify prompt-led behavior
+
+Start a fresh Copilot CLI process after installation. Capture these observations:
+
+1. An ordinary request to implement a small change starts with Requirements and
+   does not treat urgency, `implement`, `fix`, `go`, or `create a PR` as a stage
+   override.
+2. An unmistakable instruction to skip Requirements produces one consequence
+   warning and then continues unmanaged without fabricating approval or evidence.
+3. Installed hooks load after restart and remain advisory: they surface findings
+   but do not veto user-directed tool execution.
+4. Run the installed `sdlc doctor` command and record the exact version, findings,
+   hook paths, and selected Node executable.
+
+Report a missing browser/login/repository/provider prerequisite separately from
+framework behavior. Do not create or mutate an Azure DevOps repository merely to
+obtain evidence.
+
+## 6. Optional native WinGet evidence
+
+WinGet community availability is separate from the verified standalone archive:
+
+```powershell
+winget search --id Urmich.AISDLCFramework --exact
+winget install --id Urmich.AISDLCFramework --exact --scope user
+```
+
+If the community repository has not accepted the package, record
+`WinGet client availability: NotRun` with `Blocked: package not discoverable`.
+Do not treat locally valid manifests as community acceptance.
+
+## 7. Finish the report
+
+```powershell
+Stop-Transcript
+```
+
+For each phase record `Passed`, `Failed`, `NotRun`, or `Blocked` plus the exact
+command, exit code, output file, version, source commit, descriptor/checksum/archive
+digests, and any retained cleanup path. Prompt generation and validation make the
+handoff complete; only returned native evidence can change Windows execution from
+`NotRun`.
