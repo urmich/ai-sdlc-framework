@@ -16,12 +16,16 @@
       .outcome { font: 700 29px Inter, Arial, sans-serif; fill: #111827; text-anchor: middle; }
       .support { font: 18px Inter, Arial, sans-serif; fill: #364152; text-anchor: middle; }
       .footer { font: 600 17px Inter, Arial, sans-serif; fill: #495057; text-anchor: middle; }
+      .step { font: 700 16px Inter, Arial, sans-serif; fill: #ffffff; text-anchor: middle; }
       .define { fill: #d0ebff; stroke: #1971c2; stroke-width: 3; }
       .test { fill: #e5dbff; stroke: #7048e8; stroke-width: 3; }
       .build { fill: #d3f9d8; stroke: #2b8a3e; stroke-width: 3; }
       .release { fill: #fff3bf; stroke: #e67700; stroke-width: 3; }
       .neutral { fill: #ffffff; stroke: #adb5bd; stroke-width: 2; }
       .decision { fill: #fff4e6; stroke: #f08c00; stroke-width: 2; }
+      .connector-blue { fill: none; stroke: #74a9d8; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+      .connector-green { fill: none; stroke: #69b578; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+      .connector-orange { fill: none; stroke: #e9a35a; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
     </style>
   </defs>
 
@@ -36,7 +40,14 @@
   <text x="700" y="190" class="section">2  IMPLEMENT AND VERIFY</text>
   <text x="1315" y="190" class="section">3  RELEASE WITH EVIDENCE</text>
 
+  <path d="M345 355 L345 370 M345 408 L345 425 M345 545 L345 560 M345 598 L345 615 M345 735 L345 750 M345 788 L345 820 L650 820 L650 370 L700 370" class="connector-blue"/>
+  <path d="M950 440 L950 545 M950 685 L950 720" class="connector-green"/>
+  <path d="M1120 767 L1265 767 L1265 295 L1320 295" class="connector-orange"/>
+  <path d="M1522 355 L1522 370 M1522 408 L1522 425 M1522 545 L1522 560 M1522 598 L1522 615" class="connector-orange"/>
+
   <rect x="95" y="235" width="500" height="120" rx="22" class="define"/>
+  <circle cx="62" cy="265" r="19" fill="#1971c2"/>
+  <text x="62" y="271" class="step">1</text>
   <text x="345" y="282" class="box-title">Requirements + acceptance criteria</text>
   <text x="345" y="315" class="box-copy">
     <tspan x="345">Clarify intent, constraints, and assumptions</tspan>
@@ -47,6 +58,8 @@
   <text x="345" y="395" class="gate">HUMAN DECISION</text>
 
   <rect x="95" y="425" width="500" height="120" rx="22" class="test"/>
+  <circle cx="62" cy="455" r="19" fill="#7048e8"/>
+  <text x="62" y="461" class="step">2</text>
   <text x="345" y="472" class="box-title">Test strategy + living evidence plan</text>
   <text x="345" y="505" class="box-copy">
     <tspan x="345">Map every acceptance criterion to evidence</tspan>
@@ -57,6 +70,8 @@
   <text x="345" y="585" class="gate">HUMAN DECISION</text>
 
   <rect x="95" y="615" width="500" height="120" rx="22" class="define"/>
+  <circle cx="62" cy="645" r="19" fill="#1971c2"/>
+  <text x="62" y="651" class="step">3</text>
   <text x="345" y="662" class="box-title">Technical design</text>
   <text x="345" y="695" class="box-copy">
     <tspan x="345">Select architecture after outcomes</tspan>
@@ -67,6 +82,8 @@
   <text x="345" y="775" class="gate">HUMAN DECISION</text>
 
   <rect x="700" y="300" width="500" height="140" rx="22" class="build"/>
+  <circle cx="667" cy="330" r="19" fill="#2b8a3e"/>
+  <text x="667" y="336" class="step">4</text>
   <text x="950" y="354" class="box-title">Incremental implementation</text>
   <text x="950" y="390" class="box-copy">
     <tspan x="950">Build against approved intent</tspan>
@@ -74,19 +91,25 @@
   </text>
 
   <rect x="700" y="545" width="500" height="140" rx="22" class="build"/>
+  <circle cx="667" cy="575" r="19" fill="#2b8a3e"/>
+  <text x="667" y="581" class="step">5</text>
   <text x="950" y="599" class="box-title">Unit-first local verification</text>
   <text x="950" y="635" class="box-copy">
     <tspan x="950">Every correction starts a fresh</tspan>
     <tspan x="950" dy="24">candidate-bound evidence cycle</tspan>
   </text>
 
-  <rect x="780" y="720" width="340" height="95" rx="22" class="neutral"/>
+  <rect x="740" y="720" width="420" height="95" rx="22" class="neutral"/>
+  <circle cx="707" cy="748" r="18" fill="#495057"/>
+  <text x="707" y="754" class="step">6</text>
   <text x="950" y="758" class="box-title">Independent candidate review</text>
   <text x="950" y="790" class="box-copy">Review the exact validated change set</text>
 
   <text x="950" y="840" class="support">Repeat implementation and verification whenever evidence changes</text>
 
   <rect x="1320" y="235" width="405" height="120" rx="22" class="release"/>
+  <circle cx="1287" cy="265" r="19" fill="#e67700"/>
+  <text x="1287" y="271" class="step">7</text>
   <text x="1522" y="282" class="box-title">Development validation</text>
   <text x="1522" y="315" class="box-copy">
     <tspan x="1522">Build, deploy, and test</tspan>
@@ -97,6 +120,8 @@
   <text x="1522" y="395" class="gate">HUMAN DECISION</text>
 
   <rect x="1320" y="425" width="405" height="120" rx="22" class="release"/>
+  <circle cx="1287" cy="455" r="19" fill="#e67700"/>
+  <text x="1287" y="461" class="step">8</text>
   <text x="1522" y="472" class="box-title">Pre-production validation</text>
   <text x="1522" y="505" class="box-copy">
     <tspan x="1522">Policy-selected owner and environment</tspan>
@@ -107,6 +132,8 @@
   <text x="1522" y="585" class="gate">HUMAN DECISION</text>
 
   <rect x="1320" y="615" width="405" height="120" rx="22" class="build"/>
+  <circle cx="1287" cy="645" r="19" fill="#2b8a3e"/>
+  <text x="1287" y="651" class="step">9</text>
   <text x="1522" y="662" class="box-title">Release readiness</text>
   <text x="1522" y="695" class="box-copy">
     <tspan x="1522">Current review, automation, policy,</tspan>
