@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{"type":"command","exec":"node","args":["__SDLC_ENTRY__","hook","sessionStart"],"timeoutSec":5}],
+    "userPromptSubmitted": [{"type":"command","exec":"node","args":["__SDLC_ENTRY__","hook","userPromptSubmitted"],"timeoutSec":5}],
+    "preToolUse": [{"type":"command","exec":"node","args":["__SDLC_ENTRY__","gate"],"timeoutSec":5}],
+    "postToolUse": [{"type":"command","exec":"node","args":["__SDLC_ENTRY__","hook","postToolUse"],"timeoutSec":5}],
+    "postToolUseFailure": [{"type":"command","exec":"node","args":["__SDLC_ENTRY__","hook","postToolUseFailure"],"timeoutSec":5}],
+    "preCompact": [{"type":"command","exec":"node","args":["__SDLC_ENTRY__","hook","preCompact"],"timeoutSec":5}],
+    "agentStop": [{"type":"command","exec":"node","args":["__SDLC_ENTRY__","hook","agentStop"],"timeoutSec":5}],
+    "sessionEnd": [{"type":"command","exec":"node","args":["__SDLC_ENTRY__","hook","sessionEnd"],"timeoutSec":5}]
+  }
+}
