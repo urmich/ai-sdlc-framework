@@ -9,9 +9,10 @@ import { buildPackage } from '../scripts/package.mjs';
 import { buildPlatforms, renderChecksums, writeReleaseMetadata } from '../scripts/package-platforms.mjs';
 import { verifyPlatformPackage, verifyRelease, verifyReleaseChecksums } from '../scripts/verify-platform-package.mjs';
 import { canonical, inventory, readTarGzip, readZip, sha256, tarGzip, zip } from '../packaging/standalone/archive.mjs';
-import { extractEntries, platformEntries, TARGETS, verifyEntries, verifyTree } from '../packaging/standalone/protocol.mjs';
-import { activateChannel, runtimePreflight } from '../packaging/standalone/runtime.mjs';
+import { extractEntries, isPrerelease, platformEntries, TARGETS, verifyEntries, verifyTree } from '../packaging/standalone/protocol.mjs';
+import { activateChannel, runtimePreflight, validateChannelHome } from '../packaging/standalone/runtime.mjs';
 import { isolatedNpmEnvironment } from './npm-environment.mjs';
+import { createNetworkBoundary, deniedEnvironment, networkAdapter, verifyNetworkNegativeControls } from './distribution-network-boundary.mjs';
 
 const execute = promisify(execFile);
 const hostTarget = Object.keys(TARGETS).find(target =>
@@ -22,6 +23,7 @@ let built;
 let payload;
 let nativeEntries;
 let originalTmp;
+let originalCopilotHome;
 const windowsLauncher = process.env.SDLC_WINDOWS_LAUNCHER;
 const targets = windowsLauncher ? Object.keys(TARGETS) : Object.keys(TARGETS).filter(target => target !== 'windows-x64');
 
@@ -30,6 +32,8 @@ test.before(async () => {
   await fs.mkdir(path.join(root, 'scratch'), { recursive: true });
   originalTmp = process.env.TMPDIR;
   process.env.TMPDIR = path.join(root, 'scratch');
+  originalCopilotHome = process.env.COPILOT_HOME;
+  process.env.COPILOT_HOME = path.join(root, 'default copilot home');
   environment = await isolatedNpmEnvironment(root);
   environment.TMPDIR = process.env.TMPDIR;
   payload = await buildPackage({ outputDir: path.join(root, 'npm'), environment });
@@ -45,6 +49,8 @@ test.before(async () => {
 test.after(async () => {
   if (originalTmp === undefined) delete process.env.TMPDIR;
   else process.env.TMPDIR = originalTmp;
+  if (originalCopilotHome === undefined) delete process.env.COPILOT_HOME;
+  else process.env.COPILOT_HOME = originalCopilotHome;
   if (root) await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -66,9 +72,9 @@ function commandFor(source, args) {
     { executable: '/bin/sh', args: [path.join(source, 'install.sh'), ...args] };
 }
 
-async function installer(f, args, env = environment) {
+async function installer(f, args, env = environment, run = execute) {
   const command = commandFor(f.source, [...args, '--channel-root', f.channelRoot, '--home', f.home]);
-  const result = await execute(command.executable, command.args,
+  const result = await run(command.executable, command.args,
     { env: { ...env, SDLC_NODE: process.execPath }, maxBuffer: 4 * 1024 * 1024 });
   return JSON.parse(result.stdout);
 }
@@ -222,61 +228,112 @@ test('T-51 metadata finalization consumes generator artifact records without cir
   await assert.rejects(writeReleaseMetadata({ ...args, metadataFiles: [item, item] }), /Duplicate/u);
 });
 
+test('T-51 all release verification paths reject checksum-consistent prerelease package-manager metadata', async () => {
+  assert.equal(isPrerelease('1.2.3+build-with-dash'), false);
+  assert.equal(isPrerelease('1.2.3-rc.1+build-with-dash'), true);
+  for (const invalid of ['01.2.3', '1.2', '1.2.3-', '1.2.3-01', 'v1.2.3', '1.2.3+']) {
+    assert.throws(() => isPrerelease(invalid), /SemVer/u);
+  }
+  const version = '0.3.0-rc.1+audit-build';
+  const directory = path.join(root, 'prerelease base');
+  await fs.mkdir(directory);
+  const entries = readTarGzip(await fs.readFile(payload.artifact)).map(entry =>
+    entry.path === 'package/package.json' ?
+      { ...entry, data: Buffer.from(JSON.stringify({ ...JSON.parse(entry.data), version })) } : entry);
+  const payloadBytes = tarGzip(entries);
+  const artifact = path.join(directory, `ai-sdlc-framework-${version}.tgz`);
+  await fs.writeFile(artifact, payloadBytes);
+  const filename = `ai-sdlc-framework-${version}-linux-x64.tar.gz`;
+  await fs.writeFile(path.join(directory, filename), tarGzip(platformEntries(payloadBytes, 'linux-x64').entries));
+  const options = { outputDir: directory, artifact, sourceCommit: built.descriptor.sourceCommit, targets: ['linux-x64'] };
+  const initial = await writeReleaseMetadata(options);
+  assert.equal((await verifyRelease({ outputDir: directory, targets: options.targets, rebuild: false })).verified, true);
+  for (const kind of ['homebrew', 'winget']) {
+    const candidate = path.join(root, `prerelease ${kind}`);
+    await fs.cp(directory, candidate, { recursive: true });
+    const metadataName = kind === 'homebrew' ? 'candidate.rb' : 'candidate.yaml';
+    const bytes = Buffer.from('test-only metadata must not be in a release\n');
+    const metadataFile = path.join(candidate, metadataName);
+    await fs.writeFile(metadataFile, bytes);
+    const descriptor = structuredClone(initial.descriptor);
+    descriptor.files.push({ filename: metadataName, kind, sha256: sha256(bytes), size: bytes.length });
+    descriptor.files.sort((left, right) => left.filename < right.filename ? -1 : 1);
+    await fs.writeFile(path.join(candidate, 'release-descriptor.json'), canonical(descriptor));
+    await fs.writeFile(path.join(candidate, 'SHA256SUMS'), renderChecksums(descriptor));
+    await assert.rejects(verifyReleaseChecksums({ outputDir: candidate }), /Prereleases/u);
+    await assert.rejects(verifyRelease({ outputDir: candidate, targets: options.targets, rebuild: false }), /Prereleases/u);
+    await assert.rejects(verifyPlatformPackage({ artifact: path.join(candidate, filename) }), /Prereleases/u);
+    await assert.rejects(writeReleaseMetadata({ ...options, metadataFiles: [{ file: metadataFile, kind }] }), /Prereleases/u);
+  }
+});
+
+test('T-51 network adapters sanitize executable references and fail closed on unsupported native isolation', () => {
+  const env = deniedEnvironment({ HOME: 'isolated-home', PATH: '/unrestricted',
+    npm_execpath: '/absolute/npm-cli.js', NPM_EXECPATH: '/other/npm-cli.js',
+    npm_node_execpath: '/other/node', NPM_CLI_JS: '/third/npm-cli.js',
+    NODE_OPTIONS: '--require /preload.js', NODE_PATH: '/global/modules', HTTPS_PROXY: 'http://proxy' }, '/restricted');
+  assert.deepEqual(Object.keys(env).sort(), ['HOME', 'PATH', 'SDLC_NODE']);
+  assert.equal(env.PATH, '/restricted');
+  const options = { npmRoots: ['/node/npm'], emptyDirectory: '/isolated/empty' };
+  const mac = networkAdapter('darwin', options);
+  assert.match(mac.args[1], /\(deny network\*\)/u);
+  assert.match(mac.args[1], /\(deny file-read\*/u);
+  const linux = networkAdapter('linux', options);
+  for (const flag of ['--user', '--mount', '--net']) assert.ok(linux.args.includes(flag));
+  assert.equal(networkAdapter('win32', options).status, 'NotRun');
+  assert.equal(networkAdapter('unsupported', options).status, 'NotRun');
+});
+
 test('T-51 npm-denied standalone lifecycle preserves unrelated content and runtime until explicit purge',
-  { skip: !hostTarget || process.platform === 'win32' && !windowsLauncher }, async () => {
+  { skip: !hostTarget || process.platform === 'win32' && !windowsLauncher }, async t => {
     const f = await fixture();
-    const denied = path.join(f.directory, 'denied commands');
-    await fs.mkdir(denied);
-    const sentinel = path.join(f.directory, 'forbidden-command-executed');
-    for (const name of ['npm', 'npx', 'curl', 'wget', 'sdlc']) {
-      if (process.platform === 'win32') {
-        await fs.writeFile(path.join(denied, `${name}.cmd`), `@echo invoked>"${sentinel}"\r\n@exit /b 99\r\n`);
-      } else {
-        await fs.writeFile(path.join(denied, name), `#!/bin/sh\nprintf invoked > '${sentinel}'\nexit 99\n`, { mode: 0o755 });
-      }
+    const boundary = await createNetworkBoundary({ directory: f.directory, environment });
+    if (boundary.status === 'NotRun') {
+      const reason = `T-51 network-denied lifecycle NotRun: ${boundary.reason}`;
+      t.diagnostic(reason);
+      if (process.env.SDLC_DISTRIBUTION_TARGET) assert.fail(`${reason}; mandatory native release gate cannot pass`);
+      t.skip(reason);
+      return;
     }
-    const env = { ...environment, PATH: `${denied}${path.delimiter}${environment.PATH}`,
-      HTTP_PROXY: 'http://127.0.0.1:9', HTTPS_PROXY: 'http://127.0.0.1:9',
-      npm_config_registry: 'http://127.0.0.1:9', npm_config_offline: 'true' };
-    const first = await installer(f, ['install'], env);
+    const controls = await verifyNetworkNegativeControls(boundary, f.directory);
+    t.diagnostic(JSON.stringify({ test: 'T-51', status: 'enforced', ...controls }));
+    const runInstaller = args => installer(f, args, boundary.environment, boundary.execute);
+    const first = await runInstaller(['install']);
     assert.equal(first.installed, true);
     assert.match(first.nextAction, /Restart Copilot CLI/u);
     const state = path.join(f.home, 'sdlc/runtime/retained.json');
     await fs.writeFile(state, '{"keep":true}\n');
     const unrelated = path.join(f.home, 'user-settings.json');
     await fs.writeFile(unrelated, '{"unrelated":true}\n');
-    const health = await installer(f, ['doctor'], env);
+    const health = await runInstaller(['doctor']);
     assert.equal(health.installed, true);
     assert.equal(health.findings.length, 0);
     const current = process.platform === 'win32' ?
       { executable: 'powershell.exe', args: ['-NoProfile', '-NonInteractive', '-File',
         path.join(f.channelRoot, 'current.ps1'), 'doctor', '--home', f.home] } :
       { executable: path.join(f.channelRoot, 'current/bin/sdlc'), args: ['doctor', '--home', f.home] };
-    assert.equal(JSON.parse((await execute(current.executable, current.args,
-      { env: { ...env, SDLC_NODE: process.execPath } })).stdout).installed, true);
+    assert.equal(JSON.parse((await boundary.execute(current.executable, current.args)).stdout).installed, true);
     if (process.platform !== 'win32') {
       const linked = path.join(f.directory, 'user bin/sdlc');
       await fs.mkdir(path.dirname(linked));
       await fs.symlink(path.relative(path.dirname(linked), current.executable), linked);
-      assert.equal(JSON.parse((await execute(linked, ['doctor', '--home', f.home],
-        { env: { ...env, SDLC_NODE: process.execPath } })).stdout).installed, true);
+      assert.equal(JSON.parse((await boundary.execute(linked, ['doctor', '--home', f.home])).stdout).installed, true);
     }
-    const update = await installer(f, ['update'], env);
+    const update = await runInstaller(['update']);
     assert.equal(update.changedFiles.length, 0);
     assert.equal(await fs.readFile(state, 'utf8'), '{"keep":true}\n');
     const hooks = JSON.parse(await fs.readFile(path.join(f.home, 'hooks/sdlc.json'), 'utf8'));
     assert.equal(hooks.hooks.preToolUse[0].exec, await fs.realpath(process.execPath));
     assert.equal(hooks.hooks.preToolUse[0].args[0], path.join(f.home, 'sdlc/bin/sdlc.mjs'));
-    assert.equal((await installer(f, ['uninstall'], env)).uninstalled, true);
+    assert.equal((await runInstaller(['uninstall'])).uninstalled, true);
     assert.equal(await fs.readFile(state, 'utf8'), '{"keep":true}\n');
-    assert.equal((await installer(f, ['install', '--purge-existing'], env)).purgedExisting, true);
+    assert.equal((await runInstaller(['install', '--purge-existing'])).purgedExisting, true);
     await assert.rejects(fs.stat(state), { code: 'ENOENT' });
     await fs.writeFile(state, '{"purge":true}\n');
-    assert.equal((await installer(f, ['uninstall', '--purge'], env)).purged, true);
+    assert.equal((await runInstaller(['uninstall', '--purge'])).purged, true);
     await assert.rejects(fs.stat(path.join(f.home, 'sdlc')), { code: 'ENOENT' });
     assert.equal(await fs.readFile(unrelated, 'utf8'), '{"unrelated":true}\n');
     assert.equal((await fs.readFile(path.join(f.home, 'copilot-instructions.md'), 'utf8')).trimEnd(), 'Keep user instructions.');
-    await assert.rejects(fs.stat(sentinel), { code: 'ENOENT' });
   });
 
 test('T-51 channel-only installs and channel removal never mutate the Copilot home',
@@ -302,6 +359,66 @@ test('T-51 corrupt and wrong-architecture runtime/payload fail before channel or
     await assert.rejects(activateChannel({ sourceRoot: f.source, channelRoot: f.channelRoot }), /mismatch/u);
     await assert.rejects(fs.stat(f.channelRoot), { code: 'ENOENT' });
     await assert.rejects(installer(f, ['install', '--purge-existing']));
+    assert.deepEqual(await fs.readdir(f.home), ['copilot-instructions.md']);
+  });
+
+test('T-51 channel/home overlap is rejected before writes under explicit, environment and default home rules',
+  { skip: !hostTarget || process.platform === 'win32' && !windowsLauncher }, async () => {
+    const f = await fixture();
+    const retained = path.join(f.home, 'sdlc/runtime/retained.json');
+    await fs.mkdir(path.dirname(retained), { recursive: true });
+    await fs.writeFile(retained, '{"retained":true}\n');
+    for (const [channelRoot, home] of [
+      [f.home, f.home], [path.join(f.home, 'new/channel'), f.home],
+      [f.directory, f.home], [f.channelRoot, path.join(f.channelRoot, 'new/copilot')],
+    ]) {
+      await assert.rejects(activateChannel({ sourceRoot: f.source, channelRoot, home }), /non-overlapping/u);
+    }
+    for (const operation of [['install', '--purge-existing'], ['uninstall', '--purge'], ['doctor']]) {
+      const command = commandFor(f.source, [...operation, '--channel-root', f.home]);
+      await assert.rejects(execute(command.executable, command.args, {
+        env: { ...environment, COPILOT_HOME: f.home, SDLC_NODE: process.execPath },
+      }), /non-overlapping/u);
+    }
+    const defaultHome = path.join(f.directory, '.copilot');
+    const command = commandFor(f.source, ['install', '--channel-root', path.join(defaultHome, 'nested')]);
+    const defaultEnv = { ...environment, HOME: f.directory, USERPROFILE: f.directory, SDLC_NODE: process.execPath };
+    delete defaultEnv.COPILOT_HOME;
+    await assert.rejects(execute(command.executable, command.args, { env: defaultEnv }), /non-overlapping/u);
+    await assert.rejects(fs.stat(defaultHome), { code: 'ENOENT' });
+    await assert.rejects(fs.stat(f.channelRoot), { code: 'ENOENT' });
+    assert.equal(await fs.readFile(retained, 'utf8'), '{"retained":true}\n');
+    await validateChannelHome({ channelRoot: `${f.home}-sibling`, home: f.home });
+    const selected = await installer(f, ['install', '--channel-only'], { ...environment, COPILOT_HOME: f.channelRoot });
+    assert.equal(selected.activated, true, 'Explicit --home must override COPILOT_HOME');
+    assert.equal(await fs.readFile(retained, 'utf8'), '{"retained":true}\n');
+    if (process.platform !== 'win32') {
+      await assert.rejects(execute(selected.launcher, ['uninstall', '--purge', '--home', path.join(f.channelRoot, 'copilot')],
+        { env: { ...environment, SDLC_NODE: process.execPath } }), /non-overlapping/u);
+      await assert.rejects(fs.stat(path.join(f.channelRoot, 'copilot')), { code: 'ENOENT' });
+    }
+  });
+
+test('T-51 layout checks resolve existing and dangling symlink ancestors before any channel mutation',
+  { skip: !hostTarget || process.platform === 'win32' && !windowsLauncher }, async () => {
+    const f = await fixture();
+    const alias = path.join(f.directory, 'home alias');
+    await fs.symlink(f.home, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    for (const [channelRoot, home] of [
+      [path.join(alias, 'new/channel'), f.home],
+      [f.home, path.join(alias, 'new/copilot')],
+      [alias, f.home],
+    ]) {
+      await assert.rejects(activateChannel({ sourceRoot: f.source, channelRoot, home }), /non-overlapping/u);
+    }
+    if (process.platform !== 'win32') {
+      const dangling = path.join(f.directory, 'dangling home alias');
+      await fs.symlink(f.channelRoot, dangling);
+      await assert.rejects(activateChannel({ sourceRoot: f.source, channelRoot: f.channelRoot, home: dangling }), /non-overlapping/u);
+      await assert.rejects(activateChannel({ sourceRoot: f.source,
+        channelRoot: path.join(f.channelRoot, 'nested'), home: dangling }), /non-overlapping/u);
+    }
+    await assert.rejects(fs.stat(f.channelRoot), { code: 'ENOENT' });
     assert.deepEqual(await fs.readdir(f.home), ['copilot-instructions.md']);
   });
 

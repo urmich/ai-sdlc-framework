@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { canonical, readTarGzip, readZip, sha256 } from '../packaging/standalone/archive.mjs';
-import { DIGEST, parseCanonical, payloadIdentity, TARGETS, verifyEntries } from '../packaging/standalone/protocol.mjs';
+import { DIGEST, isPrerelease, parseCanonical, payloadIdentity, TARGETS, verifyEntries } from '../packaging/standalone/protocol.mjs';
 import { buildPlatforms, commandOptions, renderChecksums } from './package-platforms.mjs';
 import { buildPackage } from './package.mjs';
 
@@ -22,6 +22,7 @@ export async function verifyReleaseChecksums({ outputDir, descriptor, checksums,
       typeof value.version !== 'string' || !/^[a-f0-9]{40}$/u.test(value.sourceCommit ?? '') ||
       !DIGEST.test(value.payload?.sha256 ?? '') || !DIGEST.test(value.payload?.inventoryDigest ?? '') ||
       !Array.isArray(value.files) || !value.files.length) throw new Error('Malformed release descriptor');
+  const prerelease = isPrerelease(value.version);
   const seen = new Set(['sha256sums', 'release-descriptor.json']);
   let last = '';
   for (const file of value.files) {
@@ -31,6 +32,9 @@ export async function verifyReleaseChecksums({ outputDir, descriptor, checksums,
         seen.has(file.filename.toLowerCase()) || last >= file.filename ||
         Object.keys(file).sort().join(',') !== 'filename,kind,sha256,size') {
       throw new Error('Malformed or duplicate release file');
+    }
+    if (prerelease && ['homebrew', 'winget'].includes(file.kind)) {
+      throw new Error('Prereleases cannot include stable package-manager metadata');
     }
     seen.add(file.filename.toLowerCase());
     last = file.filename;

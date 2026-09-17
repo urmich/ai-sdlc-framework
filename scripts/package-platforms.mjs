@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { buildPackage } from './package.mjs';
 import { canonical, comparePath, safePath, sha256, tarGzip, zip } from '../packaging/standalone/archive.mjs';
-import { payloadIdentity, platformEntries, TARGETS } from '../packaging/standalone/protocol.mjs';
+import { isPrerelease, payloadIdentity, platformEntries, TARGETS } from '../packaging/standalone/protocol.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 export { canonical, sha256, TARGETS };
@@ -48,6 +48,9 @@ export async function writeReleaseMetadata({ outputDir, artifact, sourceCommit, 
   if (!outputStat.isDirectory() || outputStat.isSymbolicLink()) throw new Error('Release output must be a literal directory');
   const payloadBytes = await fs.readFile(artifact);
   const { manifest } = payloadIdentity(payloadBytes);
+  if (isPrerelease(manifest.version) && metadataFiles.some(item => ['homebrew', 'winget'].includes(item.kind))) {
+    throw new Error('Prereleases cannot include stable package-manager metadata');
+  }
   const commit = sourceCommit ?? execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
   if (!/^[a-f0-9]{40}$/u.test(commit)) throw new Error('Release sourceCommit must be a full Git commit');
   const filenames = new Set(['release-descriptor.json', 'sha256sums']);
@@ -67,9 +70,6 @@ export async function writeReleaseMetadata({ outputDir, artifact, sourceCommit, 
   }
   for (const item of metadataFiles) {
     if (!['homebrew', 'winget', 'metadata'].includes(item.kind)) throw new Error('Unsupported release metadata kind');
-    if (manifest.version.includes('-') && ['homebrew', 'winget'].includes(item.kind)) {
-      throw new Error('Prereleases cannot include stable package-manager metadata');
-    }
     const file = metadataSource(item);
     const bytes = await fs.readFile(file);
     if (item.sha256 !== undefined && item.sha256 !== sha256(bytes) ||

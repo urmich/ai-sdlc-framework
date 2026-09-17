@@ -6,6 +6,9 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { canonical } from './archive.mjs';
 import { extractEntries, verifyTree } from './protocol.mjs';
+import { canonicalPath, within } from '../../src/files.mjs';
+import { parseArguments } from '../../src/cli.mjs';
+import { Store } from '../../src/store.mjs';
 
 const exists = async file => {
   try { return await fs.lstat(file); } catch (error) {
@@ -83,6 +86,34 @@ function defaultRoot() {
   return path.join(os.homedir(), '.local', 'share', 'ai-sdlc-framework');
 }
 
+async function canonicalLayoutPath(file, links = 0) {
+  if (links > 32) throw new Error('Channel/home symlink chain is too deep');
+  const absolute = path.resolve(file);
+  const parent = path.dirname(absolute);
+  if (parent === absolute) return canonicalPath(absolute);
+  const candidate = path.join(await canonicalLayoutPath(parent, links), path.basename(absolute));
+  const stat = await exists(candidate);
+  if (stat?.isSymbolicLink()) {
+    return canonicalLayoutPath(path.resolve(path.dirname(candidate), await fs.readlink(candidate)), links + 1);
+  }
+  return stat ? canonicalPath(candidate) : candidate;
+}
+
+export async function validateChannelHome({ channelRoot = defaultRoot(), home } = {}) {
+  const channel = await canonicalLayoutPath(channelRoot);
+  const copilot = await canonicalLayoutPath(new Store(home).home);
+  if (within(channel, copilot) || within(copilot, channel)) {
+    throw new Error('Channel root and Copilot home must be separate, non-overlapping directories');
+  }
+  return { channelRoot: channel, home: copilot };
+}
+
+function bindHome(args, home) {
+  const index = args.indexOf('--home');
+  if (index < 0) args.push('--home', home);
+  else args[index + 1] = home;
+}
+
 function windowsCurrent(version) {
   return `# ai-sdlc-framework standalone current v1\r\n` +
     `$ErrorActionPreference = 'Stop'\r\n` +
@@ -105,7 +136,7 @@ async function cleanAbandonedStages(root) {
 }
 
 export async function activateChannel({ sourceRoot, channelRoot = defaultRoot(),
-  node = process.execPath, lockTimeoutMs = 5000, beforeStep = async () => {} }) {
+  home, node = process.execPath, lockTimeoutMs = 5000, beforeStep = async () => {} }) {
   if (!Number.isInteger(lockTimeoutMs) || lockTimeoutMs < 0 || lockTimeoutMs > 30000) {
     throw new Error('Channel lock timeout must be between 0 and 30000ms');
   }
@@ -114,8 +145,9 @@ export async function activateChannel({ sourceRoot, channelRoot = defaultRoot(),
   const selectedNode = await runtimePreflight({ node,
     platform: verified.platform.platform, arch: verified.platform.arch });
   const root = path.resolve(channelRoot);
-  const source = path.resolve(sourceRoot);
-  if (root === source || source.startsWith(`${root}${path.sep}`) || root.startsWith(`${source}${path.sep}`)) {
+  const layout = await validateChannelHome({ channelRoot, home });
+  const source = await canonicalPath(sourceRoot);
+  if (within(layout.channelRoot, source) || within(source, layout.channelRoot)) {
     throw new Error('Channel root must be separate from the downloaded distribution');
   }
   await literalDirectory(root, { create: true });
@@ -212,6 +244,12 @@ export async function main(argv) {
   const args = input.slice(separator + 1);
   if (operation === 'launch') {
     await verifyTree(root, { expectedPlatform: process.platform, expectedArch: process.arch });
+    const { flags } = parseArguments(args);
+    const parent = path.dirname(root);
+    const managedRoot = path.basename(parent) === 'versions' &&
+      await exists(path.join(path.dirname(parent), 'channel.json')) ? path.dirname(parent) : root;
+    const layout = await validateChannelHome({ channelRoot: managedRoot, home: flags.home });
+    bindHome(args, layout.home);
     return invokeFramework(root, node, args);
   }
   if (operation !== 'install-channel') throw new Error('Unsupported distribution runtime operation');
@@ -234,12 +272,15 @@ export async function main(argv) {
   if (args.includes('--source-root')) throw new Error('Standalone source-root cannot be overridden');
   if (args[0] !== 'install' && args.includes('--purge-existing') ||
       args[0] !== 'uninstall' && args.includes('--purge')) throw new Error('Invalid purge operation');
+  const { flags } = parseArguments(args);
+  const layout = await validateChannelHome({ channelRoot, home: flags.home });
+  bindHome(args, layout.home);
   await verifyTree(root, { expectedPlatform: process.platform, expectedArch: process.arch });
   if (['doctor', 'uninstall'].includes(args[0])) {
     if (channelOnly) throw new Error('--channel-only applies only to install/update');
     return invokeFramework(root, node, args);
   }
-  const activation = await activateChannel({ sourceRoot: root, channelRoot, node });
+  const activation = await activateChannel({ sourceRoot: root, channelRoot, home: layout.home, node });
   if (channelOnly) {
     process.stdout.write(`${JSON.stringify(activation)}\n`);
     return 0;

@@ -89,6 +89,12 @@ only the payload and prints its absolute launcher path without touching
 Copilot. `SDLC_NODE`, if provided, must name an absolute executable. Otherwise
 the first selected Node command on PATH must itself meet the requirements;
 an incompatible or shadowing command is not skipped in favor of another.
+The effective Copilot home follows the framework's `--home`, `COPILOT_HOME`,
+then user-home default precedence. Before any channel write or destructive
+operation, existing ancestors and symlink targets are resolved; equal roots
+and containment in either direction are rejected, including dangling home
+links into a not-yet-created channel. Framework execution receives the
+validated canonical home explicitly rather than resolving an alias again.
 
 Each channel version is immutable; same-version/same-digest installation is
 idempotent, and a conflicting digest fails. A unique stage is verified before
@@ -150,6 +156,24 @@ executable to include Windows ZIP/native lifecycle tests. Windows native CI
 fails rather than skips if the expected target is Windows and this input is
 missing. Without that input, local non-Windows tests verify the three POSIX
 archives and ZIP codec fixtures, not a native Windows release.
+
+The npm-denied lifecycle runs inside an OS-enforced boundary, not a proxy or
+command-shim approximation. macOS uses Seatbelt to deny all network operations
+and reads of the discovered npm installation directories. Linux uses private
+user, mount and network namespaces with read-only empty mounts over npm.
+Restricted command resolution contains only the validated Node and required
+shell utilities; inherited npm executable references, Node preload/module
+paths, proxies and package credentials are absent. Before the positive
+lifecycle, live local HTTP and HTTPS endpoints and an actual absolute npm
+CLI are proven usable outside the boundary and denied inside it.
+
+Namespace/sandbox availability is probed without changing host policies.
+An unavailable adapter is reported as T-51 `NotRun` with a blocked diagnostic;
+when `SDLC_DISTRIBUTION_TARGET` selects a mandatory native job, that condition
+fails the job rather than allowing publication. Windows currently has no
+validated per-process network-and-npm-filesystem isolation adapter and remains
+`NotRun` for this specific gate. Proxy settings, global firewall edits, or a
+foreign-OS container cannot substitute for the missing native evidence.
 
 Retain all four mandatory native results and descriptor/checksum digests.
 Native Homebrew/WinGet validation, publication from one immutable bundle, and

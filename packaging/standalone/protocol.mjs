@@ -10,6 +10,15 @@ export const TARGETS = Object.freeze({
 });
 export const DIGEST = /^[a-f0-9]{64}$/u;
 
+export function isPrerelease(version) {
+  const match = typeof version === 'string' &&
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u.exec(version);
+  if (!match || match[4]?.split('.').some(part => /^0\d+$/u.test(part))) {
+    throw new Error('Release version must be valid SemVer');
+  }
+  return match[4] !== undefined;
+}
+
 export function parseCanonical(bytes, label) {
   let value;
   try { value = JSON.parse(bytes.toString('utf8')); } catch {
@@ -25,8 +34,8 @@ export function payloadIdentity(bytes) {
   const metadata = entries.find(entry => entry.path === 'package/package.json');
   if (!metadata) throw new Error('Payload is missing package.json');
   const pkg = JSON.parse(metadata.data.toString('utf8'));
+  isPrerelease(pkg.version);
   if (pkg.name !== 'ai-sdlc-framework' ||
-      !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u.test(pkg.version) ||
       pkg.engines?.node !== '>=22' || pkg.dependencies && Object.keys(pkg.dependencies).length) {
     throw new Error('Unsupported payload identity or runtime requirements');
   }
