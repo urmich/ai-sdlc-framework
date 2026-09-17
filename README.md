@@ -5,42 +5,7 @@ CLI. It reduces solution-first bias by requiring understood requirements,
 requirement-specific definitions of done, planned evidence, and an approved
 technical design before implementation begins.
 
-```mermaid
-flowchart TB
-  subgraph DEFINE["1. Define the right outcome"]
-    direction LR
-    R["Requirements + Definition of Done<br/>Clarify intent; expose ambiguity"]
-    T["Test Design → living Test Plan<br/>Map every requirement to evidence"]
-    D["Technical Design<br/>Design only after outcomes and tests are clear"]
-    R -->|"user approval"| T
-    T -->|"user approval"| D
-  end
-
-  subgraph BUILD["2. Build with fast feedback"]
-    direction LR
-    C["Coding<br/>Implement against approved intent"]
-    L["Unit-first local validation<br/>Every fix starts a fresh evidence cycle"]
-    V["Candidate Review<br/>Review the exact validated candidate"]
-    C --> L
-    L --> V
-    L -. "fix and revalidate" .-> C
-    V -. "finding and revalidate" .-> C
-  end
-
-  subgraph PROMOTE["3. Promote with confidence"]
-    direction LR
-    E["Development environment<br/>Build → deploy → test"]
-    S["Pre-production environment<br/>Policy-selected validation owner/location"]
-    P["Production readiness<br/>Current evidence and policy; recommendation by default"]
-    E -->|"completion + authorization"| S
-    S -->|"completion + readiness checks"| P
-  end
-
-  D -->|"user approval"| C
-  V -->|"explicit remote authorization"| E
-  O["Less solution-first bias → less rework → faster delivery + higher quality"]
-  P --> O
-```
+![AI SDLC Framework lifecycle](docs/images/ai-sdlc-framework-overview.svg)
 
 The framework combines installable Copilot instructions and skills with an
 offline, dependency-free Node.js CLI. The agent handles reasoning and uses its

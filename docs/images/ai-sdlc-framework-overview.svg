@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1220" viewBox="0 0 1800 1220" role="img" aria-labelledby="title desc">
+  <title id="title">AI SDLC Framework lifecycle</title>
+  <desc id="desc">A provider-neutral lifecycle that moves from outcome definition through implementation and evidence-based release readiness, with human decisions at consequential boundaries.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8f9fa"/>
+      <stop offset="1" stop-color="#f3f0ff"/>
+    </linearGradient>
+    <style>
+      .title { font: 700 48px Inter, Arial, sans-serif; fill: #16191d; text-anchor: middle; }
+      .subtitle { font: 600 24px Inter, Arial, sans-serif; fill: #364152; text-anchor: middle; }
+      .section { font: 700 22px Inter, Arial, sans-serif; fill: #364152; letter-spacing: 2px; }
+      .box-title { font: 700 25px Inter, Arial, sans-serif; fill: #111827; text-anchor: middle; }
+      .box-copy { font: 16px Inter, Arial, sans-serif; fill: #364152; text-anchor: middle; }
+      .gate { font: 700 14px Inter, Arial, sans-serif; fill: #9c4a00; text-anchor: middle; letter-spacing: 1px; }
+      .outcome { font: 700 29px Inter, Arial, sans-serif; fill: #111827; text-anchor: middle; }
+      .support { font: 18px Inter, Arial, sans-serif; fill: #364152; text-anchor: middle; }
+      .footer { font: 600 17px Inter, Arial, sans-serif; fill: #495057; text-anchor: middle; }
+      .legend { font: 600 14px Inter, Arial, sans-serif; fill: #364152; }
+      .step { font: 700 12px Inter, Arial, sans-serif; fill: #ffffff; text-anchor: middle; }
+      .define { fill: #d0ebff; stroke: #1971c2; stroke-width: 3; }
+      .test { fill: #e5dbff; stroke: #7048e8; stroke-width: 3; }
+      .build { fill: #d3f9d8; stroke: #2b8a3e; stroke-width: 3; }
+      .release { fill: #fff3bf; stroke: #e67700; stroke-width: 3; }
+      .neutral { fill: #ffffff; stroke: #adb5bd; stroke-width: 2; }
+      .decision { fill: #fff4e6; stroke: #f08c00; stroke-width: 2; }
+      .connector-blue { fill: none; stroke: #74a9d8; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+      .connector-green { fill: none; stroke: #69b578; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+      .connector-orange { fill: none; stroke: #e9a35a; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1220" fill="url(#background)"/>
+  <circle cx="1690" cy="55" r="190" fill="#dbe4ff" opacity="0.55"/>
+  <circle cx="80" cy="1135" r="190" fill="#e5dbff" opacity="0.45"/>
+
+  <text x="900" y="70" class="title">AI SDLC Framework</text>
+  <text x="900" y="112" class="subtitle">Reduce solution-first bias by validating outcomes before investing in implementation</text>
+
+  <text x="70" y="190" class="section">1  DISCOVER AND DEFINE</text>
+  <text x="650" y="190" class="section">2  IMPLEMENT AND VERIFY</text>
+  <text x="1230" y="190" class="section">3  RELEASE WITH EVIDENCE</text>
+
+  <path d="M320 385 L320 412 M320 446 L320 470 M320 635 L320 662 M320 696 L320 720 M320 885 L320 910 M320 944 L320 950 L610 950 L610 302 L650 302" class="connector-blue"/>
+  <path d="M900 385 L900 470 M900 635 L900 720" class="connector-green"/>
+  <path d="M900 885 L900 910 M900 944 L900 950 L1190 950 L1190 302 L1230 302" class="connector-orange"/>
+  <path d="M1480 385 L1480 412 M1480 446 L1480 470 M1480 635 L1480 662 M1480 696 L1480 720" class="connector-orange"/>
+
+  <rect x="70" y="220" width="500" height="165" rx="22" class="define"/>
+  <circle cx="93" cy="243" r="14" fill="#1971c2"/>
+  <text x="93" y="247" class="step">1</text>
+  <text x="320" y="263" class="box-title">Requirements + acceptance criteria</text>
+  <text x="320" y="298" class="box-copy">
+    <tspan x="320">Clarify intent, constraints, and assumptions</tspan>
+    <tspan x="320" dy="24">Define observable success</tspan>
+  </text>
+
+  <rect x="220" y="412" width="200" height="34" rx="17" class="decision"/>
+  <text x="320" y="434" class="gate">HUMAN APPROVAL</text>
+
+  <rect x="70" y="470" width="500" height="165" rx="22" class="test"/>
+  <circle cx="93" cy="493" r="14" fill="#7048e8"/>
+  <text x="93" y="497" class="step">2</text>
+  <text x="320" y="513" class="box-title">Test strategy + living evidence plan</text>
+  <text x="320" y="548" class="box-copy">
+    <tspan x="320">Map every acceptance criterion to evidence</tspan>
+    <tspan x="320" dy="24">Define positive and negative outcomes</tspan>
+  </text>
+
+  <rect x="220" y="662" width="200" height="34" rx="17" class="decision"/>
+  <text x="320" y="684" class="gate">HUMAN APPROVAL</text>
+
+  <rect x="70" y="720" width="500" height="165" rx="22" class="define"/>
+  <circle cx="93" cy="743" r="14" fill="#1971c2"/>
+  <text x="93" y="747" class="step">3</text>
+  <text x="320" y="763" class="box-title">Technical design</text>
+  <text x="320" y="798" class="box-copy">
+    <tspan x="320">Select architecture after outcomes</tspan>
+    <tspan x="320" dy="24">and evidence are clear</tspan>
+  </text>
+
+  <rect x="220" y="910" width="200" height="34" rx="17" class="decision"/>
+  <text x="320" y="932" class="gate">HUMAN APPROVAL</text>
+
+  <rect x="650" y="220" width="500" height="165" rx="22" class="build"/>
+  <circle cx="673" cy="243" r="14" fill="#2b8a3e"/>
+  <text x="673" y="247" class="step">4</text>
+  <text x="900" y="273" class="box-title">Incremental implementation</text>
+  <text x="900" y="315" class="box-copy">
+    <tspan x="900">Build against approved intent</tspan>
+    <tspan x="900" dy="24">Preserve end-to-end traceability</tspan>
+  </text>
+
+  <rect x="650" y="470" width="500" height="165" rx="22" class="build"/>
+  <circle cx="673" cy="493" r="14" fill="#2b8a3e"/>
+  <text x="673" y="497" class="step">5</text>
+  <text x="900" y="523" class="box-title">Unit-first local verification</text>
+  <text x="900" y="565" class="box-copy">
+    <tspan x="900">Every correction starts a fresh</tspan>
+    <tspan x="900" dy="24">candidate-bound evidence cycle</tspan>
+  </text>
+
+  <rect x="650" y="720" width="500" height="165" rx="22" class="neutral"/>
+  <circle cx="673" cy="743" r="14" fill="#495057"/>
+  <text x="673" y="747" class="step">6</text>
+  <text x="900" y="773" class="box-title">Independent code review</text>
+  <text x="900" y="815" class="box-copy">
+    <tspan x="900">Inspect the exact locally validated change set</tspan>
+    <tspan x="900" dy="24">Fix findings, then rerun local validation</tspan>
+  </text>
+
+  <rect x="800" y="910" width="200" height="34" rx="17" class="decision"/>
+  <text x="900" y="932" class="gate">HUMAN APPROVAL</text>
+
+  <rect x="1230" y="220" width="500" height="165" rx="22" class="release"/>
+  <circle cx="1253" cy="243" r="14" fill="#e67700"/>
+  <text x="1253" y="247" class="step">7</text>
+  <text x="1480" y="263" class="box-title">Development validation</text>
+  <text x="1480" y="298" class="box-copy">
+    <tspan x="1480">Build, deploy, and test</tspan>
+    <tspan x="1480" dy="24">with explicit authorization</tspan>
+  </text>
+
+  <rect x="1380" y="412" width="200" height="34" rx="17" class="decision"/>
+  <text x="1480" y="434" class="gate">HUMAN APPROVAL</text>
+
+  <rect x="1230" y="470" width="500" height="165" rx="22" class="release"/>
+  <circle cx="1253" cy="493" r="14" fill="#e67700"/>
+  <text x="1253" y="497" class="step">8</text>
+  <text x="1480" y="513" class="box-title">Pre-production validation</text>
+  <text x="1480" y="548" class="box-copy">
+    <tspan x="1480">Policy-selected owner and environment</tspan>
+    <tspan x="1480" dy="24">Candidate-bound validation evidence</tspan>
+  </text>
+
+  <rect x="1380" y="662" width="200" height="34" rx="17" class="decision"/>
+  <text x="1480" y="684" class="gate">HUMAN APPROVAL</text>
+
+  <rect x="1230" y="720" width="500" height="165" rx="22" class="build"/>
+  <circle cx="1253" cy="743" r="14" fill="#2b8a3e"/>
+  <text x="1253" y="747" class="step">9</text>
+  <text x="1480" y="763" class="box-title">Release readiness</text>
+  <text x="1480" y="798" class="box-copy">
+    <tspan x="1480">Current review, automation, policy,</tspan>
+    <tspan x="1480" dy="24">and artifact evidence</tspan>
+  </text>
+
+  <rect x="95" y="965" width="1630" height="135" rx="26" class="neutral"/>
+  <text x="910" y="1013" class="outcome">Less assumption-driven bias  →  fewer avoidable failures  →  less rework  →  higher delivery confidence</text>
+  <text x="910" y="1056" class="support">Recoverable state  •  End-to-end traceability  •  Version-control audit trail  •  Verified automation evidence</text>
+
+  <rect x="225" y="1122" width="28" height="18" rx="5" class="define"/>
+  <text x="265" y="1137" class="legend">Define and design</text>
+  <rect x="490" y="1122" width="28" height="18" rx="5" class="test"/>
+  <text x="530" y="1137" class="legend">Evidence planning</text>
+  <rect x="750" y="1122" width="28" height="18" rx="5" class="build"/>
+  <text x="790" y="1137" class="legend">Build, verify, readiness</text>
+  <rect x="1075" y="1122" width="28" height="18" rx="5" class="release"/>
+  <text x="1115" y="1137" class="legend">Environment validation</text>
+  <rect x="1405" y="1122" width="28" height="18" rx="5" class="neutral"/>
+  <text x="1445" y="1137" class="legend">Independent review</text>
+  <text x="900" y="1180" class="footer">Human authority at consequential boundaries  •  Provider-neutral adapters  •  Explicit, auditable overrides</text>
+</svg>
