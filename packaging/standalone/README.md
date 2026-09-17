@@ -95,6 +95,10 @@ operation, existing ancestors and symlink targets are resolved; equal roots
 and containment in either direction are rejected, including dangling home
 links into a not-yet-created channel. Framework execution receives the
 validated canonical home explicitly rather than resolving an alias again.
+Uncreated path suffixes are conservatively compared without case distinctions
+on Windows and macOS, even on case-sensitive volumes; Linux retains
+case-sensitive comparisons. Different spelling cannot defer an overlap until
+after directory creation on the commonly case-insensitive platforms.
 
 Each channel version is immutable; same-version/same-digest installation is
 idempotent, and a conflicting digest fails. A unique stage is verified before

@@ -9,6 +9,7 @@ import { extractEntries, verifyTree } from './protocol.mjs';
 import { canonicalPath, within } from '../../src/files.mjs';
 import { parseArguments } from '../../src/cli.mjs';
 import { Store } from '../../src/store.mjs';
+import { withinNativePath } from '../../src/platform.mjs';
 
 const exists = async file => {
   try { return await fs.lstat(file); } catch (error) {
@@ -99,10 +100,17 @@ async function canonicalLayoutPath(file, links = 0) {
   return stat ? canonicalPath(candidate) : candidate;
 }
 
+export function layoutPathsOverlap(channel, home, platform = process.platform) {
+  // Uncreated suffixes cannot be realpathed; conservatively protect case-insensitive destinations.
+  const comparable = value => ['win32', 'darwin'].includes(platform) ? value.toLowerCase() : value;
+  return withinNativePath(comparable(channel), comparable(home), platform) ||
+    withinNativePath(comparable(home), comparable(channel), platform);
+}
+
 export async function validateChannelHome({ channelRoot = defaultRoot(), home } = {}) {
   const channel = await canonicalLayoutPath(channelRoot);
   const copilot = await canonicalLayoutPath(new Store(home).home);
-  if (within(channel, copilot) || within(copilot, channel)) {
+  if (layoutPathsOverlap(channel, copilot)) {
     throw new Error('Channel root and Copilot home must be separate, non-overlapping directories');
   }
   return { channelRoot: channel, home: copilot };

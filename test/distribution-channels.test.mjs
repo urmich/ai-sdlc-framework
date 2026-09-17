@@ -10,7 +10,7 @@ import { buildPlatforms, renderChecksums, writeReleaseMetadata } from '../script
 import { verifyPlatformPackage, verifyRelease, verifyReleaseChecksums } from '../scripts/verify-platform-package.mjs';
 import { canonical, inventory, readTarGzip, readZip, sha256, tarGzip, zip } from '../packaging/standalone/archive.mjs';
 import { extractEntries, isPrerelease, platformEntries, TARGETS, verifyEntries, verifyTree } from '../packaging/standalone/protocol.mjs';
-import { activateChannel, runtimePreflight, validateChannelHome } from '../packaging/standalone/runtime.mjs';
+import { activateChannel, layoutPathsOverlap, runtimePreflight, validateChannelHome } from '../packaging/standalone/runtime.mjs';
 import { isolatedNpmEnvironment } from './npm-environment.mjs';
 import { createNetworkBoundary, deniedEnvironment, networkAdapter, verifyNetworkNegativeControls } from './distribution-network-boundary.mjs';
 
@@ -420,6 +420,60 @@ test('T-51 layout checks resolve existing and dangling symlink ancestors before 
     }
     await assert.rejects(fs.stat(f.channelRoot), { code: 'ENOENT' });
     assert.deepEqual(await fs.readdir(f.home), ['copilot-instructions.md']);
+  });
+
+test('T-51 unresolved layout suffixes use Windows/macOS case equivalence without collapsing Linux names', () => {
+  for (const platform of ['win32', 'darwin', 'linux']) {
+    const api = platform === 'win32' ? path.win32 : path.posix;
+    const base = platform === 'win32' ? 'C:\\Fixture' : '/fixture';
+    const channel = api.join(base, 'New-Channel');
+    const home = api.join(base, 'new-channel');
+    const insensitive = platform !== 'linux';
+    assert.equal(layoutPathsOverlap(channel, home, platform), insensitive);
+    assert.equal(layoutPathsOverlap(channel, api.join(home, 'Copilot'), platform), insensitive);
+    assert.equal(layoutPathsOverlap(api.join(channel, 'Nested'), home, platform), insensitive);
+    assert.equal(layoutPathsOverlap(channel, `${home}-sibling`, platform), false);
+    assert.equal(layoutPathsOverlap(channel, api.join(channel, 'Copilot'), platform), true);
+    assert.equal(layoutPathsOverlap(api.join(channel, 'Nested'), channel, platform), true);
+  }
+  assert.equal(layoutPathsOverlap('C:\\Fixture\\New', 'c:\\fixture\\new\\Home', 'win32'), true);
+});
+
+test('T-51 nonexistent case-variant home/channel roots reject channel-only and destructive operations without writes',
+  { skip: !hostTarget || process.platform === 'win32' && !windowsLauncher }, async () => {
+    const f = await fixture();
+    const upper = path.join(f.directory, 'Future-Root');
+    const lower = path.join(f.directory, 'future-root');
+    const before = await fs.readdir(f.directory);
+    if (process.platform === 'linux') {
+      await validateChannelHome({ channelRoot: upper, home: lower });
+      assert.deepEqual(await fs.readdir(f.directory), before);
+      return;
+    }
+    for (const [channelRoot, home] of [
+      [upper, lower], [upper, path.join(lower, 'Copilot')],
+      [path.join(upper, 'Nested'), lower],
+    ]) {
+      await assert.rejects(activateChannel({ sourceRoot: f.source, channelRoot, home }), /non-overlapping/u);
+      for (const operation of [['install', '--channel-only'], ['install', '--purge-existing'], ['uninstall', '--purge']]) {
+        const command = commandFor(f.source, [...operation, '--channel-root', channelRoot, '--home', home]);
+        await assert.rejects(execute(command.executable, command.args, {
+          env: { ...environment, SDLC_NODE: process.execPath },
+        }), /non-overlapping/u);
+        assert.deepEqual(await fs.readdir(f.directory), before);
+      }
+    }
+    const fromEnvironment = commandFor(f.source, ['install', '--channel-only', '--channel-root', upper]);
+    await assert.rejects(execute(fromEnvironment.executable, fromEnvironment.args, {
+      env: { ...environment, COPILOT_HOME: lower, SDLC_NODE: process.execPath },
+    }), /non-overlapping/u);
+    const fromDefault = commandFor(f.source, ['uninstall', '--purge',
+      '--channel-root', path.join(f.directory, '.COPILOT', 'New-Channel')]);
+    const defaultEnv = { ...environment, HOME: f.directory, USERPROFILE: f.directory, SDLC_NODE: process.execPath };
+    delete defaultEnv.COPILOT_HOME;
+    await assert.rejects(execute(fromDefault.executable, fromDefault.args, { env: defaultEnv }), /non-overlapping/u);
+    assert.deepEqual(await fs.readdir(f.directory), before);
+    assert.equal(await fs.readFile(path.join(f.home, 'copilot-instructions.md'), 'utf8'), 'Keep user instructions.\n');
   });
 
 test('T-51 shell rejects Node 21, missing, non-executable and shadowed Node before mutation',
