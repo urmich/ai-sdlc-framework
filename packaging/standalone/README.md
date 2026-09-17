@@ -1,0 +1,134 @@
+# Standalone distribution interface
+
+This directory is part of the npm payload. Platform packaging copies these
+installers and the POSIX launcher **from the exact npm archive**, not from a
+second source build. The Windows native launcher is supplied by the WinGet
+build interface. Node.js 22+ for the native host architecture is required;
+there are no runtime npm dependencies or installer network requests.
+
+## Building and verifying
+
+```sh
+npm run package:artifact
+npm run package:platforms -- --artifact dist/ai-sdlc-framework-0.3.0.tgz \
+  --windows-launcher /absolute/path/to/sdlc.exe
+npm run verify:platforms -- --windows-launcher /absolute/path/to/sdlc.exe
+npm run test:distribution
+```
+
+Use the version from `package.json`, not a separately chosen channel version.
+The default build requires all four targets. `--targets linux-x64`,
+`--targets macos-arm64`, or a comma-separated list produces an explicitly
+incomplete development bundle, never evidence for a complete release.
+The output directory must contain only the exact owned candidate filenames.
+Packaging never recursively clears an output directory.
+
+Exports for release orchestration:
+
+- `buildPlatforms({artifact, outputDir, windowsLauncher, sourceCommit,
+  metadataFiles, environment, targets})`: deterministic archives and metadata.
+- `writeReleaseMetadata({outputDir, artifact, sourceCommit, metadataFiles,
+  targets})`: finalize metadata **after** Homebrew/WinGet generators consume
+  archive digests. Each metadata item is `{file, kind, filename?}`; kind is
+  `homebrew`, `winget`, or `metadata`. Output filenames are flat and unique.
+  The CLI `--metadata path.json` accepts this array.
+- `verifyRelease({outputDir, windowsLauncher, environment, targets})`:
+  full inventory verification and fresh npm/platform rebuild. The descriptor
+  must identify the checked-out revision (or an explicitly supplied
+  `sourceCommit`).
+- `verifyPlatformPackage({artifact, descriptor?, checksums?,
+  expectedPlatform?, expectedArch?, expectedDescriptorSha256?,
+  expectedChecksumsSha256?})`: independently verify a single downloaded
+  platform archive. This works with only that archive, descriptor and
+  checksum file; other release archives need not be downloaded.
+
+Every archive contains `package/`, the exact `.tgz`, `LICENSE`,
+`payload-manifest.json`, `platform.json`, and only its allowed launchers.
+The external descriptor and `SHA256SUMS` are never embedded in an archive.
+Canonical JSON recursively sorts keys and uses UTF-8/LF without timestamps.
+The inventory records regular files, sizes, hashes and permission modes.
+Paths, duplicates, links, device entries, unexpected wrappers and changed
+payloads fail verification. Windows wrapper PowerShell uses CRLF; POSIX
+launchers use LF and mode `0755`. ZIP timestamps are fixed at 1980-01-01;
+tar/gzip timestamps are zero. Host tools and npm are build-time tools only.
+
+## Verified installation and lifecycle
+
+Before extracting or running downloaded code, obtain the exact release
+descriptor, `SHA256SUMS`, and desired archive from the approved public release.
+Use the host's `Get-FileHash`, `shasum -a 256`, or `sha256sum` to compare the
+archive against **both** the descriptor and checksum record. Confirm version,
+platform and architecture. A verifier embedded in downloaded code is not a
+substitute for this first external check. Postpublication consumers additionally
+compare descriptor and checksum digests with saved prepublication evidence.
+
+After that external verification and extraction:
+
+```sh
+sh ./install.sh install
+sh ./install.sh update
+sh ./install.sh doctor
+sh ./install.sh uninstall
+sh ./install.sh install --purge-existing
+sh ./install.sh uninstall --purge
+```
+
+On Windows the equivalent commands are `.\install.ps1 install`,
+`.\install.ps1 update`, `.\install.ps1 doctor`, `.\install.ps1 uninstall`,
+`.\install.ps1 install --purge-existing`, and
+`.\install.ps1 uninstall --purge`. Do not alter OS execution policy to make an
+installer run; report the precise policy block and use approved guidance.
+
+`--home` (or `COPILOT_HOME`) selects the framework home. `--channel-root`
+selects a separate standalone payload directory; it defaults to
+`~/.local/share/ai-sdlc-framework` or
+`%LOCALAPPDATA%\ai-sdlc-framework`. `--channel-only` on install/update activates
+only the payload and prints its absolute launcher path without touching
+Copilot. `SDLC_NODE`, if provided, must name an absolute executable. Otherwise
+the first selected Node command on PATH must itself meet the requirements;
+an incompatible or shadowing command is not skipped in favor of another.
+
+Each channel version is immutable; same-version/same-digest installation is
+idempotent, and a conflicting digest fails. A unique stage is verified before
+version rename and current-launcher promotion. On POSIX `current/bin/sdlc` is
+the stable launcher through an atomically replaced relative link. On Windows
+`current.ps1` is an atomically replaced dispatcher to the immutable native
+launcher; administrator symlink privileges are not required. The channel lock
+is always released before framework maintenance takes its separate lock.
+A busy channel fails after five seconds without stealing its lock. Following
+an abrupt process termination, inspect `.channel-lock/owner.json` and confirm
+that no installer is running before manually removing that stale lock.
+Subsequent activation removes at most 32 reserved abandoned stage/promotion
+paths; it never removes installed versions.
+
+Install/update invokes the new launcher by absolute path, never a shadowing
+`sdlc` on PATH. Framework hooks reference the installed Copilot-home copy and
+the validated absolute Node executable, not the downloaded archive or old
+channel. Remove an old package only after the replacement launcher's
+install/update and doctor have succeeded. Ordinary uninstall preserves
+framework runtime state and unrelated Copilot content. `--purge-existing` and
+`uninstall --purge` are explicit, destructive framework operations; a reported
+partial purge is not silently rolled back. These commands do not remove
+standalone channel versions. Removing a channel payload separately never
+uninstalls the already copied Copilot-home integration.
+
+Restart Copilot CLI after install/update; launchers do not claim hot reload.
+Registry policy, CFS quarantine, package exceptions, GitHub download policy,
+WinGet policy and OS execution controls remain separate external controls.
+This channel neither changes those controls nor promises a bypass.
+
+## Native CI integration
+
+Set `SDLC_DISTRIBUTION_TARGET` to `windows-x64`, `macos-x64`, `macos-arm64`, or
+`linux-x64` in each release-blocking native job. The test asserts actual
+`process.platform`, `process.arch`, native machine architecture and absence of
+Rosetta. Set `SDLC_WINDOWS_LAUNCHER` to the independently rebuilt Windows
+executable to include Windows ZIP/native lifecycle tests. Windows native CI
+fails rather than skips if the expected target is Windows and this input is
+missing. Without that input, local non-Windows tests verify the three POSIX
+archives and ZIP codec fixtures, not a native Windows release.
+
+Retain all four mandatory native results and descriptor/checksum digests.
+Native Homebrew/WinGet validation, publication from one immutable bundle, and
+anonymous live acceptance are orchestration responsibilities; local package
+tests do not establish public availability or package-manager acceptance.
