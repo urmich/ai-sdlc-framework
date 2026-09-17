@@ -39,6 +39,54 @@ export async function downloadPublicAssets(bundle, directory, fetcher = fetch) {
     checksumsSha256: bundle.identity.checksumsSha256, files: records.length };
 }
 
+export async function acceptPublicHomebrew({ bundle, downloaded, environment = process.env,
+  brew = process.env.SDLC_PUBLIC_HOMEBREW_BREW, run = execute }) {
+  const formulas = bundle.descriptor.files.filter(file => file.kind === 'homebrew');
+  if (formulas.length !== 1 || formulas[0].filename !== 'ai-sdlc-framework.rb') {
+    throw new Error('Stable public Homebrew acceptance requires one frozen formula');
+  }
+  const formulaPath = path.join(downloaded, formulas[0].filename);
+  const formulaBytes = await fs.readFile(formulaPath);
+  if (formulaBytes.length !== formulas[0].size || sha256(formulaBytes) !== formulas[0].sha256) {
+    throw new Error('Downloaded Homebrew formula differs from the frozen release metadata');
+  }
+  if (!brew) {
+    brew = (await run('/usr/bin/which', ['brew'], { encoding: 'utf8' })).stdout.trim();
+  }
+  if (!path.isAbsolute(brew)) throw new Error('Public Homebrew acceptance requires an absolute brew executable');
+  await fs.access(brew, fs.constants.X_OK);
+  const env = Object.fromEntries(Object.entries(environment).filter(([key]) =>
+    !/token|credential|password|secret|auth|proxy|^npm_|^node_options$|^node_path$|^copilot_home$/iu.test(key)));
+  Object.assign(env, { HOMEBREW_NO_AUTO_UPDATE: '1', HOMEBREW_NO_ANALYTICS: '1',
+    HOMEBREW_NO_INSTALL_CLEANUP: '1' });
+  const commands = [];
+  const invoke = async args => {
+    const result = await run(brew, args, { env, encoding: 'utf8', timeout: 20 * 60 * 1000,
+      maxBuffer: 16 * 1024 * 1024 });
+    commands.push({ command: brew, args, exitCode: 0 });
+    return result;
+  };
+  let installed = false;
+  let failure;
+  try {
+    await invoke(['install', '--formula', formulaPath]);
+    installed = true;
+    await invoke(['test', 'ai-sdlc-framework']);
+  } catch (error) {
+    failure = error;
+  }
+  if (installed) {
+    try {
+      await invoke(['uninstall', '--formula', 'ai-sdlc-framework']);
+    } catch (error) {
+      failure ??= error;
+    }
+  }
+  if (failure) throw failure;
+  return { status: 'Passed', authentication: 'anonymous', formulaSha256: formulas[0].sha256,
+    nativePlatform: process.platform, nativeArchitecture: process.arch, commands };
+}
+
 export async function acceptRelease({ directory, outputFile, npm = 'false', hooks = {}, ...expected }) {
   if (!['true', 'false'].includes(npm)) throw new Error('--npm must be true or false');
   const bundle = await verifyBundle({ directory, ...expected });
@@ -87,13 +135,8 @@ export async function acceptRelease({ directory, outputFile, npm = 'false', hook
       await verifyPackage({ artifact, environment: env });
       result.npm = { status: 'Passed', authentication: 'anonymous', payloadSha256: identity.sha256 };
     }
-    // A local formula or cross-build cannot assert public Homebrew acceptance.
-    if (!bundle.context.prerelease && typeof hooks.homebrew !== 'function') {
-      throw Object.assign(new Error('Stable acceptance requires the integrated anonymous Homebrew acceptance hook'),
-        { code: 'RELEASE_INTEGRATION_BLOCKED' });
-    }
     if (!bundle.context.prerelease) {
-      result.homebrew = await hooks.homebrew({ bundle, downloaded, environment: env });
+      result.homebrew = await (hooks.homebrew ?? acceptPublicHomebrew)({ bundle, downloaded, environment: env });
       if (result.homebrew.status !== 'Passed') throw new Error('Requested Homebrew acceptance hook did not pass');
     }
     result.status = 'Passed';
