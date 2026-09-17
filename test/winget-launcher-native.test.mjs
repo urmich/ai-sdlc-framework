@@ -5,7 +5,8 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { TOOLCHAIN } from '../packaging/winget/build-launcher.mjs';
+import { buildLauncher, launcherBuildEnvironment, TOOLCHAIN } from '../packaging/winget/build-launcher.mjs';
+import { writePayloadFixture } from './winget-payload-fixture.mjs';
 
 const execute = promisify(execFile);
 const goCommand = process.env.SDLC_GO || 'go';
@@ -15,7 +16,7 @@ test('T-51 native Go launcher preserves paths, streams, arguments, working direc
   const root = path.resolve('.test-data', `winget native with spaces ${randomUUID()}`);
   await fs.mkdir(root, { recursive: true });
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const env = { ...process.env, ...TOOLCHAIN.environment, GOOS: process.platform === 'win32' ? 'windows' : process.platform,
+  const env = { ...launcherBuildEnvironment(process.env), GOOS: process.platform === 'win32' ? 'windows' : process.platform,
     GOARCH: process.arch === 'x64' ? 'amd64' : process.arch,
     GOTMPDIR: root, TMPDIR: root, TEMP: root, TMP: root, GOCACHE: path.join(root, 'cache') };
   const { stdout: version } = await execute(goCommand, ['version'], { env });
@@ -27,7 +28,7 @@ test('T-51 native Go launcher preserves paths, streams, arguments, working direc
   await fs.mkdir(path.dirname(launcher), { recursive: true });
   await execute(goCommand, ['build', ...TOOLCHAIN.flags, '-o', launcher, '.'],
     { cwd: path.resolve('cmd/sdlc-launcher'), env, timeout: 180_000 });
-  await fs.writeFile(entry, `import * as fs from 'node:fs';
+  await writePayloadFixture(archiveRoot, `import * as fs from 'node:fs';
 fs.writeFileSync(process.env.COPILOT_HOME + '/invoked', 'CLI invoked');
 process.stdout.write(JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(),
   node: process.execPath, options: process.env.NODE_OPTIONS ?? null,
@@ -96,8 +97,49 @@ process.exit(Number(process.env.SDLC_TEST_EXIT ?? 0));
   await assert.rejects(fs.stat(path.join(home, 'invoked')), { code: 'ENOENT' });
   delete runtimeEnv.SDLC_NODE;
   runtimeEnv.PATH = nodeDirectory;
+  await fs.writeFile(path.join(home, 'preserved-state'), 'Do not purge this state.');
+  for (const relative of ['package/bin/sdlc.mjs', 'package/packaging/standalone/runtime.mjs',
+    'payload-manifest.json', 'platform.json', 'ai-sdlc-framework-0.3.0.tgz']) {
+    const file = path.join(archiveRoot, relative);
+    const original = await fs.readFile(file);
+    await fs.appendFile(file, '\nTAMPERED');
+    const tampered = await run(launcher);
+    assert.equal(tampered.error.code, 1, relative);
+    assert.match(tampered.stderr, /integrity check failed/u);
+    assert.equal(tampered.stdout, '', 'No package code may run before verification, including purge');
+    await assert.rejects(fs.stat(path.join(home, 'invoked')), { code: 'ENOENT' });
+    assert.equal(await fs.readFile(path.join(home, 'preserved-state'), 'utf8'), 'Do not purge this state.');
+    await fs.writeFile(file, original);
+  }
+  const manifestFile = path.join(archiveRoot, 'payload-manifest.json');
+  const manifestBytes = await fs.readFile(manifestFile);
+  await fs.unlink(manifestFile);
+  const absentManifest = await run(launcher);
+  assert.equal(absentManifest.error.code, 1);
+  assert.match(absentManifest.stderr, /integrity check failed/u);
+  await assert.rejects(fs.stat(path.join(home, 'invoked')), { code: 'ENOENT' });
+  await fs.writeFile(manifestFile, manifestBytes);
+  const extra = path.join(archiveRoot, 'package', 'extra.mjs');
+  await fs.writeFile(extra, 'unlisted code');
+  const unlisted = await run(launcher);
+  assert.equal(unlisted.error.code, 1);
+  assert.match(unlisted.stderr, /unlisted/u);
+  await assert.rejects(fs.stat(path.join(home, 'invoked')), { code: 'ENOENT' });
+  await fs.unlink(extra);
   await fs.unlink(entry);
   const missingPayload = await run(launcher);
   assert.equal(missingPayload.error.code, 1);
   assert.match(missingPayload.stderr, /package\/bin\/sdlc.mjs is unavailable/u);
+});
+
+test('T-51 reproducible launcher builds cannot delegate to an ambient GOCACHEPROG', { skip: !enabled }, async t => {
+  const root = path.resolve('.test-data', `winget-cache-isolation-${randomUUID()}`);
+  await fs.mkdir(root, { recursive: true });
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const invalidCacheProgram = path.join(root, 'external-cache-must-not-run');
+  const result = await buildLauncher({ outputDir: path.join(root, 'output'), goCommand,
+    environment: { ...process.env, GOCACHEPROG: invalidCacheProgram, gOcAcHePrOg: invalidCacheProgram } });
+  assert.equal(result.toolchain, TOOLCHAIN.goVersion);
+  assert.equal(result.filename, 'sdlc.exe');
+  assert.match(result.sha256, /^[a-f0-9]{64}$/u);
 });

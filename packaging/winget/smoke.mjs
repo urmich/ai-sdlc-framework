@@ -71,6 +71,53 @@ async function exists(file) {
   }
 }
 
+export function requireHealthyDoctor(doctor, version, phase) {
+  assert.equal(doctor.installed, true, `${phase}: framework must remain installed`);
+  assert.equal(doctor.frameworkVersion, version, `${phase}: framework version must match`);
+  assert.deepEqual(doctor.findings, [], `${phase}: doctor findings must be empty`);
+}
+
+export async function verifyRetainedFramework({ home, version, removedRoot, workspace, environment = process.env }) {
+  const entry = path.join(home, 'sdlc', 'bin', 'sdlc.mjs');
+  const hooks = JSON.parse(await fs.readFile(path.join(home, 'hooks', 'sdlc.json'), 'utf8'));
+  const retainedNode = await fs.realpath(process.execPath);
+  const relativeNode = path.relative(path.resolve(removedRoot), retainedNode);
+  assert.ok(relativeNode.startsWith(`..${path.sep}`) || relativeNode === '..' || path.isAbsolute(relativeNode),
+    'Hook runtime must be independent of the removed channel');
+  assert.equal(await exists(path.join(removedRoot, 'bin', 'sdlc.exe')), false, 'Channel launcher must already be removed');
+  assert.equal(hooks.version, 1);
+  const handlers = Object.values(hooks.hooks).flat();
+  assert.ok(handlers.length > 0, 'Installed hook commands are required');
+  for (const handler of handlers) {
+    assert.equal(handler.type, 'command');
+    assert.ok(path.isAbsolute(handler.exec), 'Installed hooks must select an absolute runtime');
+    assert.equal(await fs.realpath(handler.exec), retainedNode);
+    assert.ok(Array.isArray(handler.args) && handler.args.every(value => typeof value === 'string'));
+    assert.equal(handler.args[0], entry, 'Hook must invoke the retained installed entrypoint');
+  }
+  const handler = hooks.hooks.sessionStart?.[0];
+  assert.ok(handler, 'Installed sessionStart hook is required');
+  assert.deepEqual(handler.args, [entry, 'hook', 'sessionStart', '--home', home],
+    'Post-removal evidence must execute the installed sessionStart command for this isolated home');
+  const inputFile = path.join(workspace, `post-removal-hook-${randomUUID()}.json`);
+  await fs.writeFile(inputFile, JSON.stringify({ sessionId: 'winget-retained-runtime', cwd: workspace }), { flag: 'wx' });
+  const env = { ...environment, COPILOT_HOME: home, SDLC_NODE: retainedNode };
+  try {
+    const hook = await execute(handler.exec, [...handler.args, '--input-file', inputFile], { env, timeout: 120_000 });
+    assert.equal(hook.stderr, '', 'Installed hook must not report errors');
+    assert.match(JSON.parse(hook.stdout).additionalContext, /AI SDLC lifecycle/u,
+      'The actual installed hook must execute successfully after channel removal');
+    const { stdout } = await execute(handler.exec, [entry, 'doctor', '--home', home], { env, timeout: 120_000 });
+    requireHealthyDoctor(JSON.parse(stdout), version, 'after channel removal');
+    return { hook: 'Passed', doctor: 'Passed' };
+  } catch (error) {
+    error.frameworkFailure = true;
+    throw error;
+  } finally {
+    await fs.unlink(inputFile);
+  }
+}
+
 export async function smokeWinGet({ input, upgradeInput, wingetCommand = 'winget' }) {
   requireNativeWindows();
   assert.ok(input?.archivePath && upgradeInput?.archivePath, 'Two verified archive inputs are required for a real upgrade');
@@ -82,7 +129,7 @@ export async function smokeWinGet({ input, upgradeInput, wingetCommand = 'winget
   assert.ok(process.env.LOCALAPPDATA, 'LOCALAPPDATA is required');
   const alias = path.join(process.env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links', 'sdlc-test.exe');
   assert.equal(await exists(alias), false, 'Refusing to replace an existing WinGet test alias');
-  const environment = { ...process.env };
+  const environment = { ...process.env, SDLC_NODE: await fs.realpath(process.execPath) };
   const winget = async args => {
     try {
       return await execute(wingetCommand, args,
@@ -147,12 +194,10 @@ export async function smokeWinGet({ input, upgradeInput, wingetCommand = 'winget
       assert.equal((await fs.realpath(alias)).toLowerCase(), (await fs.realpath(launcher)).toLowerCase(),
         'WinGet must own a Links alias targeting the executable inside the archive, not a copied binary');
       await execute(launcher, [index === 0 ? 'install' : 'update', '--home', home],
-        { env: { ...process.env, COPILOT_HOME: home }, timeout: 120_000 });
+        { env: environment, timeout: 120_000 });
       const { stdout } = await execute(launcher, ['doctor', '--home', home],
-        { env: { ...process.env, COPILOT_HOME: home }, timeout: 120_000 });
-      const doctor = JSON.parse(stdout);
-      assert.equal(doctor.installed, true);
-      assert.equal(doctor.frameworkVersion, candidate.version);
+        { env: environment, timeout: 120_000 });
+      requireHealthyDoctor(JSON.parse(stdout), candidate.version, index === 0 ? 'after install' : 'after upgrade');
       evidence.push({ version: candidate.version, manifestValidation: 'Passed',
         operation: index === 0 ? 'install' : 'upgrade', channelOwnership: 'Passed', doctor: 'Passed' });
     }
@@ -163,11 +208,12 @@ export async function smokeWinGet({ input, upgradeInput, wingetCommand = 'winget
     assert.equal(await exists(launcher), false, 'WinGet uninstall must remove its launcher');
     installationAttempted = false;
     assert.deepEqual(await snapshot(home), beforeRemoval, 'WinGet uninstall must preserve the explicit Copilot-home installation');
-    const { stdout } = await execute(process.execPath, [path.join(home, 'sdlc', 'bin', 'sdlc.mjs'), 'doctor', '--home', home],
-      { env: { ...process.env, COPILOT_HOME: home } });
-    assert.equal(JSON.parse(stdout).installed, true, 'Framework hooks must not depend on the removed channel');
+    const retained = await verifyRetainedFramework({
+      home, version: upgradeInput.version, removedRoot: installRoot, workspace: root, environment,
+    });
     return { status: 'Passed', nativeHost: 'windows-x64', evidence,
       channelUninstallPreservesFramework: 'Passed', testOnly: true,
+      postRemovalHook: retained.hook, postRemovalDoctor: retained.doctor,
       communityAccepted: false, clientAvailable: false };
   } finally {
     await new Promise(resolve => server.close(resolve));
@@ -199,7 +245,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     const upgradeInput = JSON.parse(await fs.readFile(args[3], 'utf8'));
     console.log(JSON.stringify(await smokeWinGet({ input, upgradeInput }), null, 2));
   } catch (error) {
-    const blocked = error.blocked || typeof error.code === 'number';
+    const blocked = !error.frameworkFailure && (error.blocked || typeof error.code === 'number');
     console.error(JSON.stringify({ status: blocked ? 'NotRun' : 'Failed', diagnostic: blocked ? 'Blocked' : null,
       message: error.message, code: error.code ?? null, stdout: error.stdout ?? null, stderr: error.stderr ?? null,
       note: 'No policy or execution controls were changed. A generic client failure is not evidence of CFS quarantine.' }, null, 2));

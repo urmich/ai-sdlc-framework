@@ -190,6 +190,7 @@ test('T-51 launcher toolchain contract overrides ambient build variation', async
     PATH: 'preserved', CGO_ENABLED: '1', GOOS: 'linux', GOARCH: 'arm64', GOAMD64: 'v4',
     GOFLAGS: '-race', GOTOOLCHAIN: 'auto', GOENV: 'host-settings', GOEXPERIMENT: 'ambient',
     GOROOT: '/unrelated/toolchain', GOCACHE: '/unrelated/cache', goos: 'freebsd',
+    GOCACHEPROG: 'untrusted-cache', gocacheprog: 'lowercase-cache', gOcAcHePrOg: 'mixed-case-cache',
   });
   assert.equal(environment.PATH, 'preserved');
   assert.equal(environment.GOARCH, 'amd64');
@@ -205,6 +206,7 @@ test('T-51 launcher toolchain contract overrides ambient build variation', async
   assert.equal(environment.GOROOT, undefined);
   assert.equal(environment.GOCACHE, undefined);
   assert.equal(environment.goos, undefined);
+  for (const key of Object.keys(environment)) assert.notEqual(key.toUpperCase(), 'GOCACHEPROG');
   const goModule = await fs.readFile('cmd/sdlc-launcher/go.mod', 'utf8');
   assert.ok(goModule.includes(`go ${TOOLCHAIN.goVersion.slice(2)}`));
 });

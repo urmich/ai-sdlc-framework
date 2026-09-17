@@ -154,6 +154,9 @@ func launch(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if arch == "amd64" {
 		arch = "x64"
 	}
+	if err := verifyInstalledPayload(executable, platform, arch); err != nil {
+		return fail(fmt.Errorf("installed payload integrity check failed: %w", err))
+	}
 	environment := runtimeEnvironment(os.Environ())
 	node, err := findNode(environment, platform, arch)
 	if err != nil {

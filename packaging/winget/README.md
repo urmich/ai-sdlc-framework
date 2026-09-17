@@ -20,7 +20,8 @@ node packaging/winget/build-launcher.mjs --output-dir dist/winget-launcher
 version. The builder rejects other versions and disables automatic toolchain and
 module downloads. It fixes `CGO_ENABLED=0`, `GOOS=windows`, `GOARCH=amd64`,
 `GOAMD64=v1`, `-trimpath`, `-buildvcs=false`, and `-ldflags=-buildid=`, ignoring
-ambient Go settings. Two builds in different project-local directories and
+ambient Go settings, including every case variant of `GOCACHEPROG` so an external
+cache program cannot replace the independent local caches. Two builds in different project-local directories and
 fresh caches must produce identical bytes. The builder also verifies the PE
 machine type is AMD64. It does not sign or timestamp the executable.
 
@@ -47,6 +48,28 @@ preflight stop before framework invocation. The same absolute Node executable
 is used for execution. An empty, relative, missing or incompatible `SDLC_NODE`
 override fails without falling back to PATH. `NODE_OPTIONS` and `NODE_PATH` are removed from both
 preflight and execution to prevent preload code before validation.
+
+Before executing any package JavaScript (including a JS verifier or purge
+command), the native Go verifier in `cmd/sdlc-launcher/integrity.go` checks:
+
+* Strict, canonical `payload-manifest.json` and `platform.json`, matching identity,
+  version, native platform/architecture, metadata references and launcher SHA-256.
+* The embedded npm `.tgz` SHA-256 and its bounded, regular-file-only USTAR
+  inventory. The declared inventory and its canonical digest must match the
+  independently derived embedded archive inventory, not merely a rewritten
+  extracted-file manifest.
+* Every extracted `package/**` path, type, size, SHA-256 and mode, rejecting
+  missing/extra files or directories, duplicate/case-aliased/escaping paths,
+  symlinks, junctions, archive links, unsupported modes and missing required
+  payload files.
+
+Windows does not retain POSIX permission bits; the verified embedded tar modes
+are authoritative there. On POSIX test hosts, extracted modes are also checked.
+WinGet may maintain its own portable index outside `package/`; that
+non-executable manager metadata is not part of the npm payload inventory.
+These embedded checks are defense in depth, not a replacement for authenticating
+the outer archive before extraction. Rewriting the entire local archive and all
+its hashes is not prevented by writable embedded metadata.
 
 Arguments are passed without a shell; stdin/stdout/stderr, the working
 directory, and the CLI exit code are preserved. Ordinary invocation does not
@@ -189,9 +212,12 @@ versions, in increasing order. The script checks native host architecture,
 refuses an existing test alias/package, starts and probes a loopback candidate
 server, creates test-only manifests, runs real WinGet validation and same-ID
 install/upgrade/uninstall in paths with spaces, checks the Links target, invokes
-the absolute launcher's explicit framework install/update/doctor, and snapshots
+the absolute launcher's explicit framework install/update/doctor, requires empty
+doctor findings after install, upgrade and removal, and snapshots
 Copilot-home preservation across package operations. It proves that installed
-framework code survives channel removal. Cleanup retains its workspace if
+framework code survives channel removal by executing the actual installed
+`sessionStart` hook with its recorded retained Node executable, requiring valid
+hook output and no process errors, then running doctor again. Cleanup retains its workspace if
 WinGet ownership/cleanup cannot be established. Native policy/access failures
 remain `NotRun` with a separate `Blocked` diagnostic; assertion failures are
 `Failed`, not passed or silently skipped.
@@ -207,7 +233,7 @@ purge/migration/hook tests remain the shared installer smoke job's responsibilit
 ```sh
 cd cmd/sdlc-launcher && go test ./... && go vet ./...
 # From the repository root; setting SDLC_GO also enables host-native launcher tests:
-SDLC_GO=go node --test test/winget.test.mjs test/winget-launcher-native.test.mjs
+SDLC_GO=go node --test test/winget.test.mjs test/winget-launcher-native.test.mjs test/winget-smoke.test.mjs
 node packaging/winget/build-launcher.mjs --output-dir dist/winget-launcher
 ```
 
@@ -216,6 +242,8 @@ enable it with `SDLC_GO`. Go fixtures, build caches and launcher fixtures live
 under project-local `.test-data`; generated binaries/manifests live in ignored
 `dist`. Configure the host Go test command's `GOTMPDIR`/`TMPDIR`/`TEMP` to an
 existing project-local directory when host temporary storage is prohibited.
+`SDLC_VERIFY_SHARED_ROOT` optionally points Go tests at an independently verified,
+extracted shared Windows archive for canonical-schema interoperability coverage.
 
 Integration requirements for the shared packager / CI owner:
 

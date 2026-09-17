@@ -10,7 +10,7 @@ const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 export const TOOLCHAIN = JSON.parse(await fs.readFile(new URL('./toolchain.json', import.meta.url), 'utf8'));
 
 export function launcherBuildEnvironment(environment = process.env) {
-  const controlled = new Set([...Object.keys(TOOLCHAIN.environment), 'GOROOT', 'GOCACHE',
+  const controlled = new Set([...Object.keys(TOOLCHAIN.environment), 'GOROOT', 'GOCACHE', 'GOCACHEPROG',
     'GOTMPDIR', 'TMPDIR', 'TEMP', 'TMP']);
   const inherited = Object.fromEntries(Object.entries(environment)
     .filter(([key]) => !controlled.has(key.toUpperCase())));
