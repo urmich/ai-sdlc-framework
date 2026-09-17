@@ -127,19 +127,22 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     const generate = (descriptor, artifactDirectory, mode = 'candidate') =>
       generateHomebrewFormula({ descriptor, artifactDirectory, mode,
         ...(mode === 'candidate' ? { candidateBaseUrl, architectures: [process.arch] } : {}) });
-    if (!candidate.version.includes('-') && process.arch === 'arm64') {
+    if (!candidate.version.includes('-')) {
       const stable = await generate(candidate, candidateDirectory, 'stable');
+      const repeated = await generateHomebrewFormula({ descriptor: candidate,
+        artifactDirectory: candidateDirectory, architectures: ['x64', 'arm64'] });
+      assert.deepEqual(repeated, stable, 'Dual-architecture formula metadata is not deterministic');
+      evidence.formulaMetadataArchitectures = ['arm64', 'x64'];
+      evidence.formulaMetadataSha256 = stable.sha256;
+      evidence.deterministicFormulaMetadata = 'passed';
       await fs.writeFile(formulaFile, stable.contents);
       await fs.writeFile(path.join(work, 'stable-ai-sdlc-framework.rb'), stable.contents);
       await runBrew(['style', formulaFile]);
       await runBrew(['audit', '--strict', '--formula', formulaName]);
       evidence.stableMetadataAudit = 'passed';
-    } else if (candidate.version.includes('-')) {
+    } else {
       evidence.stableMetadataAudit = 'not-applicable-prerelease';
       evidence.publicAcceptance = 'not-applicable-prerelease';
-    } else {
-      evidence.stableMetadataAudit = 'not-applicable-unverified-architecture';
-      evidence.publicAcceptance = 'not-applicable-unverified-architecture';
     }
     const local = await generate(candidate, candidateDirectory);
     await fs.writeFile(formulaFile, local.contents);

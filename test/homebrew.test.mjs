@@ -28,16 +28,18 @@ async function fixture(t, version = '0.3.0') {
   return { root, descriptor, artifactDirectory: root };
 }
 
-test('T-51 initial stable Homebrew metadata binds only arm64 and preserves lifecycle ownership', async t => {
+test('T-51 stable Homebrew metadata deterministically binds both architectures and lifecycle ownership', async t => {
   const input = await fixture(t);
   const first = await generateHomebrewFormula(input);
   assert.deepEqual(await generateHomebrewFormula(input), first);
   assert.equal(first.sha256, digest(first.contents));
   assert.equal(first.size, Buffer.byteLength(first.contents));
-  const record = input.descriptor.files.find(file => file.filename.includes('-arm64.'));
-  assert.ok(first.contents.includes(`  url "https://github.com/urmich/ai-sdlc-framework/releases/download/v0.3.0/${record.filename}"\n  sha256 "${record.sha256}"`));
-  assert.match(first.contents, /depends_on arch: :arm64/u);
-  assert.doesNotMatch(first.contents, /on_intel|macos-x64|x86_64/u);
+  for (const [arch, block] of [['arm64', 'on_arm'], ['x64', 'on_intel']]) {
+    const record = input.descriptor.files.find(file => file.filename.includes(`-${arch}.`));
+    assert.ok(first.contents.includes(`${block} do\n      url "https://github.com/urmich/ai-sdlc-framework/releases/download/v0.3.0/${record.filename}"\n      sha256 "${record.sha256}"`));
+  }
+  assert.deepEqual(await generateHomebrewFormula({ ...input, architectures: ['x64', 'arm64'] }), first);
+  assert.doesNotMatch(first.contents, /depends_on arch:/u);
   assert.match(first.contents, /depends_on "node@22"/u);
   assert.match(first.contents, /libexec.install Dir\["\*"\]/u);
   assert.match(first.contents, /skip_clean "libexec"/u);
@@ -47,16 +49,17 @@ test('T-51 initial stable Homebrew metadata binds only arm64 and preserves lifec
   const install = first.contents.split('  def install\n')[1].split('  end\n')[0];
   assert.doesNotMatch(install, /COPILOT_HOME|system|purge|uninstall/u);
   assert.doesNotMatch(first.contents, /def (post_install|uninstall)|latest|--overwrite/u);
-  await fs.unlink(path.join(input.root, input.descriptor.files[0].filename));
-  assert.deepEqual(await generateHomebrewFormula(input), first, 'An absent Intel artifact must not block stable arm64 metadata');
-  input.descriptor.files = [record];
-  assert.deepEqual(await generateHomebrewFormula(input), first);
-  for (const architectures of [['x64'], ['arm64', 'x64']]) {
-    await assert.rejects(generateHomebrewFormula({ ...input, architectures }), /arm64-only until native Intel acceptance/u);
+  for (const architectures of [['x64'], ['arm64']]) {
+    await assert.rejects(generateHomebrewFormula({ ...input, architectures }), /requires both arm64 and x64/u);
   }
+  const intel = input.descriptor.files.find(file => file.filename.includes('-x64.'));
+  await fs.unlink(path.join(input.root, intel.filename));
+  await assert.rejects(generateHomebrewFormula(input), { code: 'ENOENT' });
+  input.descriptor.files = input.descriptor.files.filter(file => file !== intel);
+  await assert.rejects(generateHomebrewFormula(input), /Missing macOS x64/u);
 });
 
-test('T-51 explicit local candidate formulas can still exercise Intel without stable support claims', async t => {
+test('T-51 local candidate formulas support host-only and dual-architecture testing', async t => {
   const input = await fixture(t);
   const options = { ...input, mode: 'candidate', candidateBaseUrl: 'http://127.0.0.1:8123/',
     architectures: ['arm64', 'x64'] };

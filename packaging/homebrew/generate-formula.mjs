@@ -32,7 +32,7 @@ function validateDescriptor(descriptor) {
 
 /** Accepts the archive-stage descriptor subset; the final descriptor adds this formula. */
 export async function generateHomebrewFormula({
-  descriptor, artifactDirectory, mode = 'stable', candidateBaseUrl, architectures = ['arm64'],
+  descriptor, artifactDirectory, mode = 'stable', candidateBaseUrl, architectures = ['arm64', 'x64'],
 } = {}) {
   validateDescriptor(descriptor);
   if (!['stable', 'candidate'].includes(mode)) throw new Error('Unknown Homebrew metadata mode');
@@ -41,8 +41,8 @@ export async function generateHomebrewFormula({
       architectures.some(arch => !['arm64', 'x64'].includes(arch))) {
     throw new Error('Select unique supported Homebrew candidate architectures');
   }
-  if (mode === 'stable' && (architectures.length !== 1 || architectures[0] !== 'arm64')) {
-    throw new Error('Stable Homebrew output is arm64-only until native Intel acceptance');
+  if (mode === 'stable' && architectures.length !== 2) {
+    throw new Error('Stable Homebrew metadata requires both arm64 and x64 archives');
   }
   const selected = ['arm64', 'x64'].filter(arch => architectures.includes(arch));
   if (mode === 'stable' && descriptor.version.includes('-')) {
