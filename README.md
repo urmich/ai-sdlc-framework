@@ -520,7 +520,9 @@ arm64 **standalone and Homebrew** lifecycle and deterministic Windows x64 cross-
 metadata/pre-JS payload-integrity validation; native Windows is not claimed.
 Published standalone archives are **Windows x64, macOS arm64 and macOS Intel x64**.
 Intel archive reproducibility plus architecture-specific Homebrew URL/checksum
-validation is a mandatory non-execution gate. Intel native lifecycle remains
+validation and real host Homebrew audit/style are mandatory non-execution
+checks. Both macOS gates reject incorrect/missing Node runtime dependency metadata.
+Intel native lifecycle remains
 `NotRun` and non-blocking; Linux installer archives remain excluded.
 Stable Homebrew metadata includes both macOS architectures.
 

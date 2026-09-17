@@ -137,14 +137,39 @@ export function validateInitialHomebrewFormula({ descriptor, repository, content
   }
   const actualUrls = [...contents.matchAll(/^\s*url "([^"]+)"[ \t]*$/gmu)].map(match => match[1]);
   const digests = [...contents.matchAll(/^\s*sha256 "([a-f0-9]{64})"[ \t]*$/gmu)].map(match => match[1]);
+  const dependencies = [...contents.matchAll(/^[ \t]*depends_on[^\n]*$/gmu)].map(match => match[0]);
   if (canonical(actualUrls) !== canonical(records.map(record => record.url)) ||
       canonical(digests) !== canonical(records.map(record => record.sha256)) ||
-      !/^\s*depends_on :macos[ \t]*$/mu.test(contents) ||
-      !/^\s*depends_on "node@22"[ \t]*$/mu.test(contents) ||
+      canonical(dependencies) !== canonical(['  depends_on :macos', '  depends_on "node@22"']) ||
       (mode === 'candidate' && !contents.startsWith('# Test-only local candidate; never publish to the stable tap.\n'))) {
     throw new Error('Homebrew formula URL/checksum/architecture or Node dependency contract mismatch');
   }
-  return { validation: 'Passed', mode, architectures: records, nativeValidation: 'NotRun' };
+  return { validation: 'Passed', mode, architectures: records, nativeValidation: 'NotRun',
+    nodeDependency: { validation: 'Passed', formula: 'node@22', major: 22, scope: 'runtime', conditional: false } };
+}
+
+export function validateHomebrewQualityEvidence(quality, { identity, targetArch, formula, mode }) {
+  const expectedDependency = { validation: 'Passed', formula: 'node@22', major: 22, scope: 'runtime', conditional: false };
+  const expectedAudit = ['audit', '--strict', '--formula', '--os=macos', `--arch=${targetArch === 'x64' ? 'intel' : 'arm'}`];
+  if (!quality || quality.validation !== 'Passed' || quality.tool !== 'Homebrew' ||
+      typeof quality.brewVersion !== 'string' || !quality.brewVersion.trim() ||
+      quality.targetArch !== targetArch || quality.mode !== mode || quality.nativeExecution !== 'NotRun' ||
+      canonical(quality.identity) !== canonical(identity) || canonical(quality.formula) !== canonical(formula) ||
+      canonical(quality.nodeDependency) !== canonical(expectedDependency) ||
+      quality.style?.status !== 'Passed' || quality.style?.exitCode !== 0 ||
+      quality.audit?.status !== 'Passed' || quality.audit?.exitCode !== 0 ||
+      quality.style?.args?.length !== 2 || quality.style.args[0] !== 'style' ||
+      !quality.style.args[1].endsWith('/Formula/ai-sdlc-framework.rb') ||
+      quality.audit?.args?.length !== 6 || canonical(quality.audit.args.slice(0, 5)) !== canonical(expectedAudit) ||
+      !/^local\/sdlc-quality-[a-f0-9]+\/ai-sdlc-framework$/u.test(quality.audit.args[5])) {
+    throw new Error('Missing or invalid candidate-bound Homebrew audit/style/Node dependency evidence');
+  }
+  for (const stage of ['style', 'audit']) {
+    if (!quality.commands?.some(record => record.command === quality.brew &&
+        record.exitCode === 0 && canonical(record.args) === canonical(quality[stage].args))) {
+      throw new Error('Homebrew audit/style requires successful actual command evidence');
+    }
+  }
 }
 
 export async function homebrewMetadata({ descriptor, artifactDirectory, outputDir, repository, generator,
@@ -237,12 +262,18 @@ export function validateGates(gates, identity) {
         gate.required !== RELEASE_SCOPE[target].required ||
         gate.validation !== RELEASE_SCOPE[target].validation) throw new Error(`Missing or stale gate: ${target}`);
     if (gate.required && gate.status !== 'Passed') throw new Error(`Required gate did not pass: ${target}`);
+    if (target.startsWith('macos-')) {
+      const quality = gate.homebrew?.quality;
+      validateHomebrewQualityEvidence(quality, { identity, targetArch: target.slice('macos-'.length),
+        formula: quality?.formula, mode: quality?.mode });
+    }
     if (target === 'macos-x64' && (gate.nativeValidation !== 'NotRun' ||
         gate.deterministicArchive?.validation !== 'Passed' || gate.deterministicArchive?.target !== 'macos-x64' ||
         gate.deterministicArchive?.platform !== 'darwin' || gate.deterministicArchive?.arch !== 'x64' ||
         gate.deterministicArchive?.payloadSha256 !== identity.payloadSha256 ||
         gate.homebrew?.validation !== 'Passed' || gate.homebrew?.deterministicGeneration !== 'Passed' ||
         gate.homebrew?.nativeValidation !== 'NotRun' ||
+        gate.homebrew?.quality?.validation !== 'Passed' ||
         canonical(gate.homebrew?.architectures?.map(record => record.arch)) !== canonical(MACOS_ARCHITECTURES))) {
       throw new Error('Missing mandatory non-execution Intel archive/formula evidence; Intel native must remain NotRun');
     }
@@ -250,8 +281,10 @@ export function validateGates(gates, identity) {
     if (target === 'macos-arm64' && (gate.nativeValidation !== 'Passed' ||
         gate.networkDeniedLifecycle !== 'Passed' || gate.host?.platform !== 'darwin' || gate.host?.arch !== 'arm64' ||
         gate.homebrew?.nativeValidation !== 'Passed' || gate.homebrew?.evidence?.passed !== true ||
+        gate.homebrew?.quality?.validation !== 'Passed' ||
         gate.homebrew?.evidence?.platform !== 'darwin' || gate.homebrew?.evidence?.architecture !== 'arm64' ||
         gate.homebrew?.evidence?.uname !== 'arm64' ||
+        canonical(gate.homebrew?.evidence?.homebrewRuntime) !== canonical({ platform: 'darwin', arch: 'arm64', major: 22 }) ||
         [true, 1, '1'].includes(gate.homebrew?.evidence?.sysctlProcTranslated) || gate.homebrew?.evidence?.cleanupError)) {
       throw new Error('Missing mandatory native Apple Silicon standalone/Homebrew lifecycle evidence');
     }
@@ -269,6 +302,7 @@ export function validateGates(gates, identity) {
 export function windowsTesterReadiness(candidate, gates) {
   validateGates(gates, candidate.context.identity);
   const intel = gates.find(gate => gate.target === 'macos-x64');
+  const arm = gates.find(gate => gate.target === 'macos-arm64');
   const archive = archiveRecord(candidate, 'macos-x64');
   const expectedIntelArchive = { validation: 'Passed', target: 'macos-x64', platform: 'darwin', arch: 'x64',
     filename: archive.filename, sha256: archive.sha256, size: archive.size,
@@ -285,6 +319,10 @@ export function windowsTesterReadiness(candidate, gates) {
       (!candidate.context.prerelease &&
         canonical([intel.homebrew.formula]) !== canonical(candidate.descriptor.files.filter(file => file.kind === 'homebrew')))) {
     throw new Error('Intel archive/formula evidence is not bound to the exact candidate metadata');
+  }
+  for (const [gate, targetArch] of [[intel, 'x64'], [arm, 'arm64']]) {
+    validateHomebrewQualityEvidence(gate.homebrew.quality, { identity: candidate.context.identity, targetArch,
+      formula: intel.homebrew.formula, mode: expectedMode });
   }
   if (!candidate.context.prerelease && candidate.context.homebrew?.status !== 'Generated') {
     throw new Error('Stable Homebrew implementation and metadata must be integrated before T-60 generation');

@@ -22,7 +22,8 @@ all library targets, not release eligibility. The current
 [release orchestration policy](../../docs/release-ci.md) explicitly selects
 `macos-arm64,macos-x64,windows-x64` and excludes Linux publication. Intel standalone
 archives and stable Homebrew metadata are published after mandatory deterministic
-archive/formula URL/checksum/architecture validation, without claiming native
+archive/formula URL/checksum/architecture validation and host Homebrew audit/style
+with the correct Node runtime dependency, without claiming native
 Intel lifecycle acceptance. CI verifies
 that exact allowlist and separate required evidence instead of using `complete`.
 Other ad hoc target subsets do not establish release eligibility.
@@ -162,7 +163,9 @@ Set `SDLC_DISTRIBUTION_TARGET` to the actual native target when requiring native
 evidence. The current release's only mandatory native target is `macos-arm64`, covering
 both standalone and Homebrew lifecycle;
 Windows is cross-validated; Intel archive/formula evidence is mandatory and
-non-execution-only. Native Intel lifecycle remains explicitly `NotRun`.
+non-execution-only for the target payload. Intel and ARM64 both require actual
+Homebrew audit/style, and ARM64 must complete those checks before lifecycle
+execution. Native Intel lifecycle remains explicitly `NotRun`.
 The test asserts actual
 `process.platform`, `process.arch`, native machine architecture and absence of
 Rosetta. Set `SDLC_WINDOWS_LAUNCHER` to the independently rebuilt Windows

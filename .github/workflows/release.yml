@@ -96,8 +96,8 @@ jobs:
       EXPECTED_SOURCE_COMMIT: ${{ needs.candidate.outputs.source_commit }}
       EXPECTED_DESCRIPTOR_SHA256: ${{ needs.candidate.outputs.descriptor_sha256 }}
       EXPECTED_CHECKSUMS_SHA256: ${{ needs.candidate.outputs.checksums_sha256 }}
-      # The Homebrew workstream must provision this isolated executable before the mandatory native gate.
-      SDLC_HOMEBREW_BREW: ${{ vars.RELEASE_HOMEBREW_BREW }}
+      # Provision isolated host brew + audit/style dependencies on both macOS and Ubuntu before these gates.
+      SDLC_HOMEBREW_BREW: ${{ matrix.target == 'macos-x64' && vars.RELEASE_HOMEBREW_INTEL_BREW || matrix.target == 'macos-arm64' && vars.RELEASE_HOMEBREW_BREW || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -127,7 +127,7 @@ jobs:
           artifact-ids: ${{ needs.candidate.outputs.artifact_id }}
           path: source/.test-data/candidate
           merge-multiple: true
-      - name: Require ARM64 native, Intel deterministic archive/formula, or Windows cross-only evidence
+      - name: Require ARM64 native and audit/style, Intel metadata audit/style, or Windows cross-only evidence
         env:
           RELEASE_TARGET: ${{ matrix.target }}
         run: |

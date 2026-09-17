@@ -8,12 +8,14 @@ adjustment of 2026-09-17 authorizes Intel standalone publication and x64 Homebre
 metadata, overriding that earlier commit's Intel preview/arm64-only restrictions.
 Intel deterministic archive/formula checks are now mandatory; Intel native
 lifecycle remains explicitly `NotRun` and non-blocking.
+The later authoritative clarification also requires real Homebrew audit/style
+and correct Node runtime dependency metadata in both macOS paths.
 
 | Target | Prepublication requirement | Published installer |
 | --- | --- | --- |
-| macOS Apple Silicon `macos-arm64` | **Mandatory native standalone and Homebrew lifecycle**, native Node/machine/anti-Rosetta checks, enforced network/npm-denied standalone lifecycle with negative controls | Yes |
+| macOS Apple Silicon `macos-arm64` | **Mandatory native standalone and Homebrew lifecycle**, candidate-bound audit/style and Node metadata before Homebrew lifecycle, native machine checks and network-denied standalone lifecycle | Yes |
 | Windows `windows-x64` | **Mandatory deterministic cross-build/PE/schema/URL/metadata/pre-JS payload-integrity checks**, plus validation of deferred T-60 identity inputs | Yes; no native execution claim |
-| macOS Intel `macos-x64` | **Mandatory deterministic archive/formula URL/checksum/architecture checks**, with explicit native lifecycle `NotRun` and non-blocking | Yes, including architecture-specific Homebrew metadata; no native acceptance claim |
+| macOS Intel `macos-x64` | **Mandatory deterministic archive/formula URL/checksum/architecture checks, host Homebrew audit/style and Node metadata**, with explicit native lifecycle `NotRun` and non-blocking | Yes, including architecture-specific Homebrew metadata; no native acceptance claim |
 | Linux `linux-x64` | Out of scope | **No** |
 
 The generic platform library's `complete` flag describes its four supported
@@ -34,8 +36,9 @@ The gate also checks the actual runtime/machine: a label migration, unavailable
 Seatbelt, blocked negative control, or missing required native evidence fails
 closed. No proxy-only substitute or policy modification is permitted. There is
 no native Intel runner or native lifecycle prerequisite. The mandatory Intel job
-runs on Ubuntu, reads/rebuilds archives, and validates generated formula text as
-data. It never runs Intel launchers, Ruby, brew, or an Intel lifecycle. The job's
+runs on Ubuntu, reads/rebuilds archives, and validates generated formula metadata.
+It runs host Homebrew/Ruby audit tooling with macOS/Intel metadata simulation,
+never the Intel launcher, package install/upgrade/test, or native lifecycle. The job's
 overall result can be `Passed` only with all deterministic evidence while its
 `nativeValidation` remains `NotRun`. Missing or failed deterministic Intel
 evidence blocks sealing; no synthesized Intel result replaces a missing job.
@@ -134,15 +137,19 @@ The descriptor contains both macOS archives. The adapter statically checks the
 generator's bounded `on_macos` / `on_arm` / `on_intel` source stanzas: each exact
 versioned URL and SHA-256 must appear under its matching architecture. Missing,
 duplicate, swapped or overriding sources, an arm64-only guard, Linux sources,
-or a missing Node dependency fail validation. No Ruby/formula execution is
-used to establish Intel evidence.
+or a missing/incorrect Node dependency fail validation. The bounded static
+contract requires one unconditional runtime `depends_on "node@22"` alongside
+`depends_on :macos`; build-only, optional, conditional, duplicate or conflicting
+Node dependencies fail. Static matching is **not** reported as `brew audit` or
+`brew style` evidence.
 
 The Intel gate independently packs the source npm payload and compares its bytes
 to the frozen tgz, rebuilds both macOS archives twice, checks archive hashes and
 sizes, and verifies the Intel platform identity as `darwin/x64`. It then calls
 the existing generator twice in separate directories using the archive-stage
 descriptor, compares the entire generated formula bytes via their hashes/sizes,
-and requires the stable formula to equal the frozen release metadata. Its
+and requires the stable formula to equal the frozen release metadata. Actual
+host Homebrew audit/style must then succeed. Its
 evidence binds both architecture records, the Intel archive and final formula
 back to the candidate before sealing. A missing generator is `NotRun`/`Blocked`,
 not an implicit pass. Prereleases use two deterministic test-only loopback
@@ -174,6 +181,43 @@ state. The job records Node, machine architecture, runner image, `uname -m`, and
 the actual `sysctl.proc_translated` probe result.
 Do not advertise Homebrew availability merely because a draft or npm handoff
 succeeded without that integration.
+
+### Required metadata audit/style in both macOS jobs
+
+`scripts/homebrew-quality.mjs` is release orchestration, not a second formula
+generator. Both macOS paths call its `verifyHomebrewQuality` against the exact
+stable formula, or the deterministic test-only dual-architecture formula for a
+prerelease. It verifies source metadata first, stages identical formula bytes in
+a new isolated tap, and requires these real tool commands:
+
+```sh
+brew style /isolated/tap/Formula/ai-sdlc-framework.rb
+brew audit --strict --formula --os=macos --arch=intel local/<owned-tap>/ai-sdlc-framework
+# ARM64 uses --arch=arm, before invoking the native lifecycle hook.
+```
+
+`--os`/`--arch` select Homebrew's metadata evaluation context; they do not run
+macOS or Intel binaries on Linux. No `--fix`, `--skip-style`, `--except`,
+`--only`, online-audit override, package install or formula test is used in
+the quality runner. Frozen formula bytes are rehashed between and after tools.
+Nonzero exits, mutation, missing tools or redirected directories fail closed;
+metadata/static success cannot substitute for missing audit/style evidence.
+
+Provision a pinned, disposable Homebrew checkout/prefix under each job's
+`source/.test-data/`, with its supported Ruby, audit/style gems and `node@22`
+formula metadata already available. Set **`RELEASE_HOMEBREW_INTEL_BREW`** for
+the Ubuntu job and `RELEASE_HOMEBREW_BREW` for native macOS. The runner refuses
+system/external prefixes or repositories, sanitizes tool credentials/options,
+uses owned caches/home, does not auto-update Homebrew, and deletes only its
+newly created tap. Missing provisioning is a release integration blocker.
+
+Both gates retain the candidate identity, formula SHA-256/size, explicit
+unconditional runtime Node dependency, tool version, exact architecture-specific
+audit/style arguments and successful command results. Sealing verifies that
+record against the same final candidate and rejects missing, stale or failed
+quality evidence. Native ARM64 additionally requires the lifecycle hook's real
+`homebrewRuntime` to identify native `darwin/arm64` Node 22. No quality check
+changes native Intel's `NotRun` status or fabricates native acceptance.
 
 ## T-60 Windows tester handoff
 

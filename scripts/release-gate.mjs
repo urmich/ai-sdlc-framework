@@ -15,8 +15,9 @@ import { verifyPlatformPackage, verifyRelease } from './verify-platform-package.
 import { buildPackage } from './package.mjs';
 import { buildPlatforms } from './package-platforms.mjs';
 import { verifyPackage } from './verify-package.mjs';
+import { verifyHomebrewQuality } from './homebrew-quality.mjs';
 import { ROOT, MACOS_ARCHITECTURES, RELEASE_TARGETS, RELEASE_GATE_TARGETS, RELEASE_SCOPE, archiveRecord, homebrewMetadata, options,
-  readJson, trustedEnvironment, verifyCandidate, writeJson } from './release-bundle.mjs';
+  readJson, trustedEnvironment, validateHomebrewQualityEvidence, verifyCandidate, writeJson } from './release-bundle.mjs';
 
 const execute = promisify(execFile);
 
@@ -26,7 +27,7 @@ function integrationBlocked(message) {
 }
 
 export async function verifyNativeHomebrew({ candidate, candidateDir, scratch,
-  brew = process.env.SDLC_HOMEBREW_BREW, verifyLifecycle } = {}) {
+  brew = process.env.SDLC_HOMEBREW_BREW, verifyLifecycle, verifyQuality = verifyHomebrewQuality, generator } = {}) {
   if (!candidate.context.prerelease && candidate.context.homebrew.status !== 'Generated') {
     throw integrationBlocked('Mandatory native Homebrew validation requires the integrated dual-architecture stable generator');
   }
@@ -42,16 +43,34 @@ export async function verifyNativeHomebrew({ candidate, candidateDir, scratch,
   if (typeof verifyLifecycle !== 'function') throw new Error('Homebrew lifecycle module must export verifyHomebrewLifecycle');
   if (!brew || !path.isAbsolute(brew)) throw integrationBlocked('Provide SDLC_HOMEBREW_BREW for an approved isolated Homebrew prefix');
   const root = path.join(scratch, 'homebrew-native');
+  const mode = candidate.context.prerelease ? 'candidate' : 'stable';
+  const candidateBaseUrl = mode === 'candidate' ? 'http://127.0.0.1:8765/' : undefined;
+  let formula = candidate.descriptor.files.find(file => file.kind === 'homebrew');
+  let formulaPath = formula && path.resolve(candidateDir, 'assets', formula.filename);
+  if (mode === 'candidate') {
+    const generated = await homebrewMetadata({ descriptor: candidate.descriptor, artifactDirectory: path.resolve(candidateDir, 'assets'),
+      outputDir: path.join(scratch, 'arm-formula-quality'), repository: candidate.context.releaseRepository,
+      mode, candidateBaseUrl, generator });
+    if (generated.status !== 'Generated') throw integrationBlocked('Native prerelease audit/style requires the Homebrew generator');
+    const { artifact, ...record } = generated.files[0];
+    formula = record;
+    formulaPath = artifact;
+  }
+  if (!formulaPath) throw integrationBlocked('Native Homebrew audit/style requires candidate-bound formula metadata');
+  const quality = await verifyQuality({ candidate, formulaPath, mode, candidateBaseUrl,
+    targetArch: 'arm64', outputDir: path.join(scratch, 'arm-homebrew-quality'), brew });
+  validateHomebrewQualityEvidence(quality, { identity: candidate.context.identity, targetArch: 'arm64', formula, mode });
   try {
     const evidence = await verifyLifecycle({ brew, candidateDirectory: path.resolve(candidateDir, 'assets'), root });
     if (evidence?.passed !== true || evidence.platform !== 'darwin' || evidence.architecture !== 'arm64' ||
-        evidence.uname !== 'arm64' || [true, 1, '1'].includes(evidence.sysctlProcTranslated) || evidence.cleanupError) {
+        evidence.uname !== 'arm64' || canonical(evidence.homebrewRuntime) !== canonical({ platform: 'darwin', arch: 'arm64', major: 22 }) ||
+        [true, 1, '1'].includes(evidence.sysctlProcTranslated) || evidence.cleanupError) {
       throw new Error('Mandatory Homebrew native lifecycle, architecture or cleanup did not pass');
     }
-    return { nativeValidation: 'Passed', evidence };
+    return { nativeValidation: 'Passed', evidence, quality };
   } catch (error) {
     const evidence = await readJson(path.join(root, 'evidence.json')).catch(() => null);
-    error.homebrewResult = { nativeValidation: 'Failed', reason: error.message, evidence };
+    error.homebrewResult = { nativeValidation: 'Failed', reason: error.message, evidence, quality };
     error.retainedWorkspace = scratch;
     throw error;
   }
@@ -81,7 +100,8 @@ export async function verifyMacosArchives({ candidate, candidateDir, scratch, en
     payloadSha256: verified.payloadSha256, inventoryDigest: verified.inventoryDigest };
 }
 
-export async function verifyIntelFormula({ candidate, candidateDir, scratch, generator }) {
+export async function verifyIntelFormula({ candidate, candidateDir, scratch, generator,
+  brew = process.env.SDLC_HOMEBREW_BREW, verifyQuality = verifyHomebrewQuality }) {
   const descriptor = { ...candidate.descriptor, files: candidate.descriptor.files.filter(file => file.kind === 'archive') };
   const options = { descriptor, artifactDirectory: path.resolve(candidateDir, 'assets'),
     repository: candidate.context.releaseRepository, generator,
@@ -98,9 +118,14 @@ export async function verifyIntelFormula({ candidate, candidateDir, scratch, gen
       canonical(records[0]) !== canonical(candidate.descriptor.files.filter(file => file.kind === 'homebrew'))) {
     throw new Error('Rebuilt Intel formula differs from frozen public Homebrew metadata');
   }
+  const mode = candidate.context.prerelease ? 'candidate' : 'stable';
+  const quality = await verifyQuality({ candidate, formulaPath: results[0].files[0].artifact, mode,
+    candidateBaseUrl: options.candidateBaseUrl, targetArch: 'x64',
+    outputDir: path.join(scratch, 'intel-homebrew-quality'), brew });
+  validateHomebrewQualityEvidence(quality, { identity: candidate.context.identity, targetArch: 'x64', formula: records[0][0], mode });
   return { ...results[0].validation, deterministicGeneration: 'Passed', formula: records[0][0],
     publication: candidate.context.prerelease ? 'NotPublishedPrerelease' : 'StableMetadata',
-    nativeValidation: 'NotRun' };
+    nativeValidation: 'NotRun', quality };
 }
 
 async function command(executable, args, env, cwd = ROOT) {
@@ -129,7 +154,7 @@ export async function runGate({ candidateDir, evidenceDir, target, ...expected }
     if (target === 'macos-x64') {
       result.deterministicArchive = await verifyMacosArchives({ candidate, candidateDir, scratch, environment: env });
       result.homebrew = await verifyIntelFormula({ candidate, candidateDir, scratch });
-      result.reason = 'Intel archive and architecture-specific formula metadata were checked as data only; no Intel launcher, Ruby, brew, or native lifecycle was executed.';
+      result.reason = 'Intel archive and formula were checked with host Homebrew audit/style using macOS/Intel metadata simulation; no Intel payload, package installation, formula test, or native lifecycle was executed.';
       result.status = 'Passed';
       return result;
     }
@@ -199,6 +224,7 @@ export async function runGate({ candidateDir, evidenceDir, target, ...expected }
     result.status = error.code === 'RELEASE_INTEGRATION_BLOCKED' ? 'NotRun' : 'Failed';
     if (error.code === 'RELEASE_INTEGRATION_BLOCKED') result.diagnosticStatus = 'Blocked';
     if (error.homebrewResult) result.homebrew = error.homebrewResult;
+    if (error.homebrewQuality) result.homebrew = { ...result.homebrew, quality: error.homebrewQuality };
     if (error.retainedWorkspace) result.retainedWorkspace = error.retainedWorkspace;
     result.reason = error.message;
     if (error.stdout) process.stdout.write(error.stdout);
