@@ -265,6 +265,7 @@ jobs:
     needs: [candidate, release-bundle, npm-readiness]
     # npm validates this actual caller filename: release.yml, not npm-publish.yml.
     # Both caller and called publishing jobs must permit OIDC; signing permissions stay separate.
+    # Primary publication is token-free: no auth secret injection or secrets inheritance, and no fallback path.
     permissions:
       contents: read
       id-token: write

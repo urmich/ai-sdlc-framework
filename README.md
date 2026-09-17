@@ -501,6 +501,9 @@ npm >=11.15, and OIDC with automatic public-repository provenance. npm trust
 targets the actual caller **`release.yml`**, with environment **`npm`** on the
 publishing job in reusable **`npm-publish.yml`**; both caller and called job
 permit `id-token: write`.
+The job upgrades an older npm through an integrity-pinned, script-disabled tool
+install, asserts effective auth config has no credentials, and requires matching
+provenance metadata after publication. It has no automatic token fallback.
 Homebrew generation has an integration interface but no duplicated implementation.
 Only after completed native validation can a sealed review bundle include the
 candidate-bound T-60 Windows tester handoff. Missing Homebrew integration blocks

@@ -296,9 +296,25 @@ manager-integration limitations and channel policy. Then run live acceptance.
 `publish_npm` is a separate explicit handoff, not an automatic tag side effect.
 The publishing job uses **GitHub-hosted Node 24 and npm >=11.15.0**, with OIDC
 only. There is no `NODE_AUTH_TOKEN`, npm token secret, inherited secret set, or
-token-based fallback. An older npm version fails closed; update the approved
-hosted Node 24 tooling rather than installing application dependencies or
-switching authentication inside the privileged job.
+token-based fallback in the primary caller or reusable publishing job.
+No emergency token workflow is retained. A future emergency path must be a
+separate explicit dispatch/job/environment and cannot produce token-free OIDC
+compliance evidence.
+
+After Node 24 setup, the workflow inspects npm's **effective configuration**
+without printing its contents and rejects configured credentials, including
+redacted/protected token entries. It uses fresh user/global npmrc files and
+rejects later changes or a project npmrc. The same effective-config assertion
+runs again immediately before publication.
+
+If the bundled npm is older than 11.15, the job upgrades only its trusted npm
+CLI tooling to **11.16.0**, using the version and SHA-512 pin declared in
+`npm-publish.yml`. It verifies downloaded tool bytes before an isolated
+`npm install --offline --ignore-scripts --bin-links=false`, with audit/funding
+requests disabled. The tool has bundled dependencies; no application
+dependencies or lifecycle scripts are installed/executed. The upgraded CLI
+path and version are recorded and reused for publication. Failed integrity,
+installation or version checks stop publication rather than using a token.
 
 The exact trust configuration for this implementation is:
 
@@ -339,7 +355,9 @@ The permission boundary is explicit:
 2. `npm-handoff` calls the reusable workflow with the exact artifact ID, bundle
    digest, source commit and handoff JSON. It does not inherit secrets.
 3. The protected publishing job has **no checkout**, repository-script imports,
-   build, dependency installation, or package-code execution. Reviewed inline
+   build, application dependency installation, or package-code execution.
+   The sole installation exception is the integrity-pinned npm CLI tooling
+   upgrade described above. Reviewed inline
    workflow code verifies the hosted runtime/caller, hashes all downloaded data,
    reads package metadata to stdout without extraction/execution, and copies
    only the exact approved tgz into a fresh publication directory. Its npm user
@@ -351,13 +369,30 @@ Only then does the job invoke `npm publish --ignore-scripts` on those exact byte
 Stable versions use `latest`; prereleases use `next` (build metadata containing
 a dash does not make a version prerelease). It never repacks, bumps versions,
 or changes package contents. An already published version is a no-op **only**
-after anonymous SHA-256 and registry SHA-512-integrity comparison; different bytes
-fail. An identical existing version does not rewind/move dist-tags.
+after anonymous SHA-256, registry SHA-512-integrity and provenance metadata
+comparison; different bytes or provenance fail. An identical existing version
+does not rewind/move dist-tags. Its prior authentication method is explicitly
+`NotVerifiedExistingPublication` and current OIDC publication is `NotRun`:
+reusing an old token-published version cannot be credited as token-free
+publication merely because its bytes match.
 
 For this public repository, npm trusted publishing provides **automatic
 provenance**. There is no manual `--provenance` flag and no disabling override.
-This is npm's OIDC behavior, not a claim that a local test produced or externally
-verified an attestation. GitHub artifact signing, if integrated separately, must
+After publication, the job requires anonymous registry provenance metadata.
+It validates the attestation endpoint, in-toto/SLSA v1 metadata, package subject
+and SHA-512, exact source commit, public repository, actual `release.yml`
+workflow path, hosted GitHub builder, and invocation reference. Missing metadata
+is never treated as success; fresh publication allows bounded propagation retries.
+Bad metadata preserves a `FailedOrIncomplete` receipt with `publishAttempted`,
+not a fabricated successful release.
+
+These are provenance **metadata** checks. Cryptographic certificate/signature
+and transparency-log verification remains explicitly `NotRun` here and belongs
+in the separate consumer verification flow (for example `npm audit signatures`).
+The job retains sanitized auth-config and publication/provenance metadata receipts,
+never configuration values or credentials. No local test claims to mint real
+OIDC credentials or verify an actual published attestation.
+GitHub artifact signing, if integrated separately, must
 use a separate job with its own `attestations: write` permission; that permission
 does not belong in the npm publishing job.
 

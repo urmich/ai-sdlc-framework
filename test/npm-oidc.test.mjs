@@ -79,13 +79,29 @@ async function fixture(t, { version = '0.3.0', publishConfig } = {}) {
     sha256: payload.sha256, size: bytes.length, integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}`,
     distTag: version.split('+')[0].includes('-') ? 'next' : 'latest' };
   await fs.writeFile(path.join(directory, 'handoff.json'), JSON.stringify(handoff));
+  const toolBytes = Buffer.from('Integrity-bound npm tool unit fixture; not a real CLI archive');
+  await fs.writeFile(path.join(directory, 'npm-tool-download.tgz'), toolBytes);
   const tools = path.join(directory, 'tools');
   await fs.mkdir(tools);
   await fs.writeFile(path.join(tools, 'npm'), `#!${process.execPath}
 import fs from 'node:fs';
 import path from 'node:path';
 if (process.argv[2] === '--version') {
-  console.log(process.env.TEST_NPM_VERSION || '11.16.0');
+  console.log(process.argv[1].includes('/npm-tool/node_modules/npm/bin/npm-cli.js') ?
+    (process.env.TEST_NPM_UPGRADED_VERSION || '11.16.0') : (process.env.TEST_NPM_VERSION || '11.16.0'));
+} else if (process.argv[2] === 'config') {
+  console.log(JSON.stringify({ registry: process.env.NPM_CONFIG_REGISTRY,
+    'ignore-scripts': process.env.NPM_CONFIG_IGNORE_SCRIPTS === 'true', _auth: null,
+    ...(process.env.TEST_NPM_EFFECTIVE_AUTH === 'true' ? {'//registry.npmjs.org/:_authToken':'(protected fixture)'} : {}) }));
+} else if (process.argv[2] === 'install') {
+  const args=process.argv.slice(2);
+  if(!args.includes('--offline')||!args.includes('--ignore-scripts')||!args.includes('--bin-links=false')) throw new Error('Unsafe tool install');
+  const prefix=args[args.indexOf('--prefix')+1];
+  const packageRoot=path.join(prefix,'node_modules/npm');
+  fs.mkdirSync(path.join(packageRoot,'bin'),{recursive:true});
+  fs.writeFileSync(path.join(packageRoot,'package.json'),JSON.stringify({type:'module'}));
+  fs.writeFileSync(path.join(packageRoot,'bin/npm-cli.js'),fs.readFileSync(process.argv[1]));
+  fs.writeFileSync(path.join(process.env.TEST_NPM_ROOT,'tool-install.json'),JSON.stringify(args));
 } else if (process.argv[2] === 'publish') {
   fs.writeFileSync(path.join(process.env.TEST_NPM_ROOT, 'npm-call.json'), JSON.stringify({
     args: process.argv.slice(2),
@@ -105,7 +121,11 @@ if (process.argv[2] === '--version') {
     EXPECTED_BUNDLE_ARTIFACT_ID: '1234',
     EXPECTED_BUNDLE_SHA256: handoff.bundleSha256, EXPECTED_NPM_HANDOFF: JSON.stringify(handoff),
     NPM_CALLER_WORKFLOW_REF: `${NPM_TRUST.repository}/.github/workflows/release.yml@refs/heads/main`,
+    GITHUB_WORKFLOW_REF: `${NPM_TRUST.repository}/.github/workflows/release.yml@refs/heads/main`,
+    GITHUB_SERVER_URL: 'https://github.com', GITHUB_REF: 'refs/heads/main',
+    GITHUB_RUN_ID: '1234', GITHUB_RUN_ATTEMPT: '1',
     NPM_SOURCE_PRIVATE: 'false', NPM_TRUST_ENVIRONMENT: 'npm',
+    NPM_TOOL_VERSION: '11.16.0', NPM_TOOL_INTEGRITY: `sha512-${createHash('sha512').update(toolBytes).digest('base64')}`,
     ACTIONS_ID_TOKEN_REQUEST_URL: 'https://example.invalid/oidc-fixture',
     ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'unit-fixture-not-a-credential', TEST_NPM_ROOT: directory,
     TEST_NODE_VERSION: '24.16.0' };
@@ -125,33 +145,51 @@ test('protected npm job is data-only, tokenless, and trusts the actual reusable 
   assert.match(workflow, /environment: npm\s+permissions:\s+contents: read\s+id-token: write/u);
   assert.match(workflow, /runs-on: ubuntu-24\.04/u);
   assert.match(workflow, /node-version: '24'/u);
-  assert.doesNotMatch(workflow, /actions\/checkout|secrets\.|attestations:|npm (?:ci|install|run)|node scripts\/|--provenance|registry-url:/u);
+  assert.doesNotMatch(workflow, /actions\/checkout|secrets\.|attestations:|npm (?:ci|run)|node scripts\/|--provenance|registry-url:/u);
   assert.doesNotMatch(caller, /NODE_AUTH_TOKEN|secrets\.NPM_TOKEN|secrets: inherit/u);
   assert.deepEqual(NPM_TRUST, { repository: 'urmich/ai-sdlc-framework', callerFile: 'release.yml',
     publishingFile: 'npm-publish.yml', environment: 'npm' });
 });
 
 test('simulated OIDC preflight enforces hosted Node/npm and actual caller/environment boundaries', async t => {
-  const f = await fixture(t);
   for (const overrides of [
     { RUNNER_ENVIRONMENT: 'self-hosted' }, { NPM_SOURCE_PRIVATE: 'true' },
     { NPM_CALLER_WORKFLOW_REF: `${NPM_TRUST.repository}/.github/workflows/npm-publish.yml@refs/heads/main` },
     { NPM_CALLER_WORKFLOW_REF: `${NPM_TRUST.repository}/.github/workflows/outer-wrapper.yml@refs/heads/main` },
     { NPM_TRUST_ENVIRONMENT: 'other' }, { ACTIONS_ID_TOKEN_REQUEST_TOKEN: '' },
+    { GITHUB_WORKFLOW_REF: `${NPM_TRUST.repository}/.github/workflows/npm-publish.yml@refs/heads/main` },
     { EXPECTED_BUNDLE_ARTIFACT_ID: '1234,9999' },
     { TEST_NODE_VERSION: '22.12.0' },
     { GITHUB_SHA: 'b'.repeat(40) }, { NODE_AUTH_TOKEN: 'unit-fixture' }, { NPM_TOKEN: 'unit-fixture' },
     { NPM_CONFIG_PROVENANCE: 'false' },
-  ]) await assert.rejects(f.run('NPM_OIDC_PREFLIGHT', overrides), /requires|forbidden|must not be disabled/u);
+    { TEST_NPM_EFFECTIVE_AUTH: 'true' },
+  ]) {
+    const rejected = await fixture(t);
+    await assert.rejects(rejected.run('NPM_OIDC_PREFLIGHT', overrides), /requires|forbidden|must not be disabled|auth config contains credentials/u);
+  }
   for (const npmVersion of ['11.14.9', '10.9.0', '11.15.0-beta.1']) {
     const old = await fixture(t);
-    await assert.rejects(old.run('NPM_OIDC_PREFLIGHT', { TEST_NPM_VERSION: npmVersion }), /npm >=11.15.0/u);
+    const result = await old.run('NPM_OIDC_PREFLIGHT', { TEST_NPM_VERSION: npmVersion });
+    assert.match(result.stdout, /IntegrityVerifiedPinnedToolUpgrade/u);
+    const tool = JSON.parse(await fs.readFile(path.join(old.directory, 'npm-work/npm-tool.json'), 'utf8'));
+    assert.equal(tool.npmVersion, '11.16.0');
   }
+  const f = await fixture(t);
   const result = await f.run('NPM_OIDC_PREFLIGHT', { TEST_NPM_VERSION: '11.15.0' });
   assert.match(result.stdout, /"callerFilename":"release.yml"/u);
   assert.match(result.stdout, /"environment":"npm"/u);
   const npmrc = await fs.readFile(path.join(f.directory, 'npm-work/user.npmrc'), 'utf8');
   assert.doesNotMatch(npmrc, /auth|token|provenance/u);
+});
+
+test('npm tool upgrade rejects a tampered archive or insufficient resulting version', async t => {
+  const tampered = await fixture(t);
+  await assert.rejects(tampered.run('NPM_OIDC_PREFLIGHT', { TEST_NPM_VERSION: '11.14.0', TEST_NPM_BAD_TOOL: 'true' }),
+    /tooling integrity mismatch/u);
+  await assert.rejects(fs.stat(path.join(tampered.directory, 'tool-install.json')), { code: 'ENOENT' });
+  const old = await fixture(t);
+  await assert.rejects(old.run('NPM_OIDC_PREFLIGHT', { TEST_NPM_VERSION: '11.14.0', TEST_NPM_UPGRADED_VERSION: '11.14.0' }),
+    /npm >=11.15.0/u);
 });
 
 test('privileged data verifier reads only data, ignores embedded lifecycle scripts, and copies exact tgz bytes', async t => {
@@ -190,11 +228,15 @@ test('inline OIDC transport is idempotent, rejects conflicting versions, and nev
     const work = path.join(f.directory, 'npm-work');
     const existing = await f.run('NPM_OIDC_PUBLISH', { TEST_NPM_EXISTS: 'true' }, work);
     assert.match(existing.stdout, /AlreadyPublishedIdentical/u);
+    assert.match(existing.stdout, /NotVerifiedExistingPublication/u);
     await assert.rejects(fs.stat(path.join(f.directory, 'npm-call.json')), { code: 'ENOENT' });
     await assert.rejects(f.run('NPM_OIDC_PUBLISH', { TEST_NPM_EXISTS: 'true', TEST_NPM_CORRUPT: 'true' }, work),
       /Published npm bytes differ/u);
     const published = await f.run('NPM_OIDC_PUBLISH', { npm_config_registry: 'https://example.invalid' }, work);
     assert.match(published.stdout, /PublishedAndBytesVerified/u);
+    const receipt = JSON.parse(await fs.readFile(path.join(work, 'npm-publication-result.json'), 'utf8'));
+    assert.equal(receipt.provenanceMetadata.validation, 'Verified');
+    assert.equal(receipt.provenanceMetadata.cryptographicSignatureVerification, 'NotRun');
     const call = JSON.parse(await fs.readFile(path.join(f.directory, 'npm-call.json'), 'utf8'));
     assert.deepEqual(call.args, ['publish', `./${f.filename}`, '--ignore-scripts', '--access', 'public',
       '--tag', f.handoff.distTag, '--registry', 'https://registry.npmjs.org']);
@@ -203,4 +245,55 @@ test('inline OIDC transport is idempotent, rejects conflicting versions, and nev
     assert.equal(call.config.scripts, 'true');
     await assert.rejects(fs.stat(path.join(work, 'payload-executed')), { code: 'ENOENT' });
   }
+});
+
+test('publication rejects changed auth files and effective token configuration before any registry action', async t => {
+  for (const mode of ['user-file', 'project-file', 'effective-token']) {
+    const f = await fixture(t);
+    await f.run('NPM_OIDC_PREFLIGHT');
+    await f.run('NPM_DATA_VERIFY');
+    const work = path.join(f.directory, 'npm-work');
+    if (mode === 'user-file') await fs.appendFile(path.join(work, 'user.npmrc'), '//registry.npmjs.org/:_authToken=unit-fixture\n');
+    if (mode === 'project-file') await fs.writeFile(path.join(work, '.npmrc'), '//registry.npmjs.org/:_authToken=unit-fixture\n');
+    await assert.rejects(f.run('NPM_OIDC_PUBLISH', mode === 'effective-token' ? { TEST_NPM_EFFECTIVE_AUTH: 'true' } : {}, work),
+      /auth config|auth configuration/u);
+    await assert.rejects(fs.stat(path.join(f.directory, 'npm-call.json')), { code: 'ENOENT' });
+  }
+});
+
+test('provenance metadata is mandatory and binds source, caller, subject and hosted builder', async t => {
+  for (const overrides of [
+    { TEST_NPM_MISSING_PROVENANCE: 'true' },
+    ...['source', 'caller', 'subject', 'builder'].map(value => ({ TEST_NPM_BAD_PROVENANCE: value })),
+  ]) {
+    const f = await fixture(t);
+    await f.run('NPM_OIDC_PREFLIGHT');
+    await f.run('NPM_DATA_VERIFY');
+    const work = path.join(f.directory, 'npm-work');
+    await assert.rejects(f.run('NPM_OIDC_PUBLISH', { TEST_NPM_EXISTS: 'true', ...overrides }, work), /provenance metadata/u);
+    await assert.rejects(fs.stat(path.join(f.directory, 'npm-call.json')), { code: 'ENOENT' });
+    const result = JSON.parse(await fs.readFile(path.join(work, 'npm-publication-result.json'), 'utf8'));
+    assert.equal(result.status, 'FailedOrIncomplete');
+    assert.equal(result.publishAttempted, false);
+  }
+});
+
+test('the verified npm upgrade is used for publishing, and bad provenance retains a truthful partial result', async t => {
+  const f = await fixture(t);
+  await f.run('NPM_OIDC_PREFLIGHT', { TEST_NPM_VERSION: '11.14.0' });
+  await f.run('NPM_DATA_VERIFY');
+  const work = path.join(f.directory, 'npm-work');
+  const result = await f.run('NPM_OIDC_PUBLISH', { TEST_NPM_VERSION: '11.14.0' }, work);
+  assert.match(result.stdout, /PublishedAndBytesVerified/u);
+  const tool = JSON.parse(await fs.readFile(path.join(work, 'npm-tool.json'), 'utf8'));
+  assert.equal(tool.npmVersion, '11.16.0');
+  const bad = await fixture(t);
+  await bad.run('NPM_OIDC_PREFLIGHT');
+  await bad.run('NPM_DATA_VERIFY');
+  const badWork = path.join(bad.directory, 'npm-work');
+  await assert.rejects(bad.run('NPM_OIDC_PUBLISH', { TEST_NPM_BAD_PROVENANCE: 'source' }, badWork), /provenance metadata/u);
+  const partial = JSON.parse(await fs.readFile(path.join(badWork, 'npm-publication-result.json'), 'utf8'));
+  assert.equal(partial.status, 'FailedOrIncomplete');
+  assert.equal(partial.publishAttempted, true);
+  assert.equal(partial.provenanceMetadata, 'NotVerified');
 });
