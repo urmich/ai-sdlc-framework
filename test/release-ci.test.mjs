@@ -15,7 +15,7 @@ import { RELEASE_SCOPE, RELEASE_TARGETS, RELEASE_GATE_TARGETS, archiveRecord, ev
   prepareRelease, verifyCandidate, windowsTesterInput, windowsTesterReadiness, writeJson } from '../scripts/release-bundle.mjs';
 import { publishApprovedDraft, publishDraft, verifyRegistryPayload } from '../scripts/publish-release.mjs';
 import { NPM_TRUST, npmHandoffFromVerifiedBundle, prepareNpmHandoff } from '../scripts/npm-handoff.mjs';
-import { downloadPublicAssets } from '../scripts/accept-release.mjs';
+import { acceptPublicHomebrew, downloadPublicAssets } from '../scripts/accept-release.mjs';
 import { verifyIntelFormula, verifyMacosArchives, verifyNativeHomebrew } from '../scripts/release-gate.mjs';
 import { verifyHomebrewQuality } from '../scripts/homebrew-quality.mjs';
 
@@ -730,6 +730,32 @@ test('anonymous public acceptance compares saved hashes before extraction or nat
     async () => new Response('bad bytes')), /prepublication evidence/u);
   await assert.rejects(downloadPublicAssets(bundle, path.join(f.directory, 'unpublished-download'),
     async () => new Response('', { status: 404 })), /unavailable/u);
+});
+
+test('stable public Homebrew acceptance installs, tests and uninstalls the exact downloaded formula',
+  { skip: packagePrerelease ? 'Stable Homebrew acceptance is not applicable to prereleases' : false }, async t => {
+  const f = await fixture(t);
+  await sealBundle(f);
+  const bundle = await verifyBundle({ directory: f.outputDir });
+  const downloaded = path.join(f.directory, 'public-homebrew');
+  await fs.mkdir(downloaded);
+  const formula = bundle.descriptor.files.find(file => file.kind === 'homebrew');
+  await fs.copyFile(path.join(f.outputDir, 'assets', formula.filename), path.join(downloaded, formula.filename));
+  const brew = path.join(f.directory, 'brew');
+  await fs.writeFile(brew, '#!/bin/sh\nexit 99\n', { mode: 0o755 });
+  const calls = [];
+  const result = await acceptPublicHomebrew({ bundle, downloaded, brew,
+    run: async (command, args) => {
+      assert.equal(command, brew);
+      calls.push(args);
+      return { stdout: '', stderr: '' };
+    } });
+  assert.equal(result.status, 'Passed');
+  assert.deepEqual(calls, [
+    ['install', '--formula', path.join(downloaded, formula.filename)],
+    ['test', 'ai-sdlc-framework'],
+    ['uninstall', '--formula', 'ai-sdlc-framework'],
+  ]);
 });
 
 test('read-only npm handoff binds the exact bundle, package and approved public repository', async t => {
