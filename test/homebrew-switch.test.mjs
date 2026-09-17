@@ -40,6 +40,20 @@ async function setup(t, behavior = {}) {
     await fs.writeFile(path.join(directory, 'INSTALL_RECEIPT.json'), receipt(dependencies, version, revision));
   }
   await keg(oldKeg, '0.3.0');
+  const inactiveKeg = path.join(cellar, 'ai-sdlc-framework', '0.2.0');
+  const obsoleteNodeKeg = path.join(cellar, 'node@22', '22.1.0');
+  if (behavior.inactiveRetiredDependencies) {
+    await keg(inactiveKeg, '0.2.0');
+    await fs.writeFile(path.join(inactiveKeg, 'INSTALL_RECEIPT.json'), receipt([
+      { full_name: 'node@22', pkg_version: '22.1.0' },
+      { full_name: 'icu4c@71', pkg_version: '71.1' },
+    ], '0.2.0'));
+    await fs.mkdir(path.join(obsoleteNodeKeg, 'bin'), { recursive: true });
+    await fs.writeFile(path.join(obsoleteNodeKeg, 'bin', 'node'), 'inactive node fixture\n');
+    await fs.writeFile(path.join(obsoleteNodeKeg, 'INSTALL_RECEIPT.json'), receipt([
+      { full_name: 'icu4c@70', pkg_version: '70.1' },
+    ], '22.1.0'));
+  }
   await fs.mkdir(path.join(nodeKeg, 'bin'), { recursive: true });
   await fs.writeFile(node, 'native node fixture\n', { mode: 0o755 });
   await fs.writeFile(path.join(nodeKeg, 'INSTALL_RECEIPT.json'), receipt([], '22.23.2'));
@@ -99,8 +113,10 @@ async function setup(t, behavior = {}) {
         assert.equal(captured.capturedLink.absolute, path.join(oldKeg, 'bin', 'sdlc'));
         assert.equal(captured.targetKeg, oldKeg);
         assert.ok(captured.kegs.some(item => item.path === nodeKeg));
-        assert.deepEqual(captured.installedVersions[0].versions,
-          installedNew ? ['0.3.0', candidatePkgVersion].sort() : ['0.3.0']);
+        assert.deepEqual(captured.installedVersions[0].versions, [
+          ...(behavior.inactiveRetiredDependencies ? ['0.2.0'] : []),
+          '0.3.0', ...(installedNew ? [candidatePkgVersion] : []),
+        ].sort());
         await fs.access(path.join(captured.kegs[0].backup, 'bin', 'sdlc'));
       }
       if (args[0] === 'install') {
@@ -167,7 +183,7 @@ async function setup(t, behavior = {}) {
     }
     throw new Error(`Unexpected invocation: ${command} ${args}`);
   };
-  return { root, prefix, cellar, oldKeg, newKeg, nodeKeg, historicalNodeKeg, node, destination,
+  return { root, prefix, cellar, oldKeg, inactiveKeg, obsoleteNodeKeg, newKeg, nodeKeg, historicalNodeKeg, node, destination,
     candidateVersion, candidateRevision, candidatePkgVersion,
     home, sourceRoot, formula, run, calls, target, captured: () => captured,
     options: { brew: 'fake-brew', formula, home, sourceRoot, run,
@@ -225,7 +241,7 @@ test('T-51 forward and reverse switching survive retired receipt dependency vers
     assert.equal(old.receipt.runtime_dependencies[0].pkg_version, '22.22.0');
     assert.deepEqual(old.dependencies[0], {
       fullName: 'node@22', recordedVersion: '22.22.0', historicalKeg: input.historicalNodeKeg,
-      historicalPresent: false, currentKeg: input.nodeKeg,
+      historicalPresent: false, requiredLive: true, currentKeg: input.nodeKeg,
     });
     assert.ok(record.kegs.some(keg => keg.path === input.nodeKeg));
     assert.ok(!record.kegs.some(keg => keg.path === input.historicalNodeKeg));
@@ -261,6 +277,61 @@ test('T-51 an unresolved current dependency still fails even when its historical
     await assert.rejects(direction(input.options), { code: 'ENOENT' });
     assert.ok(!input.calls.some(call => ['install', 'tab', 'uninstall'].includes(call.args[0])));
     await fs.access(input.historicalNodeKeg);
+  }
+});
+
+test('T-51 inactive framework and transitive historical receipts do not require retired ICU providers', nativeMac, async t => {
+  for (const direction of [switchToHomebrew, switchFromHomebrew]) {
+    const input = await setup(t, { inactiveRetiredDependencies: true });
+    const result = await direction(input.options);
+    assert.equal(result.postSwitchVerified, true);
+    const record = JSON.parse(await fs.readFile(result.stateFile, 'utf8'));
+    const inactive = record.kegs.find(keg => keg.path === input.inactiveKeg);
+    const obsoleteNode = record.kegs.find(keg => keg.path === input.obsoleteNodeKeg);
+    assert.equal(inactive.role, 'historical');
+    assert.equal(obsoleteNode.role, 'historical');
+    assert.equal(record.kegs.find(keg => keg.path === input.oldKeg).role, 'live');
+    assert.equal(record.kegs.find(keg => keg.path === input.nodeKeg).role, 'live');
+    for (const provenance of [
+      inactive.dependencies.find(dependency => dependency.fullName === 'icu4c@71'),
+      obsoleteNode.dependencies.find(dependency => dependency.fullName === 'icu4c@70'),
+    ]) {
+      assert.equal(provenance.requiredLive, false);
+      assert.equal(provenance.historicalPresent, false);
+      assert.equal(Object.hasOwn(provenance, 'currentKeg'), false);
+    }
+    assert.ok(!input.calls.some(call => call.args[0] === '--prefix' && /^icu4c@/u.test(call.args[1])));
+    assert.equal(inactive.receipt.runtime_dependencies[1].full_name, 'icu4c@71');
+    assert.equal(obsoleteNode.receipt.runtime_dependencies[0].full_name, 'icu4c@70');
+  }
+});
+
+test('T-51 missing live transitive ICU providers still prevent both switch directions', nativeMac, async t => {
+  for (const direction of [switchToHomebrew, switchFromHomebrew]) {
+    const input = await setup(t, { inactiveRetiredDependencies: true });
+    const receiptFile = path.join(input.nodeKeg, 'INSTALL_RECEIPT.json');
+    const receipt = JSON.parse(await fs.readFile(receiptFile, 'utf8'));
+    receipt.runtime_dependencies = [{ full_name: 'icu4c@78', pkg_version: '78.3' }];
+    await fs.writeFile(receiptFile, JSON.stringify(receipt));
+    await assert.rejects(direction(input.options), { code: 'ENOENT' });
+    assert.ok(!input.calls.some(call => ['install', 'tab', 'uninstall'].includes(call.args[0])));
+  }
+});
+
+test('T-51 stale transitive inventory in a live receipt is provenance, not the current direct graph', nativeMac, async t => {
+  for (const direction of [switchToHomebrew, switchFromHomebrew]) {
+    const input = await setup(t);
+    const receiptFile = path.join(input.oldKeg, 'INSTALL_RECEIPT.json');
+    const receipt = JSON.parse(await fs.readFile(receiptFile, 'utf8'));
+    receipt.runtime_dependencies[0].declared_directly = true;
+    receipt.runtime_dependencies.push({ full_name: 'icu4c@70', pkg_version: '70.1', declared_directly: false });
+    await fs.writeFile(receiptFile, JSON.stringify(receipt));
+    const result = await direction(input.options);
+    const record = JSON.parse(await fs.readFile(result.stateFile, 'utf8'));
+    const provenance = record.kegs.find(keg => keg.path === input.oldKeg).dependencies[1];
+    assert.equal(provenance.requiredLive, false);
+    assert.equal(provenance.historicalPresent, false);
+    assert.ok(!input.calls.some(call => call.args[0] === '--prefix' && call.args[1] === 'icu4c@70'));
   }
 });
 

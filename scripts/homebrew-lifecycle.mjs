@@ -6,6 +6,7 @@ import { createServer } from 'node:http';
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import { generateHomebrewFormula } from '../packaging/homebrew/generate-formula.mjs';
+import { homebrewFormulaEvidence } from '../packaging/homebrew/evidence.mjs';
 import { assertNativeMacHost, runHomebrewCommand, switchFromHomebrew, switchToHomebrew, verifyCopiedHomebrewInstallation } from './homebrew-switch.mjs';
 
 const execute = runHomebrewCommand;
@@ -36,7 +37,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
   await fs.mkdir(work, { recursive: false });
   const evidence = { schemaVersion: 1, platform: process.platform, architecture: process.arch,
     node: process.version, uname: host, sysctlProcTranslated: translated,
-    candidateDirectory: path.resolve(candidateDirectory), commands: [], passed: false,
+    candidateDirectory: path.resolve(candidateDirectory), commands: [], formulas: {}, passed: false,
     publicAcceptance: 'NotRun', upgradeKind: upgradeDirectory ? 'version' : 'formula-revision' };
   const environment = { ...process.env,
     HOME: path.join(work, 'home'), COPILOT_HOME: path.join(work, 'copilot home'),
@@ -52,6 +53,9 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
   for (const key of ['HOME', 'COPILOT_HOME', 'HOMEBREW_CACHE', 'HOMEBREW_LOGS', 'HOMEBREW_TEMP']) {
     await fs.mkdir(environment[key], { recursive: true });
   }
+  let currentFormula;
+  let formulaName;
+  let formulaFile;
   const run = async (command, args, options = {}) => {
     const entry = { command, args };
     evidence.commands.push(entry);
@@ -59,6 +63,13 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
       if (command === brew) {
         entry.noInstallCleanup = (options.env ?? environment).HOMEBREW_NO_INSTALL_CLEANUP;
         assert.equal(entry.noInstallCleanup, '1', 'Every brew operation must suppress install cleanup');
+        if (currentFormula && args.some(arg => arg === formulaName || arg === formulaFile)) {
+          const actual = await fs.readFile(formulaFile);
+          assert.equal(createHash('sha256').update(actual).digest('hex'), currentFormula.sha256,
+            'The formula used by brew differs from the saved run evidence');
+          assert.equal(actual.length, currentFormula.size);
+          entry.formula = { ...currentFormula };
+        }
       }
       const channelOnly = command === brew && ['install', 'upgrade', 'uninstall', 'autoremove', 'tab'].includes(args[0]);
       const before = channelOnly ? await snapshot(environment.COPILOT_HOME) : undefined;
@@ -122,8 +133,8 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     await fs.mkdir(path.join(tapRoot, 'Formula'), { recursive: true });
     await fs.mkdir(path.join(work, 'Formula'));
     await run('git', ['init', '--quiet', tapRoot]);
-    const formulaFile = path.join(tapRoot, 'Formula', 'ai-sdlc-framework.rb');
-    const formulaName = `${tap}/ai-sdlc-framework`;
+    formulaFile = path.join(tapRoot, 'Formula', 'ai-sdlc-framework.rb');
+    formulaName = `${tap}/ai-sdlc-framework`;
     const generate = (descriptor, artifactDirectory, mode = 'candidate') =>
       generateHomebrewFormula({ descriptor, artifactDirectory, mode,
         ...(mode === 'candidate' ? { candidateBaseUrl, architectures: [process.arch] } : {}) });
@@ -137,6 +148,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
       evidence.deterministicFormulaMetadata = 'passed';
       await fs.writeFile(formulaFile, stable.contents);
       await fs.writeFile(path.join(work, 'stable-ai-sdlc-framework.rb'), stable.contents);
+      currentFormula = evidence.formulas.stable = await homebrewFormulaEvidence(work, 'stable');
       await runBrew(['style', formulaFile]);
       await runBrew(['audit', '--strict', '--formula', formulaName]);
       evidence.stableMetadataAudit = 'passed';
@@ -147,6 +159,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     const local = await generate(candidate, candidateDirectory);
     await fs.writeFile(formulaFile, local.contents);
     await fs.writeFile(path.join(work, 'Formula', 'ai-sdlc-framework.rb'), local.contents);
+    currentFormula = evidence.formulas.candidate = await homebrewFormulaEvidence(work, 'candidate');
     await runBrew(['style', formulaFile]);
     await runBrew(['audit', '--strict', '--formula', formulaName]);
     const home = environment.COPILOT_HOME;
@@ -215,6 +228,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
       next.contents.replace('  license "MIT"\n', '  license "MIT"\n  revision 1\n');
     await fs.writeFile(formulaFile, upgradedFormula);
     await fs.writeFile(path.join(work, 'upgraded-ai-sdlc-framework.rb'), upgradedFormula);
+    currentFormula = evidence.formulas.upgrade = await homebrewFormulaEvidence(work, 'upgrade');
     let failedPromotionState;
     await assert.rejects(switchToHomebrew({
       brew, formula: formulaName, home, environment,
@@ -223,6 +237,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
           assert.equal(options.env.HOMEBREW_NO_INSTALL_CLEANUP, '1');
           evidence.commands.push({ command, args, success: false,
             noInstallCleanup: options.env.HOMEBREW_NO_INSTALL_CLEANUP,
+            formula: { ...currentFormula },
             faultInjected: 'one candidate promotion fails to exercise rollback and retry' });
           throw new Error('Injected candidate promotion failure');
         }

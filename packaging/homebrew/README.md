@@ -57,7 +57,7 @@ archive's license. Both are required for manifest verification after installatio
 ## Candidate validation, including prereleases
 
 ```sh
-node --test test/homebrew.test.mjs test/homebrew-switch.test.mjs
+node --test test/homebrew.test.mjs test/homebrew-switch.test.mjs test/homebrew-evidence.test.mjs
 node packaging/homebrew/generate-formula.mjs \
   dist/release-descriptor.json dist \
   .test-data/homebrew-tap/Formula/ai-sdlc-framework.rb \
@@ -99,7 +99,20 @@ install its actual `node@22` dependency first. Keep `HOME`, `HOMEBREW_CACHE`,
 `HOMEBREW_LOGS`, `HOMEBREW_TEMP` and `TMPDIR` inside that local test tree during
 bootstrap. A nondefault prefix may require building a dependency from source.
 The runner records JSON evidence and the exact generated formulas under its
-new `--root`. With one bundle it exercises a real formula-revision upgrade
+new `--root`. Its `formulas` object binds the stable, candidate and upgrade
+snapshots independently by path, SHA-256 and size; applicable brew command
+records carry the exact formula identity used by that command. Candidate URLs
+contain a run-specific local port, so their hashes cannot be reused from a
+different run or reconstructed from a later formula generation.
+
+For a final handoff, call
+`readHomebrewRunEvidence(root)` from `packaging/homebrew/evidence.mjs` for
+**each cited run**. It rehashes the actual saved formula files and rejects stale
+or mismatched run/command digests. Include its returned `directory`,
+`evidenceSha256` and `formulas` together; never mix one run's path with another
+run's candidate or upgrade hashes.
+
+With one bundle the runner exercises a real formula-revision upgrade
 using the same verified payload; add `--upgrade-dir NEXT_BUNDLE` to exercise a
 version-changing upgrade. CI should use successive candidate versions too.
 Every brew operation in a switch sets `HOMEBREW_NO_INSTALL_CLEANUP=1`, including
@@ -169,10 +182,19 @@ old keg only after the snapshot, and links the new one after framework checks.
 The snapshot includes all installed versions of the affected formulas,
 dependency keg contents, receipt identities, and Homebrew's opt/linked-keg
 symlinks. Original receipt dependency versions remain recorded as provenance.
-The snapshot captures verified currently resolved dependency kegs and includes
-historical receipt kegs only when still present. Normal dependency upgrade and
-cleanup may retire those historical versions; their absence alone does not
-block switching. Missing or unidentified current dependencies still fail.
+The required live graph starts from the active target/previous kegs and follows
+their currently resolved direct providers. Current provider receipts determine
+their own direct dependencies; stale transitive inventory is provenance, not a
+second required graph. Legacy receipts without a directness flag conservatively
+treat their entries as direct.
+
+Inactive framework versions and historical dependency kegs are backup-only:
+their receipt names/versions are retained as provenance, and still-existing
+historical kegs may be backed up, but they never introduce required live edges.
+Thus an obsolete inactive receipt naming a retired ICU formula cannot block
+switching. Missing or unidentified **live** dependencies still fail. Each keg's
+record distinguishes `role: live` from `historical`, and dependency provenance
+records identify whether `requiredLive` resolution was required.
 
 The intended candidate version and formula revision come from `brew info`
 before installation, independently of the current `opt` link. The helper

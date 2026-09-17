@@ -145,7 +145,8 @@ export async function captureSwitchState({ prefix, cellar, formula, previousForm
       throw new Error('Unidentified sdlc destination (including global npm links); no Homebrew install or framework mutation was attempted');
     }
     const roots = [...new Set([state.targetKeg, state.previousKeg].filter(Boolean))];
-    const queue = [...roots];
+    const liveQueue = [...roots];
+    const historicalQueue = [];
     state.installedVersions = [];
     for (const directory of new Set(roots.map(keg => path.dirname(keg)))) {
       const versions = [];
@@ -153,13 +154,18 @@ export async function captureSwitchState({ prefix, cellar, formula, previousForm
         if (entry.name.startsWith('.')) continue;
         if (!entry.isDirectory() || !leaf(entry.name)) throw new Error(`Unexpected installed version entry: ${directory}/${entry.name}`);
         versions.push(entry.name);
-        queue.push(path.join(directory, entry.name));
+        historicalQueue.push(path.join(directory, entry.name));
       }
       state.installedVersions.push({ directory, versions: versions.sort() });
     }
     const seen = new Set();
     const currentDependencies = new Map();
-    for (const keg of queue) {
+    let liveIndex = 0;
+    let historicalIndex = 0;
+    // Finish the required graph first; inactive receipts never add live edges.
+    while (liveIndex < liveQueue.length || historicalIndex < historicalQueue.length) {
+      const live = liveIndex < liveQueue.length;
+      const keg = live ? liveQueue[liveIndex++] : historicalQueue[historicalIndex++];
       if (seen.has(keg)) continue;
       seen.add(keg);
       const components = path.relative(cellar, keg).split(path.sep);
@@ -181,6 +187,7 @@ export async function captureSwitchState({ prefix, cellar, formula, previousForm
       }
       const dependencies = [];
       state.kegs.push({ path: keg, name: components[0], version: components[1],
+        role: live ? 'live' : 'historical',
         receipt, receiptSha256: sha256(receiptBytes), backup, files, dependencies });
       for (const dependency of receipt.runtime_dependencies) {
         const name = dependency.full_name?.split('/').at(-1);
@@ -188,11 +195,16 @@ export async function captureSwitchState({ prefix, cellar, formula, previousForm
             !/^(?:[a-zA-Z0-9][a-zA-Z0-9_-]*\/[a-zA-Z0-9][a-zA-Z0-9_-]*\/)?[a-zA-Z0-9][a-zA-Z0-9@+_.-]*$/u.test(dependency.full_name)) {
           throw new Error('Invalid dependency rollback identity');
         }
-        if (!currentDependencies.has(dependency.full_name)) {
-          currentDependencies.set(dependency.full_name,
-            await findInstalledKeg(runBrew, dependency.full_name, cellar));
+        const requiredLive = live && dependency.declared_directly !== false;
+        let currentKeg;
+        if (requiredLive) {
+          if (!currentDependencies.has(dependency.full_name)) {
+            currentDependencies.set(dependency.full_name,
+              await findInstalledKeg(runBrew, dependency.full_name, cellar));
+          }
+          currentKeg = currentDependencies.get(dependency.full_name);
+          liveQueue.push(currentKeg);
         }
-        const currentKeg = currentDependencies.get(dependency.full_name);
         const historicalKeg = path.join(cellar, name, dependency.pkg_version);
         let historicalPresent;
         try {
@@ -203,9 +215,8 @@ export async function captureSwitchState({ prefix, cellar, formula, previousForm
           historicalPresent = false;
         }
         dependencies.push({ fullName: dependency.full_name, recordedVersion: dependency.pkg_version,
-          historicalKeg, historicalPresent, currentKeg });
-        queue.push(currentKeg);
-        if (historicalPresent) queue.push(historicalKeg);
+          historicalKeg, historicalPresent, requiredLive, ...(requiredLive ? { currentKeg } : {}) });
+        if (historicalPresent) historicalQueue.push(historicalKeg);
       }
       for (const file of [path.join(prefix, 'opt', components[0]),
         path.join(prefix, 'var', 'homebrew', 'linked', components[0])]) {
@@ -216,7 +227,14 @@ export async function captureSwitchState({ prefix, cellar, formula, previousForm
           throw new Error(`Unidentified Homebrew rollback link: ${file}`);
         }
         state.links.push({ path: file, name: components[0], captured });
-        if (captured.kind === 'link') queue.push(captured.absolute);
+        if (captured.kind === 'link') {
+          try {
+            await fs.lstat(captured.absolute);
+            historicalQueue.push(captured.absolute);
+          } catch (error) {
+            if (error.code !== 'ENOENT') throw error;
+          }
+        }
       }
     }
     state.phase = 'captured-before-brew';
