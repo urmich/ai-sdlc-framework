@@ -11,7 +11,7 @@ import { verifyPackage } from './verify-package.mjs';
 import { verifyReleaseChecksums, verifyRelease } from './verify-platform-package.mjs';
 import { registryPackage, verifyRegistryPayload } from './publish-release.mjs';
 import { ROOT, RELEASE_TARGETS, archiveRecord, emptyDirectory, options,
-  trustedEnvironment, verifyBundle, writeJson } from './release-bundle.mjs';
+  requirePublicationReady, trustedEnvironment, verifyBundle, writeJson } from './release-bundle.mjs';
 
 const execute = promisify(execFile);
 
@@ -42,12 +42,15 @@ export async function downloadPublicAssets(bundle, directory, fetcher = fetch) {
 export async function acceptRelease({ directory, outputFile, npm = 'false', hooks = {}, ...expected }) {
   if (!['true', 'false'].includes(npm)) throw new Error('--npm must be true or false');
   const bundle = await verifyBundle({ directory, ...expected });
+  requirePublicationReady(bundle);
   const root = path.join(ROOT, '.test-data', `release-acceptance-${randomUUID()}`);
   await fs.mkdir(root, { recursive: true });
   const result = { schemaVersion: 1, identity: bundle.identity, status: 'NotRun',
     publicAssets: { status: 'NotRun' }, nativeMacosArm64: 'NotRun',
     nativeWindows: 'NotRun', nativeMacosIntel: 'NotRun',
-    npm: { status: 'NotRun' }, homebrew: { status: 'NotRun', reason: 'Separate stable Homebrew acceptance hook not integrated' },
+    npm: { status: 'NotRun' }, homebrew: bundle.context.prerelease ?
+      { status: 'NotApplicable', reason: 'Prereleases do not publish stable Homebrew metadata' } :
+      { status: 'NotRun', reason: 'Required stable Homebrew acceptance hook not integrated' },
     wingetCommunity: { status: 'NotRun', reason: 'Community submission and native client availability are not cross-build evidence' } };
   try {
     if (process.platform !== 'darwin' || process.arch !== 'arm64') {
@@ -84,15 +87,20 @@ export async function acceptRelease({ directory, outputFile, npm = 'false', hook
       await verifyPackage({ artifact, environment: env });
       result.npm = { status: 'Passed', authentication: 'anonymous', payloadSha256: identity.sha256 };
     }
-    // Hooks are deliberately separate: a local formula or cross-build cannot assert community acceptance.
-    if (!bundle.context.prerelease && hooks.homebrew) {
+    // A local formula or cross-build cannot assert public Homebrew acceptance.
+    if (!bundle.context.prerelease && typeof hooks.homebrew !== 'function') {
+      throw Object.assign(new Error('Stable acceptance requires the integrated anonymous Homebrew acceptance hook'),
+        { code: 'RELEASE_INTEGRATION_BLOCKED' });
+    }
+    if (!bundle.context.prerelease) {
       result.homebrew = await hooks.homebrew({ bundle, downloaded, environment: env });
       if (result.homebrew.status !== 'Passed') throw new Error('Requested Homebrew acceptance hook did not pass');
     }
     result.status = 'Passed';
     return result;
   } catch (error) {
-    result.status = 'Failed';
+    result.status = error.code === 'RELEASE_INTEGRATION_BLOCKED' ? 'NotRun' : 'Failed';
+    if (error.code === 'RELEASE_INTEGRATION_BLOCKED') result.diagnosticStatus = 'Blocked';
     result.reason = error.message;
     if (error.stdout) process.stdout.write(error.stdout);
     if (error.stderr) process.stderr.write(error.stderr);

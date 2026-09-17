@@ -1,20 +1,59 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { readZip } from '../packaging/standalone/archive.mjs';
+import { canonical, readZip } from '../packaging/standalone/archive.mjs';
 import { extractEntries } from '../packaging/standalone/protocol.mjs';
 import { runtimePreflight } from '../packaging/standalone/runtime.mjs';
 import { buildLauncher } from '../packaging/winget/build-launcher.mjs';
 import { validateManifests } from '../packaging/winget/validate.mjs';
+import { renderManifests } from '../packaging/winget/generate.mjs';
 import { verifyRelease } from './verify-platform-package.mjs';
 import { verifyPackage } from './verify-package.mjs';
 import { ROOT, RELEASE_TARGETS, RELEASE_GATE_TARGETS, RELEASE_SCOPE, archiveRecord, options,
   readJson, trustedEnvironment, verifyCandidate, writeJson } from './release-bundle.mjs';
 
 const execute = promisify(execFile);
+
+function integrationBlocked(message) {
+  return Object.assign(new Error(message), { code: 'RELEASE_INTEGRATION_BLOCKED',
+    homebrewResult: { nativeValidation: 'NotRun', reason: message } });
+}
+
+export async function verifyNativeHomebrew({ candidate, candidateDir, scratch,
+  brew = process.env.SDLC_HOMEBREW_BREW, verifyLifecycle } = {}) {
+  if (!candidate.context.prerelease && candidate.context.homebrew.status !== 'Generated') {
+    throw integrationBlocked('Mandatory native Homebrew validation requires the integrated arm64-only stable generator');
+  }
+  if (!verifyLifecycle) {
+    const modulePath = path.join(ROOT, 'scripts/homebrew-lifecycle.mjs');
+    const present = await fs.stat(modulePath).catch(error => {
+      if (error.code !== 'ENOENT') throw error;
+      return null;
+    });
+    if (!present) throw integrationBlocked('Mandatory native Homebrew lifecycle hook is not integrated');
+    verifyLifecycle = (await import(pathToFileURL(modulePath).href)).verifyHomebrewLifecycle;
+  }
+  if (typeof verifyLifecycle !== 'function') throw new Error('Homebrew lifecycle module must export verifyHomebrewLifecycle');
+  if (!brew || !path.isAbsolute(brew)) throw integrationBlocked('Provide SDLC_HOMEBREW_BREW for an approved isolated Homebrew prefix');
+  const root = path.join(scratch, 'homebrew-native');
+  try {
+    const evidence = await verifyLifecycle({ brew, candidateDirectory: path.resolve(candidateDir, 'assets'), root });
+    if (evidence?.passed !== true || evidence.platform !== 'darwin' || evidence.architecture !== 'arm64' ||
+        evidence.uname !== 'arm64' || [true, 1, '1'].includes(evidence.sysctlProcTranslated) || evidence.cleanupError) {
+      throw new Error('Mandatory Homebrew native lifecycle, architecture or cleanup did not pass');
+    }
+    return { nativeValidation: 'Passed', evidence };
+  } catch (error) {
+    const evidence = await readJson(path.join(root, 'evidence.json')).catch(() => null);
+    error.homebrewResult = { nativeValidation: 'Failed', reason: error.message, evidence };
+    error.retainedWorkspace = scratch;
+    throw error;
+  }
+}
 
 async function command(executable, args, env, cwd = ROOT) {
   const result = await execute(executable, args, { cwd, env, timeout: 20 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 });
@@ -29,7 +68,8 @@ export async function runGate({ candidateDir, evidenceDir, target, ...expected }
   const policy = RELEASE_SCOPE[target];
   const result = { schemaVersion: 1, target, required: policy.required, validation: policy.validation,
     identity: candidate.context.identity, status: 'NotRun', nativeValidation: 'NotRun',
-    host: { platform: process.platform, arch: process.arch },
+    host: { platform: process.platform, arch: process.arch, node: process.version,
+      machine: os.machine(), runnerImage: process.env.ImageOS ?? 'local', runnerImageVersion: process.env.ImageVersion ?? null },
     ...(process.env.GITHUB_RUN_ID ? { run: { id: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT } } : {}) };
   const scratch = path.join(ROOT, '.test-data', `release-gate-${randomUUID()}`);
   await fs.mkdir(scratch, { recursive: true });
@@ -48,6 +88,12 @@ export async function runGate({ candidateDir, evidenceDir, target, ...expected }
         throw new Error('Mandatory lifecycle requires native Apple Silicon Node, not Intel or emulation');
       }
       await runtimePreflight();
+      result.host.uname = (await execute('/usr/bin/uname', ['-m'])).stdout.trim();
+      const translated = await execute('/usr/sbin/sysctl', ['-in', 'sysctl.proc_translated'])
+        .then(value => ({ exitCode: 0, stdout: value.stdout.trim(), stderr: value.stderr.trim() }),
+          error => ({ exitCode: error.code, stdout: error.stdout?.trim() ?? '', stderr: error.stderr?.trim() ?? error.message }));
+      result.host.sysctlProcTranslated = translated;
+      if (result.host.uname !== 'arm64' || translated.stdout === '1') throw new Error('macOS arm64 validation cannot use emulation');
       await verifyPackage({ artifact: path.join(assets, candidate.descriptor.payload.filename), environment: env });
       await command(process.execPath, ['--test', 'test/distribution-channels.test.mjs'], {
         ...env, SDLC_DISTRIBUTION_TARGET: target,
@@ -55,8 +101,10 @@ export async function runGate({ candidateDir, evidenceDir, target, ...expected }
         SDLC_RELEASE_DIR: assets,
         SDLC_WINDOWS_LAUNCHER: path.resolve(candidateDir, 'launcher/sdlc.exe'),
       });
-      result.nativeValidation = 'Passed';
+      result.standaloneNativeValidation = 'Passed';
       result.networkDeniedLifecycle = 'Passed';
+      result.homebrew = await verifyNativeHomebrew({ candidate, candidateDir, scratch });
+      result.nativeValidation = 'Passed';
     } else {
       if (process.platform === 'win32') throw new Error('Windows gate is deliberately non-native cross-validation');
       const launcher = await buildLauncher({ outputDir: path.join(scratch, 'launcher'), environment: env });
@@ -69,6 +117,11 @@ export async function runGate({ candidateDir, evidenceDir, target, ...expected }
           input.releaseRepository !== candidate.context.releaseRepository) throw new Error('WinGet input is not candidate-bound');
       result.winget = await validateManifests({ ...input,
         archivePath: path.join(assets, archive.filename), manifestDir: path.join(candidateDir, 'winget') });
+      const expectedMetadata = candidate.context.prerelease ? [] :
+        renderManifests(input).map(({ content, ...record }) => record);
+      if (canonical(candidate.descriptor.files.filter(file => file.kind === 'winget')) !== canonical(expectedMetadata)) {
+        throw new Error('Frozen public WinGet metadata differs from the validated manifest set');
+      }
       const schema = await command(process.env.SDLC_PYTHON || 'python3',
         ['scripts/validate-winget-schema.py', '--manifest-dir', path.join(candidateDir, 'winget'),
           '--schema-dir', path.join(ROOT, '.test-data/winget-schemas')], env);
@@ -86,20 +139,23 @@ export async function runGate({ candidateDir, evidenceDir, target, ...expected }
       await command(process.execPath, ['--test', 'test/winget.test.mjs'], env);
       result.deterministicCrossBuild = 'Passed';
       result.payloadIntegrity = 'Passed';
-      result.testerPrompt = candidate.testerPrompt;
+      result.testerInputValidation = 'Passed';
       result.reason = 'No Windows executable, WinGet client, or Windows lifecycle was executed.';
     }
     result.status = 'Passed';
     return result;
   } catch (error) {
-    result.status = 'Failed';
+    result.status = error.code === 'RELEASE_INTEGRATION_BLOCKED' ? 'NotRun' : 'Failed';
+    if (error.code === 'RELEASE_INTEGRATION_BLOCKED') result.diagnosticStatus = 'Blocked';
+    if (error.homebrewResult) result.homebrew = error.homebrewResult;
+    if (error.retainedWorkspace) result.retainedWorkspace = error.retainedWorkspace;
     result.reason = error.message;
     if (error.stdout) process.stdout.write(error.stdout);
     if (error.stderr) process.stderr.write(error.stderr);
     throw error;
   } finally {
     await writeJson(path.join(evidenceDir, `${target}.json`), result);
-    await fs.rm(scratch, { recursive: true, force: true });
+    if (!result.retainedWorkspace) await fs.rm(scratch, { recursive: true, force: true });
   }
 }
 

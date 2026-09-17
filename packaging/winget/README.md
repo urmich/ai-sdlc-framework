@@ -275,7 +275,10 @@ network dependencies. This is schema evidence only:
 macOS cross-compilation and fixture tests cannot establish native Windows
 installation, WinGet community acceptance, or client availability.
 
-The release pipeline additionally generates and validates a deterministic
+Only after implementation and required native macOS/Homebrew validation complete
+does the release pipeline generate and validate a deterministic
 [T-60 Windows tester handoff](../../docs/release-ci.md#t-60-windows-tester-handoff)
 against the final candidate digests. Prompt generation is not native execution:
 its native status stays `NotRun`, and final content remains `PendingIntegration`.
+The Windows job validates only deferred input identity, including the launcher
+digest. Pending T-60 completeness prevents publication.

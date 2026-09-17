@@ -3,18 +3,19 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { readTarGzip, sha256, tarGzip } from '../packaging/standalone/archive.mjs';
+import { canonical, readTarGzip, sha256, tarGzip } from '../packaging/standalone/archive.mjs';
 import { platformEntries } from '../packaging/standalone/protocol.mjs';
 import { generateManifests } from '../packaging/winget/generate.mjs';
-import { generateWindowsTesterPrompt, renderWindowsTesterPrompt,
+import { generateWindowsTesterPrompt, INPUT_FILENAME, renderWindowsTesterPrompt,
   validateWindowsTesterPrompt } from '../packaging/windows-tester/generate.mjs';
 import { buildPackage } from '../scripts/package.mjs';
 import { buildPlatforms, writeReleaseMetadata } from '../scripts/package-platforms.mjs';
 import { RELEASE_SCOPE, RELEASE_TARGETS, RELEASE_GATE_TARGETS, archiveRecord, evidenceIdentity, options,
   homebrewMetadata, releaseRepository, sealBundle, selectGateFiles, validateGates, verifyBundle,
-  verifyCandidate, windowsTesterInput, writeJson } from '../scripts/release-bundle.mjs';
-import { publishDraft, publishNpm, verifyRegistryPayload } from '../scripts/publish-release.mjs';
+  prepareRelease, verifyCandidate, windowsTesterInput, windowsTesterReadiness, writeJson } from '../scripts/release-bundle.mjs';
+import { publishApprovedDraft, publishApprovedNpm, publishDraft, publishNpm, verifyRegistryPayload } from '../scripts/publish-release.mjs';
 import { downloadPublicAssets } from '../scripts/accept-release.mjs';
+import { verifyNativeHomebrew } from '../scripts/release-gate.mjs';
 
 let root;
 let base;
@@ -30,11 +31,13 @@ function simulatedGates(identity) {
     validation: RELEASE_SCOPE[target].validation,
     status: target === 'macos-x64' ? 'NotRun' : 'Passed',
     nativeValidation: target === 'macos-arm64' ? 'Passed' : 'NotRun',
-    ...(target === 'macos-arm64' ? { networkDeniedLifecycle: 'Passed', host: { platform: 'darwin', arch: 'arm64' } } : {}),
+    ...(target === 'macos-arm64' ? { networkDeniedLifecycle: 'Passed', host: { platform: 'darwin', arch: 'arm64' },
+      homebrew: { nativeValidation: 'Passed', evidence: { passed: true, platform: 'darwin',
+        architecture: 'arm64', uname: 'arm64', commands: ['unit fixture only'] } } } : {}),
     ...(target === 'windows-x64' ? { deterministicCrossBuild: 'Passed', payloadIntegrity: 'Passed',
       schema: { schemaValidation: 'Passed' }, host: { platform: 'linux', arch: 'x64' },
       winget: { contractValidation: 'Passed', nativeValidation: 'NotRun' },
-      testerPrompt: { test: 'T-60', generationValidation: 'Passed', nativeExecution: 'NotRun', identity } } : {}),
+      testerInputValidation: 'Passed' } : {}),
   }));
 }
 
@@ -58,11 +61,15 @@ test.before(async () => {
   const archive = archiveRecord(built, 'windows-x64');
   const winget = await generateManifests({ version: built.descriptor.version, releaseRepository: repository,
     archive, archivePath: path.join(base, 'assets', archive.filename), outputDir: path.join(root, 'winget') });
+  const macos = archiveRecord(built, 'macos-arm64');
+  const formula = path.join(root, 'ai-sdlc-framework.rb');
+  await fs.writeFile(formula, `  depends_on arch: :arm64\n  url "https://github.com/${repository}/releases/download/v${payload.version}/${macos.filename}"\n  sha256 "${macos.sha256}"\n`);
   const final = await writeReleaseMetadata({ outputDir: path.join(base, 'assets'), artifact: payload.artifact,
-    sourceCommit, targets: RELEASE_TARGETS, metadataFiles: winget.files });
-  await generateWindowsTesterPrompt({ outputDir: path.join(base, 'handoff'), ...windowsTesterInput(final, repository) });
+    sourceCommit, targets: RELEASE_TARGETS, metadataFiles: [...winget.files, { artifact: formula, kind: 'homebrew' }] });
+  await writeJson(path.join(base, INPUT_FILENAME), windowsTesterInput(final, repository, sha256(pe)));
   await writeJson(path.join(base, 'context.json'), { schemaVersion: 1, releaseRepository: repository,
-    identity: evidenceIdentity(final), scope: RELEASE_SCOPE, prerelease: false, homebrew: { status: 'NotIntegrated' } });
+    identity: evidenceIdentity(final), scope: RELEASE_SCOPE, prerelease: false,
+    launcher: { sha256: sha256(pe) }, homebrew: { status: 'Generated' } });
 });
 
 test.after(async () => {
@@ -98,6 +105,14 @@ test('only Apple Silicon and Windows archives publish; Intel is unsupported/NotR
   assert.throws(() => options(['--target', 'x', '--target', 'y']), /Duplicate/u);
 });
 
+test('release preparation cannot attribute candidate bytes to a different source commit', async t => {
+  const f = await fixture(t);
+  const outputDir = path.join(f.directory, 'wrong-revision');
+  await assert.rejects(prepareRelease({ outputDir, repository, sourceCommit }),
+    /exact clean committed source revision/u);
+  await assert.rejects(fs.stat(outputDir), { code: 'ENOENT' });
+});
+
 test('bundle seals exact payload and final manager metadata before descriptor/checksum pins', async t => {
   const f = await fixture(t);
   const sealed = await sealBundle(f);
@@ -107,7 +122,8 @@ test('bundle seals exact payload and final manager metadata before descriptor/ch
   assert.equal(bundle.descriptor.files.filter(file => file.kind === 'archive').length, 3);
   assert.ok(bundle.files.every(file => !file.filename.includes('linux')));
   assert.ok(bundle.files.filter(file => file.filename.startsWith('assets/')).every(file => !file.filename.includes('macos-x64')));
-  assert.equal(bundle.context.homebrew.status, 'NotIntegrated');
+  assert.equal(bundle.context.homebrew.status, 'Generated');
+  assert.equal(bundle.publicationReady, false, 'Pending T-60 completeness cannot authorize publication');
   const names = bundle.files.map(file => file.filename);
   assert.ok(names.includes('assets/release-descriptor.json'));
   assert.ok(names.includes('assets/SHA256SUMS'));
@@ -156,7 +172,7 @@ test('candidate verification independently rejects checksum-consistent Intel Hom
   const armOnly = `  depends_on arch: :arm64\n  url "https://github.com/${repository}/releases/download/v${payload.version}/${archive.filename}"\n  sha256 "${archive.sha256}"\n`;
   for (const intel of [false, true]) {
     await fs.writeFile(file, armOnly + (intel ? '  on_intel do\n  end\n' : ''));
-    const metadataFiles = f.candidate.descriptor.files.filter(item => item.kind !== 'archive')
+    const metadataFiles = f.candidate.descriptor.files.filter(item => !['archive', 'homebrew'].includes(item.kind))
       .map(item => ({ ...item, artifact: path.join(f.candidateDir, 'assets', item.filename) }));
     const final = await writeReleaseMetadata({ outputDir: path.join(f.candidateDir, 'assets'),
       artifact: payload.artifact, sourceCommit, targets: RELEASE_TARGETS,
@@ -164,8 +180,9 @@ test('candidate verification independently rejects checksum-consistent Intel Hom
     await fs.unlink(path.join(f.candidateDir, 'context.json'));
     await writeJson(path.join(f.candidateDir, 'context.json'), { ...f.candidate.context,
       identity: evidenceIdentity(final), homebrew: { status: 'Generated', nativeValidation: 'NotRun' } });
-    await fs.rm(path.join(f.candidateDir, 'handoff'), { recursive: true });
-    await generateWindowsTesterPrompt({ outputDir: path.join(f.candidateDir, 'handoff'), ...windowsTesterInput(final, repository) });
+    await fs.unlink(path.join(f.candidateDir, INPUT_FILENAME));
+    await writeJson(path.join(f.candidateDir, INPUT_FILENAME),
+      windowsTesterInput(final, repository, f.candidate.context.launcher.sha256));
     if (intel) await assert.rejects(verifyCandidate(f.candidateDir), /arm64 only/u);
     else assert.equal((await verifyCandidate(f.candidateDir)).context.homebrew.status, 'Generated');
   }
@@ -173,7 +190,8 @@ test('candidate verification independently rejects checksum-consistent Intel Hom
 
 test('T-60 prompt deterministically binds final metadata and explicitly does not claim native execution', async t => {
   const f = await fixture(t);
-  const input = windowsTesterInput(f.candidate, repository);
+  const input = { ...f.candidate.testerInput,
+    readiness: windowsTesterReadiness(f.candidate, simulatedGates(f.candidate.context.identity)) };
   const first = renderWindowsTesterPrompt(input);
   assert.deepEqual(first, renderWindowsTesterPrompt(structuredClone(input)));
   for (const field of ['sourceCommit', 'payloadSha256', 'descriptorSha256', 'checksumsSha256']) {
@@ -181,26 +199,35 @@ test('T-60 prompt deterministically binds final metadata and explicitly does not
   }
   assert.ok(first.contents.includes(input.archive.sha256));
   assert.ok(first.contents.includes(input.inventoryDigest));
+  assert.ok(first.contents.includes(input.launcherSha256));
   assert.match(first.contents, /PendingIntegration/u);
   assert.equal(first.manifest.nativeExecution, 'NotRun');
   const outputDir = path.join(f.directory, 'prompt');
   const result = await generateWindowsTesterPrompt({ ...input, outputDir });
   assert.equal(result.generationValidation, 'Passed');
   assert.equal(result.nativeExecution, 'NotRun');
+  assert.equal(result.completionValidation, 'NotRun');
+  const changedIdentity = { ...input.identity, checksumsSha256: '0'.repeat(64) };
   await assert.rejects(validateWindowsTesterPrompt({ ...input, outputDir,
-    identity: { ...input.identity, checksumsSha256: '0'.repeat(64) } }), /not bound/u);
+    identity: changedIdentity, readiness: { ...input.readiness, identity: changedIdentity } }), /not bound/u);
   await assert.rejects(validateWindowsTesterPrompt({ ...input, outputDir,
     releaseRepository: 'different/public-assets' }), /not bound/u);
   await fs.appendFile(path.join(outputDir, 'windows-tester-prompt.md'), '\nNative execution: Passed\n');
   await assert.rejects(validateWindowsTesterPrompt({ ...input, outputDir }), /not bound/u);
   assert.throws(() => renderWindowsTesterPrompt({ ...input,
     archive: { ...input.archive, filename: input.archive.filename.replace('windows-x64', 'macos-x64') } }), /exact Windows/u);
+  assert.throws(() => renderWindowsTesterPrompt({ ...input, launcherSha256: undefined }), /exact final candidate/u);
 });
 
-test('T-60 handoff cannot be missing from a frozen candidate', async t => {
+test('T-60 generation waits for completed native validation and only identity inputs exist in a candidate', async t => {
   const f = await fixture(t);
-  await fs.unlink(path.join(f.candidateDir, 'handoff/windows-tester-prompt.json'));
-  await assert.rejects(verifyCandidate(f.candidateDir), /T-60 handoff/u);
+  await assert.rejects(fs.stat(path.join(f.candidateDir, 'handoff')), { code: 'ENOENT' });
+  const outputDir = path.join(f.directory, 'premature-prompt');
+  await assert.rejects(generateWindowsTesterPrompt({ ...f.candidate.testerInput, outputDir }),
+    /completed implementation/u);
+  await assert.rejects(fs.stat(outputDir), { code: 'ENOENT' });
+  await fs.writeFile(path.join(f.candidateDir, INPUT_FILENAME), '{}');
+  await assert.rejects(verifyCandidate(f.candidateDir), /T-60 input/u);
 });
 
 test('missing, failed, stale, skipped or emulated required evidence blocks sealing', async t => {
@@ -213,7 +240,8 @@ test('missing, failed, stale, skipped or emulated required evidence blocks seali
     values => { values[0].identity = { ...values[0].identity, payloadSha256: '0'.repeat(64) }; },
     values => { values.find(item => item.target === 'windows-x64').nativeValidation = 'Passed'; },
     values => { values.find(item => item.target === 'windows-x64').schema.schemaValidation = 'NotRun'; },
-    values => { values.find(item => item.target === 'windows-x64').testerPrompt.nativeExecution = 'Passed'; },
+    values => { values.find(item => item.target === 'windows-x64').testerInputValidation = 'NotRun'; },
+    values => { values[0].homebrew.nativeValidation = 'NotRun'; },
     values => { values.find(item => item.target === 'macos-x64').status = 'Passed'; },
   ]) {
     const copy = structuredClone(gates);
@@ -222,6 +250,25 @@ test('missing, failed, stale, skipped or emulated required evidence blocks seali
   }
   await fs.unlink(path.join(f.evidenceDir, 'macos-arm64.json'));
   await assert.rejects(sealBundle(f), /every scoped mandatory gate/u);
+});
+
+test('missing Homebrew integration blocks the required native gate; an adapter cannot hide bad native evidence', async t => {
+  const f = await fixture(t);
+  const args = { candidate: f.candidate, candidateDir: f.candidateDir, scratch: f.directory };
+  await assert.rejects(verifyNativeHomebrew({ ...args,
+    candidate: { ...f.candidate, context: { ...f.candidate.context, homebrew: { status: 'NotIntegrated' } } } }),
+  { code: 'RELEASE_INTEGRATION_BLOCKED' });
+  await assert.rejects(verifyNativeHomebrew({ ...args, brew: '', verifyLifecycle: async () => ({ passed: true }) }),
+    { code: 'RELEASE_INTEGRATION_BLOCKED' });
+  const evidence = simulatedGates(f.candidate.context.identity)[0].homebrew.evidence;
+  const passed = await verifyNativeHomebrew({ ...args, brew: path.join(f.directory, 'isolated/bin/brew'),
+    verifyLifecycle: async input => {
+      assert.equal(input.candidateDirectory, path.join(f.candidateDir, 'assets'));
+      return evidence;
+    } });
+  assert.equal(passed.nativeValidation, 'Passed');
+  await assert.rejects(verifyNativeHomebrew({ ...args, brew: path.join(f.directory, 'isolated/bin/brew'),
+    verifyLifecycle: async () => ({ ...evidence, architecture: 'x64' }) }), /did not pass/u);
 });
 
 test('Intel has no required job or artifact and is recorded as unsupported NotRun during sealing', async t => {
@@ -313,41 +360,55 @@ function githubFixture(bundle, directory) {
     makePublic: () => { release.draft = false; } };
 }
 
-test('draft publication is idempotent and never overwrites mismatched bytes or creates tags', async t => {
+test('pending T-60 completeness blocks real publisher entrypoints and forged readiness is rejected', async t => {
   const f = await fixture(t);
-  const sealed = await sealBundle(f);
-  const bundle = await verifyBundle({ directory: f.outputDir });
-  const mock = githubFixture(bundle, f.outputDir);
-  const request = { directory: f.outputDir, repository, expectedBundleSha256: sealed.bundleSha256 };
-  assert.equal((await publishDraft(request, mock.api)).status, 'DraftAssetsVerified');
-  const mutations = mock.calls.filter(call => call.method === 'POST').length;
-  await publishDraft(request, mock.api);
-  assert.equal(mock.calls.filter(call => call.method === 'POST').length, mutations);
-  assert.ok(mock.calls.every(call => !['DELETE', 'PATCH', 'PUT'].includes(call.method)));
-  mock.assets[0].bytes[0] ^= 255;
-  await assert.rejects(publishDraft(request, mock.api), /conflicts/u);
-  assert.equal(mock.calls.filter(call => call.method === 'POST').length, mutations);
+  await sealBundle(f);
+  await assert.rejects(publishDraft({ directory: f.outputDir, repository },
+    async () => assert.fail('No GitHub request is allowed before readiness')), /Publication blocked/u);
+  await assert.rejects(publishNpm({ directory: f.outputDir, sourceRepository: repository }, {
+    fetcher: async () => assert.fail('No npm query is allowed before readiness'),
+  }), /Publication blocked/u);
+  const manifest = JSON.parse(await fs.readFile(path.join(f.outputDir, 'bundle.json'), 'utf8'));
+  await fs.writeFile(path.join(f.outputDir, 'bundle.json'), canonical({ ...manifest, publicationReady: true }));
+  await assert.rejects(verifyBundle({ directory: f.outputDir }), /readiness mismatch/u);
 });
 
-test('draft publication rejects private repos, wrong tag commits, unexpected assets and public releases', async t => {
+test('approved draft transport is idempotent and never overwrites mismatched bytes or creates tags', async t => {
   const f = await fixture(t);
   await sealBundle(f);
   const bundle = await verifyBundle({ directory: f.outputDir });
   const mock = githubFixture(bundle, f.outputDir);
-  const request = { directory: f.outputDir, repository };
-  await assert.rejects(publishDraft({ ...request, repository: 'other/repo' }, mock.api), /frozen metadata/u);
+  // Transport tests simulate the separate approval layer; all remote requests remain mocked.
+  const request = { directory: f.outputDir, repository, bundle: { ...bundle, publicationReady: true } };
+  assert.equal((await publishApprovedDraft(request, mock.api)).status, 'DraftAssetsVerified');
+  const mutations = mock.calls.filter(call => call.method === 'POST').length;
+  await publishApprovedDraft(request, mock.api);
+  assert.equal(mock.calls.filter(call => call.method === 'POST').length, mutations);
+  assert.ok(mock.calls.every(call => !['DELETE', 'PATCH', 'PUT'].includes(call.method)));
+  mock.assets[0].bytes[0] ^= 255;
+  await assert.rejects(publishApprovedDraft(request, mock.api), /conflicts/u);
+  assert.equal(mock.calls.filter(call => call.method === 'POST').length, mutations);
+});
+
+test('approved draft transport rejects private repos, wrong tag commits, unexpected assets and public releases', async t => {
+  const f = await fixture(t);
+  await sealBundle(f);
+  const bundle = await verifyBundle({ directory: f.outputDir });
+  const mock = githubFixture(bundle, f.outputDir);
+  const request = { directory: f.outputDir, repository, bundle: { ...bundle, publicationReady: true } };
+  await assert.rejects(publishApprovedDraft({ ...request, repository: 'other/repo' }, mock.api), /frozen metadata/u);
   mock.setPrivate(true);
-  await assert.rejects(publishDraft(request, mock.api), /public repository/u);
+  await assert.rejects(publishApprovedDraft(request, mock.api), /public repository/u);
   mock.setPrivate(false);
   mock.setTag('b'.repeat(40));
-  await assert.rejects(publishDraft(request, mock.api), /exact validated source/u);
+  await assert.rejects(publishApprovedDraft(request, mock.api), /exact validated source/u);
   mock.setTag(sourceCommit);
-  await publishDraft(request, mock.api);
+  await publishApprovedDraft(request, mock.api);
   mock.assets.push({ name: 'unowned.txt' });
-  await assert.rejects(publishDraft(request, mock.api), /unexpected assets/u);
+  await assert.rejects(publishApprovedDraft(request, mock.api), /unexpected assets/u);
   mock.assets.pop();
   mock.makePublic();
-  await assert.rejects(publishDraft(request, mock.api), /matching draft/u);
+  await assert.rejects(publishApprovedDraft(request, mock.api), /matching draft/u);
 });
 
 test('anonymous public acceptance compares saved hashes before extraction or native execution', async t => {
@@ -371,7 +432,7 @@ test('anonymous public acceptance compares saved hashes before extraction or nat
     async () => new Response('', { status: 404 })), /unavailable/u);
 });
 
-test('npm handoff reuses the exact bundled tgz and identical public versions never republish', async t => {
+test('approved npm transport reuses the exact bundled tgz and identical public versions never republish', async t => {
   const f = await fixture(t);
   await sealBundle(f);
   const bytes = await fs.readFile(payload.artifact);
@@ -381,12 +442,13 @@ test('npm handoff reuses the exact bundled tgz and identical public versions nev
     integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}` } };
   const fetcher = async url => new Response(String(url).endsWith('.tgz') ? bytes : JSON.stringify(metadata));
   const sourceRepository = pkg.repository.url.slice('https://github.com/'.length, -4);
-  const result = await publishNpm({ directory: f.outputDir, sourceRepository }, {
+  const bundle = { ...await verifyBundle({ directory: f.outputDir }), publicationReady: true };
+  const result = await publishApprovedNpm({ directory: f.outputDir, sourceRepository, bundle }, {
     fetcher, run: () => assert.fail('An identical existing npm version must not be republished'),
   });
   assert.equal(result.status, 'AlreadyPublishedIdentical');
   let published = false;
-  await publishNpm({ directory: f.outputDir, sourceRepository }, {
+  await publishApprovedNpm({ directory: f.outputDir, sourceRepository, bundle }, {
     fetcher: async url => !published ? new Response('', { status: 404 }) : fetcher(url),
     run: async (_command, args) => {
       const index = args.indexOf('publish');

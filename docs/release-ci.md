@@ -2,10 +2,13 @@
 
 ## Release policy
 
+The authoritative requirements are the approved `ec3b2e7` scope change
+(cherry-picked here as `4cf9570`), especially AC-053.10, AC-053.17, T-51 and T-60.
+
 | Target | Prepublication requirement | Published installer |
 | --- | --- | --- |
-| macOS Apple Silicon `macos-arm64` | **Mandatory native lifecycle**, native Node/machine/anti-Rosetta checks, enforced network/npm-denied lifecycle with negative controls | Yes |
-| Windows `windows-x64` | **Mandatory deterministic cross-build/PE/schema/URL/metadata/pre-JS payload-integrity checks**, plus T-60 prompt binding validation | Yes; no native execution claim |
+| macOS Apple Silicon `macos-arm64` | **Mandatory native standalone and Homebrew lifecycle**, native Node/machine/anti-Rosetta checks, enforced network/npm-denied standalone lifecycle with negative controls | Yes |
+| Windows `windows-x64` | **Mandatory deterministic cross-build/PE/schema/URL/metadata/pre-JS payload-integrity checks**, plus validation of deferred T-60 identity inputs | Yes; no native execution claim |
 | macOS Intel `macos-x64` | Unsupported; explicit native `NotRun`, non-blocking | **No**; any separately generated preview is excluded from supported release and Homebrew metadata |
 | Linux `linux-x64` | Out of scope | **No** |
 
@@ -58,18 +61,29 @@ execution on any host.
    covering npm, platform archives and stable manager metadata, followed by
    **SHA256SUMS** covering those files and the descriptor. There is no hash cycle.
    Nothing rewrites these bytes after native/cross-validation starts.
-6. After the final descriptor and checksums exist, generate the candidate-bound
-   T-60 Windows tester prompt under `handoff/`, **outside `assets/`**. Its binding
-   can include both final digests without creating a descriptor/prompt hash cycle.
+6. After the final descriptor and checksums exist, write only
+   `windows-tester-input.json`, including the independently verified launcher
+   digest. **Do not generate the tester document yet.** Candidate verification
+   rejects prematurely generated `handoff/` content.
 7. All matrix jobs download the same immutable candidate artifact by ID, bind it
    to saved descriptor/checksum/source pins, and record candidate-bound evidence.
    The native lifecycle extracts the downloaded archive; independent test
    builds must first reproduce its exact payload/platform digests.
-8. Sealing requires both mandatory gates to pass, checks the explicit Intel
-   `NotRun`, and emits one v4 immutable `release-bundle-<version>-<run>-<attempt>`.
-   Its inventory binds `assets/`, `handoff/`, `context.json`, and `evidence/` with exact sizes
+8. Sealing first requires completed native standalone **and Homebrew** evidence
+   from macOS arm64 and the Windows cross-only gate. Only then does it generate
+   the candidate-bound T-60 document under `handoff/`, **outside `assets/`**,
+   avoiding a final-descriptor/prompt hash cycle. The resulting immutable review
+   bundle includes explicit publication readiness.
+   Its inventory binds `assets/`, deferred identity inputs, `handoff/`,
+   `context.json`, and `evidence/` with exact sizes
    and hashes. Unexpected files, symlinks, empty directories, stale evidence,
    Windows native claims, and Intel/Linux archives fail verification.
+
+While T-60 content completeness remains `PendingIntegration`/`NotRun`, the bundle
+records `publicationReady: false`. All production draft, npm and acceptance
+entrypoints reject it before making external requests. Flipping that flag in
+the bundle cannot bypass verification: readiness is recomputed from the verified
+handoff. An immutable review artifact is not permission to publish.
 
 The candidate artifact is intermediate, not a publication input. Only the
 sealed bundle is downloaded by publication jobs, by exact artifact ID. The
@@ -86,8 +100,10 @@ rebuilding or resealing anything.
 ## Homebrew integration boundary
 
 No Homebrew implementation is copied into release CI. Until a later cherry-pick,
-the candidate writes `homebrew-input.json` and records `NotIntegrated`; it does
-not invent formula or native Homebrew evidence. The staged interface is:
+candidate preparation can write `homebrew-input.json` and record `NotIntegrated`,
+but **the required native job cannot pass and the release cannot be sealed or
+published**. A passing standalone test is not a substitute for Homebrew. The
+staged generator interface is:
 
 ```js
 import { generateHomebrewFormula } from './packaging/homebrew/generate-formula.mjs';
@@ -126,6 +142,15 @@ The existing native hook is
 from `scripts/homebrew-lifecycle.mjs`; it requires a separately bootstrapped,
 isolated Homebrew prefix and project-local root. No system Homebrew mutation is
 implied by the generator interface.
+The CI adapter invokes this hook against the frozen candidate, requires native
+arm64 success including cleanup, and retains its returned command evidence.
+Set `RELEASE_HOMEBREW_BREW` in the workflow (or `SDLC_HOMEBREW_BREW` locally) to
+the approved isolated executable after the Homebrew workstream supplies its
+bootstrap. A missing generator/hook/prefix reports `NotRun` with a `Blocked`
+diagnostic and fails the mandatory job. Hook/assertion failures remain `Failed`;
+owned failure workspaces are retained for diagnosis rather than deleting rollback
+state. The job records Node, machine architecture, runner image, `uname -m`, and
+the actual `sysctl.proc_translated` probe result.
 Do not advertise Homebrew availability merely because a draft or npm handoff
 succeeded without that integration.
 
@@ -134,26 +159,37 @@ succeeded without that integration.
 `packaging/windows-tester/generate.mjs` exposes:
 
 ```js
-generateWindowsTesterPrompt({ outputDir, identity, releaseRepository, inventoryDigest, archive });
-validateWindowsTesterPrompt({ outputDir, identity, releaseRepository, inventoryDigest, archive });
-renderWindowsTesterPrompt({ identity, releaseRepository, inventoryDigest, archive });
+const input = windowsTesterInput(finalRelease, repository, launcherSha256);
+validateWindowsTesterInput(input);
+generateWindowsTesterPrompt({ outputDir, ...input, readiness });
+validateWindowsTesterPrompt({ outputDir, ...input, readiness });
 ```
 
-`windowsTesterInput(finalRelease, repository)` supplies the exact final source
+`windowsTesterInput(finalRelease, repository, launcherSha256)` supplies the exact final source
 commit, version, npm SHA-256/inventory digest, descriptor/checksum SHA-256, Windows
-x64 archive filename/size/SHA-256, and approved repository. The generator derives
+x64 archive filename/size/SHA-256, launcher SHA-256 and approved repository.
+Candidate verification independently matches the launcher digest to the verified
+Windows archive's platform metadata. The input also pins the source template
+SHA-256 so changing that template after candidate freeze requires a new candidate.
+The generator derives
 version-specific public URLs, includes the source template's digest, and writes
 LF-only deterministic `windows-tester-prompt.md` and a canonical JSON binding.
 Validation recomputes both complete files and rejects stale source/version,
 URL/digest drift, missing/extra files, unresolved inputs, and modified content.
 
-The Windows job requires **generation/binding validation**, not execution of the
-prompt. It reports `generationValidation: Passed` only after validation while
+The Windows job validates only the deferred identity input; it does not generate
+a prompt or claim T-60 completeness. After all implementation/native gates pass,
+`windowsTesterReadiness` supplies candidate-bound completion prerequisites;
+generation before that point is rejected. The later generation validator reports
+only binding/determinism success. `completionValidation: NotRun`,
 `nativeExecution: NotRun` and `contentStatus: PendingIntegration` remain explicit.
 The editable template `packaging/windows-tester/prompt.md.template` provides
 candidate identity and safety/evidence boundaries, not finalized native
-acceptance scenarios. Finalize its content after all installer integration,
-then regenerate and reseal a new candidate; never edit the immutable handoff
+acceptance scenarios. Finalize its content and implement the full deterministic completeness checks
+listed in T-60 after all installer integration. Only real completeness
+validation may produce a publication-ready bundle; do not replace the pending
+status with an unconditional passing flag. Then regenerate and reseal a new
+candidate; never edit the immutable handoff
 in place or reinterpret generation success as T-60/native execution success.
 
 The handoff is retained inside the immutable CI bundle, not included in the
@@ -232,10 +268,11 @@ network-denied; successful downloading is separate from offline operation.
 Runtime/user-content preservation and explicit purge remain covered by the
 native distribution tests.
 
-`acceptRelease({hooks: {homebrew}})` is a stable-only extension point receiving
+`acceptRelease({hooks: {homebrew}})` is a required stable-only extension point receiving
 `{bundle, downloaded, environment}`. A supplied hook must return real
-`{status:'Passed', ...evidence}` or acceptance fails. Without a hook, Homebrew is
-`NotRun`; prereleases never claim published Homebrew acceptance. Native Windows,
+`{status:'Passed', ...evidence}` or acceptance fails. Without the required hook,
+stable acceptance is `NotRun`/`Blocked`, not Passed. Prereleases mark published
+Homebrew acceptance `NotApplicable` and retain the native local-formula gate. Native Windows,
 Intel and WinGet community/client acceptance remain explicitly `NotRun`.
 The acceptance result is a new artifact, never a mutation of prepublication
 evidence. OS/network/package-manager policy failures must be investigated through

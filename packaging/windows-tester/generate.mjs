@@ -5,12 +5,15 @@ import { DIGEST, isPrerelease } from '../standalone/protocol.mjs';
 
 export const PROMPT_FILENAME = 'windows-tester-prompt.md';
 export const BINDING_FILENAME = 'windows-tester-prompt.json';
+export const INPUT_FILENAME = 'windows-tester-input.json';
 const template = await fs.readFile(new URL('./prompt.md.template', import.meta.url), 'utf8');
+export const TESTER_TEMPLATE_SHA256 = sha256(Buffer.from(template));
 
-export function renderWindowsTesterPrompt({ identity, releaseRepository, inventoryDigest, archive } = {}) {
+export function validateWindowsTesterInput({ identity, releaseRepository, inventoryDigest, launcherSha256,
+  templateSha256, archive } = {}) {
   if (!identity || !/^[a-f0-9]{40}$/u.test(identity.sourceCommit ?? '') ||
       !['payloadSha256', 'descriptorSha256', 'checksumsSha256'].every(key => DIGEST.test(identity[key] ?? '')) ||
-      !DIGEST.test(inventoryDigest ?? '') ||
+      !DIGEST.test(inventoryDigest ?? '') || !DIGEST.test(launcherSha256 ?? '') || templateSha256 !== TESTER_TEMPLATE_SHA256 ||
       !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_][A-Za-z0-9_.-]*$/u.test(releaseRepository ?? '')) {
     throw new Error('T-60 requires the exact final candidate identity and approved release repository');
   }
@@ -21,12 +24,20 @@ export function renderWindowsTesterPrompt({ identity, releaseRepository, invento
     throw new Error('T-60 requires the exact Windows x64 archive record');
   }
   const base = `https://github.com/${releaseRepository}/releases/download/v${encodeURIComponent(identity.version)}`;
-  const binding = { schemaVersion: 1, test: 'T-60', target: 'windows-x64',
+  return { schemaVersion: 1, test: 'T-60', target: 'windows-x64',
     contentStatus: 'PendingIntegration', nativeExecution: 'NotRun',
-    identity, inventoryDigest, archive, releaseRepository,
+    identity, inventoryDigest, launcherSha256, archive, releaseRepository,
     urls: { archive: `${base}/${encodeURIComponent(filename)}`,
       descriptor: `${base}/release-descriptor.json`, checksums: `${base}/SHA256SUMS` },
-    templateSha256: sha256(Buffer.from(template)) };
+    templateSha256 };
+}
+
+export function renderWindowsTesterPrompt({ readiness, ...input } = {}) {
+  const binding = validateWindowsTesterInput(input);
+  if (readiness?.installerImplementation !== 'Complete' || readiness.nativeMacosArm64 !== 'Passed' ||
+      readiness.nativeHomebrew !== 'Passed' || canonical(readiness.identity) !== canonical(binding.identity)) {
+    throw new Error('T-60 generation requires completed implementation and candidate-bound native macOS/Homebrew validation');
+  }
   if (template.split('{{binding}}').length !== 2 || template.includes('\r')) {
     throw new Error('T-60 template must be LF-only with exactly one candidate binding');
   }
@@ -61,6 +72,6 @@ export async function validateWindowsTesterPrompt({ outputDir, ...input }) {
       await fs.readFile(path.join(outputDir, BINDING_FILENAME), 'utf8') !== canonical(rendered.manifest)) {
     throw new Error('T-60 handoff is stale, nondeterministic or not bound to the final candidate');
   }
-  return { test: 'T-60', generationValidation: 'Passed', contentStatus: 'PendingIntegration',
+  return { test: 'T-60', generationValidation: 'Passed', completionValidation: 'NotRun', contentStatus: 'PendingIntegration',
     nativeExecution: 'NotRun', identity: rendered.manifest.identity, prompt: rendered.manifest.prompt };
 }

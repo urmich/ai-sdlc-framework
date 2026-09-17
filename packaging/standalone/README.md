@@ -158,7 +158,8 @@ This channel neither changes those controls nor promises a bypass.
 ## Native CI integration
 
 Set `SDLC_DISTRIBUTION_TARGET` to the actual native target when requiring native
-evidence. The current release's only mandatory native target is `macos-arm64`;
+evidence. The current release's only mandatory native target is `macos-arm64`, covering
+both standalone and Homebrew lifecycle;
 Windows is cross-validated and Intel is unsupported with native evidence
 explicitly `NotRun`; no Intel archive enters the supported release.
 The test asserts actual
@@ -195,7 +196,8 @@ Retain the required arm64/native and Windows/cross-validation results, explicit
 Intel `NotRun`, and descriptor/checksum digests in one immutable release bundle.
 Native Homebrew/WinGet validation and anonymous live acceptance are distinct
 evidence; local package tests do not establish public availability or
-package-manager acceptance. Homebrew integration is tracked separately.
+package-manager acceptance. Missing native Homebrew integration is a release
+blocker, not an optional passing standalone result.
 Prereleases never include stable package-manager metadata or claim
 published-Homebrew acceptance. A future local-formula gate must retain its own
 prerelease evidence outside the release asset directory.

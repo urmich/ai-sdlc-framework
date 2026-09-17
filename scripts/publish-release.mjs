@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { isPrerelease } from '../packaging/standalone/protocol.mjs';
 import { readTarGzip, sha256 } from '../packaging/standalone/archive.mjs';
 import { npmInvocation } from './package.mjs';
-import { options, releaseRepository, trustedEnvironment, verifyBundle } from './release-bundle.mjs';
+import { options, releaseRepository, requirePublicationReady, trustedEnvironment, verifyBundle } from './release-bundle.mjs';
 
 const execute = promisify(execFile);
 
@@ -36,6 +36,12 @@ async function requireValue(api, route, options) {
 
 export async function publishDraft({ directory, repository, ...expected }, api = githubRequest) {
   const bundle = await verifyBundle({ directory, ...expected });
+  requirePublicationReady(bundle);
+  return publishApprovedDraft({ directory, repository, bundle }, api);
+}
+
+export async function publishApprovedDraft({ directory, repository, bundle }, api = githubRequest) {
+  requirePublicationReady(bundle);
   repository = releaseRepository(repository);
   if (repository !== bundle.releaseRepository) throw new Error('Publication repository differs from the frozen metadata');
   const prefix = `/repos/${repository}`;
@@ -58,7 +64,7 @@ export async function publishDraft({ directory, repository, ...expected }, api =
         `SHA256SUMS SHA-256: ${bundle.identity.checksumsSha256}\n\n` +
         'macOS arm64 native lifecycle is required. Windows evidence is cross-build/schema/payload/metadata only; ' +
         'native Windows is NotRun. macOS Intel is unsupported/NotRun and is excluded along with Linux installers. ' +
-        'Homebrew native acceptance and package-manager community acceptance are separate evidence.\n\n' +
+        'Native macOS standalone/Homebrew evidence is required; package-manager community acceptance remains separate.\n\n' +
         'This workflow never makes the draft public. Review before manually publishing, then run Release acceptance.',
     } });
   }
@@ -124,6 +130,14 @@ export async function publishNpm({ directory, sourceRepository, ...expected }, {
   fetcher = fetch, run = execute, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
 } = {}) {
   const bundle = await verifyBundle({ directory, ...expected });
+  requirePublicationReady(bundle);
+  return publishApprovedNpm({ directory, sourceRepository, bundle }, { fetcher, run, sleep });
+}
+
+export async function publishApprovedNpm({ directory, sourceRepository, bundle }, {
+  fetcher = fetch, run = execute, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
+} = {}) {
+  requirePublicationReady(bundle);
   const artifact = path.resolve(directory, 'assets', bundle.descriptor.payload.filename);
   const entries = readTarGzip(await fs.readFile(artifact));
   const pkg = JSON.parse(entries.find(entry => entry.path === 'package/package.json').data);

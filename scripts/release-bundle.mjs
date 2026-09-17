@@ -2,12 +2,13 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { canonical, sha256 } from '../packaging/standalone/archive.mjs';
+import { canonical, readZip, sha256 } from '../packaging/standalone/archive.mjs';
 import { isPrerelease, TARGETS } from '../packaging/standalone/protocol.mjs';
 import { buildLauncher } from '../packaging/winget/build-launcher.mjs';
 import { generateManifests } from '../packaging/winget/generate.mjs';
 import { validateManifests } from '../packaging/winget/validate.mjs';
-import { generateWindowsTesterPrompt, validateWindowsTesterPrompt } from '../packaging/windows-tester/generate.mjs';
+import { generateWindowsTesterPrompt, INPUT_FILENAME, TESTER_TEMPLATE_SHA256, validateWindowsTesterInput,
+  validateWindowsTesterPrompt } from '../packaging/windows-tester/generate.mjs';
 import { buildPackage } from './package.mjs';
 import { buildPlatforms, writeReleaseMetadata } from './package-platforms.mjs';
 import { verifyRelease } from './verify-platform-package.mjs';
@@ -59,21 +60,26 @@ export function archiveRecord(release, target) {
   return record;
 }
 
-export function windowsTesterInput(release, repository) {
+export function windowsTesterInput(release, repository, launcherSha256) {
   return { identity: evidenceIdentity(release), releaseRepository: releaseRepository(repository),
-    inventoryDigest: release.descriptor.payload.inventoryDigest, archive: archiveRecord(release, 'windows-x64') };
+    inventoryDigest: release.descriptor.payload.inventoryDigest, launcherSha256, templateSha256: TESTER_TEMPLATE_SHA256,
+    archive: archiveRecord(release, 'windows-x64') };
 }
 
-export async function verifyCandidate(directory, expected = {}) {
+export async function verifyCandidate(directory, { allowGeneratedPrompt = false, ...expected } = {}) {
   const release = await verifyRelease({ outputDir: path.join(directory, 'assets'),
     targets: RELEASE_TARGETS, rebuild: false });
   const context = await readJson(path.join(directory, 'context.json'));
   releaseRepository(context.releaseRepository);
   if (canonical(context.identity) !== canonical(evidenceIdentity(release)) ||
-      canonical(context.scope) !== canonical(RELEASE_SCOPE)) throw new Error('Candidate identity or release scope mismatch');
+      canonical(context.scope) !== canonical(RELEASE_SCOPE) ||
+      context.prerelease !== isPrerelease(release.descriptor.version)) throw new Error('Candidate identity or release scope mismatch');
   const formulas = release.descriptor.files.filter(file => file.kind === 'homebrew');
   if (formulas.length > 1 || formulas.some(file => file.filename !== 'ai-sdlc-framework.rb')) {
     throw new Error('Initial Homebrew metadata must contain only the arm64 formula');
+  }
+  if (!context.prerelease && context.homebrew?.status === 'Generated' && formulas.length !== 1) {
+    throw new Error('Generated stable Homebrew metadata is missing from the candidate');
   }
   for (const file of formulas) {
     validateInitialHomebrewFormula({ descriptor: release.descriptor, repository: context.releaseRepository,
@@ -82,9 +88,20 @@ export async function verifyCandidate(directory, expected = {}) {
   for (const [key, value] of Object.entries(expected)) {
     if (value && context.identity[key] !== value) throw new Error(`Candidate ${key} differs from trusted evidence`);
   }
-  const testerPrompt = await validateWindowsTesterPrompt({ outputDir: path.join(directory, 'handoff'),
-    ...windowsTesterInput(release, context.releaseRepository) });
-  return { ...release, context, testerPrompt };
+  const windows = archiveRecord(release, 'windows-x64');
+  const platform = JSON.parse(readZip(await fs.readFile(path.join(directory, 'assets', windows.filename)))
+    .find(entry => entry.path === 'platform.json').data);
+  if (context.launcher?.sha256 !== platform.launcherSha256) throw new Error('Candidate launcher digest does not match the verified Windows archive');
+  const testerInput = windowsTesterInput(release, context.releaseRepository, platform.launcherSha256);
+  validateWindowsTesterInput(testerInput);
+  if (await fs.readFile(path.join(directory, INPUT_FILENAME), 'utf8') !== canonical(testerInput)) {
+    throw new Error('T-60 input is not bound to the final candidate and launcher');
+  }
+  if (!allowGeneratedPrompt && await fs.lstat(path.join(directory, 'handoff')).then(() => true, error => {
+    if (error.code !== 'ENOENT') throw error;
+    return false;
+  })) throw new Error('T-60 prompt generation is deferred until mandatory native validation completes');
+  return { ...release, context, testerInput };
 }
 
 export function validateInitialHomebrewFormula({ descriptor, repository, contents }) {
@@ -127,7 +144,11 @@ export async function homebrewMetadata({ descriptor, artifactDirectory, outputDi
 export async function prepareRelease({ outputDir, repository, sourceCommit, environment = process.env,
   homebrewGenerator } = {}) {
   repository = releaseRepository(repository);
-  sourceCommit ??= execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
+  sourceCommit ??= head;
+  if (sourceCommit !== head || execFileSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).trim()) {
+    throw new Error('Release preparation requires the exact clean committed source revision');
+  }
   const directory = path.resolve(outputDir);
   await emptyDirectory(directory);
   const pkg = await readJson(path.join(ROOT, 'package.json'));
@@ -162,12 +183,14 @@ export async function prepareRelease({ outputDir, repository, sourceCommit, envi
     sourceCommit, targets: RELEASE_TARGETS, metadataFiles });
   await verifyRelease({ outputDir: assets, windowsLauncher: launcher.artifact,
     targets: RELEASE_TARGETS, sourceCommit, environment });
-  const testerPrompt = await generateWindowsTesterPrompt({ outputDir: path.join(directory, 'handoff'),
-    ...windowsTesterInput(final, repository) });
+  const testerInput = windowsTesterInput(final, repository, launcher.sha256);
+  validateWindowsTesterInput(testerInput);
+  await writeJson(path.join(directory, INPUT_FILENAME), testerInput);
   const context = { schemaVersion: 1, releaseRepository: repository, identity: evidenceIdentity(final),
     scope: RELEASE_SCOPE, prerelease, launcher: { sha256: launcher.sha256, toolchain: launcher.toolchain },
     winget, homebrew: { status: homebrew.status, nativeValidation: 'NotRun', supportedArchitectures: ['arm64'] },
-    windowsTesterPrompt: { contentStatus: testerPrompt.contentStatus, nativeExecution: 'NotRun' },
+    windowsTesterPrompt: { generationStatus: 'DeferredUntilRequiredValidation',
+      contentStatus: 'PendingIntegration', nativeExecution: 'NotRun' },
     publicAssets: 'NotRun', npmPublication: 'NotRun', communityAcceptance: 'NotRun' };
   await writeJson(path.join(directory, 'context.json'), context);
   return { ...context.identity, version: pkg.version, candidateDir: directory };
@@ -184,20 +207,37 @@ export function validateGates(gates, identity) {
     if (target === 'macos-x64' && gate.status !== 'NotRun') throw new Error('Intel native evidence must explicitly remain NotRun');
     if (target === 'windows-x64' && gate.nativeValidation !== 'NotRun') throw new Error('Cross-build cannot claim native Windows evidence');
     if (target === 'macos-arm64' && (gate.nativeValidation !== 'Passed' ||
-        gate.networkDeniedLifecycle !== 'Passed' || gate.host?.platform !== 'darwin' || gate.host?.arch !== 'arm64')) {
-      throw new Error('Missing mandatory native Apple Silicon lifecycle evidence');
+        gate.networkDeniedLifecycle !== 'Passed' || gate.host?.platform !== 'darwin' || gate.host?.arch !== 'arm64' ||
+        gate.homebrew?.nativeValidation !== 'Passed' || gate.homebrew?.evidence?.passed !== true ||
+        gate.homebrew?.evidence?.platform !== 'darwin' || gate.homebrew?.evidence?.architecture !== 'arm64' ||
+        gate.homebrew?.evidence?.uname !== 'arm64' ||
+        [true, 1, '1'].includes(gate.homebrew?.evidence?.sysctlProcTranslated) || gate.homebrew?.evidence?.cleanupError)) {
+      throw new Error('Missing mandatory native Apple Silicon standalone/Homebrew lifecycle evidence');
     }
     if (target === 'windows-x64' && (gate.deterministicCrossBuild !== 'Passed' ||
         gate.payloadIntegrity !== 'Passed' || gate.schema?.schemaValidation !== 'Passed' ||
         gate.winget?.contractValidation !== 'Passed' || gate.winget?.nativeValidation !== 'NotRun' ||
-        gate.testerPrompt?.test !== 'T-60' || gate.testerPrompt?.generationValidation !== 'Passed' ||
-        gate.testerPrompt?.nativeExecution !== 'NotRun' ||
-        canonical(gate.testerPrompt?.identity) !== canonical(identity) ||
+        gate.testerInputValidation !== 'Passed' ||
         !['linux', 'darwin'].includes(gate.host?.platform))) {
       throw new Error('Missing mandatory non-native Windows validation evidence');
     }
   }
   if (gates.length !== RELEASE_GATE_TARGETS.length) throw new Error('Unexpected release gate');
+}
+
+export function windowsTesterReadiness(candidate, gates) {
+  validateGates(gates, candidate.context.identity);
+  if (!candidate.context.prerelease && candidate.context.homebrew?.status !== 'Generated') {
+    throw new Error('Stable Homebrew implementation and metadata must be integrated before T-60 generation');
+  }
+  return { installerImplementation: 'Complete', nativeMacosArm64: 'Passed', nativeHomebrew: 'Passed',
+    identity: candidate.context.identity };
+}
+
+export function requirePublicationReady(bundle) {
+  if (bundle.publicationReady !== true) {
+    throw new Error('Publication blocked: T-60 content completeness remains PendingIntegration/NotRun');
+  }
 }
 
 async function inventoryTree(directory, prefix = '') {
@@ -255,17 +295,21 @@ export async function sealBundle({ candidateDir, evidenceDir, outputDir, runId }
       reason: 'Unsupported and excluded from publication/Homebrew metadata; no Intel runner or native validation requested.' });
   }
   validateGates(gates, candidate.context.identity);
+  const readiness = windowsTesterReadiness(candidate, gates);
   await emptyDirectory(outputDir);
   await fs.cp(path.join(candidateDir, 'assets'), path.join(outputDir, 'assets'), { recursive: true });
-  await fs.cp(path.join(candidateDir, 'handoff'), path.join(outputDir, 'handoff'), { recursive: true });
+  await fs.copyFile(path.join(candidateDir, INPUT_FILENAME), path.join(outputDir, INPUT_FILENAME));
   await fs.copyFile(path.join(candidateDir, 'context.json'), path.join(outputDir, 'context.json'));
   for (const gate of gates) await writeJson(path.join(outputDir, 'evidence', `${gate.target}.json`), gate);
+  const testerPrompt = await generateWindowsTesterPrompt({ outputDir: path.join(outputDir, 'handoff'),
+    ...candidate.testerInput, readiness });
   const files = await inventoryTree(outputDir);
   const bundle = { schemaVersion: 1, identity: candidate.context.identity,
-    releaseRepository: candidate.context.releaseRepository, scope: RELEASE_SCOPE, files };
+    releaseRepository: candidate.context.releaseRepository, scope: RELEASE_SCOPE, files,
+    publicationReady: testerPrompt.completionValidation === 'Passed' };
   await writeJson(path.join(outputDir, 'bundle.json'), bundle);
   return { ...(await verifyBundle({ directory: outputDir })).identity,
-    bundleSha256: sha256(Buffer.from(canonical(bundle))) };
+    bundleSha256: sha256(Buffer.from(canonical(bundle))), publicationReady: bundle.publicationReady };
 }
 
 export async function verifyBundle({ directory, expectedBundleSha256, ...expected }) {
@@ -275,14 +319,17 @@ export async function verifyBundle({ directory, expectedBundleSha256, ...expecte
   if (canonical(bundle) !== bytes.toString() || bundle.schemaVersion !== 1) throw new Error('Malformed bundle manifest');
   const actual = (await inventoryTree(directory)).filter(file => file.filename !== 'bundle.json');
   if (canonical(bundle.files) !== canonical(actual)) throw new Error('Immutable bundle files changed');
-  const candidate = await verifyCandidate(directory, expected);
+  const candidate = await verifyCandidate(directory, { ...expected, allowGeneratedPrompt: true });
   if (canonical(bundle.identity) !== canonical(candidate.context.identity) ||
       canonical(bundle.scope) !== canonical(RELEASE_SCOPE) ||
       bundle.releaseRepository !== candidate.context.releaseRepository) throw new Error('Bundle identity mismatch');
   const gateNames = await fs.readdir(path.join(directory, 'evidence'));
   const gates = await Promise.all(gateNames.map(name => readJson(path.join(directory, 'evidence', name))));
-  validateGates(gates, bundle.identity);
-  return { ...bundle, context: candidate.context, descriptor: candidate.descriptor };
+  const readiness = windowsTesterReadiness(candidate, gates);
+  const testerPrompt = await validateWindowsTesterPrompt({ outputDir: path.join(directory, 'handoff'),
+    ...candidate.testerInput, readiness });
+  if (bundle.publicationReady !== (testerPrompt.completionValidation === 'Passed')) throw new Error('Bundle publication readiness mismatch');
+  return { ...bundle, context: candidate.context, descriptor: candidate.descriptor, testerPrompt };
 }
 
 export function options(argv) {
@@ -311,8 +358,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   if (!command) throw new Error('Expected prepare, seal or verify');
   const result = await command({ ...options(process.argv.slice(3)), ...trustedEnvironment() });
   if (process.env.GITHUB_OUTPUT) {
-    for (const name of ['version', 'sourceCommit', 'payloadSha256', 'descriptorSha256', 'checksumsSha256', 'bundleSha256']) {
-      if (result[name]) await fs.appendFile(process.env.GITHUB_OUTPUT, `${name}=${result[name]}\n`);
+    for (const name of ['version', 'sourceCommit', 'payloadSha256', 'descriptorSha256', 'checksumsSha256', 'bundleSha256', 'publicationReady']) {
+      if (result[name] !== undefined) await fs.appendFile(process.env.GITHUB_OUTPUT, `${name}=${result[name]}\n`);
     }
   }
   console.log(JSON.stringify(result, null, 2));

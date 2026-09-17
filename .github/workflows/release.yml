@@ -61,7 +61,7 @@ jobs:
           echo "TMPDIR=$GITHUB_WORKSPACE/.test-data/release-scratch" >> "$GITHUB_ENV"
       - run: npm run check
       - run: npm test
-      - name: Wrap exact tgz, freeze final metadata, then bind the T-60 tester handoff
+      - name: Wrap exact tgz, freeze final metadata, and prepare deferred T-60 identity inputs
         id: prepare
         run: |
           node scripts/release-bundle.mjs prepare \
@@ -94,6 +94,8 @@ jobs:
       EXPECTED_SOURCE_COMMIT: ${{ needs.candidate.outputs.source_commit }}
       EXPECTED_DESCRIPTOR_SHA256: ${{ needs.candidate.outputs.descriptor_sha256 }}
       EXPECTED_CHECKSUMS_SHA256: ${{ needs.candidate.outputs.checksums_sha256 }}
+      # The Homebrew workstream must provision this isolated executable before the mandatory native gate.
+      SDLC_HOMEBREW_BREW: ${{ vars.RELEASE_HOMEBREW_BREW }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -123,7 +125,7 @@ jobs:
           artifact-ids: ${{ needs.candidate.outputs.artifact_id }}
           path: source/.test-data/candidate
           merge-multiple: true
-      - name: Execute scoped gate and validate the candidate-bound T-60 handoff
+      - name: Require native standalone/Homebrew or cross-only Windows validation
         env:
           RELEASE_TARGET: ${{ matrix.target }}
         run: |
@@ -146,6 +148,7 @@ jobs:
       artifact_id: ${{ steps.upload.outputs.artifact-id }}
       artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
       bundle_sha256: ${{ steps.seal.outputs.bundleSha256 }}
+      publication_ready: ${{ steps.seal.outputs.publicationReady }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -163,7 +166,7 @@ jobs:
         with:
           pattern: release-gate-*-${{ github.run_id }}-*
           path: source/.test-data/evidence
-      - name: Verify mandatory results and seal the sole publication input
+      - name: Verify completed native gates, generate T-60, and seal the immutable review bundle
         id: seal
         run: |
           node scripts/release-bundle.mjs seal --candidate-dir .test-data/candidate \
@@ -184,9 +187,12 @@ jobs:
           ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
           BUNDLE_SHA256: ${{ steps.seal.outputs.bundleSha256 }}
           SOURCE_COMMIT: ${{ needs.candidate.outputs.source_commit }}
+          PUBLICATION_READY: ${{ steps.seal.outputs.publicationReady }}
         run: |
           printf '## Immutable release handoff\nRun: `%s`\nArtifact ID: `%s`\nArtifact ZIP digest: `%s`\nBundle manifest SHA-256: `%s`\nSource commit: `%s`\n' \
             "$GITHUB_RUN_ID" "$ARTIFACT_ID" "$ARTIFACT_DIGEST" "$BUNDLE_SHA256" "$SOURCE_COMMIT" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Publication ready: `%s`. Pending T-60 completeness blocks all publisher/acceptance entrypoints.\n' \
+            "$PUBLICATION_READY" >> "$GITHUB_STEP_SUMMARY"
 
   draft-assets:
     if: github.event_name == 'workflow_dispatch' && inputs.publish_draft
