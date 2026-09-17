@@ -44,6 +44,7 @@ process.exit(Number(process.env.SDLC_TEST_EXIT ?? 0));
   else await fs.symlink(process.execPath, node);
   const runtimeEnv = { ...process.env, PATH: nodeDirectory, PATHEXT: '.EXE;.CMD',
     COPILOT_HOME: home, NODE_OPTIONS: '--import=missing-preload.mjs', NODE_PATH: 'untrusted-preload' };
+  delete runtimeEnv.SDLC_NODE;
   const args = ['install', '--home', 'path with spaces', '& echo SHOULD_NOT_RUN', '"quoted"', '', 'unicode-λ', '--purge-existing'];
   const run = command => new Promise(resolve => {
     const child = execFile(command, args, { cwd, env: runtimeEnv }, (error, stdout, stderr) =>
@@ -82,6 +83,18 @@ process.exit(Number(process.env.SDLC_TEST_EXIT ?? 0));
   assert.equal(missing.error.code, 1);
   assert.match(missing.stderr, /Node.js 22\+ must be available on PATH/u);
   await assert.rejects(fs.stat(path.join(home, 'invoked')), { code: 'ENOENT' });
+  runtimeEnv.SDLC_NODE = node;
+  const overridden = await run(launcher);
+  assert.ifError(overridden.error);
+  assert.equal((await fs.realpath(JSON.parse(overridden.stdout).node)).toLowerCase(),
+    (await fs.realpath(node)).toLowerCase());
+  await fs.unlink(path.join(home, 'invoked'));
+  runtimeEnv.SDLC_NODE = 'node';
+  const relativeOverride = await run(launcher);
+  assert.equal(relativeOverride.error.code, 1);
+  assert.match(relativeOverride.stderr, /SDLC_NODE must identify an absolute/u);
+  await assert.rejects(fs.stat(path.join(home, 'invoked')), { code: 'ENOENT' });
+  delete runtimeEnv.SDLC_NODE;
   runtimeEnv.PATH = nodeDirectory;
   await fs.unlink(entry);
   const missingPayload = await run(launcher);

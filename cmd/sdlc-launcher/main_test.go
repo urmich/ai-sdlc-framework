@@ -63,6 +63,10 @@ func TestFindNodeValidatesTheSelectedExecutable(t *testing.T) {
 	}
 	t.Setenv("PATH", directory)
 	t.Setenv("PATHEXT", ".EXE;.CMD")
+	if value, present := os.LookupEnv("SDLC_NODE"); present {
+		os.Unsetenv("SDLC_NODE")
+		t.Cleanup(func() { os.Setenv("SDLC_NODE", value) })
+	}
 	for _, mode := range []string{"valid", "old", "wrong-arch", "shadowed", "crash", "malformed"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("SDLC_TEST_NODE_PROBE", mode)
@@ -83,6 +87,29 @@ func TestFindNodeValidatesTheSelectedExecutable(t *testing.T) {
 		t.Setenv("SDLC_TEST_NODE_PROBE", "valid")
 		if _, err := findNode(runtimeEnvironment(os.Environ()), "win32", "x64"); err == nil {
 			t.Fatal("current-directory Node accepted")
+		}
+	})
+	t.Run("absolute override is used instead of PATH", func(t *testing.T) {
+		t.Setenv("PATH", "")
+		t.Setenv("SDLC_NODE", selected)
+		t.Setenv("SDLC_TEST_NODE_PROBE", "valid")
+		got, err := findNode(runtimeEnvironment(os.Environ()), "win32", "x64")
+		if err != nil || got != selected {
+			t.Fatalf("explicit Node = %q, %v", got, err)
+		}
+	})
+	t.Run("invalid override does not fall back to PATH", func(t *testing.T) {
+		t.Setenv("SDLC_TEST_NODE_PROBE", "valid")
+		for _, value := range []string{"", "node.exe", selected + ".missing", directory} {
+			t.Setenv("SDLC_NODE", value)
+			if _, err := findNode(runtimeEnvironment(os.Environ()), "win32", "x64"); err == nil {
+				t.Fatalf("invalid SDLC_NODE %q accepted", value)
+			}
+		}
+		t.Setenv("SDLC_NODE", selected)
+		t.Setenv("SDLC_TEST_NODE_PROBE", "old")
+		if _, err := findNode(runtimeEnvironment(os.Environ()), "win32", "x64"); err == nil {
+			t.Fatal("incompatible explicit Node accepted")
 		}
 	})
 	if err := os.Remove(selected); err != nil {

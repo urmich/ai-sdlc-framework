@@ -38,17 +38,24 @@ files/directories or symlink outputs fail rather than being deleted.
 
 The executable resolves its actual file path through WinGet's symlink before
 looking up **`../package/bin/sdlc.mjs`**. It never finds the payload through PATH,
-the current working directory, or a global npm installation. It selects Node
+the current working directory, or a global npm installation. It selects the
+explicit absolute `SDLC_NODE` executable when provided, otherwise selects Node
 from PATH, resolves its executable, and probes the actual runtime for stable
 Node **22+**, `win32`, and `x64`. Windows batch shims, missing/non-executable
 Node, incompatible/shadowed runtimes, missing/escaping payloads, and failed
 preflight stop before framework invocation. The same absolute Node executable
-is used for execution. `NODE_OPTIONS` and `NODE_PATH` are removed from both
+is used for execution. An empty, relative, missing or incompatible `SDLC_NODE`
+override fails without falling back to PATH. `NODE_OPTIONS` and `NODE_PATH` are removed from both
 preflight and execution to prevent preload code before validation.
 
 Arguments are passed without a shell; stdin/stdout/stderr, the working
 directory, and the CLI exit code are preserved. Ordinary invocation does not
 itself install or purge framework state.
+
+The native archive launcher does not interpret a standalone channel's mutable
+`current.json`. A channel-owned dispatcher must validate that pointer and invoke
+the absolute immutable `versions/<version>/bin/sdlc.exe`; copying the native
+archive launcher to a payload-free channel root is not supported.
 
 ## Manifest input and output
 

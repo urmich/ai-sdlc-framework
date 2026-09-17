@@ -98,9 +98,17 @@ func validateNode(output []byte, selected, platform, arch string) error {
 }
 
 func findNode(environment []string, platform, arch string) (string, error) {
-	selected, err := exec.LookPath("node")
-	if err != nil {
-		return "", fmt.Errorf("Node.js 22+ must be available on PATH (current-directory commands are not accepted): %w", err)
+	selected, explicit := os.LookupEnv("SDLC_NODE")
+	var err error
+	if explicit {
+		if !filepath.IsAbs(selected) {
+			return "", errors.New("SDLC_NODE must identify an absolute Node.js 22+ executable")
+		}
+	} else {
+		selected, err = exec.LookPath("node")
+		if err != nil {
+			return "", fmt.Errorf("Node.js 22+ must be available on PATH (current-directory commands are not accepted): %w", err)
+		}
 	}
 	if !filepath.IsAbs(selected) {
 		return "", errors.New("Node.js 22+ must resolve from an absolute PATH entry, not the current directory")
@@ -110,7 +118,7 @@ func findNode(environment []string, platform, arch string) (string, error) {
 		return "", fmt.Errorf("resolve selected Node: %w", err)
 	}
 	if platform == "win32" && !strings.EqualFold(filepath.Ext(selected), ".exe") {
-		return "", errors.New("Node on PATH is shadowed by a non-executable shim; a native node.exe is required")
+		return "", errors.New("selected Node is a non-executable shim; a native node.exe is required")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
