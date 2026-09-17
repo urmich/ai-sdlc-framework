@@ -41,10 +41,10 @@
   <text x="650" y="190" class="section">2  IMPLEMENT AND VERIFY</text>
   <text x="1230" y="190" class="section">3  RELEASE WITH EVIDENCE</text>
 
-  <path d="M320 385 L320 430 M320 595 L320 640 M570 722 L610 722 L610 302 L650 302" class="connector-blue"/>
+  <path d="M320 385 L320 392 M320 422 L320 430 M320 595 L320 602 M320 632 L320 640 M320 805 L320 815 M320 845 L320 850 L610 850 L610 302 L650 302" class="connector-blue"/>
   <path d="M900 385 L900 430 M900 595 L900 640" class="connector-green"/>
-  <path d="M1150 722 L1190 722 L1190 302 L1230 302" class="connector-orange"/>
-  <path d="M1480 385 L1480 430 M1480 595 L1480 640" class="connector-orange"/>
+  <path d="M900 805 L900 815 M900 845 L900 850 L1190 850 L1190 302 L1230 302" class="connector-orange"/>
+  <path d="M1480 385 L1480 392 M1480 422 L1480 430 M1480 595 L1480 602 M1480 632 L1480 640" class="connector-orange"/>
 
   <rect x="70" y="220" width="500" height="165" rx="22" class="define"/>
   <circle cx="93" cy="243" r="14" fill="#1971c2"/>
@@ -55,8 +55,8 @@
     <tspan x="320" dy="24">Define observable success</tspan>
   </text>
 
-  <rect x="217" y="335" width="206" height="38" rx="19" class="decision"/>
-  <text x="320" y="360" class="gate">HUMAN DECISION</text>
+  <rect x="225" y="392" width="190" height="30" rx="15" class="decision"/>
+  <text x="320" y="412" class="gate">HUMAN APPROVAL</text>
 
   <rect x="70" y="430" width="500" height="165" rx="22" class="test"/>
   <circle cx="93" cy="453" r="14" fill="#7048e8"/>
@@ -67,8 +67,8 @@
     <tspan x="320" dy="24">Define positive and negative outcomes</tspan>
   </text>
 
-  <rect x="217" y="545" width="206" height="38" rx="19" class="decision"/>
-  <text x="320" y="570" class="gate">HUMAN DECISION</text>
+  <rect x="225" y="602" width="190" height="30" rx="15" class="decision"/>
+  <text x="320" y="622" class="gate">HUMAN APPROVAL</text>
 
   <rect x="70" y="640" width="500" height="165" rx="22" class="define"/>
   <circle cx="93" cy="663" r="14" fill="#1971c2"/>
@@ -79,8 +79,8 @@
     <tspan x="320" dy="24">and evidence are clear</tspan>
   </text>
 
-  <rect x="217" y="755" width="206" height="38" rx="19" class="decision"/>
-  <text x="320" y="780" class="gate">HUMAN DECISION</text>
+  <rect x="225" y="815" width="190" height="30" rx="15" class="decision"/>
+  <text x="320" y="835" class="gate">HUMAN APPROVAL</text>
 
   <rect x="650" y="220" width="500" height="165" rx="22" class="build"/>
   <circle cx="673" cy="243" r="14" fill="#2b8a3e"/>
@@ -109,6 +109,9 @@
     <tspan x="900" dy="24">Fix findings, then rerun local validation</tspan>
   </text>
 
+  <rect x="805" y="815" width="190" height="30" rx="15" class="decision"/>
+  <text x="900" y="835" class="gate">HUMAN APPROVAL</text>
+
   <rect x="1230" y="220" width="500" height="165" rx="22" class="release"/>
   <circle cx="1253" cy="243" r="14" fill="#e67700"/>
   <text x="1253" y="247" class="step">7</text>
@@ -118,8 +121,8 @@
     <tspan x="1480" dy="24">with explicit authorization</tspan>
   </text>
 
-  <rect x="1377" y="335" width="206" height="38" rx="19" class="decision"/>
-  <text x="1480" y="360" class="gate">HUMAN DECISION</text>
+  <rect x="1385" y="392" width="190" height="30" rx="15" class="decision"/>
+  <text x="1480" y="412" class="gate">HUMAN APPROVAL</text>
 
   <rect x="1230" y="430" width="500" height="165" rx="22" class="release"/>
   <circle cx="1253" cy="453" r="14" fill="#e67700"/>
@@ -130,8 +133,8 @@
     <tspan x="1480" dy="24">Candidate-bound validation evidence</tspan>
   </text>
 
-  <rect x="1377" y="545" width="206" height="38" rx="19" class="decision"/>
-  <text x="1480" y="570" class="gate">HUMAN DECISION</text>
+  <rect x="1385" y="602" width="190" height="30" rx="15" class="decision"/>
+  <text x="1480" y="622" class="gate">HUMAN APPROVAL</text>
 
   <rect x="1230" y="640" width="500" height="165" rx="22" class="build"/>
   <circle cx="1253" cy="663" r="14" fill="#2b8a3e"/>
