@@ -111,6 +111,7 @@ jobs:
       - name: Publish public npm package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         run: |
           PACKAGE_VERSION="$(node -p "require('./package.json').version")"
           if test "$GITHUB_REF_TYPE" = 'tag'; then
@@ -118,5 +119,9 @@ jobs:
               { echo "Tag $GITHUB_REF_NAME does not match package version $PACKAGE_VERSION" >&2; exit 1; }
           fi
           DIST_TAG="$(node -p "require('./package.json').version.includes('-') ? 'next' : 'latest'")"
+          PROVENANCE_ARGS=()
+          if test "$REPOSITORY_PRIVATE" != 'true'; then
+            PROVENANCE_ARGS+=(--provenance)
+          fi
           npm publish "./dist/${{ needs.validate-package.outputs.artifact_name }}.tgz" \
-            --access public --provenance --tag "$DIST_TAG"
+            --access public --tag "$DIST_TAG" "${PROVENANCE_ARGS[@]}"
