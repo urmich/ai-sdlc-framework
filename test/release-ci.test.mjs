@@ -14,7 +14,7 @@ import { RELEASE_SCOPE, RELEASE_TARGETS, RELEASE_GATE_TARGETS, archiveRecord, ev
   homebrewMetadata, releaseRepository, sealBundle, selectGateFiles, validateGates, verifyBundle,
   prepareRelease, verifyCandidate, windowsTesterInput, windowsTesterReadiness, writeJson } from '../scripts/release-bundle.mjs';
 import { publishApprovedDraft, publishDraft, verifyRegistryPayload } from '../scripts/publish-release.mjs';
-import { npmHandoffFromVerifiedBundle, prepareNpmHandoff } from '../scripts/npm-handoff.mjs';
+import { NPM_TRUST, npmHandoffFromVerifiedBundle, prepareNpmHandoff } from '../scripts/npm-handoff.mjs';
 import { downloadPublicAssets } from '../scripts/accept-release.mjs';
 import { verifyIntelFormula, verifyMacosArchives, verifyNativeHomebrew } from '../scripts/release-gate.mjs';
 import { verifyHomebrewQuality } from '../scripts/homebrew-quality.mjs';
@@ -23,7 +23,7 @@ let root;
 let base;
 let payload;
 let originalTmp;
-const repository = 'example/public-releases';
+const repository = NPM_TRUST.repository;
 const sourceCommit = 'a'.repeat(40);
 const candidateBaseUrl = 'http://127.0.0.1:8765/';
 const packagePrerelease = isPrerelease(
@@ -197,7 +197,7 @@ test('bundle seals exact payload and final manager metadata before descriptor/ch
   assert.ok(bundle.files.every(file => !file.filename.includes('linux')));
   assert.ok(bundle.files.some(file => file.filename === `assets/ai-sdlc-framework-${payload.version}-macos-x64.tar.gz`));
   assert.equal(bundle.context.homebrew.status, packagePrerelease ? 'NotPublishedPrerelease' : 'Generated');
-  assert.equal(bundle.publicationReady, false, 'Pending T-60 completeness cannot authorize publication');
+  assert.equal(bundle.publicationReady, true, 'Validated complete T-60 content authorizes publication');
   const names = bundle.files.map(file => file.filename);
   assert.ok(names.includes('assets/release-descriptor.json'));
   assert.ok(names.includes('assets/SHA256SUMS'));
@@ -477,13 +477,17 @@ test('T-60 prompt deterministically binds final metadata and explicitly does not
   assert.ok(first.contents.includes(input.archive.sha256));
   assert.ok(first.contents.includes(input.inventoryDigest));
   assert.ok(first.contents.includes(input.launcherSha256));
-  assert.match(first.contents, /PendingIntegration/u);
+  assert.match(first.contents, /Content status: \*\*Complete\*\*/u);
+  assert.match(first.contents, /previous private framework generation may be installed as \*\*v1\.2\.4\*\*/u);
+  assert.match(first.contents, /all GitHub Copilot CLI\s+processes closed/u);
+  assert.match(first.contents, /install --purge-existing/u);
+  assert.match(first.contents, /Do not store an npm publishing token/u);
   assert.equal(first.manifest.nativeExecution, 'NotRun');
   const outputDir = path.join(f.directory, 'prompt');
   const result = await generateWindowsTesterPrompt({ ...input, outputDir });
   assert.equal(result.generationValidation, 'Passed');
   assert.equal(result.nativeExecution, 'NotRun');
-  assert.equal(result.completionValidation, 'NotRun');
+  assert.equal(result.completionValidation, 'Passed');
   const changedIdentity = { ...input.identity, checksumsSha256: '0'.repeat(64) };
   await assert.rejects(validateWindowsTesterPrompt({ ...input, outputDir,
     identity: changedIdentity, readiness: { ...input.readiness, identity: changedIdentity } }), /not bound/u);
@@ -655,15 +659,14 @@ function githubFixture(bundle, directory) {
     clearDuplicateDraft: () => { duplicateDraft = undefined; } };
 }
 
-test('pending T-60 completeness blocks real publisher entrypoints and forged readiness is rejected', async t => {
+test('complete T-60 content authorizes publisher entrypoints and forged readiness is rejected', async t => {
   const f = await fixture(t);
   const sealed = await sealBundle(f);
-  await assert.rejects(publishDraft({ directory: f.outputDir, repository },
-    async () => assert.fail('No GitHub request is allowed before readiness')), /Publication blocked/u);
-  await assert.rejects(prepareNpmHandoff({ directory: f.outputDir, sourceRepository: repository,
-    expectedBundleSha256: sealed.bundleSha256 }), /Publication blocked/u);
+  const handoff = await prepareNpmHandoff({ directory: f.outputDir, sourceRepository: repository,
+    expectedBundleSha256: sealed.bundleSha256 });
+  assert.equal(handoff.version, payload.version);
   const manifest = JSON.parse(await fs.readFile(path.join(f.outputDir, 'bundle.json'), 'utf8'));
-  await fs.writeFile(path.join(f.outputDir, 'bundle.json'), canonical({ ...manifest, publicationReady: true }));
+  await fs.writeFile(path.join(f.outputDir, 'bundle.json'), canonical({ ...manifest, publicationReady: false }));
   await assert.rejects(verifyBundle({ directory: f.outputDir }), /readiness mismatch/u);
 });
 
