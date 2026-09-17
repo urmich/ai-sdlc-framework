@@ -744,17 +744,22 @@ test('stable public Homebrew acceptance installs, tests and uninstalls the exact
   const brew = path.join(f.directory, 'brew');
   await fs.writeFile(brew, '#!/bin/sh\nexit 99\n', { mode: 0o755 });
   const calls = [];
+  const tap = `local/sdlc-acceptance-${formula.sha256.slice(0, 12)}`;
+  const tapRepository = path.join(f.directory, 'tap');
   const result = await acceptPublicHomebrew({ bundle, downloaded, brew,
     run: async (command, args) => {
       assert.equal(command, brew);
       calls.push(args);
-      return { stdout: '', stderr: '' };
+      return { stdout: args[0] === '--repository' ? `${tapRepository}\n` : '', stderr: '' };
     } });
   assert.equal(result.status, 'Passed');
   assert.deepEqual(calls, [
-    ['install', '--formula', path.join(downloaded, formula.filename)],
-    ['test', 'ai-sdlc-framework'],
-    ['uninstall', '--formula', 'ai-sdlc-framework'],
+    ['tap-new', tap],
+    ['--repository', tap],
+    ['install', `${tap}/ai-sdlc-framework`],
+    ['test', `${tap}/ai-sdlc-framework`],
+    ['uninstall', '--formula', `${tap}/ai-sdlc-framework`],
+    ['untap', tap],
   ]);
 });
 

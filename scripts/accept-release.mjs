@@ -66,18 +66,35 @@ export async function acceptPublicHomebrew({ bundle, downloaded, environment = p
     commands.push({ command: brew, args, exitCode: 0 });
     return result;
   };
+  const tap = `local/sdlc-acceptance-${formulas[0].sha256.slice(0, 12)}`;
+  const formulaName = `${tap}/ai-sdlc-framework`;
+  let tapped = false;
   let installed = false;
   let failure;
   try {
-    await invoke(['install', '--formula', formulaPath]);
+    await invoke(['tap-new', tap]);
+    tapped = true;
+    const repository = (await invoke(['--repository', tap])).stdout.trim();
+    if (!path.isAbsolute(repository)) throw new Error('Temporary Homebrew tap repository is invalid');
+    const formulaDirectory = path.join(repository, 'Formula');
+    await fs.mkdir(formulaDirectory, { recursive: true });
+    await fs.copyFile(formulaPath, path.join(formulaDirectory, formulas[0].filename));
+    await invoke(['install', formulaName]);
     installed = true;
-    await invoke(['test', 'ai-sdlc-framework']);
+    await invoke(['test', formulaName]);
   } catch (error) {
     failure = error;
   }
   if (installed) {
     try {
-      await invoke(['uninstall', '--formula', 'ai-sdlc-framework']);
+      await invoke(['uninstall', '--formula', formulaName]);
+    } catch (error) {
+      failure ??= error;
+    }
+  }
+  if (tapped) {
+    try {
+      await invoke(['untap', tap]);
     } catch (error) {
       failure ??= error;
     }
