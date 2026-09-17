@@ -16,7 +16,7 @@
       .outcome { font: 700 29px Inter, Arial, sans-serif; fill: #111827; text-anchor: middle; }
       .support { font: 18px Inter, Arial, sans-serif; fill: #364152; text-anchor: middle; }
       .footer { font: 600 17px Inter, Arial, sans-serif; fill: #495057; text-anchor: middle; }
-      .legend { font: 600 14px Inter, Arial, sans-serif; fill: #495057; text-anchor: middle; }
+      .legend { font: 600 14px Inter, Arial, sans-serif; fill: #364152; }
       .step { font: 700 12px Inter, Arial, sans-serif; fill: #ffffff; text-anchor: middle; }
       .define { fill: #d0ebff; stroke: #1971c2; stroke-width: 3; }
       .test { fill: #e5dbff; stroke: #7048e8; stroke-width: 3; }
@@ -146,6 +146,15 @@
   <text x="910" y="913" class="outcome">Less assumption-driven bias  →  fewer avoidable failures  →  less rework  →  higher delivery confidence</text>
   <text x="910" y="956" class="support">Recoverable state  •  End-to-end traceability  •  Version-control audit trail  •  Verified automation evidence</text>
 
-  <text x="900" y="1038" class="legend">Blue: define and design  •  Purple: evidence planning  •  Green: build, verify, and readiness  •  Amber: environment validation  •  White: independent review</text>
+  <rect x="225" y="1022" width="28" height="18" rx="5" class="define"/>
+  <text x="265" y="1037" class="legend">Define and design</text>
+  <rect x="490" y="1022" width="28" height="18" rx="5" class="test"/>
+  <text x="530" y="1037" class="legend">Evidence planning</text>
+  <rect x="750" y="1022" width="28" height="18" rx="5" class="build"/>
+  <text x="790" y="1037" class="legend">Build, verify, readiness</text>
+  <rect x="1075" y="1022" width="28" height="18" rx="5" class="release"/>
+  <text x="1115" y="1037" class="legend">Environment validation</text>
+  <rect x="1405" y="1022" width="28" height="18" rx="5" class="neutral"/>
+  <text x="1445" y="1037" class="legend">Independent review</text>
   <text x="900" y="1080" class="footer">Human authority at consequential boundaries  •  Provider-neutral adapters  •  Explicit, auditable overrides</text>
 </svg>
