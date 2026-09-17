@@ -29,6 +29,17 @@ async function requireValue(api, route, options) {
   return response.value;
 }
 
+async function findDraftRelease(api, prefix, tag) {
+  const matches = [];
+  for (let page = 1; ; page++) {
+    const releases = await requireValue(api, `${prefix}/releases?per_page=100&page=${page}`);
+    matches.push(...releases.filter(release => release.draft && release.tag_name === tag));
+    if (releases.length < 100) break;
+  }
+  if (matches.length > 1) throw new Error(`Multiple draft releases match ${tag}; refusing ambiguous resume`);
+  return matches[0];
+}
+
 export async function publishDraft({ directory, repository, ...expected }, api = githubRequest) {
   const bundle = await verifyBundle({ directory, ...expected });
   requirePublicationReady(bundle);
@@ -51,6 +62,7 @@ export async function publishApprovedDraft({ directory, repository, bundle }, ap
     throw new Error('Pre-existing release tag must resolve to the exact validated source commit; no tags are created');
   }
   let release = (await api(`${prefix}/releases/tags/${encodeURIComponent(tag)}`)).value;
+  if (!release) release = await findDraftRelease(api, prefix, tag);
   if (!release) {
     release = await requireValue(api, `${prefix}/releases`, { method: 'POST', body: {
       tag_name: tag, name: tag, draft: true, prerelease: isPrerelease(bundle.identity.version),

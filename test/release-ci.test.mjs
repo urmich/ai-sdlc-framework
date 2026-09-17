@@ -589,6 +589,7 @@ test('checksum-consistent Linux archives cannot enter the supported release', as
 
 function githubFixture(bundle, directory) {
   let release;
+  let duplicateDraft;
   const assets = [];
   const calls = [];
   let tagCommit = sourceCommit;
@@ -597,7 +598,12 @@ function githubFixture(bundle, directory) {
     calls.push({ route, ...options });
     if (route === `/repos/${repository}`) return { status: 200, value: { private: privateRepo } };
     if (route.includes('/git/ref/tags/')) return { status: 200, value: { object: { type: 'commit', sha: tagCommit } } };
-    if (route.includes('/releases/tags/')) return release ? { status: 200, value: release } : { status: 404 };
+    if (route.includes('/releases/tags/')) {
+      return release && !release.draft ? { status: 200, value: release } : { status: 404 };
+    }
+    if (route.includes('/releases?per_page=')) {
+      return { status: 200, value: [release, duplicateDraft].filter(Boolean) };
+    }
     if (route === `/repos/${repository}/releases` && options.method === 'POST') {
       release = { id: 7, ...options.body };
       return { status: 201, value: release };
@@ -615,7 +621,9 @@ function githubFixture(bundle, directory) {
   };
   return { api, calls, assets, directory, bundle,
     setTag: value => { tagCommit = value; }, setPrivate: value => { privateRepo = value; },
-    makePublic: () => { release.draft = false; } };
+    makePublic: () => { release.draft = false; },
+    duplicateDraft: () => { duplicateDraft = { ...release, id: release.id + 1 }; },
+    clearDuplicateDraft: () => { duplicateDraft = undefined; } };
 }
 
 test('pending T-60 completeness blocks real publisher entrypoints and forged readiness is rejected', async t => {
@@ -642,6 +650,9 @@ test('approved draft transport is idempotent and never overwrites mismatched byt
   await publishApprovedDraft(request, mock.api);
   assert.equal(mock.calls.filter(call => call.method === 'POST').length, mutations);
   assert.ok(mock.calls.every(call => !['DELETE', 'PATCH', 'PUT'].includes(call.method)));
+  mock.duplicateDraft();
+  await assert.rejects(publishApprovedDraft(request, mock.api), /ambiguous resume/u);
+  mock.clearDuplicateDraft();
   mock.assets[0].bytes[0] ^= 255;
   await assert.rejects(publishApprovedDraft(request, mock.api), /conflicts/u);
   assert.equal(mock.calls.filter(call => call.method === 'POST').length, mutations);
