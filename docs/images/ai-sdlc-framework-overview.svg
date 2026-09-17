@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1080" viewBox="0 0 1800 1080" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1120" viewBox="0 0 1800 1120" role="img" aria-labelledby="title desc">
   <title id="title">AI SDLC Framework lifecycle</title>
   <desc id="desc">A provider-neutral lifecycle that moves from outcome definition through implementation and evidence-based release readiness, with human decisions at consequential boundaries.</desc>
   <defs>
@@ -16,6 +16,7 @@
       .outcome { font: 700 29px Inter, Arial, sans-serif; fill: #111827; text-anchor: middle; }
       .support { font: 18px Inter, Arial, sans-serif; fill: #364152; text-anchor: middle; }
       .footer { font: 600 17px Inter, Arial, sans-serif; fill: #495057; text-anchor: middle; }
+      .legend { font: 600 14px Inter, Arial, sans-serif; fill: #495057; text-anchor: middle; }
       .step { font: 700 12px Inter, Arial, sans-serif; fill: #ffffff; text-anchor: middle; }
       .define { fill: #d0ebff; stroke: #1971c2; stroke-width: 3; }
       .test { fill: #e5dbff; stroke: #7048e8; stroke-width: 3; }
@@ -29,7 +30,7 @@
     </style>
   </defs>
 
-  <rect width="1800" height="1080" fill="url(#background)"/>
+  <rect width="1800" height="1120" fill="url(#background)"/>
   <circle cx="1690" cy="55" r="190" fill="#dbe4ff" opacity="0.55"/>
   <circle cx="80" cy="1035" r="190" fill="#e5dbff" opacity="0.45"/>
 
@@ -145,5 +146,6 @@
   <text x="910" y="913" class="outcome">Less assumption-driven bias  →  fewer avoidable failures  →  less rework  →  higher delivery confidence</text>
   <text x="910" y="956" class="support">Recoverable state  •  End-to-end traceability  •  Version-control audit trail  •  Verified automation evidence</text>
 
-  <text x="900" y="1045" class="footer">Human authority at consequential boundaries  •  Provider-neutral adapters  •  Explicit, auditable overrides</text>
+  <text x="900" y="1038" class="legend">Blue: define and design  •  Purple: evidence planning  •  Green: build, verify, and readiness  •  Amber: environment validation  •  White: independent review</text>
+  <text x="900" y="1080" class="footer">Human authority at consequential boundaries  •  Provider-neutral adapters  •  Explicit, auditable overrides</text>
 </svg>
