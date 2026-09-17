@@ -263,10 +263,13 @@ does not include itself. CI retains the descriptor and `SHA256SUMS` digests as
 workflow evidence so postpublication clients compare the exact published bytes
 with the prepublication result.
 
-Artifact names are
-`ai-sdlc-framework-<version>-windows-x64.zip`,
-`...-macos-x64.tar.gz`, `...-macos-arm64.tar.gz`, and
-`...-linux-x64.tar.gz`.
+Initial published artifact names are
+`ai-sdlc-framework-<version>-windows-x64.zip` and
+`...-macos-arm64.tar.gz`. The packager may generate
+`...-macos-x64.tar.gz` as explicitly unverified preview output, but it is not
+included in supported Homebrew metadata before native Intel acceptance.
+Linux installer artifacts and metadata are not generated for the initial
+release asset set.
 
 `scripts/package-platforms.mjs` creates fixed-time, sorted, deterministic
 staging trees. Each tree contains `package/` extracted from the exact npm
@@ -320,8 +323,10 @@ Homebrew owns its Cellar payload and linked launcher only. Candidate testing
 uses a generated local formula whose URL points to the candidate archive in a
 local HTTP fixture/cache; it runs real `brew install`, upgrade, unlink/link, and
 uninstall without public release dependency. Stable published formula metadata
-uses final public release URLs and exact x64/arm64 checksums. Prerelease CI uses
-a test-only local formula but does not update stable tap metadata.
+uses the final public arm64 release URL and checksum and declares the initial
+formula arm64-only. An x64 URL/checksum stanza is added only after native Intel
+acceptance of the exact candidate. Prerelease CI uses a test-only local formula
+but does not update stable tap metadata.
 
 WinGet uses the Windows archive with a small open-source native `sdlc.exe`
 launcher built for x64, because portable manifests do not support `.cmd` as the
@@ -336,9 +341,13 @@ discoverability remain postpublication evidence.
 
 Stable WinGet manifests reference the public stable asset. Prerelease Windows
 CI generates a test-only manifest pointing to the local candidate archive,
-validates its schema/digest/installer behavior, and discards it; stable WinGet
+validates its schema, digest, architecture, URLs, and embedded payload-integrity
+contract without executing the Windows installer, then discards it; stable WinGet
 metadata publication is not applicable to prereleases, while the native
-Windows standalone lifecycle remains release-blocking.
+Windows standalone lifecycle remains deferred to the post-implementation
+Windows tester handoff. The Windows artifact still fails prepublication when
+its deterministic build, PE identity, schema, embedded payload integrity, or
+metadata binding is invalid.
 
 Channel switching resolves and invokes the new launcher by absolute path before
 removing the old package. Before any Homebrew install/upgrade command, switching
@@ -384,22 +393,26 @@ fails, uninstall the new channel payload and retain the old payload; neither
 path rolls back an explicitly requested framework purge. PATH precedence is
 diagnosed but never used to choose the launcher during switching.
 
-The release-blocking native matrix is:
+The initial release validation matrix is:
 
-| Job | Required evidence |
+| Target | Initial release treatment |
 | --- | --- |
-| Linux x64 | standalone archive, npm-denied install, lifecycle, payload/checksum verification |
-| Windows x64 | PowerShell standalone, cmd launcher, WinGet manifest validation, paths with spaces, hooks |
-| macOS Intel x64 | standalone and Homebrew install/update/uninstall |
-| macOS Apple Silicon arm64 | standalone and Homebrew install/update/uninstall |
+| macOS Apple Silicon arm64 | Required native standalone and Homebrew install/update/doctor/uninstall/switching, hook, and checksum evidence |
+| Windows x64 | Deterministic artifact, PE, schema, metadata, and pre-execution payload-integrity validation required; native lifecycle deferred to a generated tester prompt |
+| macOS Intel x64 | Artifact may be generated, but native acceptance is `NotRun` and non-blocking |
+| Linux x64 | Installer artifact, metadata, native CI, and publication are out of scope |
 
-Each job records runner image/architecture plus `process.platform`,
+The required macOS job records runner image/architecture plus `process.platform`,
 `process.arch`, and host-native architecture evidence. macOS jobs require
 `uname -m` and `sysctl.proc_translated`; Intel evidence fails under Rosetta and
 arm64 evidence requires native arm64. The launcher uses the same validated Node
 path for preflight and execution. Emulation cannot satisfy a native
-requirement. Release publication depends on every mandatory job; a failed,
-skipped, cancelled, or absent result blocks it.
+requirement. Release publication depends on the macOS arm64 native job and the
+Windows non-execution validation job; failed, skipped, cancelled, or absent
+mandatory evidence blocks it. Deferred Windows and macOS Intel native results
+remain `NotRun`, not Passed. The repository generates a self-contained Windows
+tester prompt after all implementation is complete. Linux is excluded from the
+release asset set rather than represented as a skipped mandatory job.
 
 Stable release metadata is generated only for stable versions. Prereleases may
 publish npm `next` and prerelease GitHub assets but do not update WinGet or

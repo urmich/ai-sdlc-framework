@@ -275,6 +275,7 @@ formalized in section 6. All sources below concern framework behavior.
 | S-53 | 2026-09-16 | Staging access is environment-specific. Dedicated secured machines and user-owned testing are supported policy choices, not universal framework assumptions. The selected environment contract determines location, owner, automation, and available agent execution. This supersedes S-33's universal wording. |
 | S-54 | 2026-09-17 | Distribute the OSS framework through npm, standalone platform archives/installers, WinGet, Homebrew, and direct release downloads. Every channel must install the same verified framework version and preserve clean migration, doctor, update, uninstall, ownership, and restart behavior. Build the channels in parallel where their shared contract permits it. |
 | S-55 | 2026-09-17 | Make the personal third-party OSS repository ready for external supply-chain review without implying Microsoft ownership. Add transparent governance, security reporting, support, contribution, release integrity, dependency maintenance, vulnerability scanning, SBOM, and reproducibility evidence comparable to mature OSS projects. |
+| S-56 | 2026-09-17 | For the time-bounded initial multi-channel release, require native macOS Apple Silicon validation on the available real host. Defer native Windows installation and verification to an explicit tester handoff after the remaining implementation is complete. Treat macOS Intel as unverified and Linux installers as out of scope; neither blocks this release. |
 
 ## 6. Framework requirements
 
@@ -2207,8 +2208,12 @@ behavior as the npm package.
 
 **Definition of Done**
 
-- AC-053.1: One versioned release produces the npm package plus deterministic
-  standalone archives for Windows, macOS, and Linux. The framework payload is
+- AC-053.1: The initial versioned multi-channel release produces the npm
+  package plus deterministic Windows x64 and macOS Apple Silicon arm64
+  standalone archives. A macOS Intel x64 archive may be generated as explicit
+  unverified preview output but is not published as supported Homebrew
+  metadata until native acceptance exists. Linux installer archives and
+  metadata are outside the initial release scope. The framework payload is
   architecture-neutral JavaScript; supported execution requires a Node 22+
   runtime available for the host architecture.
 - AC-053.2: Standalone archives contain the framework payload, platform
@@ -2255,13 +2260,16 @@ behavior as the npm package.
   before installation or destructive migration. CI installs each mandatory
   native channel into an isolated Copilot home and prevents release publication
   when any required artifact or metadata is inconsistent.
-- AC-053.10: Native Windows CI exercises PowerShell and Command Prompt
-  installation, update, doctor, uninstall, clean migration, paths with spaces,
-  and hook command payloads on Windows x64. Native macOS CI exercises the
-  standalone and Homebrew paths on both Intel x64 and Apple Silicon arm64.
-  Native Linux x64 CI exercises the standalone shell path. These four native
-  host/architecture combinations are release-blocking; other Node-supported
-  architectures are marked unverified until native runners are available.
+- AC-053.10: Native macOS Apple Silicon arm64 validation exercises standalone
+  and Homebrew installation, update, doctor, uninstall, clean migration,
+  channel switching, checksums, and hook behavior on the available real host
+  and is release-blocking. Windows x64 artifacts and WinGet metadata must pass
+  deterministic cross-build, schema, payload-integrity, and non-execution
+  validation before publication, while native PowerShell, Command Prompt,
+  WinGet, path, and hook acceptance remains explicit `NotRun` for a later
+  Windows tester handoff and does not block this release. macOS Intel x64 is
+  explicit `NotRun` and non-blocking. Linux installer artifacts, metadata, and
+  native acceptance are out of scope and are not published in this release.
 - AC-053.11: One release version is used consistently across npm, GitHub
   Release assets, standalone metadata, WinGet, and Homebrew. Prerelease channels
   do not become stable/latest channels. Initial WinGet and Homebrew metadata is
@@ -2282,8 +2290,15 @@ behavior as the npm package.
   separate external controls under FR-045.3. Blocked clients report the exact
   control and use only approved waiting, exception, or alternate-channel
   guidance; another channel is never guaranteed to bypass policy.
+- AC-053.17: After implementation and macOS validation complete, the release
+  produces a self-contained Windows tester prompt covering anonymous download,
+  SHA-256 and payload verification before execution, PowerShell and Command
+  Prompt standalone lifecycle, WinGet manifest/install behavior, paths with
+  spaces, hook execution, clean migration, ordinary uninstall, purge,
+  unrelated-content preservation, evidence capture, and truthful
+  `Passed`/`Failed`/`NotRun`/`Blocked` reporting.
 
-**Source:** S-54.
+**Sources:** S-54, S-56.
 
 ### 6.26 Third-party OSS trust and supply-chain evidence
 
