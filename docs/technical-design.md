@@ -340,9 +340,18 @@ metadata publication is not applicable to prereleases, while the native
 Windows standalone lifecycle remains release-blocking.
 
 Channel switching resolves and invokes the new launcher by absolute path before
-removing the old package. Homebrew switching installs with `--skip-link`,
-invokes the new Cellar launcher directly, verifies framework update/doctor, then
-captures the existing `sdlc` link target. If that link belongs to a global npm
+removing the old package. Before any Homebrew install/upgrade command, switching
+captures the existing `sdlc` link target, owning keg/version, formula dependency
+state, and rollback command while the old keg and link are still intact. Every
+Homebrew operation in the transaction runs with install cleanup suppressed
+(`HOMEBREW_NO_INSTALL_CLEANUP=1`), and the switch verifies after installation
+that the captured old keg still exists with its recorded identity. If the
+installed Homebrew version cannot honor that retention contract, switching
+stops before promotion and reports the retained old channel rather than
+claiming rollback safety. It then installs with `--skip-link`, invokes the new
+Cellar launcher directly, and verifies framework update/doctor. Cleanup of the
+old keg is allowed only after successful link promotion and post-promotion
+doctor/hook verification. If the captured link belongs to a global npm
 installation, it is treated as an unsupported external/legacy channel and is
 not automatically removed. The documented npm channel uses `npx` or an
 extracted versioned payload and owns no persistent global `sdlc` link.
@@ -356,9 +365,15 @@ retains both payloads; it never removes an unidentified file.
 
 The reverse Homebrew-to-npm path uses the documented non-global `npx` or
 extracted-package entry by absolute path, updates/verifies `COPILOT_HOME`, and
-then optionally unlinks/uninstalls Homebrew. It does not create or compete for
-a global npm bin link. Global `npm install -g` is outside the supported channel
-contract and receives only manual ownership diagnostics.
+then optionally unlinks/uninstalls Homebrew. Before removal, it proves that the
+Node 22+ executable bound into installed hooks remains independently retained
+after Homebrew autoremove, retaining or installing a separately owned runtime
+when the formula dependency is the only provider. It then removes the formula
+and re-runs hook and doctor checks using the retained absolute runtime; failure
+restores the prior keg/link when possible and reports an incomplete switch
+rather than success. It does not create or compete for a global npm bin link.
+Global `npm install -g` is outside the supported channel contract and receives
+only manual ownership diagnostics.
 
 WinGet owns its scope-specific portable alias under
 `Microsoft\WinGet\Links` and performs same-PackageIdentifier upgrade;
