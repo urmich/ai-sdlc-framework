@@ -163,9 +163,10 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     await fs.mkdir(shadow);
     await fs.writeFile(path.join(shadow, 'node'), '#!/bin/sh\nexit 99\n', { mode: 0o755 });
     const shadowedDoctor = JSON.parse((await run(launcher, ['doctor'], {
-      env: { ...environment, PATH: `${shadow}:${environment.PATH}` },
+      env: { ...environment, PATH: `${shadow}:${environment.PATH}`,
+        SDLC_NODE: path.join(shadow, 'node') },
     })).stdout);
-    assert.equal(shadowedDoctor.findings.length, 0, 'The wrapper selected a shadowing PATH runtime');
+    assert.equal(shadowedDoctor.findings.length, 0, 'The wrapper selected a shadowing PATH/SDLC_NODE runtime');
     assert.deepEqual(await snapshot(home), installedHome);
     await runBrew(['test', formulaName]);
     assert.deepEqual(await snapshot(home), installedHome, 'brew test escaped its isolated home');

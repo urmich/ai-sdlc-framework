@@ -92,7 +92,9 @@ ${candidateVersion}      sha256 "${archives.x64.sha256}"
   def install
     libexec.install Dir["*"]
     cp libexec/"LICENSE", prefix/"LICENSE"
-    (bin/"sdlc").write_env_script libexec/"bin/sdlc", PATH: "\#{formula_opt_bin("node@22")}:$PATH"
+    (bin/"sdlc").write_env_script libexec/"bin/sdlc",
+                                PATH:      "\#{formula_opt_bin("node@22")}:$PATH",
+                                SDLC_NODE: "\#{formula_opt_bin("node@22")}/node"
   end
 
   def caveats

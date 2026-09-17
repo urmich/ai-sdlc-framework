@@ -41,7 +41,8 @@ test('T-51 Homebrew stable metadata binds both public architecture assets and li
   assert.match(first.contents, /libexec.install Dir\["\*"\]/u);
   assert.match(first.contents, /skip_clean "libexec"/u);
   assert.match(first.contents, /cp libexec\/"LICENSE", prefix\/"LICENSE"/u);
-  assert.match(first.contents, /write_env_script libexec\/"bin\/sdlc", PATH: "#\{formula_opt_bin\("node@22"\)\}:\$PATH"/u);
+  assert.match(first.contents, /write_env_script libexec\/"bin\/sdlc",\n\s+PATH: +"#\{formula_opt_bin\("node@22"\)\}:\$PATH"/u);
+  assert.match(first.contents, /SDLC_NODE: "#\{formula_opt_bin\("node@22"\)\}\/node"/u);
   const install = first.contents.split('  def install\n')[1].split('  end\n')[0];
   assert.doesNotMatch(install, /COPILOT_HOME|system|purge|uninstall/u);
   assert.doesNotMatch(first.contents, /def (post_install|uninstall)|latest|--overwrite/u);

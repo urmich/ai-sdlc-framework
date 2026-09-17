@@ -39,9 +39,10 @@ publication must verify this repository and these exact bytes are anonymously
 reachable. No URL or checksum placeholder is committed as a usable formula.
 The generated formula declares `node@22` (supported Node 22+ LTS), copies the
 entire verified archive to `libexec`, and wraps `libexec/bin/sdlc` with the
-Homebrew dependency first in `PATH`. The standalone launcher owns runtime and
-embedded payload preflight. No formula install/upgrade/uninstall hook invokes
-the framework or mutates `COPILOT_HOME`. `skip_clean "libexec"` prevents
+Homebrew dependency first in `PATH` and its absolute executable in `SDLC_NODE`,
+overriding inherited standalone-runtime selections. The standalone launcher
+owns runtime and embedded payload preflight. No formula install/upgrade/uninstall
+hook invokes the framework or mutates `COPILOT_HOME`. `skip_clean "libexec"` prevents
 Homebrew's automatic Node shebang rewriting from changing checksum-bound bytes;
 a separate prefix license copy prevents its metafile handling from moving the
 archive's license. Both are required for manifest verification after installation.
