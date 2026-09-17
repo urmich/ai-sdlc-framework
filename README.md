@@ -5,16 +5,7 @@ CLI. It reduces solution-first bias by requiring understood requirements,
 requirement-specific definitions of done, planned evidence, and an approved
 technical design before implementation begins.
 
-```mermaid
-flowchart LR
-  R[Requirements] --> T[Test Plan]
-  T --> D[Technical Design]
-  D --> C[Coding and local validation]
-  C --> V[Candidate Review]
-  V --> DEV[DEV]
-  DEV --> S[STAGING]
-  S --> P[Production readiness]
-```
+![AI SDLC Framework lifecycle](docs/images/ai-sdlc-framework-overview.svg)
 
 The framework combines installable Copilot instructions and skills with an
 offline, dependency-free Node.js CLI. The agent handles reasoning and uses its
