@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
-import { artifact, fixture, coding, completeReview, grant, grantPush, orient, pushAction, pushPermission, syntheticPushAction, testDefinitions } from './helpers.mjs';
+import { artifact, fixture, coding, completeReview, finishFixtureOperation, fixtureArtifact, fixtureBuild, fixtureDeployment, grant, grantPush, observeFixtureRepository, orient, pushAction, pushPermission, registerFixtureProviderRequest, registerFixtureProviderResult, syntheticPushAction, testDefinitions } from './helpers.mjs';
 import { startCycle, recordTest, recordArtifact, stagingHandoff } from '../src/validation.mjs';
 import { currentCycle } from '../src/authority.mjs';
 import { evaluatePolicy } from '../src/policy.mjs';
@@ -29,6 +29,24 @@ async function configuration(f) {
   } };
   await writeJson(path.join(f.repo, '.sdlc/config.json'), config);
   return config;
+}
+async function observeCommittedFixture(f, options) {
+  await f.runGit('add', '.sdlc');
+  await f.runGit('commit', '-qm', 'Fixture candidate source');
+  return observeFixtureRepository(f, options);
+}
+async function produceFixtureArtifact(f, cycle, { environment, target, artifactId }) {
+  const producer = await fixtureBuild(f, cycle, {
+    environment, target, pipeline: `fixture-${environment.toLowerCase()}-build`,
+    correlationKey: `produce-${artifactId}`,
+  });
+  return fixtureArtifact(f, cycle, producer, { environment, artifactId });
+}
+async function deployFixtureArtifact(f, cycle, artifact, target) {
+  return fixtureDeployment(f, cycle, artifact, {
+    target,
+    correlationKey: `deploy-${artifact.artifactId}`,
+  });
 }
 test('T-20/T-22 cumulative gates preserve per-session compaction, push and phase boundaries', async t => {
   const f = await coding(await fixture(t));
@@ -76,24 +94,182 @@ test('T-18 uncertain dispatch cannot retry/prune; evidenced terminal records ret
   await configuration(f);
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Commit candidate before push recovery');
+  const repositoryObservation = await observeFixtureRepository(f);
   const request = { toolName: 'bash', toolArgs: { command: 'git push --no-follow-tags --no-recurse-submodules origin refs/heads/feature/fixture:refs/heads/feature/fixture' }, cwd: f.repo };
-  await grantPush(f, request.toolArgs.command, { effect: { scope: { repositoryIds: ['primary'] } } });
+  const push = await grantPush(f, request.toolArgs.command, {
+    repositoryObservation, effect: { scope: { repositoryIds: ['primary'] } },
+  });
   const cycle = await localPass(f);
   await completeReview(f, cycle);
   const prepared = await prepareOperation(f.store, { workItemId: f.workItemId, sessionId: f.sessionId,
-    action: await pushAction(f, request.toolArgs.command), request, correlationKey: 'push-1', intent: 'Publish requested branch' });
+    action: push.action, request, correlationKey: 'push-1', intent: 'Publish requested branch' });
   const operation = prepared.operation;
+  registerFixtureProviderRequest(f, operation);
   await markDispatching(f.store, f.workItemId, operation.id);
-  const uncertain = await recordOperation(f.store, { workItemId: f.workItemId, operationId: operation.id, status: 'submitted' });
+  const uncertain = await recordOperation(f.store, {
+    workItemId: f.workItemId, operationId: operation.id, status: 'submitted',
+    evidenceRef: 'fixture:submission-only',
+    requestFingerprint: operation.requestFingerprint,
+    correlationKey: operation.correlationKey,
+  });
   assert.equal(uncertain.status, 'uncertain');
+  assert.equal(uncertain.evidenceRef, 'fixture:submission-only');
+  assert.equal(uncertain.resultProof, undefined);
   await assert.rejects(markDispatching(f.store, f.workItemId, operation.id), { code: 'UNCERTAIN' });
   await pruneWork(f.store, f.workItemId);
   assert.ok((await f.store.records(f.workItemId)).some(r => r.id === operation.id));
+  const observedResult = registerFixtureProviderResult(f, operation, {
+    providerResultId: `${operation.action.target}:${operation.action.targetRef}`,
+    result: {
+      destination: operation.action.target,
+      ref: operation.action.targetRef,
+      revision: operation.action.sourceRevision,
+      published: true,
+      remoteRepositoryURL: operation.intendedOutcome.target.remoteRepositoryURL,
+      remoteUrlDigest: operation.intendedOutcome.target.remoteUrlDigest,
+    },
+  });
   await recordOperation(f.store, { workItemId: f.workItemId, operationId: operation.id, status: 'succeeded',
-    target: operation.target, requestFingerprint: operation.requestFingerprint, evidenceRef: 'fixture:remote-ref' }, { reconcile: true });
+    observedResult }, { reconcile: true });
   await pruneWork(f.store, f.workItemId);
   assert.ok(!(await f.store.records(f.workItemId)).some(r => r.id === operation.id));
   assert.ok(await fs.stat(path.join(f.store.workPath(f.workItemId), 'evidence', `${operation.id}.json`)));
+});
+async function revisionBoundBuildFixture(t) {
+  const f = await coding(await fixture(t));
+  await configuration(f);
+  await observeCommittedFixture(f);
+  const cycle = await localPass(f);
+  await completeReview(f, cycle);
+  await grant(f, 'dev-authorization', binding(cycle, {
+    target: 'dev-resource', completedStage: 'review',
+  }));
+  const action = {
+    class: 'build', repositoryId: 'primary', environment: 'DEV',
+    target: 'dev-resource', configDigest: cycle.configDigest,
+    sourceRevision: cycle.sources[0].revision,
+    provider: 'fixture', pipeline: 'candidate-build', monitorCapability: true,
+  };
+  return { f, cycle, action };
+}
+function buildRequest(f, action) {
+  return { toolName: 'fixture_build', toolArgs: { action }, cwd: f.repo };
+}
+test('T-107 an archived build result cannot prove a later identical dispatch', async t => {
+  const { f, action } = await revisionBoundBuildFixture(t);
+  const first = await prepareOperation(f.store, {
+    workItemId: f.workItemId, sessionId: f.sessionId,
+    action, request: buildRequest(f, action), correlationKey: 'first-build',
+    intent: 'Build the candidate once',
+  });
+  registerFixtureProviderRequest(f, first.operation);
+  await markDispatching(f.store, f.workItemId, first.operation.id);
+  const completed = await finishFixtureOperation(f, first.operation,
+    { alreadyDispatched: true });
+  assert.equal(completed.status, 'succeeded');
+  await pruneWork(f.store, f.workItemId);
+  assert.ok(!(await f.store.records(f.workItemId)).some(record =>
+    record.id === first.operation.id));
+  const archived = await f.store.archivedOperationProofs(f.workItemId,
+    completed.resultProof);
+  assert.equal(archived[0].dispatchId, first.operation.id);
+
+  const second = await prepareOperation(f.store, {
+    workItemId: f.workItemId, sessionId: f.sessionId,
+    action, request: buildRequest(f, action), correlationKey: 'second-build',
+    intent: 'Reject a reused provider response for a new build',
+  });
+  registerFixtureProviderRequest(f, second.operation);
+  f.providerRequests.set(second.operation.id,
+    f.providerRequests.get(first.operation.id));
+  await markDispatching(f.store, f.workItemId, second.operation.id);
+  const earlier = f.providerResults.get(first.operation.id).observation;
+  const observedResult = registerFixtureProviderResult(f, second.operation, {
+    providerResultId: earlier.providerResultId,
+    result: earlier.result,
+  });
+  const rejected = await recordOperation(f.store, {
+    workItemId: f.workItemId, operationId: second.operation.id,
+    status: 'succeeded', observedResult,
+  });
+  assert.equal(rejected.status, 'uncertain');
+  assert.equal(rejected.resultGap,
+    'result-or-request-belongs-to-another-dispatch');
+});
+test('same-content HEAD advance rejects a stale explicit build revision at preparation', async t => {
+  const { f, cycle, action } = await revisionBoundBuildFixture(t);
+  await f.runGit('commit', '--allow-empty', '-qm', 'Same content, different revision');
+  assert.notEqual(await f.runGit('rev-parse', 'HEAD'), cycle.sources[0].revision);
+  await assert.rejects(prepareOperation(f.store, {
+    workItemId: f.workItemId, sessionId: f.sessionId, action,
+    request: buildRequest(f, action), correlationKey: 'stale-preparation',
+    intent: 'Build the old commit after HEAD advances',
+  }), { code: 'STALE' });
+  const newRevision = { ...action,
+    sourceRevision: await f.runGit('rev-parse', 'HEAD') };
+  await assert.rejects(prepareOperation(f.store, {
+    workItemId: f.workItemId, sessionId: f.sessionId, action: newRevision,
+    request: buildRequest(f, newRevision), correlationKey: 'stale-cycle',
+    intent: 'Build the new commit with the old validation cycle',
+  }), { code: 'STALE' });
+  assert.equal((await f.store.records(f.workItemId)).some(record =>
+    record.type === 'operation' &&
+    ['stale-preparation', 'stale-cycle'].includes(record.correlationKey)), false);
+});
+test('same-content HEAD advance rejects dispatch of a prepared build without resetting the cycle', async t => {
+  const { f, cycle, action } = await revisionBoundBuildFixture(t);
+  const { operation } = await prepareOperation(f.store, {
+    workItemId: f.workItemId, sessionId: f.sessionId, action,
+    request: buildRequest(f, action), correlationKey: 'stale-dispatch',
+    intent: 'Build the candidate at its prepared commit',
+  });
+  assert.ok(operation.intendedOutcome);
+  await f.runGit('commit', '--allow-empty', '-qm', 'Same content, later HEAD');
+  await assert.rejects(markDispatching(f.store, f.workItemId, operation.id),
+    { code: 'STALE' });
+  const state = await f.store.load(f.workItemId);
+  assert.equal(state.records.find(record => record.id === operation.id).status, 'prepared');
+  assert.equal(currentCycle(state.records, state.checkpoint).id, cycle.id);
+});
+test('submitted and running handles remain request-bound diagnostics, not terminal proof', async t => {
+  const { f, action } = await revisionBoundBuildFixture(t);
+  const { operation } = await prepareOperation(f.store, {
+    workItemId: f.workItemId, sessionId: f.sessionId, action,
+    request: buildRequest(f, action), correlationKey: 'in-flight-build',
+    intent: 'Build the candidate and observe its in-flight handle',
+  });
+  await markDispatching(f.store, f.workItemId, operation.id);
+  const submission = {
+    workItemId: f.workItemId, operationId: operation.id, status: 'submitted',
+    handle: 'run-pending-1', evidenceRef: 'fixture:accepted-request',
+    requestFingerprint: operation.requestFingerprint,
+    correlationKey: operation.correlationKey,
+  };
+  await assert.rejects(recordOperation(f.store, {
+    ...submission, correlationKey: 'another-request',
+  }), { code: 'EVIDENCE' });
+  await assert.rejects(recordOperation(f.store, {
+    ...submission, requestFingerprint: 'another-fingerprint',
+  }), { code: 'EVIDENCE' });
+  await assert.rejects(recordOperation(f.store, {
+    ...submission, handle: 'r'.repeat(513),
+  }), { code: 'INPUT' });
+  const accepted = await recordOperation(f.store, submission);
+  assert.equal(accepted.status, 'submitted');
+  assert.equal(accepted.handle, submission.handle);
+  assert.equal(accepted.evidenceRef, submission.evidenceRef);
+  assert.equal(accepted.resultProof, undefined);
+  const running = await recordOperation(f.store, {
+    ...submission, status: 'running', evidenceRef: 'fixture:running',
+  });
+  assert.equal(running.status, 'running');
+  assert.equal(running.evidenceRef, 'fixture:running');
+  assert.equal(running.resultProof, undefined);
+  const unresolved = await recordOperation(f.store, {
+    ...submission, status: 'succeeded',
+  });
+  assert.equal(unresolved.status, 'uncertain');
+  assert.equal(unresolved.resultProof, undefined);
 });
 test('T-31 out-of-scope execution/documentation and scoped conflict overrides remain independent', async t => {
   const f = await coding(await fixture(t));
@@ -119,11 +295,19 @@ test('T-17 once-only permission reservation respects the authorized target', asy
   const f = await coding(await fixture(t));
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Commit target-specific push candidate');
+  await f.runGit('remote', 'add', 'origin-a', 'https://example.invalid/origin-a.git');
+  await f.runGit('remote', 'add', 'origin-b', 'https://example.invalid/origin-b.git');
+  const observationA = await observeFixtureRepository(f, { remoteName: 'origin-a' });
+  const observationB = await observeFixtureRepository(f, { remoteName: 'origin-b' });
   const cycle = await localPass(f);
   await completeReview(f, cycle);
-  const sourceRevision = await f.runGit('rev-parse', 'HEAD');
-  const actionA = { ...syntheticPushAction('origin-a'), sourceRevision };
-  const actionB = { ...syntheticPushAction('origin-b'), sourceRevision };
+  const refspec = 'refs/heads/feature/fixture:refs/heads/feature/fixture';
+  const actionA = { ...await pushAction(f, `git push --no-follow-tags --no-recurse-submodules origin-a ${refspec}`),
+    localRepositoryPath: observationA.localRepositoryPath,
+    remoteRepositoryURL: observationA.remoteRepositoryURL };
+  const actionB = { ...await pushAction(f, `git push --no-follow-tags --no-recurse-submodules origin-b ${refspec}`),
+    localRepositoryPath: observationB.localRepositoryPath,
+    remoteRepositoryURL: observationB.remoteRepositoryURL };
   const once = await grant(f, 'permission', { ...pushPermission(actionA), lifetime: { kind: 'once' } });
   await grant(f, 'permission', pushPermission(actionB));
   await prepareOperation(f.store, { workItemId: f.workItemId, sessionId: f.sessionId,
@@ -261,12 +445,18 @@ test('T-18 superseded current-cycle evidence is pruned from the active working s
   assert.equal((await f.store.records(f.workItemId)).filter(record =>
     record.type === 'test-evidence' && record.testId === 'T-unit').length, 30);
   const recoveryToken = await f.store.beginRecovery(f.workItemId);
+  await assert.rejects(recordTest(f.store, {
+    workItemId: f.workItemId, cycleId: cycle.id, testId: 'T-unit',
+    status: 'Passed', expectedMet: true, evidenceRef: 'fixture:unit-during-recovery',
+    owner: 'agent', host: 'local',
+  }), { code: 'RECOVERY' });
   const pruneGate = await gate(f.store, { cwd: f.repo, sessionId: f.sessionId,
-    toolName: 'bash', toolArgs: { command: `${process.execPath} ${path.resolve('bin/sdlc.mjs')} prune --work-item ${f.workItemId}` } });
-  assert.equal(pruneGate.permissionDecision, undefined, JSON.stringify(pruneGate));
+    toolName: 'bash', toolArgs: { command: `${JSON.stringify(process.execPath)} ${JSON.stringify(path.resolve('bin/sdlc.mjs'))} prune --work-item ${f.workItemId}` } });
+  assert.deepEqual(pruneGate, {});
   await pruneWork(f.store, f.workItemId);
   assert.equal((await f.store.load(f.workItemId)).recoveryRequired, true);
   await f.store.completeRecovery(f.workItemId, recoveryToken);
+  assert.equal((await f.store.load(f.workItemId)).recoveryRequired, false);
   assert.equal((await f.store.records(f.workItemId)).filter(record =>
     record.type === 'test-evidence' && record.testId === 'T-unit').length, 1);
 });
@@ -317,9 +507,13 @@ test('T-06/T-13 STAGING-only guidance combines wildcard targets with secondary r
   await f.store.bindMember({ workItemId: f.workItemId, repositoryId: 'secondary',
     cwd: secondary.repo, sessionId: 'secondary-session' });
   await writeJson(path.join(f.repo, '.sdlc/config.json'), { defaultBranch: 'refs/heads/main',
-    environments: { STAGING: { target: 'staging-target',
-      configDigest: 'v1', allowedStages: ['STAGING'],
-      execution: { owner: 'user', locations: ['authorized-machine'] } } } });
+    environments: {
+      DEV: { target: 'dev-target', configDigest: 'v1', allowedStages: ['DEV'] },
+      STAGING: { target: 'staging-target',
+        configDigest: 'v1', allowedStages: ['STAGING'],
+        execution: { owner: 'user', locations: ['authorized-machine'] } },
+    } });
+  await observeCommittedFixture(f);
   await fs.writeFile(path.join(f.repo, 'docs/test-plan.md'), '# Plan\n' +
     '| ID | Requirements | Conditions | Environment | Level | Checkpoint | Mode | Owner | Location | Expected outcome | Implementation | Status |\n' +
     '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n' +
@@ -330,6 +524,13 @@ test('T-06/T-13 STAGING-only guidance combines wildcard targets with secondary r
   await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id, testId: 'T-unit',
     status: 'Passed', expectedMet: true, evidenceRef: 'fixture:unit', owner: 'agent', host: 'local' });
   await completeReview(f, cycle);
+  await grant(f, 'dev-authorization', binding(cycle, {
+    target: 'dev-target', completedStage: 'review',
+  }));
+  const devArtifact = await produceFixtureArtifact(f, cycle, {
+    environment: 'DEV', target: 'dev-target', artifactId: 'secondary-scope-dev-artifact',
+  });
+  const devDeployment = await deployFixtureArtifact(f, cycle, devArtifact, 'dev-target');
   await grant(f, 'override', { rules: ['dev-validation'],
     reason: 'Authorize STAGING-only validation from the secondary repository',
     scope: { repositoryIds: ['secondary'], actions: ['staging-promotion'], environment: 'STAGING' } });
@@ -338,10 +539,10 @@ test('T-06/T-13 STAGING-only guidance combines wildcard targets with secondary r
     scope: { actions: ['staging-promotion'], environment: 'STAGING', target: 'staging-target' } });
   assert.match(nextAction(await f.store.load(f.workItemId), f.clock),
     /Recommend STAGING and await explicit promotion consent/u);
-  const binding = { cycleId: cycle.id, candidateDigest: cycle.candidateDigest,
+  const cycleBinding = { cycleId: cycle.id, candidateDigest: cycle.candidateDigest,
     testSpecDigest: cycle.testSpecDigest, configDigest: cycle.configDigest };
-  const promotion = await grant(f, 'staging-promotion', { ...binding, target: 'staging-target',
-    completedStage: 'DEV', deploymentId: 'overridden-dev',
+  const promotion = await grant(f, 'staging-promotion', { ...cycleBinding, target: 'staging-target',
+    completedStage: 'DEV', deploymentId: devDeployment.id,
     scope: { repositoryIds: ['secondary'], actions: ['build'], environment: 'STAGING' },
     lifetime: { kind: 'until', expiresAt: new Date(f.clock.now() + 1000).toISOString() } });
   await grant(f, 'override', { rules: ['dev-validation', 'dev-completion'],
@@ -366,9 +567,13 @@ test('T-06/T-13 STAGING-only guidance combines wildcard targets with secondary r
 test('T-06/T-13 explicit DEV prerequisite overrides allow STAGING-only progression', async t => {
   const f = await coding(await fixture(t));
   await writeJson(path.join(f.repo, '.sdlc/config.json'), { defaultBranch: 'refs/heads/main',
-    environments: { STAGING: { target: 'staging-target',
-      configDigest: 'v1', allowedStages: ['STAGING'],
-      execution: { owner: 'user', locations: ['authorized-machine'] } } } });
+    environments: {
+      DEV: { target: 'dev-target', configDigest: 'v1', allowedStages: ['DEV'] },
+      STAGING: { target: 'staging-target',
+        configDigest: 'v1', allowedStages: ['STAGING'],
+        execution: { owner: 'user', locations: ['authorized-machine'] } },
+    } });
+  await observeCommittedFixture(f);
   const plan = path.join(f.repo, 'docs/test-plan.md');
   await fs.writeFile(plan, '# Plan\n' +
     '| ID | Requirements | Conditions | Environment | Level | Checkpoint | Mode | Owner | Location | Expected outcome | Implementation | Status |\n' +
@@ -382,41 +587,49 @@ test('T-06/T-13 explicit DEV prerequisite overrides allow STAGING-only progressi
   await completeReview(f, cycle);
   const binding = { cycleId: cycle.id, candidateDigest: cycle.candidateDigest,
     testSpecDigest: cycle.testSpecDigest, configDigest: cycle.configDigest };
+  await grant(f, 'dev-authorization', { ...binding, target: 'dev-target',
+    completedStage: 'review' });
+  const devArtifact = await produceFixtureArtifact(f, cycle, {
+    environment: 'DEV', target: 'dev-target', artifactId: 'overridden-dev-artifact',
+  });
+  const devDeployment = await deployFixtureArtifact(f, cycle, devArtifact, 'dev-target');
   await grant(f, 'override', { rules: ['dev-validation', 'dev-completion'],
     reason: 'Unrelated DEV override must not affect STAGING scope discovery',
     scope: { environment: 'DEV', target: 'unrelated-dev' } });
   await grant(f, 'override', { rules: ['dev-validation'],
     reason: 'User explicitly authorizes this STAGING-only validation workflow',
     scope: { repositoryIds: ['alpha', 'primary'],
-      actions: ['staging-promotion', 'deploy'], environment: 'STAGING' } });
+      actions: ['staging-promotion', 'build', 'deploy'], environment: 'STAGING' } });
   await assert.rejects(grant(f, 'staging-promotion', { ...binding, target: 'staging-target',
-    completedStage: 'DEV' }), { code: 'EVIDENCE' });
+    completedStage: 'DEV', deploymentId: 'historical-unproven-dev' }), { code: 'EVIDENCE' });
   const completionOverride = await grant(f, 'override', { rules: ['dev-completion'],
     reason: 'User explicitly authorizes STAGING progression without DEV completion',
     scope: { repositoryIds: ['beta', 'primary'],
-      actions: ['staging-promotion', 'deploy'], environment: 'STAGING', target: 'staging-target' } });
+      actions: ['staging-promotion', 'build', 'deploy'], environment: 'STAGING', target: 'staging-target' } });
   assert.match(nextAction(await f.store.load(f.workItemId), f.clock),
     /Recommend STAGING and await explicit promotion consent/u);
   await grant(f, 'override', { rules: ['dev-validation', 'dev-completion'],
     reason: 'Authorize only an older promotion target, not its execution',
     scope: { repositoryIds: ['primary'],
       actions: ['staging-promotion'], environment: 'STAGING', target: 'old-staging-target' } });
-  await grant(f, 'staging-promotion', { ...binding, target: 'old-staging-target',
-    completedStage: 'DEV', deploymentId: 'old-overridden-dev' });
+  await grant(f, 'staging-promotion', { ...binding, target: 'old-staging-target' });
   assert.match(nextAction(await f.store.load(f.workItemId), f.clock),
     /Prepare the concrete STAGING build\/deployment/u);
+  const buildPromotion = await grant(f, 'staging-promotion', { ...binding,
+    target: 'staging-target' });
+  const stagingArtifact = await produceFixtureArtifact(f, cycle, {
+    environment: 'STAGING', target: 'staging-target', artifactId: 'staging-artifact',
+  });
+  await grant(f, 'revocation', { revokes: [buildPromotion.event.id] });
   const promotion = await grant(f, 'staging-promotion', { ...binding, target: 'staging-target',
-    completedStage: 'DEV', deploymentId: 'overridden-dev',
     lifetime: { kind: 'once' } });
   assert.match(nextAction(await f.store.load(f.workItemId), f.clock),
     /Prepare the concrete STAGING build\/deployment/u);
-  await recordArtifact(f.store, { workItemId: f.workItemId, cycleId: cycle.id,
-    artifactId: 'staging-artifact', environment: 'STAGING', sourceDigest: cycle.candidateDigest,
-    configDigest: cycle.configDigest, buildRunId: 'staging-build', name: 'package',
-    artifactType: 'archive', evidenceRef: 'fixture:staging-artifact', status: 'succeeded' });
   const action = { class: 'deploy', repositoryId: 'primary', environment: 'STAGING',
     target: 'staging-target', configDigest: 'v1', stages: ['STAGING'],
-    artifactId: 'staging-artifact', monitorCapability: true };
+    artifactId: stagingArtifact.artifactId, artifactRef: stagingArtifact.artifactRef,
+    artifactSha256: stagingArtifact.artifactSha256,
+    sourceRevision: stagingArtifact.sourceRevision, monitorCapability: true };
   await grant(f, 'revocation', { revokes: [completionOverride.event.id] });
   assert.match(nextAction(await f.store.load(f.workItemId), f.clock),
     /Prepare the concrete STAGING build\/deployment/u);
@@ -448,10 +661,9 @@ test('T-06/T-13 explicit DEV prerequisite overrides allow STAGING-only progressi
     sessionId: f.sessionId, action,
     request: { toolName: 'fixture_deploy', toolArgs: { environment: 'STAGING' }, cwd: f.repo },
     correlationKey: 'overridden-staging', intent: 'Deploy under explicit DEV prerequisite overrides' });
-  await markDispatching(f.store, f.workItemId, deployment.operation.id);
-  await recordOperation(f.store, { workItemId: f.workItemId, operationId: deployment.operation.id,
-    status: 'succeeded', handle: 'staging-run', target: deployment.operation.target,
-    requestFingerprint: deployment.operation.requestFingerprint, evidenceRef: 'fixture:staging-deploy' });
+  const completedDeployment = await finishFixtureOperation(f, deployment.operation);
+  assert.equal(completedDeployment.status, 'succeeded');
+  assert.equal(completedDeployment.resultProof.dispatchId, deployment.operation.id);
   await grant(f, 'revocation', { revokes: [promotion.event.id] });
   assert.match(nextAction(await f.store.load(f.workItemId), f.clock),
     /Run handoff staging to resolve/u);
@@ -518,6 +730,7 @@ test('T-17 once-only PROD authority is reserved for implicit pipeline stages', a
   const f = await coding(await fixture(t));
   await writeJson(path.join(f.repo, '.sdlc/config.json'), { defaultBranch: 'refs/heads/main',
     environments: { PROD: { target: 'prod-target', configDigest: 'config-v1', allowedStages: ['PROD'] } } });
+  const repositoryObservation = await observeCommittedFixture(f);
   const cycle = await localPass(f);
   await completeReview(f, cycle);
   await grant(f, 'override', {
@@ -533,17 +746,23 @@ test('T-17 once-only PROD authority is reserved for implicit pipeline stages', a
   const authority = await grant(f, 'permission', { grant: 'prod-execution',
     target: 'prod-target', lifetime: { kind: 'once' } });
   const action = { class: 'pipeline', repositoryId: 'primary', target: 'prod-target',
-    configDigest: 'config-v1', stages: ['PROD'], monitorCapability: true };
+    configDigest: 'config-v1', stages: ['PROD'],
+    provider: 'fixture', pipeline: 'fixture-prod-pipeline',
+    localRepositoryPath: repositoryObservation.localRepositoryPath,
+    remoteRepositoryURL: repositoryObservation.remoteRepositoryURL,
+    sourceRevision: cycle.sources[0].revision, monitorCapability: true };
   const first = await prepareOperation(f.store, { workItemId: f.workItemId,
     sessionId: f.sessionId, action,
     request: { toolName: 'fixture_pipeline', toolArgs: { attempt: 1 }, cwd: f.repo },
     correlationKey: 'prod-pipeline-1', intent: 'Run the once-authorized PROD stage' });
   assert.ok((await f.store.records(f.workItemId)).some(record =>
     record.type === 'reservation' && record.eventId === authority.event.id));
-  await markDispatching(f.store, f.workItemId, first.operation.id);
-  await recordOperation(f.store, { workItemId: f.workItemId, operationId: first.operation.id,
-    status: 'succeeded', handle: 'prod-run-1', target: first.operation.target,
-    requestFingerprint: first.operation.requestFingerprint, evidenceRef: 'fixture:prod-run' });
+  assert.equal(first.operation.intendedOutcome.target.remoteRepositoryURL,
+    repositoryObservation.remoteRepositoryURL);
+  assert.equal(first.operation.action.environment, 'PROD');
+  const completed = await finishFixtureOperation(f, first.operation);
+  assert.equal(completed.status, 'succeeded');
+  assert.equal(completed.resultProof.dispatchId, first.operation.id);
   await assert.rejects(prepareOperation(f.store, { workItemId: f.workItemId,
     sessionId: f.sessionId, action,
     request: { toolName: 'fixture_pipeline', toolArgs: { attempt: 2 }, cwd: f.repo },
@@ -558,27 +777,34 @@ test('T-17 once-only DEV/STAGING authority is reserved for implicit pipeline sta
         allowedStages: ['STAGING'],
         execution: { owner: 'user', locations: ['authorized-machine'] } },
     } });
+  const repositoryObservation = await observeCommittedFixture(f);
   const cycle = await localPass(f);
   await completeReview(f, cycle);
-  const binding = { cycleId: cycle.id, candidateDigest: cycle.candidateDigest,
+  const cycleBinding = { cycleId: cycle.id, candidateDigest: cycle.candidateDigest,
     testSpecDigest: cycle.testSpecDigest, configDigest: cycle.configDigest };
-  const dev = await grant(f, 'dev-authorization', { ...binding, target: 'dev-target',
+  const dev = await grant(f, 'dev-authorization', { ...cycleBinding, target: 'dev-target',
     completedStage: 'review', lifetime: { kind: 'once' } });
   const devAction = { class: 'pipeline', repositoryId: 'primary', target: 'dev-target',
-    configDigest: 'config-v1', stages: ['DEV'], monitorCapability: true };
+    configDigest: 'config-v1', stages: ['DEV'],
+    provider: 'fixture', pipeline: 'fixture-dev-pipeline',
+    localRepositoryPath: repositoryObservation.localRepositoryPath,
+    remoteRepositoryURL: repositoryObservation.remoteRepositoryURL,
+    sourceRevision: cycle.sources[0].revision, monitorCapability: true };
   const firstDev = await prepareOperation(f.store, { workItemId: f.workItemId,
     sessionId: f.sessionId, action: devAction,
     request: { toolName: 'fixture_pipeline', toolArgs: { environment: 'DEV', attempt: 1 }, cwd: f.repo },
     correlationKey: 'implicit-dev-1', intent: 'Run once-authorized implicit DEV stage' });
+  assert.equal(firstDev.operation.action.environment, 'DEV');
   assert.ok((await f.store.records(f.workItemId)).some(record =>
     record.type === 'reservation' && record.eventId === dev.event.id));
+  registerFixtureProviderRequest(f, firstDev.operation);
   await markDispatching(f.store, f.workItemId, firstDev.operation.id);
   let pipelineState = await f.store.load(f.workItemId);
   assert.deepEqual(currentCycle(pipelineState.records, pipelineState.checkpoint)
     .invalidatedEnvironments, ['DEV', 'STAGING']);
-  await recordOperation(f.store, { workItemId: f.workItemId, operationId: firstDev.operation.id,
-    status: 'succeeded', handle: 'dev-run-1', target: firstDev.operation.target,
-    requestFingerprint: firstDev.operation.requestFingerprint, evidenceRef: 'fixture:dev-run' });
+  const finishedDevRun = await finishFixtureOperation(f, firstDev.operation,
+    { alreadyDispatched: true });
+  assert.equal(finishedDevRun.status, 'succeeded');
   pipelineState = await f.store.load(f.workItemId);
   assert.deepEqual(currentCycle(pipelineState.records, pipelineState.checkpoint)
     .invalidatedEnvironments, ['DEV', 'STAGING']);
@@ -587,30 +813,43 @@ test('T-17 once-only DEV/STAGING authority is reserved for implicit pipeline sta
     request: { toolName: 'fixture_pipeline', toolArgs: { environment: 'DEV', attempt: 2 }, cwd: f.repo },
     correlationKey: 'implicit-dev-2', intent: 'Attempt to reuse DEV consent' }), { code: 'GATE' });
 
-  await grant(f, 'override', { rules: ['dev-validation', 'dev-completion'],
-    reason: 'Fixture isolates STAGING once-only reservation behavior' });
-  const staging = await grant(f, 'staging-promotion', { ...binding, target: 'staging-target',
-    completedStage: 'DEV', deploymentId: 'fixture-dev-deployment',
+  await grant(f, 'dev-authorization', binding(cycle, {
+    target: 'dev-target', completedStage: 'review',
+  }));
+  const devArtifact = await produceFixtureArtifact(f, cycle, {
+    environment: 'DEV', target: 'dev-target', artifactId: 'implicit-dev-artifact',
+  });
+  const devDeployment = await deployFixtureArtifact(f, cycle, devArtifact, 'dev-target');
+  await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id,
+    testId: 'T-dev', status: 'Passed', expectedMet: true, owner: 'agent',
+    host: 'development-machine', evidenceRef: 'fixture:dev-deployment-test',
+    artifactId: devArtifact.artifactId, deploymentId: devDeployment.id });
+  const staging = await grant(f, 'staging-promotion', { ...cycleBinding, target: 'staging-target',
+    completedStage: 'DEV', deploymentId: devDeployment.id,
     lifetime: { kind: 'once' } });
   const stagingAction = { class: 'pipeline', repositoryId: 'primary', target: 'staging-target',
-    configDigest: 'config-v1', stages: ['STAGING'], monitorCapability: true };
+    configDigest: 'config-v1', stages: ['STAGING'],
+    provider: 'fixture', pipeline: 'fixture-staging-pipeline',
+    localRepositoryPath: repositoryObservation.localRepositoryPath,
+    remoteRepositoryURL: repositoryObservation.remoteRepositoryURL,
+    sourceRevision: cycle.sources[0].revision, monitorCapability: true };
   const firstStaging = await prepareOperation(f.store, { workItemId: f.workItemId,
     sessionId: f.sessionId, action: stagingAction,
     request: { toolName: 'fixture_pipeline', toolArgs: { environment: 'STAGING', attempt: 1 }, cwd: f.repo },
     correlationKey: 'implicit-staging-1', intent: 'Run once-authorized implicit STAGING stage' });
+  assert.equal(firstStaging.operation.action.environment, 'STAGING');
   assert.ok((await f.store.records(f.workItemId)).some(record =>
     record.type === 'reservation' && record.eventId === staging.event.id));
-  await markDispatching(f.store, f.workItemId, firstStaging.operation.id);
-  await recordOperation(f.store, { workItemId: f.workItemId, operationId: firstStaging.operation.id,
-    status: 'succeeded', handle: 'staging-run-1', target: firstStaging.operation.target,
-    requestFingerprint: firstStaging.operation.requestFingerprint, evidenceRef: 'fixture:staging-run' });
+  const finishedStagingRun = await finishFixtureOperation(f, firstStaging.operation);
+  assert.equal(finishedStagingRun.status, 'succeeded');
+  assert.equal(finishedStagingRun.resultProof.dispatchId, firstStaging.operation.id);
   await assert.rejects(prepareOperation(f.store, { workItemId: f.workItemId,
     sessionId: f.sessionId, action: stagingAction,
     request: { toolName: 'fixture_pipeline', toolArgs: { environment: 'STAGING', attempt: 2 }, cwd: f.repo },
     correlationKey: 'implicit-staging-2', intent: 'Attempt to reuse STAGING consent' }), { code: 'GATE' });
   const audit = await formatAudit(f.store, f.workItemId);
   await f.runGit('add', '.sdlc');
-  await f.runGit('commit', '-qm', `Audit implicit environment authority\n\n${audit.trailers}`);
+  await f.runGit('commit', '--allow-empty', '-qm', `Audit implicit environment authority\n\n${audit.trailers}`);
   await recordAudit(f.store, { workItemId: f.workItemId, repositoryId: 'primary',
     commit: await f.runGit('rev-parse', 'HEAD') });
   await fs.writeFile(path.join(f.repo, 'next-candidate.mjs'), 'export const next = true;\n');
@@ -664,6 +903,7 @@ test('T-47 deployment operations require one explicitly resolved environment', a
     }],
   };
   await writeJson(path.join(f.repo, '.sdlc/config.json'), config);
+  const repositoryObservation = await observeCommittedFixture(f, { provider: 'ci-provider' });
   await orient(f);
   const cycle = await localPass(f);
   await completeReview(f, cycle);
@@ -683,6 +923,9 @@ test('T-47 deployment operations require one explicitly resolved environment', a
     stages: ['pre-production'],
     implicitEnvironments: ['pre-production'],
     monitorCapability: true,
+    localRepositoryPath: repositoryObservation.localRepositoryPath,
+    remoteRepositoryURL: repositoryObservation.remoteRepositoryURL,
+    sourceRevision: cycle.sources[0].revision,
     operationId: 'preview-mapped-environment',
   };
   const mappedDecision = evaluatePolicy(state, mapped, {
@@ -748,6 +991,8 @@ test('T-47 deployment operations require one explicitly resolved environment', a
   assert.equal(prepared.operation.action.environment, 'DEV');
   assert.deepEqual(prepared.operation.action.implicitEnvironments,
     ['pre-production']);
+  assert.equal(prepared.operation.intendedOutcome.target.remoteRepositoryURL,
+    repositoryObservation.remoteRepositoryURL);
   assert.ok((await f.store.records(f.workItemId)).some(record =>
     record.type === 'reservation' &&
     record.eventId === authority.event.id &&
@@ -853,6 +1098,10 @@ test('T-47 deployment operations require one explicitly resolved environment', a
     operationId: prepared.operation.id,
     status: 'submitted',
   });
+  const uncertain = (await f.store.records(f.workItemId)).find(record =>
+    record.id === prepared.operation.id);
+  assert.equal(uncertain.status, 'uncertain');
+  assert.equal(uncertain.resultProof, undefined);
   await grant(f, 'override', {
     rules: ['uncertain-retry'],
     reason: 'User accepts duplicate-effect risk for the mapped DEV operation',
@@ -875,4 +1124,6 @@ test('T-47 deployment operations require one explicitly resolved environment', a
     intent: 'Retry the uncertain mapped DEV delivery stage',
   });
   assert.equal(retry.operation.action.environment, 'DEV');
+  assert.equal(retry.operation.intendedOutcome.target.remoteRepositoryURL,
+    repositoryObservation.remoteRepositoryURL);
 });

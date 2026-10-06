@@ -1,4 +1,4 @@
-import { LIMITS, budget, byteSize, digest, object, requireThat } from './core.mjs';
+import { LIMITS, detailCommand, digest, object, requireThat, safeSummary, summaryPage, unsafeSummaryContent } from './core.mjs';
 import { readBytes, readJson, updateJson } from './files.mjs';
 import { bindingKey } from './git.mjs';
 import { artifactDocumentId, artifactLocator, artifactPath, artifactRepositoryId, currentTestSpecification, loadConfig, snapshotLocators, snapshots, synchronizeTestPlan, testSpecificationDigest } from './artifacts.mjs';
@@ -8,6 +8,73 @@ import { verifyEvent } from './decisions.mjs';
 import { effectiveEnvironments } from './policy.mjs';
 import { candidateContentDigest, candidateSnapshot, startCycle } from './validation.mjs';
 import { TERMINAL } from './operations.mjs';
+import { resolveDefaultBranch } from './repository-observations.mjs';
+import { currentDeployment, ensureCurrentRepositoryIdentities,
+  selectedRepositoryIdentity } from './current-evidence.mjs';
+
+async function repositoryEvidence(store, state, limit = 5) {
+  const members = state.metadata.members;
+  const visible = [];
+  await ensureCurrentRepositoryIdentities(state.metadata, state.records,
+    members.slice(0, limit).map(member => member.repositoryId));
+  for (const member of members.slice(0, limit)) {
+    const identity = selectedRepositoryIdentity(state.records,
+      member.repositoryId);
+    if (!identity || identity.evidenceGap) {
+      visible.push({ repositoryId: member.repositoryId,
+        localRepositoryPath: member.root, remoteRepositoryURL: null,
+        evidenceGap: identity?.evidenceGap ??
+          'Current repository selection was not verified',
+        nextReadOnlyStep: 'Select a current Git fetch remote and verify its URL.' });
+      continue;
+    }
+    const remoteRepositoryURL = identity.remoteRepositoryURL;
+    const selected = { selectedRemoteName: identity.selectedRemoteName,
+      fetchURLs: [remoteRepositoryURL] };
+    const observation = state.records.filter(record =>
+      record.type === 'repository-observation' &&
+      record.repositoryId === member.repositoryId &&
+      record.localRepositoryPath === member.root &&
+      record.remoteRepositoryURL === remoteRepositoryURL)
+      .sort((left, right) => left.observedAt.localeCompare(right.observedAt) ||
+        left.id.localeCompare(right.id)).at(-1);
+    const branch = resolveDefaultBranch({
+      ...(identity.configuredDefaultBranchRef ?
+        { configuredDefaultBranchRef: identity.configuredDefaultBranchRef } : {}),
+      selectedFetchRemote: selected,
+      ...(observation ? { repositoryObservation: {
+        localRepositoryPath: observation.localRepositoryPath,
+        remoteRepositoryURL: observation.remoteRepositoryURL,
+        provider: observation.provider, connection: observation.connection,
+        repositoryRef: observation.repositoryRef, revision: observation.revision,
+        ...(observation.defaultBranchRef ? { defaultBranchRef: observation.defaultBranchRef } : {}),
+        observedAt: observation.observedAt, evidenceRef: observation.evidenceRef,
+      }, verification: {
+        canonicalLocalRepositoryPath: member.root,
+        verifiedRemoteRepositoryURL: remoteRepositoryURL,
+        verifiedProvider: observation.provider,
+        verifiedConnection: observation.connection,
+        verifiedRepositoryRef: observation.repositoryRef,
+      } } : {}),
+    });
+    visible.push({ repositoryId: member.repositoryId, localRepositoryPath: member.root,
+      remoteRepositoryURL, selectedRemoteName: selected.selectedRemoteName,
+      observationId: observation?.id ?? null,
+      evidenceRef: observation?.evidenceRef ?? null,
+      defaultBranchRef: branch.resolved ? branch.branchRef : null,
+      ...(observation && branch.resolved ? {} : {
+        evidenceGap: observation ? branch.reason :
+          'No current hosting-service observation matches this checkout and fetch URL',
+        nextReadOnlyStep: branch.reason?.includes('conflict') ?
+          'Compare the configured branch with hosting-service evidence read-only before correcting the configuration.' :
+          'Verify the current hosted repository and its default branch read-only.',
+      }),
+    });
+  }
+  return { visible, count: members.length,
+    ...(members.length > visible.length ?
+      { detailNotice: 'Additional repositories omitted; inspect their work-item bindings.' } : {}) };
+}
 
 export async function orientationToken(store, workItemId, member, session, state) {
   const materialized = state.manifest.artifacts.filter(artifact => !artifact.planned && artifact.digest !== 'pending');
@@ -94,6 +161,9 @@ export function nextAction(state, clock = Date) {
       }
       return `STAGING deployment is ${stagingDeployment.status}; diagnose or retry only with current authorization before test handoff.`;
     }
+    if (!currentDeployment(cycle, records, stagingDeployment, 'STAGING')) {
+      return 'STAGING deployment lacks current execution, artifact or candidate proof; reconcile the exact provider result read-only before test handoff.';
+    }
     if (!stagePassed(cycle, records, 'STAGING', clock)) {
       return 'Run handoff staging to resolve the configured or explicitly overridden STAGING owner/location, then execute remaining deployment-bound tests and await explicit completion confirmation.';
     }
@@ -147,10 +217,37 @@ export function nextAction(state, clock = Date) {
   }
   return 'Prepare the concrete STAGING build/deployment, then dispatch only if current policy authorizes its exact target, repository, paths, item and lifetime scope.';
 }
-export async function status(store, workItemId) {
+function currentHostedPullRequests(records) {
+  const latestByIdentity = new Map();
+  for (const record of records) {
+    if (record.type !== 'pr-observation') continue;
+    const identity = JSON.stringify([
+      record.localRepositoryPath, record.remoteRepositoryURL, record.provider,
+      record.connection, record.repositoryRef, record.pullRequestRef,
+    ]);
+    const previous = latestByIdentity.get(identity);
+    if (!previous || record.sequence > previous.sequence) {
+      latestByIdentity.set(identity, record);
+    }
+  }
+  return [...latestByIdentity.values()].map(record => ({
+    id: record.id, observationId: record.id,
+    localRepositoryPath: record.localRepositoryPath,
+    remoteRepositoryURL: record.remoteRepositoryURL,
+    provider: record.provider, connection: record.connection,
+    repositoryRef: record.repositoryRef, pullRequestRef: record.pullRequestRef,
+    state: record.state, sourceRevision: record.sourceRevision,
+    targetRevision: record.targetRevision, sequence: record.sequence,
+  }));
+}
+export async function status(store, workItemId, pageOptions = undefined) {
   const state = await store.load(workItemId);
   const cycle = currentCycle(state.records, state.checkpoint);
-  return { workItemId, phase: state.checkpoint.phase, lifecycleStatus: state.checkpoint.lifecycleStatus,
+  const repositories = await repositoryEvidence(store, state);
+  const command = detailCommand('status', workItemId, store.home);
+  const full = { workItemId, phase: state.checkpoint.phase, lifecycleStatus: state.checkpoint.lifecycleStatus,
+    repositories: repositories.visible, repositoryCount: repositories.count,
+    ...(repositories.detailNotice ? { repositoryDetailNotice: repositories.detailNotice } : {}),
     revision: state.checkpoint.revision, activeTask: state.checkpoint.activeTask,
     phaseAuthority: phaseAuthority(state.records, state.checkpoint, null, { clock: store.clock }),
     artifacts: state.manifest.artifacts.map(artifact => ({
@@ -169,8 +266,65 @@ export async function status(store, workItemId) {
     conflicts: state.records.filter(r => r.type === 'conflict' && r.status === 'open'),
     operations: state.records.filter(r => r.type === 'operation').map(r => ({ id: r.id, status: r.status, target: r.target, handle: r.handle ?? null })),
     overrides: activeEvents(state.records, { cycleId: cycle?.id, clock: store.clock }).filter(e => e.kind === 'override').map(e => ({ id: e.id, effect: e.effect })),
-    pullRequests: state.records.filter(r => r.type === 'pr').map(r => ({ id: r.id, url: r.url, state: r.state, sourceRevision: r.sourceRevision })),
+    pullRequests: [
+      ...state.records.filter(r => r.type === 'pr').map(r => ({
+        id: r.id, url: r.url, state: r.state, sourceRevision: r.sourceRevision,
+      })),
+      ...currentHostedPullRequests(state.records),
+    ],
     nextAction: nextAction(state, store.clock) };
+  if (!pageOptions && Buffer.byteLength(JSON.stringify(full)) + 1 <= LIMITS.workingSet &&
+      !unsafeSummaryContent(full)) {
+    if (repositories.count > repositories.visible.length) {
+      full.repositoryDetailNotice += ` Use ${command} --offset 0 --limit 100 for every repository identity.`;
+    }
+    if (Buffer.byteLength(JSON.stringify(full)) + 1 <= LIMITS.workingSet) return full;
+  }
+  const allRepositories = repositories.count === repositories.visible.length ? repositories :
+    await repositoryEvidence(store, state, Infinity);
+  const sections = {
+    repositories: allRepositories.visible.map(repository => ({
+      repositoryId: repository.repositoryId, localRepositoryPath: repository.localRepositoryPath,
+      remoteRepositoryURL: repository.remoteRepositoryURL, observationId: repository.observationId ?? null,
+      ...(repository.evidenceGap ? { evidenceGap: unsafeSummaryContent(repository.evidenceGap) ?
+        'Repository evidence gap contains unsafe text; inspect the selected fetch remote read-only.' :
+        repository.evidenceGap,
+      ...(unsafeSummaryContent(repository.evidenceGap) ?
+        { evidenceGapDigest: digest(repository.evidenceGap) } : {}),
+      nextReadOnlyStep: repository.nextReadOnlyStep } : {}),
+    })),
+    artifacts: full.artifacts.map(artifact => ({
+      role: artifact.role, repositoryId: artifact.repositoryId, artifactId: artifact.artifactId,
+      digest: artifact.digest, ...(unsafeSummaryContent(artifactLocator(artifact, state.manifest)) ?
+        { locatorDigest: digest(artifactLocator(artifact, state.manifest)) } :
+        { locator: artifactLocator(artifact, state.manifest) }),
+    })),
+    operations: full.operations.map(operation => ({
+      id: operation.id, status: operation.status,
+      detailCommand: `${detailCommand('op show', workItemId, store.home)} --operation ${operation.id}`,
+    })),
+    tests: full.cycle?.tests.map(test => ({ id: test.id, status: test.status })) ?? [],
+    pendingDecisions: full.pendingDecisions.map(decision => ({ id: decision.id, kind: decision.kind })),
+    conflicts: full.conflicts.map(conflict => ({
+      id: conflict.id, status: conflict.status, reason: conflict.reason,
+      scope: conflict.scope, references: conflict.references,
+    })),
+    overrides: full.overrides.map(override => ({ id: override.id })),
+    pullRequests: full.pullRequests.map(pr => pr.observationId ?
+      pr : { id: pr.id, state: pr.state }),
+  };
+  const items = safeSummary(Object.entries(sections).flatMap(([kind, records]) =>
+    records.map(record => ({ kind, ...record }))));
+  return summaryPage(items, {
+    workItemId, phase: full.phase, lifecycleStatus: full.lifecycleStatus,
+    cycle: full.cycle ? { id: full.cycle.id, candidateDigest: full.cycle.candidateDigest,
+      review: full.cycle.review?.status ?? null } : null,
+    revision: full.revision, inventory: Object.fromEntries(Object.entries(sections)
+      .map(([kind, records]) => [kind, { count: records.length, digest: digest(records) }])),
+    phaseAuthorityDigest: digest(full.phaseAuthority),
+    detailNotice: 'Identity inventory is paginated; absent entries on this page are not absent from the work item.',
+    nextAction: safeSummary(full.nextAction),
+  }, 'items', { ...pageOptions, command });
 }
 export async function resume(store, input) {
   object(input, ['cwd', 'sessionId', 'workItemId'], ['cwd', 'sessionId']);
@@ -232,6 +386,7 @@ export async function resume(store, input) {
     await synchronizeTestPlan(store, workItemId, { allowRecoveryRequired: true });
   }
   state = await store.load(workItemId);
+  const repositories = await repositoryEvidence(store, state);
   let token;
   await updateJson(store.sessionPath(input.sessionId), {}, async session => {
     token = await orientationToken(store, workItemId, member, session, state);
@@ -243,6 +398,8 @@ export async function resume(store, input) {
     handle: r.handle ?? null, action: r.status === 'prepared' ? 'Review and dispatch only if still authorized' : 'Query provider read-only; never assume a missing response means no effect',
   }));
   const summary = { workItemId, phase: state.checkpoint.phase, nextAction: nextAction(state, store.clock),
+    repositories: repositories.visible, repositoryCount: repositories.count,
+    ...(repositories.detailNotice ? { repositoryDetailNotice: repositories.detailNotice } : {}),
     orientationToken: token, artifacts: state.manifest.artifacts.map(artifact => ({
       role: artifact.role,
       repositoryId: artifactRepositoryId(artifact, state.manifest),
@@ -251,24 +408,35 @@ export async function resume(store, input) {
       digest: artifact.digest,
       ...(artifact.planned ? { planned: true } : {}),
     })),
-    pendingOperations: reconciliation.length, detailCommand: `sdlc status --work-item ${workItemId}` };
-  const result = { ...summary, reconciliation: { count: reconciliation.length,
+    pendingOperations: reconciliation.length, detailCommand: detailCommand('status', workItemId, store.home) };
+  const result = safeSummary({ ...summary, reconciliation: { count: reconciliation.length,
     instruction: 'Read operation IDs in status; use op show for target, time and correlation key, then query the provider read-only before any retry.' },
     historyGaps: replay.gaps.length,
-    limits: 'Only recorded authority is recovered. Missing operation evidence does not prove nothing was dispatched.' };
-  if (byteSize(result) > LIMITS.context) {
-    result.artifacts = state.manifest.artifacts.map(artifact => ({
+    limits: 'Only recorded authority is recovered. Missing operation evidence does not prove nothing was dispatched.' });
+  const outputBytes = () => Buffer.byteLength(JSON.stringify(result)) + 1;
+  if (outputBytes() > LIMITS.context) {
+    result.repositories = safeSummary(repositories.visible.map(repository => ({
+      repositoryId: repository.repositoryId,
+      localRepositoryPath: repository.localRepositoryPath,
+      remoteRepositoryURL: repository.remoteRepositoryURL,
+      ...(repository.evidenceGap ? { evidenceGap: repository.evidenceGap } : {}),
+    })));
+    result.artifacts = safeSummary(state.manifest.artifacts.map(artifact => ({
       role: artifact.role,
       repositoryId: artifactRepositoryId(artifact, state.manifest),
       artifactId: artifactDocumentId(artifact),
       state: artifact.digest === 'pending' ? 'pending' : 'materialized',
       ...(artifact.planned ? { planned: true } : {}),
-    }));
+    })));
     if (result.reconciliation.count === 0) delete result.reconciliation;
-    result.limits = 'Recorded authority only; missing evidence is not proof of no dispatch.';
-    result.detailNotice = 'Use the detail command for full digests and operation metadata.';
+    result.limits = 'Recorded authority only; missing evidence does not prove no dispatch.';
+    result.detailNotice = 'Use detailCommand for locators, digests and operations.';
   }
-  if (byteSize(result) > LIMITS.context) {
+  if (outputBytes() > LIMITS.context) {
+    delete result.repositories;
+    result.repositoryDetailNotice = 'Use detailCommand --offset 0 --limit 100 for repository identities.';
+  }
+  if (outputBytes() > LIMITS.context) {
     const inventory = state.manifest.artifacts.map(artifact => ({
       role: artifact.role,
       repositoryId: artifactRepositoryId(artifact, state.manifest),
@@ -286,7 +454,8 @@ export async function resume(store, input) {
     };
     result.detailNotice = 'Artifact inventory is grouped; use the detail command for every identity, locator and digest.';
   }
-  budget(result, LIMITS.context, 'Orientation summary');
+  requireThat(outputBytes() <= LIMITS.context, 'CAPACITY',
+    `Orientation summary exceeds ${LIMITS.context} UTF-8 bytes including newline`);
   await store.completeRecovery(workItemId, recoveryToken);
   return result;
 }

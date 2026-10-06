@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { pathToFileURL } from 'node:url';
 import { canonical, readTarGzip, sha256, tarGzip } from '../packaging/standalone/archive.mjs';
 import { buildPackage } from '../scripts/package.mjs';
 import { renderChecksums } from '../scripts/package-platforms.mjs';
@@ -87,7 +88,7 @@ async function fixture(t, { version = '0.3.0', publishConfig } = {}) {
 import fs from 'node:fs';
 import path from 'node:path';
 if (process.argv[2] === '--version') {
-  console.log(process.argv[1].includes('/npm-tool/node_modules/npm/bin/npm-cli.js') ?
+  console.log(process.argv[1].replaceAll('\\\\', '/').includes('/npm-tool/node_modules/npm/bin/npm-cli.js') ?
     (process.env.TEST_NPM_UPGRADED_VERSION || '11.16.0') : (process.env.TEST_NPM_VERSION || '11.16.0'));
 } else if (process.argv[2] === 'config') {
   console.log(JSON.stringify({ registry: process.env.NPM_CONFIG_REGISTRY,
@@ -130,7 +131,7 @@ if (process.argv[2] === '--version') {
     ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'unit-fixture-not-a-credential', TEST_NPM_ROOT: directory,
     TEST_NODE_VERSION: '24.16.0' };
   const run = (marker, overrides = {}, cwd = directory) =>
-    execute(process.execPath, ['--import', mockModule,
+    execute(process.execPath, ['--import', pathToFileURL(mockModule).href,
       '--input-type=module', '-e', inlineScript(marker)],
     { cwd, env: { ...env, ...overrides }, maxBuffer: 4 * 1024 * 1024 });
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
@@ -240,7 +241,8 @@ test('inline OIDC transport is idempotent, rejects conflicting versions, and nev
     const call = JSON.parse(await fs.readFile(path.join(f.directory, 'npm-call.json'), 'utf8'));
     assert.deepEqual(call.args, ['publish', `./${f.filename}`, '--ignore-scripts', '--access', 'public',
       '--tag', f.handoff.distTag, '--registry', 'https://registry.npmjs.org']);
-    assert.equal(call.config.inheritedRegistry, undefined);
+    assert.equal(call.config.inheritedRegistry,
+      process.platform === 'win32' ? 'https://registry.npmjs.org' : undefined);
     assert.equal(call.config.provenance, undefined);
     assert.equal(call.config.scripts, 'true');
     await assert.rejects(fs.stat(path.join(work, 'payload-executed')), { code: 'ENOENT' });

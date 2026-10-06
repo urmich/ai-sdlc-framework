@@ -48,6 +48,19 @@ CLI can also update with `--source-root /path/to/new/checkout`.
 To let a different source/package entry invoke maintenance from inside Copilot,
 first bind that exact root to the current captured user request:
 
+`repository observe` takes `{workItemId,repositoryId?,selectedRemoteName?,
+localRepositoryPath,remoteRepositoryURL,provider,connection,repositoryRef,
+revision,defaultBranchRef?,verifiedBranch?,observedAt,evidenceRef,adapterObservation?,
+pushURL?}`. It checks the selected Git remote's fetch URL by default. With
+`pushURL:true`, it instead checks Git's actual push URL and requires the
+trusted host to verify that exact destination. This is still a read-only
+observation, not authority to push or create a PR. If fetch and push URLs
+differ, each needs its own verified observation and destination-specific
+publication consent; one URL never implicitly authorizes the other.
+`verifiedBranch:{branchRef,revision}` is optional and must be verified as
+one branch-to-commit fact by the hosting-service adapter; an unrelated
+default-branch name and observed commit do not prove that relationship.
+
 ```json
 {
   "sessionId": "current-session",
@@ -140,6 +153,8 @@ Common options:
 | `--token TOKEN` | Current token for `context ack` |
 | `--operation ID` | Prepared operation for `op mark-dispatching` |
 | `--commit FULL_SHA` | Reachable commit for `audit record` |
+| `--offset N`, `--limit N` | Read-only `status`/`check` inventory pages; offset is 0–1,000,000, limit is 1–1000 (default 100). With `check --finding N`, offset counts Unicode characters in the serialized sanitized finding (up to its length), and limit is 1–65,536 (default 65,536). |
+| `--finding N` | Read-only `check KIND` detail for zero-based finding index N; invalid or out-of-range indices fail explicitly |
 
 In JSON commands, the equivalent context fields are `workItemId`, `sessionId`,
 `repositoryId` and (where relevant) `cwd`. Do not reuse a session identifier
@@ -150,6 +165,17 @@ between independent sessions.
 Create/select the Git repository and a feature branch/worktree using authorized
 Git tools **before** `init`. The CLI uses read-only Git queries and will not
 create a repository, commit, publish, reset, or overwrite existing work.
+
+Provider verification runs in a **trusted host process**, not from JSON or
+repository configuration. A host can import `runCli` from
+`ai-sdlc-framework/cli` and `Store` from `ai-sdlc-framework/store`, then call
+`runCli(argv, io, { createStore: home => new Store(home, verifierFunctions) })`.
+The factory must use the selected Copilot home. Its trusted verifier functions
+can establish repository, PR, check, execution-result, and artifact facts before
+the same offline dispatcher records them. The ordinary `bin/sdlc.mjs` has no
+provider verifiers and rejects such facts rather than trusting unverified
+input. See [Provider adapters](provider-adapters.md) for the in-process
+boundary; the framework dispatcher does not contact a provider.
 
 ```json
 {"workItemId":"wi-example","repositoryId":"primary","sessionId":"session-1","cwd":"/project"}
@@ -236,6 +262,37 @@ create a repository, commit, publish, reset, or overwrite existing work.
 - `status`: current phase/cycle/tests, current candidate Review, grants,
   conflicts, PRs, operations and the exact next decision/action. This is not a
   completion approval.
+- `status --offset 0 --limit 100`: read the identity inventory in pages. Small
+  status responses without page flags retain their usual shape. When the usual
+  response would exceed 256 KiB, status instead returns a bounded page with
+  work-item/cycle identity, per-category counts and SHA-256 digests, `total`,
+  `count`, `offset`, `nextOffset`, `omittedDigest`, and a `detailCommand` for
+  the next page. `--human` uses compact JSON for bounded pages so it keeps the
+  same byte ceiling. Read all pages for repositories, artifacts, operations, tests,
+  conflicts (including safe reason, scope, and references), decisions, overrides,
+  and PR identities. `op show --operation ID`
+  provides recorded operation detail with credential-bearing URLs and
+  sensitive fields projected. An absent identity on a page is not
+  evidence that it does not exist. Pages contain identity and evidence-gap
+  metadata, not raw decisions or provider responses. Unsafe legacy fields
+  also force bounded summaries even when the ordinary response would fit.
+  Generated status, operation and check commands include the selected
+  `--home` when one is available; quoted commands use POSIX/PowerShell
+  single-quote syntax for paths containing spaces.
+- `check KIND --finding N --offset 0 --limit 65536`: retrieve the complete
+  sanitized finding at zero-based index N in bounded, read-only pages. The
+  `detail` field is a consecutive fragment of serialized JSON; concatenate
+  fragments in offset order to reconstruct the sanitized finding. Follow
+  each `detailCommand` until `nextOffset` is null. Every detail page retains
+  the aggregate verdict and exit code, while the digest identifies the
+  original finding. Unsafe strings/credential-bearing URL query values are
+  redacted; safe oversized reasons, missing acceptance conditions, and rules
+  remain retrievable. Neither digests nor these projections establish a
+  security boundary against malicious local files.
+- `resume` retains its stricter 1,536-byte orientation summary limit including
+  its output newline, work item, token and counts. Its `detailCommand` points to `status`;
+  follow status's page commands if the inventory does not fit. Resume does not
+  prove missing operations were never dispatched.
 - `prune`: archive supported terminal operation evidence, superseded
   current-cycle evidence, audited inactive authority and resolved blockers;
   retain uncertain/in-progress operations and active dependencies.
@@ -400,15 +457,28 @@ Review/post-Review tests keep independent evidence and block completion when
 pending or failed.
 
 `evidence artifact` takes `{workItemId,cycleId,artifactId,environment,sourceDigest,
-configDigest,buildRunId,name,artifactType,evidenceRef,status:"succeeded"}`.
+configDigest,buildRunId,name,artifactType,evidenceRef,status:"succeeded"}` plus
+the verified repository, producer, and content identities. Content requires
+either `artifactSha256` or a provider-proven `artifactImmutableVersion` with
+`artifactRetrievalContext`; a mutable locator alone is insufficient.
 Provider metadata must establish that the artifact is actually available and
-matches the selected candidate. Artifact discovery is observation, not consent.
+matches the selected candidate, checkout, hosted repository, full commit,
+configuration, and the complete producing execution (including connection,
+scope, run, and attempt) in its proven result.
+Historical producer records without that attempt proof remain readable but
+cannot make an artifact current. Artifact discovery is observation, not consent.
 `handoff staging` returns actual deployment/candidate/test details plus the
 effective STAGING owner/location and owner-specific execution guidance.
 
 ### Exact external operations
 
 The agent, not the local CLI, invokes authorized providers:
+
+Hosted configuration changes are external actions even though local framework
+configuration edits remain local. Hosted changes need a prepared intended
+target/version and verified causal result; a status label and evidence string
+alone cannot complete them. New hosted execution and environment-test results
+also require complete verified execution identity.
 
 1. `op prepare`: `{workItemId,sessionId,operationId?,action,request,
    correlationKey,intent}`. Request is exact `{toolName,toolArgs,cwd}`.
@@ -420,14 +490,28 @@ The agent, not the local CLI, invokes authorized providers:
    requestFingerprint?,expectedMet?,providerStatus?}`.
 5. `op reconcile` uses the same result shape after a **read-only** provider query.
 
+A trusted host that propagates a unique call ID imports `prepareOperation`
+from `ai-sdlc-framework/operations` and passes its documented adapter
+contract and call ID as the third, in-process argument. The prepared record
+keeps a binding digest; the verified result must prove the same call ID.
+Neither `op prepare` JSON nor a hook payload can supply trusted host-call
+proof. Without it, a provider-proven request link is needed for a conclusive
+external result; a matching status or transcript remains uncertain.
+
 `op show --operation ID` retrieves the exact recovery metadata without dispatch.
 An `uncertain-retry` override may authorize a distinct replacement operation ID
 while the earlier operation remains visibly uncertain. It never erases that risk.
+The unresolved-operation check compares normalized outcomes, including omitted
+and explicit defaults. Older records use only their stored identity facts;
+abbreviated or ambiguous revision identities cannot prove a different effect.
+An explicitly local configuration edit remains distinct from a hosted change.
 
 States: prepared → dispatching → submitted/running → succeeded/failed/cancelled.
 Missing handles, post-dispatch failures and lost responses are uncertain, never
 safe automatic retries. `not-started` needs a prepared operation, evidence and
-`dispatchAttempted:false`. Terminal outcomes need exact target/fingerprint and
+`dispatchAttempted:false`; a provider-backed non-dispatch result also needs
+the exact supported host call ID from preparation, not merely the framework
+operation ID. Terminal outcomes need exact target/fingerprint and
 supporting evidence. Provider failure needs `providerStatus`; a failed tool call
 alone does not prove failure of the remote effect.
 
@@ -462,16 +546,39 @@ An `earlyDraft:true` push/PR action also requires `draft:true`, full immutable
 source/target commit IDs, and the exact document-only paths; preparation and the
 gate re-derive the Git diff from those commits rather than substituting a
 same-named local branch.
+For an early-draft push, the local tracking branch never proves the target
+revision on its own. A current trusted observation of the **push URL** must
+verify the intended `{branchRef,revision}` pair within 60 seconds; otherwise
+use the normal reviewed-candidate path. A cached branch from fetch URL A
+cannot justify a document-only shortcut to URL B even if both remotes now
+appear to have the same URL.
+For an early-draft PR, that proof instead belongs to the exact approved
+repository hosting the PR. A source fork's push URL cannot prove the hosted
+target branch's commit.
 
 ### PR records
+
+Trusted integrations can import `readArchivedPrFacts` from
+`ai-sdlc-framework/pr` with `{workItemId,factsId,sha256?}`. Supplying the
+SHA-256 of the original serialized bytes reads that exact immutable fact
+version. Omitting it reads the first archived compatibility snapshot, never
+the active facts. The result includes exact bytes, parsed facts and
+`historicalOnly:true`; retrieving history grants no current readiness.
 
 - `pr prepare`: provider, connection, repositoryId, sourceRef, targetRef,
   sourceRevision, targetRevision, remoteSourceRevision, draft, and `matches`
   containing actual provider search facts (empty if no appropriate PR exists).
+  The hosted destination can be the selected fetch URL or its independently
+  verified push URL; consent and the prepared action must name that same
+  URL. For a first PR from a fork, both hosted target and source URLs need
+  independent trusted observations, not an already existing PR.
   Reuses one appropriate match, blocks ambiguity, and returns publication intent.
   Publication decisions retain their normal scope/lifetime semantics; once-only
   authority cannot be reused by a second PR operation.
-- `pr create-result`: `{workItemId,pr,intentId,operationId}` after a recorded create.
+- `pr create-result`: `{workItemId,pr,intentId,operationId}` after a recorded
+  create. Equal branch names in a fork require the exact prepared intent,
+  causally proven operation, and separately verified current source/hosted
+  repositories; an unverified legacy PR record cannot supply that proof.
 - `pr adopt`: `{workItemId,pr}` observes an existing PR without fabricating authority.
 - PR object: provider, connection, repositoryId, sourceRef, targetRef,
   sourceRevision, targetRevision, draft, prId, url, state, evidenceRef; optional
@@ -486,8 +593,16 @@ same-named local branch.
   exact immutable association for that check, not merely another check sharing
   the same run. A mergeContext
   supplies sourceRevision, targetRevision, mergeRevision and provider evidenceRef.
-- `pr evaluate`: `{workItemId,environment,prRecordId?,sourceRevision?,
+- `pr evaluate`: `{workItemId,environment,repositoryId?,
+  localRepositoryPath?,remoteRepositoryURL?,prRecordId?,sourceRevision?,
   targetRevision?,policyVersion?,policy?,requireArtifact?,artifactId?}`.
+  When `requireArtifact` is true, the actual local checkout path and hosted URL
+  must match the artifact currently selected for that environment; leaving
+  either out, using a superseded selection, or using an invalidated cycle
+  cannot grant readiness. PROD checks the current STAGING-selected artifact;
+  it does not create a separate PROD selection or grant deployment authority.
+  The CLI rechecks the checkout revision and selected Git fetch URL, reporting
+  stale evidence rather than accepting an artifact from an earlier HEAD or URL.
   Policy contains required/validation/reviews/merge booleans. PROD always requires
   current successful PR validation; DEV/STAGING apply configured prerequisites.
   Provider `reviews` are separate from framework candidate Review via `/review`.
@@ -532,11 +647,18 @@ Capability values must be literal JSON booleans; truthy strings are rejected.
   origin-aware notice. Delivery acknowledgement must include the generation
   that was actually shown, so an older running notice cannot acknowledge an
   unseen terminal notice.
+  If inline acknowledgment would exceed the 4096-byte monitor-record limit,
+  delivery is stored in an immutable receipt bound to that exact run identity
+  and notice generation. Public monitor reads include the verified receipt;
+  raw monitor JSON alone is not the complete delivery view in this case.
 - `interrupt`: `{runKey,reason}`. Disclose stopped host/access; replace claims
   explicitly rather than letting old callbacks mutate the new worker's state.
 - `due`: read-only due-run list, with detectable gaps.
 - `prune`: `{runKey}` archives a terminal monitor only after its completion notice
   was delivered; active or uncertain monitoring is retained.
+  Archival checks durable consumers without requiring unrelated retired
+  worktrees to remain on disk or on their former branches. Relevant unresolved
+  dependencies, missing records and recovery gaps still prevent archival.
 
 See [Provider adapter extension guide](provider-adapters.md) for the normalized
 identity contract, the built-in Azure DevOps observation shape, and requirements
@@ -611,6 +733,19 @@ restores only recorded authority. Same-commit events are valid. Git cannot prove
 when code was written or recover unaudited local records that were lost.
 
 `check artifacts|state|history|evidence|all` emits all findings:
+Ordinary responses retain the complete existing JSON shape and exit code. An
+oversized response, or an explicit `--offset N --limit N` request, emits a page
+with the original aggregate `verdict`, `exitCode`, and `summary`, plus
+`findingsDigest`, `total`, `count`, `offset`, `nextOffset`, `omittedDigest`, and
+`findings`. Follow `detailCommand` until `nextOffset` is null. The page size
+shrinks automatically when necessary to stay within 256 KiB including the
+output newline. An individual finding larger than half that budget carries
+its rule, verdict, byte count, and digest instead of unsafe/unbounded text;
+the notice explicitly identifies this substitution. Digest and page counts
+describe the full finding set, never just the displayed page. A page with no
+visible violation does not change the full aggregate verdict or exit code.
+Credential-like or raw-payload fields in otherwise small legacy findings
+also use the digest-only representation.
 
 | Verdict | Exit contribution |
 | --- | --- |

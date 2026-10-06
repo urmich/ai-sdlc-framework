@@ -362,7 +362,8 @@ test('Intel archive must exist and have actual darwin/x64 identity, even with co
 
 async function qualityFixture(t) {
   const f = await fixture(t);
-  const prefix = path.join(f.directory, 'isolated-brew');
+  const prefix = path.join(path.resolve('.test-data'), `brew-${randomUUID().slice(0, 12)}`);
+  t.after(() => fs.rm(prefix, { recursive: true, force: true }));
   const brew = path.join(prefix, 'bin/brew');
   await fs.mkdir(path.dirname(brew), { recursive: true });
   await fs.writeFile(brew, '#!/bin/sh\nexit 99\n', { mode: 0o755 });

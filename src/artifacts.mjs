@@ -2,11 +2,12 @@ import path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { LIMITS, budget, choice, digest, id, object, requireThat, safeRecord, strings, text } from './core.mjs';
 import { atomicWrite, canonicalPath, exists, listJson, readBytes, readJson, safePath, withLock, writeJson } from './files.mjs';
-import { git } from './git.mjs';
+import { git, validateRemoteName } from './git.mjs';
 import { activeEvents, currentTestEvidence, permissionMatches } from './authority.mjs';
 import { validateManifest } from './schemas.mjs';
 import { HOST_PLATFORMS, SHELL_FAMILIES, sameNativePath } from './platform.mjs';
 import { STAGING_OWNERS } from './staging.mjs';
+import { validateToolAdapter } from './tool-arguments.mjs';
 
 export const ROLES = ['requirements', 'test-plan', 'technical-design'];
 export function artifactRepositoryId(locator, manifest) {
@@ -446,10 +447,11 @@ export async function loadConfig(metadata, repositoryId) {
   const member = metadata.members.find(m => m.repositoryId === repositoryId);
   requireThat(member, 'BINDING', 'Unknown repository configuration');
   const config = await readJson(await safePath(member.root, '.sdlc/config.json'), { optional: true }) ?? {};
-  object(config, ['schemaVersion', 'defaultBranch', 'commands', 'environments',
+  object(config, ['schemaVersion', 'defaultBranch', 'remote', 'commands', 'environments',
     'environmentMappings', 'toolAdapters', 'artifactLocations']);
   safeRecord(config, LIMITS.checkpoint);
   if (config.defaultBranch) requireThat(config.defaultBranch.startsWith('refs/heads/'), 'CONFIG', 'defaultBranch must be a full ref resolved from repository policy');
+  if (config.remote !== undefined) validateRemoteName(config.remote);
   for (const command of config.commands ?? []) {
     object(command, ['command', 'action', 'platforms', 'shell'], ['command', 'action']);
     text(command.command, 'configured command', 4096);
@@ -504,9 +506,11 @@ export async function loadConfig(metadata, repositoryId) {
       'Environment mappings must have unique provider/pipeline/label/target/configuration scope');
     mappingKeys.add(key);
   }
+  requireThat(config.toolAdapters === undefined ||
+    Array.isArray(config.toolAdapters), 'CONFIG',
+  'Tool adapters must be a list of complete argument contracts');
   for (const adapter of config.toolAdapters ?? []) {
-    object(adapter, ['toolName', 'match', 'action'], ['toolName', 'action']);
-    text(adapter.toolName, 'tool name');
+    validateToolAdapter(adapter);
   }
   return config;
 }

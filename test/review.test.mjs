@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
-import { coding, completeReview, fixture, grant, grantPush, orient, pushAction, pushPermission, syntheticPushAction, testDefinitions } from './helpers.mjs';
+import { coding, completeReview, fixture, grant, grantPush, observeFixtureRepository, orient, pushAction, testDefinitions } from './helpers.mjs';
 import { evaluatePolicy } from '../src/policy.mjs';
 import { nextAction, resume } from '../src/recovery.mjs';
 import { candidateStamp, recordTest, startCycle } from '../src/validation.mjs';
@@ -11,6 +11,8 @@ import { markDispatching, prepareOperation } from '../src/operations.mjs';
 import { evaluateGate as gate } from '../src/gate.mjs';
 import { currentCycle, stagePassed } from '../src/authority.mjs';
 import { testSpecificationDigest } from '../src/artifacts.mjs';
+import { deriveIntendedOutcome } from '../src/external-results.mjs';
+import { digest } from '../src/core.mjs';
 
 async function passLocal(f, cycle) {
   for (const testId of ['T-unit', 'T-integration']) {
@@ -19,6 +21,19 @@ async function passLocal(f, cycle) {
       owner: 'agent', host: 'local' });
   }
 }
+
+test('T-35 build artifact labels require a provider and workflow before normalization', () => {
+  const build = { class: 'build', repositoryId: 'primary', environment: 'DEV',
+    target: 'dev-target', configDigest: 'config-v1', stages: ['DEV'],
+    monitorCapability: true, sourceRevision: 'a'.repeat(40),
+    remoteRepositoryURL: 'https://example.invalid/repository.git' };
+  for (const artifactId of ['artifact-a', 'artifact-b']) {
+    assert.throws(() => deriveIntendedOutcome({ ...build, artifactId }), {
+      code: 'INPUT',
+      message: 'Remote execution requires its provider and workflow definition',
+    });
+  }
+});
 
 test('T-35 canonical tests and candidate-bound /review gate publication and DEV', async t => {
   const f = await coding(await fixture(t));
@@ -34,6 +49,10 @@ test('T-35 canonical tests and candidate-bound /review gate publication and DEV'
   await f.runGit('add', 'docs/requirements.md');
   await f.runGit('commit', '-qm', 'Clarify the requirements document');
   const sourceRevision = await f.runGit('rev-parse', 'HEAD');
+  const repositoryObservation = await observeFixtureRepository(f, {
+    revision: targetRevision,
+    verifiedBranch: { branchRef: 'refs/heads/trunk', revision: targetRevision },
+  });
   const configuration = { defaultBranch: 'refs/heads/main', environments: {
     DEV: { target: 'dev-target', configDigest: 'config-v1', allowedStages: ['DEV'] },
   } };
@@ -42,11 +61,17 @@ test('T-35 canonical tests and candidate-bound /review gate publication and DEV'
     tests: [testDefinitions()[0]], configDigest: 'config-v1', cause: 'incomplete selection' }), { code: 'ARTIFACT' });
   let cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'config-v1', cause: 'canonical plan' })).cycle;
   assert.equal(cycle.tests.length, testDefinitions().length);
-  await grant(f, 'pr-publication', { repositoryId: 'primary', sourceRef: 'refs/heads/feature/fixture',
-    targetRef: 'refs/heads/trunk', draft: true });
+  const publication = { repositoryId: 'primary', sourceRef: 'refs/heads/feature/fixture',
+    targetRef: 'refs/heads/trunk', draft: true, target: 'origin',
+    localRepositoryPath: f.repo, remoteRepositoryURL: repositoryObservation.remoteRepositoryURL,
+    sourceRepositoryURL: repositoryObservation.remoteRepositoryURL };
+  await grant(f, 'pr-publication', publication);
   const earlyDraft = { class: 'pr-create', repositoryId: 'primary', sourceRef: 'refs/heads/feature/fixture',
     targetRef: 'refs/heads/trunk', sourceRevision, targetRevision,
-    draft: true, earlyDraft: true, paths: ['docs/requirements.md'] };
+    draft: true, earlyDraft: true, paths: ['docs/requirements.md'],
+    target: publication.target, localRepositoryPath: publication.localRepositoryPath,
+    remoteRepositoryURL: publication.remoteRepositoryURL,
+    sourceRepositoryURL: publication.sourceRepositoryURL };
   assert.equal(evaluatePolicy(await f.store.load(f.workItemId), earlyDraft, { configuration, clock: f.clock }).allowed, true);
   assert.equal(evaluatePolicy(await f.store.load(f.workItemId), { ...earlyDraft, paths: ['source.mjs'] },
     { configuration, clock: f.clock }).allowed, false);
@@ -63,8 +88,7 @@ test('T-35 canonical tests and candidate-bound /review gate publication and DEV'
     evidenceRef: 'copilot-cli:/review:too-early', summary: 'No findings',
     blockingFindings: [], completedStage: 'review' }), { code: 'EVIDENCE' });
   await passLocal(f, cycle);
-  const push = syntheticPushAction();
-  await grant(f, 'permission', pushPermission(push));
+  const { action: push } = await grantPush(f, undefined, { repositoryObservation });
   assert.equal(evaluatePolicy(await f.store.load(f.workItemId), push, { configuration, clock: f.clock }).allowed, false);
   await grant(f, 'review-result', { cycleId: cycle.id, candidateDigest: cycle.candidateDigest,
     testSpecDigest: cycle.testSpecDigest, configDigest: cycle.configDigest,
@@ -90,26 +114,65 @@ test('T-35 canonical tests and candidate-bound /review gate publication and DEV'
     testSpecDigest: cycle.testSpecDigest, configDigest: cycle.configDigest,
     target: 'dev-target', completedStage: 'review' });
   const build = { class: 'build', repositoryId: 'primary', environment: 'DEV',
-    target: 'dev-target', configDigest: 'config-v1', stages: ['DEV'], monitorCapability: true };
+    target: 'dev-target', configDigest: 'config-v1', stages: ['DEV'], monitorCapability: true,
+    provider: repositoryObservation.provider, pipeline: 'fixture-build-a',
+    sourceRevision: cycle.sources.find(source => source.repositoryId === 'primary').revision };
   assert.equal(evaluatePolicy(await f.store.load(f.workItemId), build, { configuration, clock: f.clock }).allowed, true);
   const firstBuild = await prepareOperation(f.store, { workItemId: f.workItemId, sessionId: f.sessionId,
-    action: { ...build, artifactId: 'artifact-a' },
-    request: { toolName: 'fixture_build', toolArgs: { artifact: 'a' }, cwd: f.repo },
-    correlationKey: 'build-a', intent: 'Build the first distinct artifact' });
+    action: build,
+    request: { toolName: 'fixture_build', toolArgs: {
+      provider: build.provider, pipeline: build.pipeline, sourceRevision: build.sourceRevision,
+    }, cwd: f.repo },
+    correlationKey: 'build-a', intent: 'Start the first explicitly requested build workflow' });
+  const secondAction = { ...build, pipeline: 'fixture-build-b' };
   const secondBuild = await prepareOperation(f.store, { workItemId: f.workItemId, sessionId: f.sessionId,
-    action: { ...build, artifactId: 'artifact-b' },
-    request: { toolName: 'fixture_build', toolArgs: { artifact: 'b' }, cwd: f.repo },
-    correlationKey: 'build-b', intent: 'Build the second distinct artifact' });
+    action: secondAction,
+    request: { toolName: 'fixture_build', toolArgs: {
+      provider: secondAction.provider, pipeline: secondAction.pipeline,
+      sourceRevision: secondAction.sourceRevision,
+    }, cwd: f.repo },
+    correlationKey: 'build-b', intent: 'Start a different explicitly requested build workflow' });
+  const firstOutcome = { family: 'execution', actionClass: 'build',
+    target: { repositoryId: 'primary', localRepositoryPath: f.repo,
+      remoteRepositoryURL: repositoryObservation.remoteRepositoryURL,
+      environment: 'DEV', target: 'dev-target',
+      provider: build.provider, pipeline: build.pipeline },
+    requested: { configDigest: 'config-v1', stages: ['DEV'],
+      sourceRevision: build.sourceRevision,
+      candidateDigest: cycle.candidateDigest, testSpecDigest: cycle.testSpecDigest } };
+  const secondOutcome = { ...firstOutcome,
+    target: { ...firstOutcome.target, pipeline: secondAction.pipeline } };
+  assert.deepEqual(firstBuild.operation.intendedOutcome,
+    { ...firstOutcome, digest: digest(firstOutcome) });
+  assert.deepEqual(secondBuild.operation.intendedOutcome,
+    { ...secondOutcome, digest: digest(secondOutcome) });
+  assert.notEqual(firstBuild.operation.intendedOutcome.digest, secondBuild.operation.intendedOutcome.digest);
   assert.notEqual(firstBuild.operation.effectFingerprint, secondBuild.operation.effectFingerprint);
+  assert.notEqual(firstBuild.operation.requestFingerprint, secondBuild.operation.requestFingerprint);
+  for (const { operation } of [firstBuild, secondBuild]) {
+    assert.equal(operation.status, 'prepared');
+    assert.equal(operation.retryOverrideId, undefined);
+    assert.equal(operation.intendedOutcomeGap, undefined);
+  }
+  await assert.rejects(prepareOperation(f.store, {
+    workItemId: f.workItemId, sessionId: f.sessionId, action: build,
+    request: { toolName: 'fixture_build', toolArgs: {
+      provider: build.provider, pipeline: build.pipeline,
+      sourceRevision: build.sourceRevision, attempt: 2,
+    }, cwd: f.repo },
+    correlationKey: 'build-a-duplicate', intent: 'Attempt the same unresolved build workflow again',
+  }), { code: 'UNCERTAIN' });
 });
 
 test('T-35 Review remains current only while local prerequisites and authority remain active', async t => {
   const f = await coding(await fixture(t));
+  await f.runGit('add', '.');
+  await f.runGit('commit', '-qm', 'Commit reviewed fixture candidate');
+  const repositoryObservation = await observeFixtureRepository(f);
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'v1', cause: 'review eligibility' })).cycle;
   await passLocal(f, cycle);
   const review = await completeReview(f, cycle);
-  const push = syntheticPushAction();
-  await grant(f, 'permission', pushPermission(push));
+  const { action: push } = await grantPush(f, undefined, { repositoryObservation });
   assert.equal(evaluatePolicy(await f.store.load(f.workItemId), push, { clock: f.clock }).allowed, true);
   await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id, testId: 'T-unit',
     status: 'Failed', expectedMet: false, evidenceRef: 'fixture:unit-regression', owner: 'agent', host: 'local' });
@@ -151,6 +214,7 @@ test('T-20/T-32 push authorization binds actual remote, refs and destructive opt
   await f.runGit('remote', 'add', 'unrelated-remote', 'https://example.invalid/unrelated.git');
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Commit candidate before push binding tests');
+  await observeFixtureRepository(f, { remoteName: 'approved-origin' });
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'v1', cause: 'push binding' })).cycle;
   await passLocal(f, cycle);
   await completeReview(f, cycle);
@@ -230,6 +294,7 @@ test('T-20/T-32 push commit must contain the complete reviewed candidate', async
   const f = await coding(await fixture(t));
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Commit candidate baseline');
+  await observeFixtureRepository(f);
   await fs.writeFile(path.join(f.repo, 'part-a.mjs'), 'export const a = true;\n');
   await fs.writeFile(path.join(f.repo, 'part-b.mjs'), 'export const b = true;\n');
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId,
@@ -238,6 +303,8 @@ test('T-20/T-32 push commit must contain the complete reviewed candidate', async
   await completeReview(f, cycle);
   await f.runGit('add', 'part-a.mjs');
   await f.runGit('commit', '-qm', 'Commit only part of the reviewed candidate');
+  f.clock.advance(1);
+  await observeFixtureRepository(f);
   await startCycle(f.store, { workItemId: f.workItemId,
     configDigest: 'v1', cause: 'partial content-preserving commit' });
   const partial = await grantPush(f);
@@ -249,6 +316,8 @@ test('T-20/T-32 push commit must contain the complete reviewed candidate', async
     intent: 'Attempt to push an incomplete reviewed candidate' }), { code: 'STALE' });
   await f.runGit('add', 'part-b.mjs');
   await f.runGit('commit', '-qm', 'Commit the complete reviewed candidate');
+  f.clock.advance(1);
+  await observeFixtureRepository(f);
   await startCycle(f.store, { workItemId: f.workItemId,
     configDigest: 'v1', cause: 'complete content-preserving commit' });
   const complete = await grantPush(f);
@@ -261,6 +330,7 @@ test('T-06/T-20 explicit validation overrides permit a normal push without a cyc
   const f = await fixture(t);
   await f.runGit('add', '.sdlc');
   await f.runGit('commit', '-qm', 'Commit explicitly overridden publication candidate');
+  await observeFixtureRepository(f);
   for (const rule of ['local-validation', 'candidate-review', 'review-completion']) {
     await grant(f, 'override', { rules: [rule],
       reason: `User explicitly waives ${rule} for this publication`,
@@ -280,6 +350,7 @@ test('T-28/T-32 symlink changes remain part of the reviewed candidate identity',
   await fs.writeFile(path.join(f.repo, 'entry.mjs'), 'export const value = 1;\n');
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Commit regular-file candidate baseline');
+  await observeFixtureRepository(f);
   await fs.unlink(path.join(f.repo, 'entry.mjs'));
   await fs.symlink('target.mjs', path.join(f.repo, 'entry.mjs'));
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId,

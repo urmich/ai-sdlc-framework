@@ -5,7 +5,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { artifact, fixture, coding, completeReview, grant, grantPush, orient, pushAction, testDefinitions, cli } from './helpers.mjs';
+import { artifact, fixture, coding, completeReview, grant, grantPush, observeFixtureRepository, pushAction,
+  orient, registerFixtureProviderRequest, registerFixtureProviderResult,
+  testDefinitions, cli } from './helpers.mjs';
 import { startCycle, recordArtifact, recordTest } from '../src/validation.mjs';
 import { nextAction, resume } from '../src/recovery.mjs';
 import { readJson, writeJson } from '../src/files.mjs';
@@ -18,7 +20,77 @@ import { handleHook } from '../src/hooks.mjs';
 import { captureReceipt } from '../src/decisions.mjs';
 import { isNonRepositoryFailure } from '../src/store.mjs';
 import { gitEnvironment } from '../src/git.mjs';
+import { digest } from '../src/core.mjs';
 const execute = promisify(execFile);
+
+async function provenArtifact(f, cycle, repositoryObservation, artifactId, executionRef) {
+  const sourceRevision = await f.runGit('rev-parse', 'HEAD');
+  const action = { class: 'build', repositoryId: 'primary', environment: 'DEV',
+    target: 'dev-target', configDigest: cycle.configDigest, stages: ['DEV'],
+    provider: repositoryObservation.provider, pipeline: 'fixture-build', artifactId,
+    sourceRevision, monitorCapability: true };
+  const { operation } = await prepareOperation(f.store, {
+    workItemId: f.workItemId, sessionId: f.sessionId, action,
+    request: { toolName: 'fixture_build', toolArgs: { artifactId }, cwd: f.repo },
+    correlationKey: `build-${artifactId}`, intent: 'Build the current candidate artifact',
+  });
+  registerFixtureProviderRequest(f, operation);
+  await markDispatching(f.store, f.workItemId, operation.id);
+  const buildRunId = `${executionRef}:not-applicable`;
+  const producingExecution = {
+    provider: repositoryObservation.provider, connection: repositoryObservation.connection,
+    scopeRef: repositoryObservation.repositoryRef, definitionRef: action.pipeline,
+    executionRef, attemptKind: 'not-applicable',
+  };
+  const observedResult = registerFixtureProviderResult(f, operation, {
+    providerResultId: buildRunId,
+    result: { executionRef, attemptCapability: 'none',
+      attemptRef: 'not-applicable', executionIdentity: producingExecution, sourceRevision,
+      configDigest: cycle.configDigest, provider: action.provider,
+      pipeline: action.pipeline, environment: 'DEV', target: action.target,
+      candidateDigest: cycle.candidateDigest, testSpecDigest: cycle.testSpecDigest,
+      remoteRepositoryURL: repositoryObservation.remoteRepositoryURL },
+  });
+  const producer = await recordOperation(f.store, { workItemId: f.workItemId, operationId: operation.id,
+    status: 'succeeded', observedResult });
+  assert.deepEqual(producer.resultProof.executionIdentity, producingExecution);
+  const artifactRef = `fixture:${artifactId}`;
+  const artifactSha256 = digest(artifactId);
+  const evidenceRef = `fixture:artifact:${artifactId}`;
+  const verification = { repositoryId: 'primary', localRepositoryPath: f.repo,
+    remoteRepositoryURL: repositoryObservation.remoteRepositoryURL,
+    provider: repositoryObservation.provider, connection: repositoryObservation.connection,
+    repositoryRef: repositoryObservation.repositoryRef, sourceRevision,
+    configDigest: cycle.configDigest, artifactId, artifactRef, artifactSha256,
+    buildRunId, name: artifactId, evidenceRef,
+    attemptCapability: producer.resultProof.attemptCapability,
+    attemptRef: producer.resultProof.attemptRef,
+    producingExecution: producer.resultProof.executionIdentity };
+  f.artifactVerifications.set(operation.id, verification);
+  const { attemptCapability, attemptRef, producingExecution: verifiedExecution,
+    ...artifactFields } = verification;
+  void attemptCapability; void attemptRef; void verifiedExecution;
+  const input = { workItemId: f.workItemId, cycleId: cycle.id, artifactId,
+    environment: 'DEV', sourceDigest: cycle.candidateDigest,
+    configDigest: cycle.configDigest, buildRunId, name: artifactId,
+    artifactType: 'archive', evidenceRef, status: 'succeeded',
+    ...artifactFields, producingOperationId: operation.id,
+    producerObservation: { operationId: operation.id } };
+  return { input, artifactRef, artifactSha256, sourceRevision };
+}
+async function provenDeploymentResult(f, operation, artifact) {
+  const observedResult = registerFixtureProviderResult(f, operation, {
+    providerResultId: `deploy-${operation.correlationKey}`,
+    result: { deploymentRef: `deploy-${operation.correlationKey}`,
+      artifactId: artifact.input.artifactId, artifactRef: artifact.artifactRef,
+      artifactSha256: artifact.artifactSha256, sourceRevision: artifact.sourceRevision,
+      configDigest: artifact.input.configDigest, environment: 'DEV',
+      target: operation.target,
+      remoteRepositoryURL: artifact.input.remoteRepositoryURL },
+  });
+  return { workItemId: f.workItemId, operationId: operation.id,
+    status: 'succeeded', observedResult };
+}
 
 test('T-01/T-19 non-Git workspace can bootstrap and use an explicitly bound child repository', async t => {
   const f = await fixture(t);
@@ -271,6 +343,9 @@ test('T-16 interrupted terminal deployment repairs the active cycle projection',
   await writeJson(path.join(f.repo, '.sdlc/config.json'), { defaultBranch: 'refs/heads/main', environments: {
     DEV: { target: 'dev-target', configDigest: 'v1', allowedStages: ['DEV'] },
   } });
+  await f.runGit('add', '.');
+  await f.runGit('commit', '-qm', 'Commit deployment recovery candidate');
+  const repositoryObservation = await observeFixtureRepository(f);
   const { cycle } = await startCycle(f.store, { workItemId: f.workItemId, tests: testDefinitions(), configDigest: 'v1', cause: 'deployment recovery' });
   for (const testId of ['T-unit', 'T-integration']) {
     await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id, testId,
@@ -280,28 +355,34 @@ test('T-16 interrupted terminal deployment repairs the active cycle projection',
   await grant(f, 'dev-authorization', { cycleId: cycle.id, candidateDigest: cycle.candidateDigest,
     testSpecDigest: cycle.testSpecDigest, configDigest: cycle.configDigest,
     target: 'dev-target', completedStage: 'review' });
-  await recordArtifact(f.store, { workItemId: f.workItemId, cycleId: cycle.id, artifactId: 'artifact-old',
-    environment: 'DEV', sourceDigest: cycle.candidateDigest, configDigest: cycle.configDigest,
-    buildRunId: 'build-old', name: 'package-old', artifactType: 'archive',
-    evidenceRef: 'fixture:artifact-old', status: 'succeeded' });
+  f.artifactVerifications = new Map();
+  f.store.verifyArtifact = ({ operation, observation }) => {
+    assert.equal(observation.operationId, operation.id);
+    const verification = f.artifactVerifications.get(operation.id);
+    assert.ok(verification, 'The fixture must register a producing build first');
+    return verification;
+  };
+  const oldArtifact = await provenArtifact(f, cycle, repositoryObservation,
+    'artifact-old', 'build-old');
+  await recordArtifact(f.store, oldArtifact.input);
+  const artifact = await provenArtifact(f, cycle, repositoryObservation,
+    'artifact-dev', 'build-1');
   f.store.fault = async stage => { if (stage === 'record:artifact') throw new Error('crash after replacement artifact'); };
-  await assert.rejects(recordArtifact(f.store, { workItemId: f.workItemId, cycleId: cycle.id, artifactId: 'artifact-dev',
-    environment: 'DEV', sourceDigest: cycle.candidateDigest, configDigest: cycle.configDigest,
-    buildRunId: 'build-1', name: 'package', artifactType: 'archive',
-    evidenceRef: 'fixture:artifact', status: 'succeeded' }), /crash after replacement artifact/);
+  await assert.rejects(recordArtifact(f.store, artifact.input), /crash after replacement artifact/);
   f.store.fault = async () => {};
   const artifactState = await f.store.load(f.workItemId);
   const artifactCycle = currentCycle(artifactState.records, artifactState.checkpoint);
   assert.equal(artifactState.records.find(record => record.id === artifactCycle.artifacts.DEV).artifactId, 'artifact-dev');
   const action = { class: 'deploy', repositoryId: 'primary', environment: 'DEV', target: 'dev-target',
-    configDigest: 'v1', stages: ['DEV'], artifactId: 'artifact-dev', monitorCapability: true };
+    configDigest: 'v1', stages: ['DEV'], artifactId: 'artifact-dev',
+    artifactRef: artifact.artifactRef, artifactSha256: artifact.artifactSha256,
+    sourceRevision: artifact.sourceRevision, monitorCapability: true };
   const request = { toolName: 'fixture_deploy', toolArgs: { target: 'dev-target' }, cwd: f.repo };
   const { operation } = await prepareOperation(f.store, { workItemId: f.workItemId, sessionId: f.sessionId,
     action, request, correlationKey: 'deploy-recovery', intent: 'Deploy current reviewed candidate' });
+  registerFixtureProviderRequest(f, operation);
   await markDispatching(f.store, f.workItemId, operation.id);
-  const result = { workItemId: f.workItemId, operationId: operation.id, status: 'succeeded',
-    handle: 'deploy-1', target: operation.target, requestFingerprint: operation.requestFingerprint,
-    evidenceRef: 'fixture:deployment' };
+  const result = await provenDeploymentResult(f, operation, artifact);
   f.store.fault = async stage => { if (stage === 'record:operation') throw new Error('crash after terminal operation'); };
   await assert.rejects(recordOperation(f.store, result), /crash after terminal operation/);
   f.store.fault = async () => {};
@@ -312,10 +393,9 @@ test('T-16 interrupted terminal deployment repairs the active cycle projection',
   const replacementRequest = { toolName: 'fixture_deploy', toolArgs: { target: 'dev-target', attempt: 2 }, cwd: f.repo };
   const replacement = await prepareOperation(f.store, { workItemId: f.workItemId, sessionId: f.sessionId,
     action, request: replacementRequest, correlationKey: 'deploy-replacement', intent: 'Replace the current DEV deployment' });
+  registerFixtureProviderRequest(f, replacement.operation);
   await markDispatching(f.store, f.workItemId, replacement.operation.id);
-  const replacementResult = { workItemId: f.workItemId, operationId: replacement.operation.id, status: 'succeeded',
-    handle: 'deploy-2', target: replacement.operation.target, requestFingerprint: replacement.operation.requestFingerprint,
-    evidenceRef: 'fixture:replacement-deployment' };
+  const replacementResult = await provenDeploymentResult(f, replacement.operation, artifact);
   f.store.fault = async stage => { if (stage === 'record:operation') throw new Error('crash after replacement deployment'); };
   await assert.rejects(recordOperation(f.store, replacementResult), /crash after replacement deployment/);
   f.store.fault = async () => {};
@@ -342,6 +422,9 @@ test('T-20 prepared operations cannot mask a differently classified environment'
           outOfScope: true, itemId: 'excluded-item' } },
     ],
   });
+  await f.runGit('add', '.');
+  await f.runGit('commit', '-qm', 'Commit classified deployment candidate');
+  const repositoryObservation = await observeFixtureRepository(f);
   const { cycle } = await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'v1', cause: 'classifier mismatch' });
   for (const testId of ['T-unit', 'T-integration']) {
     await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id, testId,
@@ -351,14 +434,22 @@ test('T-20 prepared operations cannot mask a differently classified environment'
   await grant(f, 'dev-authorization', { cycleId: cycle.id, candidateDigest: cycle.candidateDigest,
     testSpecDigest: cycle.testSpecDigest, configDigest: cycle.configDigest,
     target: 'dev-target', completedStage: 'review' });
-  await recordArtifact(f.store, { workItemId: f.workItemId, cycleId: cycle.id, artifactId: 'artifact-dev',
-    environment: 'DEV', sourceDigest: cycle.candidateDigest, configDigest: cycle.configDigest,
-    buildRunId: 'build-1', name: 'package', artifactType: 'archive',
-    evidenceRef: 'fixture:artifact', status: 'succeeded' });
+  f.artifactVerifications = new Map();
+  f.store.verifyArtifact = ({ operation, observation }) => {
+    assert.equal(observation.operationId, operation.id);
+    const verification = f.artifactVerifications.get(operation.id);
+    assert.ok(verification, 'The fixture must register a producing build first');
+    return verification;
+  };
+  const artifact = await provenArtifact(f, cycle, repositoryObservation,
+    'artifact-dev', 'build-1');
+  await recordArtifact(f.store, artifact.input);
   const request = { toolName: 'fixture_deploy', toolArgs: { slot: 'prod' }, cwd: f.repo };
   const { operation } = await prepareOperation(f.store, { workItemId: f.workItemId, sessionId: f.sessionId,
     action: { class: 'deploy', repositoryId: 'primary', environment: 'DEV', target: 'dev-target',
-      configDigest: 'v1', stages: ['DEV'], artifactId: 'artifact-dev', monitorCapability: true },
+      configDigest: 'v1', stages: ['DEV'], artifactId: 'artifact-dev',
+      artifactRef: artifact.artifactRef, artifactSha256: artifact.artifactSha256,
+      sourceRevision: artifact.sourceRevision, monitorCapability: true },
     request, correlationKey: 'masked-environment', intent: 'Attempt to mask a PROD classification as DEV' });
   await orient(f);
   await markDispatching(f.store, f.workItemId, operation.id);
@@ -368,7 +459,9 @@ test('T-20 prepared operations cannot mask a differently classified environment'
   const scopedRequest = { toolName: 'fixture_scoped_build', toolArgs: { item: 'excluded' }, cwd: f.repo };
   const scoped = await prepareOperation(f.store, { workItemId: f.workItemId, sessionId: f.sessionId,
     action: { class: 'build', repositoryId: 'primary', environment: 'DEV', target: 'dev-target',
-      configDigest: 'v1', stages: ['DEV'], artifactId: 'build-output', monitorCapability: true },
+      configDigest: 'v1', stages: ['DEV'], artifactId: 'build-output',
+      provider: 'fixture', pipeline: 'fixture-build',
+      sourceRevision: artifact.sourceRevision, monitorCapability: true },
     request: scopedRequest, correlationKey: 'masked-scope', intent: 'Attempt to discard independently classified out-of-scope metadata' });
   await markDispatching(f.store, f.workItemId, scoped.operation.id);
   const scopedResult = await gate(f.store, { ...scopedRequest, sessionId: f.sessionId });
@@ -408,19 +501,19 @@ test('T-20 phase overrides never leak outside scope or survive revocation; confi
   await orient(f);
   const result = await gate(f.store, { cwd: f.repo, sessionId: f.sessionId, toolName: 'bash', toolArgs: { command: 'git push --no-follow-tags --no-recurse-submodules origin refs/heads/feature/fixture:refs/heads/feature/fixture' } });
   assert.equal(result.permissionDecision, 'deny');
-  assert.match(result.permissionDecisionReason, /cannot relabel/u);
+  assert.match(result.permissionDecisionReason, /cannot (?:relabel|replace)/u);
   const adapterResult = await gate(f.store, { cwd: f.repo, sessionId: f.sessionId,
     toolName: 'bash', toolArgs: { command: 'git push --no-follow-tags --no-recurse-submodules origin refs/heads/feature/fixture:refs/heads/adapter-branch' } });
   assert.equal(adapterResult.permissionDecision, 'deny');
-  assert.match(adapterResult.permissionDecisionReason, /Tool adapter cannot relabel git push/u);
+  assert.match(adapterResult.permissionDecisionReason, /Tool adapters? cannot (?:relabel|replace)/u);
   const symbolicResult = await gate(f.store, { cwd: f.repo, sessionId: f.sessionId,
     toolName: 'bash', toolArgs: { command: 'git symbolic-ref HEAD refs/heads/unapproved' } });
   assert.equal(symbolicResult.permissionDecision, 'deny');
-  assert.match(symbolicResult.permissionDecisionReason, /Configured command cannot relabel a symbolic-ref write/u);
+  assert.match(symbolicResult.permissionDecisionReason, /cannot (?:relabel a symbolic-ref write|replace independently classified)/u);
   const symbolicDelete = await gate(f.store, { cwd: f.repo, sessionId: f.sessionId,
     toolName: 'bash', toolArgs: { command: 'git symbolic-ref --delete refs/heads/temporary' } });
   assert.equal(symbolicDelete.permissionDecision, 'deny');
-  assert.match(symbolicDelete.permissionDecisionReason, /Configured command cannot relabel a symbolic-ref write/u);
+  assert.match(symbolicDelete.permissionDecisionReason, /cannot (?:relabel a symbolic-ref write|replace independently classified)/u);
 });
 test('T-20/T-23 exact external artifact exemption does not authorize a second file or compound command', async t => {
   const f = await fixture(t);
@@ -519,17 +612,25 @@ test('T-17 once-only grants reserve one operation; revoked grants cannot dispatc
   const f = await coding(await fixture(t));
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Commit candidate before push authorization');
+  const repositoryObservation = await observeFixtureRepository(f);
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'v1', cause: 'once-only push' })).cycle;
   for (const testId of ['T-unit', 'T-integration']) await recordTest(f.store, { workItemId: f.workItemId,
     cycleId: cycle.id, testId, status: 'Passed', expectedMet: true,
     evidenceRef: `fixture:${testId}`, owner: 'agent', host: 'local' });
   await completeReview(f, cycle);
   const firstCommand = 'git push --no-follow-tags --no-recurse-submodules origin refs/heads/feature/fixture:refs/heads/feature/fixture';
-  const authority = await grantPush(f, firstCommand, { effect: { lifetime: { kind: 'once' } } });
+  const authority = await grantPush(f, firstCommand, {
+    repositoryObservation, effect: { lifetime: { kind: 'once' } },
+  });
   const first = await prepareOperation(f.store, { workItemId: f.workItemId, sessionId: f.sessionId, action: authority.action,
     request: { toolName: 'bash', toolArgs: { command: firstCommand }, cwd: f.repo }, correlationKey: 'first', intent: 'First authorized publication' });
-  await assert.rejects(prepareOperation(f.store, { workItemId: f.workItemId, sessionId: f.sessionId, action: { class: 'push', repositoryId: 'primary', target: 'alternate' },
-    request: { toolName: 'bash', toolArgs: { command: 'git push --no-follow-tags --no-recurse-submodules alternate refs/heads/feature/fixture:refs/heads/feature/fixture' }, cwd: f.repo }, correlationKey: 'second', intent: 'Second publication' }), { code: 'GATE' });
+  await f.runGit('remote', 'add', 'alternate', 'https://example.invalid/alternate.git');
+  await observeFixtureRepository(f, { remoteName: 'alternate' });
+  const alternateCommand = 'git push --no-follow-tags --no-recurse-submodules alternate refs/heads/feature/fixture:refs/heads/feature/fixture';
+  await assert.rejects(prepareOperation(f.store, { workItemId: f.workItemId, sessionId: f.sessionId,
+    action: await pushAction(f, alternateCommand),
+    request: { toolName: 'bash', toolArgs: { command: alternateCommand }, cwd: f.repo },
+    correlationKey: 'second', intent: 'Second publication' }), { code: 'GATE' });
   await grant(f, 'revocation', { revokes: [authority.grant.event.id] });
   await assert.rejects(markDispatching(f.store, f.workItemId, first.operation.id), { code: 'GATE' });
 });
@@ -592,13 +693,14 @@ test('T-18/T-20 one exact pre-tool dispatch binds once and a lost post-tool hand
   await writeJson(path.join(f.repo, '.sdlc/config.json'), { defaultBranch: 'refs/heads/main' });
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Commit exact push candidate');
+  const repositoryObservation = await observeFixtureRepository(f);
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'v1', cause: 'exact push' })).cycle;
   for (const testId of ['T-unit', 'T-integration']) await recordTest(f.store, { workItemId: f.workItemId,
     cycleId: cycle.id, testId, status: 'Passed', expectedMet: true,
     evidenceRef: `fixture:${testId}`, owner: 'agent', host: 'local' });
   await completeReview(f, cycle);
   const request = { toolName: 'bash', toolArgs: { command: 'git push --no-follow-tags --no-recurse-submodules origin refs/heads/feature/fixture:refs/heads/feature/fixture' }, cwd: f.repo };
-  const push = await grantPush(f, request.toolArgs.command);
+  const push = await grantPush(f, request.toolArgs.command, { repositoryObservation });
   const { operation } = await prepareOperation(f.store, { workItemId: f.workItemId, sessionId: f.sessionId,
     action: push.action, request, correlationKey: 'exact-dispatch', intent: 'Publish only the authorized branch' });
   await orient(f);
@@ -624,23 +726,33 @@ test('T-18 completed operations retire beyond the unresolved limit and archived 
   const f = await coding(await fixture(t));
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Commit repeated push candidate');
+  const repositoryObservation = await observeFixtureRepository(f);
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'v1', cause: 'repeated pushes' })).cycle;
   for (const testId of ['T-unit', 'T-integration']) await recordTest(f.store, { workItemId: f.workItemId,
     cycleId: cycle.id, testId, status: 'Passed', expectedMet: true,
     evidenceRef: `fixture:${testId}`, owner: 'agent', host: 'local' });
   await completeReview(f, cycle);
-  await grantPush(f);
   let original;
   for (let index = 0; index < 22; index++) {
+    const command = `git push --no-follow-tags --no-recurse-submodules origin refs/heads/feature/fixture:refs/heads/publication-${index}`;
+    const { action } = await grantPush(f, command, { repositoryObservation });
     const input = { workItemId: f.workItemId, sessionId: f.sessionId,
-      action: await pushAction(f),
-      request: { toolName: 'bash', toolArgs: { command: 'git push --no-follow-tags --no-recurse-submodules origin refs/heads/feature/fixture:refs/heads/feature/fixture' }, cwd: f.repo },
+      action,
+      request: { toolName: 'bash', toolArgs: { command }, cwd: f.repo },
       correlationKey: `publication-${index}`, intent: 'Record a distinct authorized publication fixture' };
     original ??= input;
     const { operation } = await prepareOperation(f.store, input);
+    registerFixtureProviderRequest(f, operation);
     await markDispatching(f.store, f.workItemId, operation.id);
+    const observedResult = registerFixtureProviderResult(f, operation, {
+      providerResultId: `origin:${action.targetRef}`,
+      result: { destination: action.target, ref: action.targetRef,
+        revision: action.sourceRevision, published: true,
+        remoteRepositoryURL: repositoryObservation.remoteRepositoryURL,
+        remoteUrlDigest: action.remoteUrlDigest },
+    });
     await recordOperation(f.store, { workItemId: f.workItemId, operationId: operation.id, status: 'succeeded',
-      target: operation.target, requestFingerprint: operation.requestFingerprint, evidenceRef: 'fixture:verified-remote-reference' });
+      observedResult });
     await pruneWork(f.store, f.workItemId);
   }
   assert.equal((await f.store.records(f.workItemId)).filter(record => record.type === 'operation').length, 0);

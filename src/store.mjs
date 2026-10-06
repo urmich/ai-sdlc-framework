@@ -7,6 +7,11 @@ import { bindingKey, identity, sameBinding, validateBinding } from './git.mjs';
 import { validateManifest, validateRecord } from './schemas.mjs';
 import { sameNativePath } from './platform.mjs';
 import { currentTestEvidence, testCheckpoint } from './authority.mjs';
+import { observeRepository, currentRepositoryObservation, verifyAdapterRepository } from './repository-observations.mjs';
+import { bindCurrentRepositoryIdentities, currentArtifact, currentDeployment,
+  hasCurrentExecutionProof, operationMatchesCurrentSource,
+  snapshotCurrentRepositoryIdentities } from './current-evidence.mjs';
+import { operationResultProof, sameResultResource } from './external-results.mjs';
 
 export function emptyCheckpoint(workItemId, repositoryId) {
   return { schemaVersion: 1, revision: 0, workItemId, lifecycleStatus: 'active', phase: 'requirements',
@@ -33,10 +38,105 @@ export function projectCheckpoint(checkpoint, records) {
   next.validationCycleRef = cycles[0]?.id ?? null;
   return next;
 }
+function recoverEnvironmentSelections(cycle, records, changed) {
+  const invalidatedEnvironments = new Set(cycle.invalidatedEnvironments ?? []);
+  for (const environment of ['DEV', 'STAGING']) {
+    if (invalidatedEnvironments.has(environment)) continue;
+    const artifact = records.filter(record => record.type === 'artifact' && record.cycleId === cycle.id &&
+      record.environment === environment && currentArtifact(cycle, records, record))
+      .sort((left, right) => left.sequence - right.sequence).at(-1);
+    if (artifact && cycle.artifacts[environment] !== artifact.id) {
+      cycle.artifacts[environment] = artifact.id;
+      changed.push(cycle.id);
+    } else if (!artifact && cycle.artifacts[environment]) {
+      delete cycle.artifacts[environment];
+      changed.push(cycle.id);
+    }
+  }
+  const deployments = records.filter(record => record.type === 'operation' && record.class === 'deploy' &&
+    record.deploymentSequence && record.cycleId === cycle.id && record.candidateDigest === cycle.candidateDigest);
+  const deploymentHighWater = Math.max(0, cycle.lastDeploymentSequence ?? 0,
+    ...deployments.map(record => record.deploymentSequence ?? 0),
+    ...Object.values(cycle.environmentInvalidationSequences ?? {}));
+  if (cycle.lastDeploymentSequence !== deploymentHighWater) {
+    cycle.lastDeploymentSequence = deploymentHighWater;
+    changed.push(cycle.id);
+  }
+  const latestFor = environment => deployments.filter(record =>
+    record.action.environment === environment &&
+    record.status === 'succeeded' &&
+    record.deploymentSequence >
+      (cycle.environmentInvalidationSequences?.[environment] ?? 0) &&
+    currentDeployment({ ...cycle,
+      deployments: { ...cycle.deployments, [environment]: record.id },
+    }, records, record, environment))
+    .sort((left, right) => left.deploymentSequence - right.deploymentSequence).at(-1);
+  const dev = latestFor('DEV');
+  const staging = latestFor('STAGING');
+  if (dev) {
+    if ((cycle.invalidatedEnvironments ?? []).includes('DEV') ||
+        cycle.environmentInvalidationSequences?.DEV !== undefined) {
+      changed.push(cycle.id);
+    }
+    if (cycle.deployments.DEV !== dev.id) {
+      cycle.deployments.DEV = dev.id;
+      changed.push(cycle.id);
+    }
+    cycle.invalidatedEnvironments =
+      (cycle.invalidatedEnvironments ?? []).filter(environment =>
+        environment !== 'DEV');
+    delete cycle.environmentInvalidationSequences?.DEV;
+    const artifact = records.find(record => record.type === 'artifact' &&
+      record.cycleId === cycle.id &&
+      record.environment === 'DEV' &&
+      record.artifactId === dev.artifactId &&
+      record.status === 'succeeded');
+    if (artifact && !cycle.artifacts.DEV) cycle.artifacts.DEV = artifact.id;
+  } else if (cycle.deployments.DEV) {
+    delete cycle.deployments.DEV;
+    changed.push(cycle.id);
+  }
+  if (staging && (!dev || staging.deploymentSequence > dev.deploymentSequence)) {
+    if ((cycle.invalidatedEnvironments ?? []).includes('STAGING') ||
+        cycle.environmentInvalidationSequences?.STAGING !== undefined) {
+      changed.push(cycle.id);
+    }
+    if (cycle.deployments.STAGING !== staging.id) {
+      cycle.deployments.STAGING = staging.id;
+      changed.push(cycle.id);
+    }
+    cycle.invalidatedEnvironments =
+      (cycle.invalidatedEnvironments ?? []).filter(environment =>
+        environment !== 'STAGING');
+    delete cycle.environmentInvalidationSequences?.STAGING;
+    const artifact = records.find(record => record.type === 'artifact' &&
+      record.cycleId === cycle.id &&
+      record.environment === 'STAGING' &&
+      record.artifactId === staging.artifactId &&
+      record.status === 'succeeded');
+    if (artifact && !cycle.artifacts.STAGING) {
+      cycle.artifacts.STAGING = artifact.id;
+    }
+  } else if (cycle.deployments.STAGING) {
+    delete cycle.deployments.STAGING;
+    changed.push(cycle.id);
+  }
+  const latestDeployment = [dev, staging].filter(Boolean)
+    .sort((left, right) => left.deploymentSequence - right.deploymentSequence).at(-1);
+  if (latestDeployment) {
+    const environment = latestDeployment.action.environment;
+    cycle.step = latestDeployment.status === 'succeeded' ?
+      (environment === 'STAGING' ? 'awaiting-staging-result' : 'dev-running') :
+      `${environment.toLowerCase()}-${latestDeployment.status}`;
+  }
+}
 function recoverResultProjections(records, clock = Date) {
   const changed = [];
+  const existingEvidenceIds = new Set(records.filter(record =>
+    record.type === 'test-evidence').map(record => record.id));
   for (const cycle of records.filter(record => record.type === 'cycle')) {
     if (cycle.assuranceInvalidated) continue;
+    recoverEnvironmentSelections(cycle, records, changed);
     const invalidatedEnvironments = new Set(cycle.invalidatedEnvironments ?? []);
     let nextEvidenceSequence = Math.max(cycle.lastEvidenceSequence ?? 0,
       ...records.filter(record => record.type === 'test-evidence' &&
@@ -46,6 +146,17 @@ function recoverResultProjections(records, clock = Date) {
       record.type === 'operation' && record.class === 'test' &&
       record.cycleId === cycle.id &&
       ['succeeded', 'failed', 'cancelled'].includes(record.status) &&
+      (record.action?.environment === 'local' ||
+        (!invalidatedEnvironments.has(record.action?.environment) &&
+          operationMatchesCurrentSource(cycle, record))) &&
+      (record.action?.environment === 'local' ||
+        (hasCurrentExecutionProof(record, records) &&
+          record.resultProof?.status === record.status &&
+          record.resultProof.dispatchId === record.id &&
+          record.resultProof.intendedOutcomeDigest === record.intendedOutcome?.digest &&
+          currentDeployment(cycle, records, records.find(candidate =>
+            candidate.id === cycle.deployments[record.action?.environment]),
+          record.action?.environment))) &&
       !records.some(evidence => evidence.type === 'test-evidence' &&
         evidence.operationId === record.id &&
         ((record.status === 'succeeded' &&
@@ -103,6 +214,7 @@ function recoverResultProjections(records, clock = Date) {
         record.type === 'operation' && record.class === 'test' &&
         record.cycleId === cycle.id &&
         record.action?.testId === test.id &&
+        operationMatchesCurrentSource(cycle, record) &&
         ['dispatching', 'submitted', 'running', 'uncertain']
           .includes(record.status));
       if (inFlightRetest) {
@@ -148,88 +260,11 @@ function recoverResultProjections(records, clock = Date) {
       if (projectedBefore === resultId) continue;
       if (resultId) cycle.results[test.id] = resultId;
       else delete cycle.results[test.id];
-      cycle.pendingPlanSync = true;
+      if (test.environment === 'local' ||
+          resultId && !existingEvidenceIds.has(resultId)) {
+        cycle.pendingPlanSync = true;
+      }
       changed.push(cycle.id);
-    }
-    for (const environment of ['DEV', 'STAGING']) {
-      if (invalidatedEnvironments.has(environment)) continue;
-      const artifact = records.filter(record => record.type === 'artifact' && record.cycleId === cycle.id &&
-        record.status === 'succeeded' && record.environment === environment)
-        .sort((left, right) => left.sequence - right.sequence).at(-1);
-      if (artifact && cycle.artifacts[environment] !== artifact.id) {
-        cycle.artifacts[environment] = artifact.id;
-        changed.push(cycle.id);
-      }
-    }
-    const deployments = records.filter(record => record.type === 'operation' && record.class === 'deploy' &&
-      record.deploymentSequence && record.cycleId === cycle.id && record.candidateDigest === cycle.candidateDigest);
-    const deploymentHighWater = Math.max(0, cycle.lastDeploymentSequence ?? 0,
-      ...deployments.map(record => record.deploymentSequence ?? 0),
-      ...Object.values(cycle.environmentInvalidationSequences ?? {}));
-    if (cycle.lastDeploymentSequence !== deploymentHighWater) {
-      cycle.lastDeploymentSequence = deploymentHighWater;
-      changed.push(cycle.id);
-    }
-    const latestFor = environment => deployments.filter(record =>
-      record.action.environment === environment &&
-      record.status === 'succeeded' &&
-      record.deploymentSequence >
-        (cycle.environmentInvalidationSequences?.[environment] ?? 0))
-      .sort((left, right) => left.deploymentSequence - right.deploymentSequence).at(-1);
-    const dev = latestFor('DEV');
-    const staging = latestFor('STAGING');
-    if (dev) {
-      if ((cycle.invalidatedEnvironments ?? []).includes('DEV') ||
-          cycle.environmentInvalidationSequences?.DEV !== undefined) {
-        changed.push(cycle.id);
-      }
-      if (cycle.deployments.DEV !== dev.id) {
-        cycle.deployments.DEV = dev.id;
-        changed.push(cycle.id);
-      }
-      cycle.invalidatedEnvironments =
-        (cycle.invalidatedEnvironments ?? []).filter(environment =>
-          environment !== 'DEV');
-      delete cycle.environmentInvalidationSequences?.DEV;
-      const artifact = records.find(record => record.type === 'artifact' &&
-        record.cycleId === cycle.id &&
-        record.environment === 'DEV' &&
-        record.artifactId === dev.artifactId &&
-        record.status === 'succeeded');
-      if (artifact && !cycle.artifacts.DEV) cycle.artifacts.DEV = artifact.id;
-    }
-    if (staging && (!dev || staging.deploymentSequence > dev.deploymentSequence)) {
-      if ((cycle.invalidatedEnvironments ?? []).includes('STAGING') ||
-          cycle.environmentInvalidationSequences?.STAGING !== undefined) {
-        changed.push(cycle.id);
-      }
-      if (cycle.deployments.STAGING !== staging.id) {
-        cycle.deployments.STAGING = staging.id;
-        changed.push(cycle.id);
-      }
-      cycle.invalidatedEnvironments =
-        (cycle.invalidatedEnvironments ?? []).filter(environment =>
-          environment !== 'STAGING');
-      delete cycle.environmentInvalidationSequences?.STAGING;
-      const artifact = records.find(record => record.type === 'artifact' &&
-        record.cycleId === cycle.id &&
-        record.environment === 'STAGING' &&
-        record.artifactId === staging.artifactId &&
-        record.status === 'succeeded');
-      if (artifact && !cycle.artifacts.STAGING) {
-        cycle.artifacts.STAGING = artifact.id;
-      }
-    } else if (cycle.deployments.STAGING) {
-      delete cycle.deployments.STAGING;
-      changed.push(cycle.id);
-    }
-    const latestDeployment = [dev, staging].filter(Boolean)
-      .sort((left, right) => left.deploymentSequence - right.deploymentSequence).at(-1);
-    if (latestDeployment) {
-      const environment = latestDeployment.action.environment;
-      cycle.step = latestDeployment.status === 'succeeded' ?
-        (environment === 'STAGING' ? 'awaiting-staging-result' : 'dev-running') :
-        `${environment.toLowerCase()}-${latestDeployment.status}`;
     }
     const reviews = records.filter(record => record.type === 'event' && record.kind === 'review-result' &&
       record.effect.cycleId === cycle.id && record.effect.candidateDigest === cycle.candidateDigest &&
@@ -292,6 +327,20 @@ export class Store {
     this.runtime = path.join(this.home, 'sdlc', 'runtime');
     this.clock = options.clock ?? Date;
     this.fault = options.fault ?? (async () => {});
+    this.verifyRepository = options.verifyRepository ?? verifyAdapterRepository;
+    for (const name of ['verifyPullRequest', 'verifyCheckResults',
+      'verifyOperationResult', 'verifyArtifact', 'verifyProviderVersion']) {
+      if (options[name] !== undefined) {
+        requireThat(typeof options[name] === 'function', 'ADAPTER',
+          `${name} requires a trusted in-process verifier`);
+        this[name] = options[name];
+      }
+    }
+  }
+  // The verifier must be supplied by a trusted hosting-service adapter, not CLI JSON.
+  async observeRepository(input) { return observeRepository(this, input); }
+  async currentRepositoryObservation(workItemId, repositoryId, selectedRemoteName) {
+    return currentRepositoryObservation(this, workItemId, repositoryId, selectedRemoteName);
   }
   async ready() {
     this.home = await canonicalPath(this.home);
@@ -302,6 +351,22 @@ export class Store {
   }
   workPath(workItemId) { return path.join(this.runtime, 'work-items', id(workItemId)); }
   recordPath(workItemId, recordId) { return path.join(this.workPath(workItemId), 'records', `${id(recordId)}.json`); }
+  async archivedOperationProofs(workItemId, proposedProof) {
+    const directory = path.join(this.workPath(workItemId), 'evidence');
+    const matchingProofs = [];
+    for (const name of await listJson(directory)) {
+      const record = await readJson(await safePath(directory, name), {
+        limit: LIMITS.workingSet,
+      });
+      if (record.type !== 'operation' || !record.resultProof) continue;
+      validateRecord(record);
+      const proof = operationResultProof(record);
+      if (proposedProof.causalKey &&
+          proof.causalKey === proposedProof.causalKey ||
+          sameResultResource(proof, proposedProof)) matchingProofs.push(proof);
+    }
+    return matchingProofs;
+  }
   sessionPath(sessionId) { return path.join(this.runtime, 'sessions', `${id(sessionId)}.json`); }
   recoveryPath(workItemId) { return path.join(this.workPath(workItemId), 'recovery-required.json'); }
   assurancePath(workItemId) { return path.join(this.workPath(workItemId), 'assurance-recheck-required.json'); }
@@ -412,6 +477,16 @@ export class Store {
   async load(workItemId, { recoverCheckpoint = false } = {}) {
     const { manifest, metadata } = await this.manifest(workItemId);
     const records = await this.records(workItemId);
+    const cycles = new Map(records.filter(record => record.type === 'cycle')
+      .map(cycle => [cycle.id, cycle]));
+    const hostedRepositoryIds = new Set(records.filter(record =>
+      record.type === 'artifact' &&
+        !cycles.get(record.cycleId)?.assuranceInvalidated &&
+        currentArtifact(cycles.get(record.cycleId), records, record))
+      .map(record => record.repositoryId));
+    const identities = await snapshotCurrentRepositoryIdentities(metadata,
+      hostedRepositoryIds);
+    bindCurrentRepositoryIdentities(records, identities);
     const checkpointFile = path.join(this.workPath(workItemId), 'checkpoint.json');
     let saved;
     try {
@@ -437,15 +512,16 @@ export class Store {
     const recoveryRequired = !saved || await exists(this.recoveryPath(workItemId));
     return { checkpoint, records, manifest, metadata, checkpointMissing: !saved,
       recoveryRequired, recoveredRecordIds, assurancePending,
-      assuranceMarker };
+      assuranceMarker, repositoryIdentities: identities };
   }
   async transaction(workItemId, action, { expectedRevision, recoverCheckpoint = false,
-    allowRecoveryRequired = false } = {}) {
+    allowRecoveryRequired = false, skipUnchanged = false } = {}) {
     return withLock(path.join(this.workPath(workItemId), '.lock'), () =>
       this._transactionLocked(workItemId, action, {
         expectedRevision,
         recoverCheckpoint,
         allowRecoveryRequired,
+        skipUnchanged,
       }));
   }
   async withWorkItemLocks(workItemIds, action) {
@@ -488,6 +564,7 @@ export class Store {
     expectedRevision,
     recoverCheckpoint = false,
     allowRecoveryRequired = false,
+    skipUnchanged = false,
   } = {}) {
       const state = await this.load(workItemId, { recoverCheckpoint });
       if (state.recoveryRequired) {
@@ -504,7 +581,8 @@ export class Store {
       const tx = {
         ...state,
         get: recordId => pending.get(recordId),
-        all: () => [...pending.values()],
+        all: () => bindCurrentRepositoryIdentities([...pending.values()],
+          state.repositoryIdentities),
         put: record => {
           id(record.id);
           validateRecord(record);
@@ -515,6 +593,7 @@ export class Store {
         remove: recordId => { pending.delete(recordId); writes.delete(recordId); removals.add(recordId); },
       };
       const result = await action(tx);
+      if (skipUnchanged && writes.size === 0 && removals.size === 0) return result;
       const projected = projectCheckpoint(tx.checkpoint, [...pending.values()]);
       projected.revision = state.checkpoint.revision + 1;
       budget(projected, LIMITS.checkpoint, 'Checkpoint');

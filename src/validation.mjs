@@ -8,6 +8,12 @@ import { effectiveStagingExecution, stagingExecutionGuidance,
   stagingExecutionMatches, STAGING_OWNERS } from './staging.mjs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { currentDeployment, hasCurrentExecutionProof, hasImmutableArtifactIdentity, matchesProducerExecution,
+  requireCurrentCandidateRevisions, requireCurrentDeployment,
+  requireCurrentRepositoryEvidence, verifiedDestination } from './current-evidence.mjs';
+import { selectedFetchRemote } from './git.mjs';
+import { validateSelectedFetchRemote } from './repository-observations.mjs';
+import { validateCurrentExecutionIdentity } from './provider-adapters.mjs';
 
 function gitBlobId(bytes, algorithm) {
   return createHash(algorithm).update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
@@ -170,6 +176,17 @@ export async function startCycle(store, input, transactionOptions = {}) {
         previous.testSpecDigest === testSpecDigest &&
         previous.configDigest === input.configDigest) {
       if (digest(previous.sources) !== digest(sources)) {
+        const revisionChanged = previous.sources.some(source =>
+          sources.find(current => current.repositoryId === source.repositoryId)?.revision !== source.revision);
+        if (revisionChanged) {
+          previous.artifacts = {};
+          previous.deployments = {};
+          for (const test of previous.tests.filter(item => item.environment !== 'local')) {
+            delete previous.results[test.id];
+          }
+          previous.step = 'local-testing';
+          previous.pendingPlanSync = true;
+        }
         previous.sources = sources;
         tx.put(previous);
       }
@@ -298,6 +315,13 @@ export async function recordTest(store, input) {
     requireThat(test, 'INPUT', 'Test is not part of the current specification');
     requireThat(!cycle.invalidatedEnvironments?.includes(test.environment), 'STALE',
       `${test.environment} assurance is invalidated; reconcile or complete a new managed deployment`);
+    if (test.environment !== 'local') {
+      await requireCurrentCandidateRevisions(tx.metadata, cycle, tx.all());
+      const deployment = tx.get(cycle.deployments[test.environment]);
+      requireCurrentDeployment(cycle, tx.all(), deployment, test.environment);
+      await requireCurrentRepositoryEvidence(tx.metadata, cycle, tx.all(),
+        deployment.repositoryId, deployment.intendedOutcome?.target);
+    }
     let operation;
     let stagingExecution;
     if (input.operationId) {
@@ -313,6 +337,11 @@ export async function recordTest(store, input) {
         operation.cycleId === cycle.id && operation.candidateDigest === cycle.candidateDigest &&
         ['dispatching', 'running', 'succeeded', 'failed'].includes(operation.status) &&
         operation.action.testId === test.id && operation.action.environment === test.environment &&
+        (test.environment === 'local' ||
+          (hasCurrentExecutionProof(operation, tx.all()) &&
+            operation.resultProof?.status === operation.status &&
+            operation.resultProof.dispatchId === operation.id &&
+            operation.resultProof.intendedOutcomeDigest === operation.intendedOutcome?.digest)) &&
         (test.environment !== 'DEV' || (operation.action.deploymentId === input.deploymentId &&
           operation.action.artifactId === input.artifactId)),
       'OPERATION', 'Test evidence operation does not match the planned test execution');
@@ -334,7 +363,7 @@ export async function recordTest(store, input) {
             operation.action.host === test.location),
         'OPERATION',
         'STAGING test operation owner/location differs from the Test Plan');
-        requireThat(deployment?.status === 'succeeded' &&
+        requireThat(currentDeployment(cycle, tx.all(), deployment, 'STAGING') &&
           deployment.id === input.deploymentId &&
           deployment.artifactId === input.artifactId &&
           deployment.target === operation.target &&
@@ -379,7 +408,7 @@ export async function recordTest(store, input) {
         stagingExecution = effectiveStagingExecution(tx.all(), cycle,
           configuration, { action: testAction, clock: store.clock });
       }
-      requireThat(deployment?.status === 'succeeded' &&
+      requireThat(currentDeployment(cycle, tx.all(), deployment, 'STAGING') &&
         stagingExecutionMatches(stagingExecution,
           testAction.owner, testAction.host) &&
         (stagingExecution.overrideId ||
@@ -409,7 +438,8 @@ export async function recordTest(store, input) {
     }
     if (test.environment === 'DEV') {
       const deployment = tx.get(cycle.deployments.DEV);
-      requireThat(deployment?.status === 'succeeded' && deployment.id === input.deploymentId &&
+      requireThat(currentDeployment(cycle, tx.all(), deployment, 'DEV') &&
+        deployment.id === input.deploymentId &&
         deployment.artifactId === input.artifactId, 'EVIDENCE', 'DEV tests require the current successful deployment and artifact');
       if (operation) requireThat(operation.target === deployment.target &&
         operation.action.target === deployment.target, 'EVIDENCE',
@@ -465,16 +495,110 @@ export async function recordTest(store, input) {
   return result;
 }
 export async function recordArtifact(store, input) {
-  object(input, ['workItemId', 'cycleId', 'artifactId', 'environment', 'sourceDigest', 'configDigest', 'buildRunId', 'name', 'artifactType', 'evidenceRef', 'status'],
-    ['workItemId', 'cycleId', 'artifactId', 'environment', 'sourceDigest', 'configDigest', 'buildRunId', 'name', 'artifactType', 'evidenceRef', 'status']);
+  object(input, ['workItemId', 'cycleId', 'artifactId', 'environment', 'sourceDigest', 'configDigest', 'buildRunId', 'name', 'artifactType', 'evidenceRef', 'status',
+    'repositoryId', 'localRepositoryPath', 'remoteRepositoryURL',
+    'provider', 'connection', 'repositoryRef', 'sourceRevision',
+    'artifactRef', 'artifactSha256', 'artifactImmutableVersion',
+    'artifactRetrievalContext', 'producingOperationId', 'producerObservation'],
+  ['workItemId', 'cycleId', 'artifactId', 'environment', 'sourceDigest',
+    'configDigest', 'buildRunId', 'name', 'artifactType', 'evidenceRef', 'status',
+    'repositoryId', 'localRepositoryPath', 'remoteRepositoryURL',
+    'provider', 'connection', 'repositoryRef', 'sourceRevision',
+    'artifactRef', 'producingOperationId', 'producerObservation']);
+  const hasDigest = /^[a-f0-9]{64}$/u.test(input.artifactSha256 ?? '') &&
+    input.artifactImmutableVersion === undefined &&
+    input.artifactRetrievalContext === undefined;
+  const hasVersion = input.artifactSha256 === undefined &&
+    typeof input.artifactImmutableVersion === 'string' &&
+    input.artifactImmutableVersion.length > 0 &&
+    typeof input.artifactRetrievalContext === 'string' &&
+    input.artifactRetrievalContext.length > 0;
+  requireThat(hasDigest || hasVersion, 'INPUT',
+    'Artifact requires a SHA-256 digest or immutable version with retrieval context');
   return store.transaction(input.workItemId, async tx => {
     const cycle = currentCycle(tx.all(), tx.checkpoint);
     requireThat(cycle?.id === input.cycleId && cycle.candidateDigest === input.sourceDigest && cycle.configDigest === input.configDigest, 'STALE', 'Artifact source/configuration differs from the candidate');
     requireThat(!assurancePending(cycle, tx.all()), 'STALE',
       'Validation assurance was invalidated; start a new cycle before selecting artifacts');
+    const source = cycle.sources.find(item => item.repositoryId === input.repositoryId);
+    const member = tx.metadata.members.find(item => item.repositoryId === input.repositoryId);
+    requireThat(member && source?.revision === input.sourceRevision &&
+      /^[a-f0-9]{40,64}$/u.test(input.sourceRevision) &&
+      (await validateBinding(member)).head === input.sourceRevision &&
+      member.root === input.localRepositoryPath,
+    'STALE', 'Artifact must match the current bound checkout and exact full candidate commit');
+    const config = await loadConfig(tx.metadata, member.repositoryId);
+    const selected = await selectedFetchRemote(member, config.remote);
+    requireThat(input.remoteRepositoryURL === validateSelectedFetchRemote(selected) &&
+      verifiedDestination(tx.all(), input.repositoryId,
+        input.localRepositoryPath, input.remoteRepositoryURL, {
+          provider: input.provider, connection: input.connection,
+          repositoryRef: input.repositoryRef,
+        }),
+    'EVIDENCE', 'Artifact requires the current verified local checkout and hosted repository');
+    const producingOperationId = id(input.producingOperationId, 'producing operation ID');
+    const activeProducer = tx.get(producingOperationId);
+    const producer = activeProducer ?? await readJson(path.join(
+      store.workPath(input.workItemId), 'evidence',
+      `${producingOperationId}.json`), { optional: true, limit: LIMITS.record });
+    requireThat(producer?.type === 'operation' &&
+      producer.id === producingOperationId &&
+      producer.workItemId === input.workItemId &&
+      ['build', 'pipeline'].includes(producer.class) &&
+      producer.status === 'succeeded' &&
+      hasCurrentExecutionProof(producer, tx.all()) &&
+      producer.resultProof?.status === 'succeeded' &&
+      producer.resultProof.dispatchId === producer.id &&
+      producer.resultProof.intendedOutcomeDigest === producer.intendedOutcome?.digest &&
+      producer.resultProof.providerResultId === input.buildRunId &&
+      producer.cycleId === cycle.id &&
+      producer.candidateDigest === cycle.candidateDigest &&
+      producer.repositoryId === input.repositoryId &&
+      producer.action.provider === input.provider &&
+      producer.intendedOutcome.requested.sourceRevision === input.sourceRevision &&
+      producer.intendedOutcome.requested.configDigest === input.configDigest &&
+      producer.intendedOutcome.target.localRepositoryPath === input.localRepositoryPath &&
+      producer.intendedOutcome.target.remoteRepositoryURL === input.remoteRepositoryURL,
+    'EVIDENCE', 'Artifact requires a proven producing execution for this revision and configuration');
+    requireThat(typeof store.verifyArtifact === 'function', 'ADAPTER',
+      'A trusted hosting-service artifact verifier is required');
+    const verified = await store.verifyArtifact({
+      operation: producer, observation: input.producerObservation,
+    });
+    object(verified, ['repositoryId', 'localRepositoryPath', 'remoteRepositoryURL',
+      'provider', 'connection', 'repositoryRef',
+      'sourceRevision', 'configDigest', 'artifactId', 'artifactRef',
+      'artifactSha256', 'artifactImmutableVersion', 'artifactRetrievalContext',
+      'versionVerified', 'buildRunId', 'name', 'evidenceRef',
+      'attemptCapability', 'attemptRef', 'producingExecution'],
+    ['repositoryId', 'localRepositoryPath', 'remoteRepositoryURL',
+      'provider', 'connection', 'repositoryRef',
+      'sourceRevision', 'configDigest', 'artifactId', 'artifactRef',
+      'buildRunId', 'name', 'evidenceRef',
+      'attemptCapability', 'attemptRef', 'producingExecution']);
+    for (const field of ['repositoryId', 'localRepositoryPath',
+      'provider', 'connection', 'repositoryRef',
+      'remoteRepositoryURL', 'sourceRevision', 'configDigest', 'artifactId',
+      'artifactRef', 'artifactSha256', 'artifactImmutableVersion',
+      'artifactRetrievalContext', 'buildRunId', 'name', 'evidenceRef']) {
+      requireThat(verified[field] === input[field], 'EVIDENCE',
+        `Artifact producer did not verify ${field}`);
+    }
+    requireThat(hasImmutableArtifactIdentity({
+      ...verified, artifactVersionVerified: verified.versionVerified,
+    }) && (input.artifactImmutableVersion === undefined ||
+      verified.versionVerified === true), 'EVIDENCE',
+    'Artifact content requires verified immutable identity and retrieval context');
+    requireThat(matchesProducerExecution(producer.resultProof, {
+      ...input, producingExecution: verified.producingExecution,
+      producingAttemptCapability: verified.attemptCapability,
+      producingAttemptRef: verified.attemptRef,
+    }), 'EVIDENCE',
+    'Artifact producing connection, scope, definition, run or attempt differs from its proven execution');
     choice(input.environment, ['DEV', 'STAGING'], 'artifact environment');
     requireThat(input.status === 'succeeded', 'EVIDENCE', 'Only successful, available artifacts may be selected');
     for (const key of ['artifactId', 'buildRunId', 'name', 'artifactType', 'evidenceRef']) text(input[key], key);
+    if (!activeProducer) tx.put(producer);
     const archived = [];
     for (const name of await fs.readdir(path.join(
       store.workPath(input.workItemId), 'evidence')).catch(error => {
@@ -492,7 +616,26 @@ export async function recordArtifact(store, input) {
         item.cycleId === cycle.id &&
         item.environment === input.environment)
       .map(item => item.sequence ?? 0)) + 1;
-    const record = { ...input, type: 'artifact',
+    const { producerObservation, ...artifact } = input;
+    void producerObservation;
+    const currentConfig = await loadConfig(tx.metadata, member.repositoryId);
+    requireThat((await validateBinding(member)).head === input.sourceRevision &&
+      input.localRepositoryPath === member.root &&
+      validateSelectedFetchRemote(await selectedFetchRemote(member, currentConfig.remote)) ===
+        input.remoteRepositoryURL &&
+      verifiedDestination(tx.all(), input.repositoryId, member.root,
+        input.remoteRepositoryURL, {
+          provider: input.provider, connection: input.connection,
+          repositoryRef: input.repositoryRef,
+        }), 'STALE',
+    'Bound checkout commit or hosted fetch URL changed during artifact verification');
+    const record = { ...artifact, type: 'artifact',
+      producingAttemptCapability: verified.attemptCapability,
+      producingAttemptRef: verified.attemptRef,
+      producingExecution: validateCurrentExecutionIdentity(
+        verified.producingExecution, verified.attemptCapability),
+      ...(verified.versionVerified === true ?
+        { artifactVersionVerified: true } : {}),
       id: `artifact-${digest({ cycle: cycle.id, environment: input.environment,
         artifactId: input.artifactId, sequence }).slice(0, 40)}`,
       sequence,
@@ -506,8 +649,11 @@ export async function recordArtifact(store, input) {
 export async function stagingHandoff(store, workItemId) {
   const state = await store.load(workItemId);
   const cycle = currentCycle(state.records, state.checkpoint);
+  await requireCurrentCandidateRevisions(state.metadata, cycle, state.records);
   const deployment = state.records.find(r => r.id === cycle?.deployments.STAGING);
-  requireThat(deployment?.status === 'succeeded', 'EVIDENCE', 'No current successful STAGING deployment is available');
+  requireCurrentDeployment(cycle, state.records, deployment, 'STAGING');
+  await requireCurrentRepositoryEvidence(state.metadata, cycle, state.records,
+    deployment.repositoryId, deployment.intendedOutcome?.target);
   const configuration = await loadConfig(state.metadata,
     deployment.repositoryId);
   const action = {

@@ -4,7 +4,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
-import { coding, completeReview, fixture, grant, grantPush } from './helpers.mjs';
+import { coding, completeReview, fixture, grant, grantPush, observeFixtureRepository } from './helpers.mjs';
 import { currentCycle, stagePassed } from '../src/authority.mjs';
 import { fingerprint } from '../src/core.mjs';
 import { captureReceipt } from '../src/decisions.mjs';
@@ -191,6 +191,9 @@ test('T-41 unmanaged tool execution invalidates stale candidate evidence when fi
 
 test('T-41 failed unmanaged candidate recheck clears current assurance', async t => {
   const f = await coding(await fixture(t));
+  await f.runGit('add', '.sdlc');
+  await f.runGit('commit', '-qm', 'Fixture source before invalid test specification');
+  const repositoryObservation = await observeFixtureRepository(f);
   const { cycle } = await startCycle(f.store, {
     workItemId: f.workItemId,
     configDigest: 'advisory-v1',
@@ -249,6 +252,17 @@ test('T-41 failed unmanaged candidate recheck clears current assurance', async t
     artifactType: 'archive',
     evidenceRef: 'fixture:late-artifact',
     status: 'succeeded',
+    repositoryId: 'primary',
+    localRepositoryPath: repositoryObservation.localRepositoryPath,
+    remoteRepositoryURL: repositoryObservation.remoteRepositoryURL,
+    provider: repositoryObservation.provider,
+    connection: repositoryObservation.connection,
+    repositoryRef: repositoryObservation.repositoryRef,
+    sourceRevision: cycle.sources[0].revision,
+    artifactRef: 'late-hosted-artifact',
+    artifactSha256: 'a'.repeat(64),
+    producingOperationId: 'late-build-operation',
+    producerObservation: { fixture: 'late-build' },
   }), { code: 'STALE' });
 });
 
@@ -343,6 +357,7 @@ test('T-44 an unrecorded stage advisory never binds managed operation credit', a
     '{"defaultBranch":"refs/heads/main"}\n');
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Create stage advisory publication candidate');
+  const repositoryObservation = await observeFixtureRepository(f);
   const { cycle } = await startCycle(f.store, {
     workItemId: f.workItemId,
     configDigest: 'advisory-push',
@@ -363,7 +378,7 @@ test('T-44 an unrecorded stage advisory never binds managed operation credit', a
   await completeReview(f, cycle);
   const command = 'git push --no-follow-tags --no-recurse-submodules origin ' +
     'refs/heads/feature/fixture:refs/heads/feature/fixture';
-  const push = await grantPush(f, command);
+  const push = await grantPush(f, command, { repositoryObservation });
   const request = { toolName: 'bash', toolArgs: { command }, cwd: f.repo };
   const { operation } = await prepareOperation(f.store, {
     workItemId: f.workItemId,
@@ -373,6 +388,7 @@ test('T-44 an unrecorded stage advisory never binds managed operation credit', a
     correlationKey: 'stage-advisory-dispatch',
     intent: 'Publish after explicit orientation-stage override',
   });
+  assert.ok(operation.intendedOutcome, 'The fixture must resolve the current hosted destination before dispatch');
   await markDispatching(f.store, f.workItemId, operation.id);
   const result = await gate(f.store, { ...request, sessionId: f.sessionId });
   assert.equal(result.permissionDecision, undefined);
@@ -638,11 +654,15 @@ test('T-41 unmanaged deployment-capable actions invalidate environment assurance
   assert.equal(invalidated.step, 'environment-unmanaged-uncertain');
   assert.deepEqual(invalidated.invalidatedEnvironments, ['DEV', 'STAGING']);
   assert.equal(invalidated.environmentInvalidationSequences.DEV, 1);
-  await recordOperation(f.store, {
+  const oldDeploymentBytes = await fs.readFile(
+    f.store.recordPath(f.workItemId, 'deployment-old'));
+  await assert.rejects(recordOperation(f.store, {
     workItemId: f.workItemId,
     operationId: 'deployment-old',
     status: 'succeeded',
-  });
+  }), { code: 'ID_CONFLICT' });
+  assert.deepEqual(await fs.readFile(
+    f.store.recordPath(f.workItemId, 'deployment-old')), oldDeploymentBytes);
   const reloaded = await f.store.load(f.workItemId);
   const recovered = currentCycle(reloaded.records, reloaded.checkpoint);
   assert.equal(recovered.artifacts.DEV, undefined);
@@ -711,8 +731,12 @@ test('T-41 unmanaged deployment-capable actions invalidate environment assurance
   }, { reconcile: true });
   const reconciled = await f.store.load(f.workItemId);
   const reconciledCycle = currentCycle(reconciled.records, reconciled.checkpoint);
-  assert.equal(reconciledCycle.deployments.DEV, 'deployment-new');
-  assert.ok(!reconciledCycle.invalidatedEnvironments.includes('DEV'));
+  assert.equal(reconciled.records.find(record =>
+    record.id === 'deployment-new').status, 'uncertain');
+  assert.equal(reconciled.records.find(record =>
+    record.id === 'deployment-new').resultGap, 'current-result-observation-required');
+  assert.equal(reconciledCycle.deployments.DEV, undefined);
+  assert.ok(reconciledCycle.invalidatedEnvironments.includes('DEV'));
   assert.ok(reconciledCycle.invalidatedEnvironments.includes('STAGING'));
   await handleHook(f.store, 'postToolUse', {
     sessionId: f.sessionId,
