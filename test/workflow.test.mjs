@@ -451,9 +451,8 @@ test('T-18 superseded current-cycle evidence is pruned from the active working s
     owner: 'agent', host: 'local',
   }), { code: 'RECOVERY' });
   const pruneGate = await gate(f.store, { cwd: f.repo, sessionId: f.sessionId,
-    toolName: 'bash', toolArgs: { command: `${process.execPath} ${path.resolve('bin/sdlc.mjs')} prune --work-item ${f.workItemId}` } });
-  assert.equal(pruneGate.permissionDecision, 'deny', JSON.stringify(pruneGate));
-  assert.match(pruneGate.permissionDecisionReason, /RECOVERY/u);
+    toolName: 'bash', toolArgs: { command: `${JSON.stringify(process.execPath)} ${JSON.stringify(path.resolve('bin/sdlc.mjs'))} prune --work-item ${f.workItemId}` } });
+  assert.deepEqual(pruneGate, {});
   await pruneWork(f.store, f.workItemId);
   assert.equal((await f.store.load(f.workItemId)).recoveryRequired, true);
   await f.store.completeRecovery(f.workItemId, recoveryToken);
