@@ -129,8 +129,17 @@ function confirmedDead(owner) {
   try { process.kill(owner.pid, 0); return false; }
   catch (error) { if (error.code === 'ESRCH') return true; if (error.code === 'EPERM') return false; throw error; }
 }
+function competingWindowsLockRead(error) {
+  return process.platform === 'win32' &&
+    ['EACCES', 'EBADF', 'EBUSY', 'EPERM', 'PATH'].includes(error.code);
+}
 async function recoverDeadLockGuarded(file) {
-  const current = await readJson(file, { optional: true, limit: 2048 });
+  let current;
+  try { current = await readJson(file, { optional: true, limit: 2048 }); }
+  catch (error) {
+    if (!competingWindowsLockRead(error)) throw error;
+    return false;
+  }
   if (!confirmedDead(current)) return false;
   const recovery = `${file}.${newId('recovery')}.stale`;
   try {
@@ -156,6 +165,8 @@ async function withRecoveryGuard(file, action) {
           limit: 2048,
         }).catch(readError => {
           if (['ENOENT', 'JSON'].includes(readError.code)) return null;
+          // A Windows reader can race with removal of the guard directory.
+          if (competingWindowsLockRead(readError)) return null;
           throw readError;
         });
         if (!confirmedDead(owner)) return { acquired: false };
@@ -177,7 +188,7 @@ async function withRecoveryGuard(file, action) {
           await fs.unlink(path.join(guard, 'reclaim'));
           return { acquired: false };
         }
-        await fs.rm(guard, { recursive: true });
+        await fs.rm(guard, { recursive: true, maxRetries: 5, retryDelay: 10 });
         return withRecoveryGuard(file, action);
       }
       throw error;
@@ -191,7 +202,7 @@ async function withRecoveryGuard(file, action) {
       });
       return { acquired: true, value: await action() };
     } finally {
-      await fs.rm(guard, { recursive: true });
+      await fs.rm(guard, { recursive: true, maxRetries: 5, retryDelay: 10 });
     }
 }
 export async function recoverDeadLock(file) {

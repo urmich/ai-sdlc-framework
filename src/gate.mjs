@@ -5,12 +5,15 @@ import { canonicalPath, readJson, updateJson } from './files.mjs';
 import { bindingKey, identity, publicationPaths, verifyPublicationBase } from './git.mjs';
 import { artifactPath, artifactRepositoryId, loadConfig } from './artifacts.mjs';
 import { activeEvents, applicableOverride, currentCycle } from './authority.mjs';
-import { evaluatePolicy, validateAction } from './policy.mjs';
+import { evaluatePolicy, isExternalAction, validateAction } from './policy.mjs';
 import { assertOriented } from './recovery.mjs';
-import { reserveOnceAuthorities } from './operations.mjs';
+import { reserveOnceAuthorities, verifyPreparedIntendedOutcome } from './operations.mjs';
 import { candidateStamp } from './validation.mjs';
 import { git } from './git.mjs';
 import { isNonRepositoryWorkspace } from './store.mjs';
+import { classifyToolArguments, MAPPABLE_FIELDS } from './tool-arguments.mjs';
+import { matchHostInvocation } from './host-invocations.mjs';
+import { resolveRepositoryDefaultBranch } from './repository-observations.mjs';
 import {
   SHELL_FAMILIES,
   commandWords,
@@ -48,12 +51,16 @@ const SOFT_STAGE_RULES = new Set([
   'staging-completion',
 ]);
 const PASS_THROUGH = Object.freeze({});
-const CLASSIFIED_SECURITY_FIELDS = ['class', 'repositoryId', 'environment', 'target', 'configDigest', 'stages',
+const CLASSIFIED_SECURITY_FIELDS = [...new Set(['class', 'repositoryId', 'environment', 'target', 'configDigest', 'stages',
   'sourceRef', 'targetRef', 'draft', 'sourceRevision', 'targetRevision', 'policyVersion', 'prRecordId',
   'artifactId', 'testId', 'owner', 'host', 'implicitEnvironments', 'externalPermission',
   'monitorCapability', 'preservesChanges', 'earlyDraft', 'outOfScope', 'itemId',
   'baseRef', 'remoteUrlDigest', 'force', 'delete', 'deploymentId', 'provider',
-  'pipeline'];
+  'pipeline', 'localRepositoryPath', 'remoteRepositoryURL',
+  'sourceRepositoryURL', 'artifactRef', 'artifactSha256',
+  'artifactImmutableVersion', 'artifactRetrievalContext', 'artifactName',
+  'producingExecutionRef', 'producingAttemptRef',
+  'contentDigest', 'recipient', 'toolOptions', ...MAPPABLE_FIELDS])];
 export function normalizeHook(payload) {
   requireThat(payload && typeof payload === 'object', 'HOOK', 'Expected a hook input object');
   const rawName = payload.toolName ?? payload.tool_name ?? payload.ToolName;
@@ -234,12 +241,15 @@ async function classifyPush(member, args) {
   requireThat(/^[A-Za-z0-9._-]+$/u.test(remote), 'HOOK', 'Managed git push requires a configured remote name');
   const pushUrls = (await git(member.root, ['remote', 'get-url', '--push', '--all', remote])).split('\n').filter(Boolean);
   requireThat(pushUrls.length === 1, 'HOOK', 'Managed git push supports exactly one resolved push URL');
+  const localRepositoryPath = member.root;
+  const remoteRepositoryURL = pushUrls[0];
   const remoteUrlDigest = digest(pushUrls);
   let refspec = rawRefspec;
   if (refspec.startsWith('+')) { force = true; refspec = refspec.slice(1); }
   if (deleteRef) {
     requireThat(!refspec.includes(':'), 'HOOK', 'git push --delete accepts one destination branch');
-    return { class: 'push', target: remote, remoteUrlDigest, targetRef: branchRef(refspec, 'destination'),
+    return { class: 'push', target: remote, localRepositoryPath,
+      remoteRepositoryURL, remoteUrlDigest, targetRef: branchRef(refspec, 'destination'),
       force, delete: true };
   }
   const pieces = refspec.split(':');
@@ -249,7 +259,8 @@ async function classifyPush(member, args) {
   requireThat(sourceRef === member.branch, 'BINDING', 'Managed push source must be the bound worktree branch');
   const targetRef = branchRef(pieces[1], 'destination');
   const sourceRevision = await git(member.root, ['rev-parse', '--verify', '-q', `${sourceRef}^{commit}`], { optional: true });
-  return { class: 'push', target: remote, remoteUrlDigest, sourceRef, targetRef,
+  return { class: 'push', target: remote, localRepositoryPath,
+    remoteRepositoryURL, remoteUrlDigest, sourceRef, targetRef,
     ...(sourceRevision ? { sourceRevision } : {}), force, delete: false };
 }
 function applyConfiguredRestrictions(actions, configured) {
@@ -285,6 +296,19 @@ async function stagedActions(store, state, member) {
 }
 export async function classifyTool(store, hook, state, member, config) {
   const base = { repositoryId: member?.repositoryId };
+  const adapters = config?.toolAdapters ?? [];
+  const matchingAdapters = adapters.filter(adapter => adapter.toolName === hook.toolName);
+  const adapterResult = classifyToolArguments(hook.toolName, hook.toolArgs,
+    adapters, { repositoryId: member?.repositoryId });
+  requireThat(adapterResult.status !== 'conflict', 'CONFLICT',
+    `Configured tool adapters conflict: ${adapterResult.reason} (${adapterResult.matches?.map(match =>
+      `${match.actionDigest}:${match.meaningDigest}`).join(', ')})${adapterResult.protectedActionDigest ?
+      `; protected action ${adapterResult.protectedActionDigest}` : ''}`);
+  if (matchingAdapters.length && (READ_TOOLS.has(hook.toolName) ||
+      EDIT_TOOLS.has(hook.toolName) || SHELL_TOOLS.has(hook.toolName))) {
+    requireThat(false, 'CONFLICT',
+      'Tool adapters cannot replace independently classified read, edit or shell actions');
+  }
   if (READ_TOOLS.has(hook.toolName)) return [{ class: 'read' }];
   if (EDIT_TOOLS.has(hook.toolName)) {
     const paths = affectedPaths(hook.toolName, hook.toolArgs);
@@ -318,13 +342,12 @@ export async function classifyTool(store, hook, state, member, config) {
     }
     return actions;
   }
-  const adapter = config?.toolAdapters?.find(a => a.toolName === hook.toolName &&
-    Object.entries(a.match ?? {}).every(([key, value]) =>
-      hook.toolArgs[key] !== undefined &&
-      digest(hook.toolArgs[key]) === digest(value)));
-  if (!SHELL_TOOLS.has(hook.toolName) && adapter) {
-    validateAction(adapter.action);
-    return [{ ...adapter.action, ...base }];
+  if (!SHELL_TOOLS.has(hook.toolName)) {
+    if (adapterResult.status === 'matched') {
+      validateAction(adapterResult.action);
+      return [adapterResult.action];
+    }
+    return [{ class: 'unknown', ...base }];
   }
   if (SHELL_TOOLS.has(hook.toolName)) {
     const command = hook.toolArgs?.command;
@@ -349,16 +372,13 @@ export async function classifyTool(store, hook, state, member, config) {
     }
     if (gitOperation === 'push') {
       requireThat(!configured || configured.action.class === 'push', 'CONFLICT', 'Configured command cannot relabel git push as a different operation class');
-      requireThat(!adapter || adapter.action.class === 'push', 'CONFLICT', 'Tool adapter cannot relabel git push as a different operation class');
-      return [{ ...mergeClassifications(configured?.action, adapter?.action, await classifyPush(member, invocation.args)), ...base }];
+      return [{ ...mergeClassifications(configured?.action, await classifyPush(member, invocation.args)), ...base }];
     }
     if (['reset', 'clean', 'checkout', 'restore', 'rebase'].includes(gitOperation)) {
       requireThat(!configured || configured.action.class === 'destructive', 'CONFLICT', 'Configured command cannot hide destructive Git behavior');
-      requireThat(!adapter || adapter.action.class === 'destructive', 'CONFLICT', 'Tool adapter cannot hide destructive Git behavior');
-      return [{ ...mergeClassifications(configured?.action, adapter?.action, { class: 'destructive' }), ...base }];
+      return [{ ...mergeClassifications(configured?.action, { class: 'destructive' }), ...base }];
     }
     if (gitOperation === 'add') {
-      requireThat(!adapter, 'CONFLICT', 'Tool adapters cannot replace built-in git add path classification');
       const separator = invocation.args.indexOf('--');
       const optionArea = separator >= 0 ?
         invocation.args.slice(0, separator) : invocation.args;
@@ -405,13 +425,11 @@ export async function classifyTool(store, hook, state, member, config) {
       return applyConfiguredRestrictions(actions, configured);
     }
     if (gitOperation === 'commit') {
-      requireThat(!adapter, 'CONFLICT', 'Tool adapters cannot replace built-in git commit path classification');
       requireIndexOnlyCommit(invocation.args);
       return applyConfiguredRestrictions(await stagedActions(store, state, member), configured);
     }
     if (['switch', 'worktree', 'init', 'clone'].includes(gitOperation)) {
-      requireThat(!adapter || adapter.action.class === 'destructive', 'CONFLICT', 'Tool adapter cannot hide repository-changing Git behavior');
-      return [{ ...mergeClassifications(adapter?.action, { class: 'destructive' }), ...base }];
+      return [{ class: 'destructive', ...base }];
     }
     if (path.basename(words[0]) === 'node' || path.resolve(words[0]) === process.execPath) {
       if (words[1] && sameNativePath(await canonicalPath(path.resolve(hook.cwd, words[1])),
@@ -419,7 +437,6 @@ export async function classifyTool(store, hook, state, member, config) {
         if (FRAMEWORK_COMMANDS.has(words[2]) ||
             (words[2] === 'receipt' && words[3] === 'latest')) {
           requireThat(!configured || configured.action.class === 'bookkeeping', 'CONFLICT', 'Configured command cannot relabel framework bookkeeping');
-          requireThat(!adapter || adapter.action.class === 'bookkeeping', 'CONFLICT', 'Tool adapter cannot relabel framework bookkeeping');
           return [{ class: 'bookkeeping' }];
         }
       }
@@ -430,15 +447,13 @@ export async function classifyTool(store, hook, state, member, config) {
       if (operation === 'symbolic-ref') {
         if (!symbolicRefReadOnly(args)) {
           requireThat(!configured || configured.action.class === 'destructive', 'CONFLICT', 'Configured command cannot relabel a symbolic-ref write');
-          requireThat(!adapter || adapter.action.class === 'destructive', 'CONFLICT', 'Tool adapter cannot relabel a symbolic-ref write');
-          return [{ ...mergeClassifications(configured?.action, adapter?.action, { class: 'destructive' }), ...base }];
+          return [{ ...mergeClassifications(configured?.action, { class: 'destructive' }), ...base }];
         }
       }
       if (['status', 'log', 'show', 'diff', 'ls-files', 'rev-parse', 'symbolic-ref'].includes(operation)) {
         const risky = args.some(arg => /^(?:--output|--ext-diff|--textconv|--no-index|--exec-path|--git-dir|--work-tree|--delete|-d)$/u.test(arg) || arg.startsWith('--output='));
         if (!risky) {
           requireThat(!configured || configured.action.class === 'read', 'CONFLICT', 'Configured command cannot relabel read-only Git discovery');
-          requireThat(!adapter || adapter.action.class === 'read', 'CONFLICT', 'Tool adapter cannot relabel read-only Git discovery');
           return [{ class: 'read' }];
         }
       }
@@ -447,14 +462,11 @@ export async function classifyTool(store, hook, state, member, config) {
     }
     if (unboundReadOnlyShell(words)) {
       requireThat(!configured || configured.action.class === 'read', 'CONFLICT', 'Configured command cannot relabel read-only shell discovery');
-      requireThat(!adapter || adapter.action.class === 'read', 'CONFLICT', 'Tool adapter cannot relabel read-only shell discovery');
       return [{ class: 'read' }];
     }
     if (configured) {
-      requireThat(!adapter || digest(adapter.action) === digest(configured.action), 'CONFLICT', 'Configured command and tool adapter classifications disagree');
       return [{ ...configured.action, ...base }];
     }
-    if (adapter) return [{ ...adapter.action, ...base }];
   }
   return [{ class: 'unknown', ...base }];
 }
@@ -647,6 +659,14 @@ export async function evaluateGate(store, payload, { allowStageOverride = false 
       const operations = tx.all().filter(r => r.type === 'operation' && r.requestFingerprint === exactFingerprint && r.status === 'dispatching');
       requireThat(operations.length <= 1, 'CONFLICT', 'Multiple operations bind the same exact tool call');
       const operation = operations[0];
+      if (operation?.hostInvocation) {
+        const invocation = await matchHostInvocation(operation.hostInvocation, {
+          sessionId: hook.sessionId, toolName: hook.toolName,
+          toolArgs: hook.toolArgs, cwd: hook.cwd,
+        });
+        requireThat(invocation.status !== 'mismatch', 'OPERATION',
+          'Prepared host invocation differs from the actual session, tool, arguments, directory or shell');
+      }
       requireThat(!operation?.dispatchBound, 'OPERATION',
         'This prepared operation already bound one invocation; repeated execution is unmanaged and requires reconciliation');
       const findings = [];
@@ -693,21 +713,29 @@ export async function evaluateGate(store, payload, { allowStageOverride = false 
             ...(override ? { eventId: override.id } : {}),
           });
         }
-        const baseBranch = member.defaultBranch ?? config.defaultBranch;
+        const resolvedBranch = await resolveRepositoryDefaultBranch(store,
+          workItemId, member.repositoryId);
+        const baseBranch = resolvedBranch.resolved ?
+          resolvedBranch.branchRef : null;
         if (!member.linkedWorktree && (!baseBranch || member.branch === baseBranch) &&
           !applicableOverride(tx.all(), 'repository-workflow', action, context)) findings.push({ rule: 'repository-workflow', verdict: 'violation', reason: 'Use a feature branch/worktree; resolve the default branch or record a scoped override.' });
         if (action.earlyDraft) {
-          if (action.class === 'push') await verifyPublicationBase(member, action.target,
-            action.baseRef, action.targetRevision);
-          requireThat(digest(await publicationPaths(member, action.sourceRevision, action.targetRevision)) === digest([...action.paths].sort()),
+          const verifiedBaseRevision = await verifyPublicationBase(member, action.target,
+            action.class === 'push' ? action.baseRef : action.targetRef,
+            action.targetRevision, tx.all(), store.clock,
+            { actionClass: action.class, remoteRepositoryURL: action.remoteRepositoryURL,
+              configuredRemote: config.remote });
+          requireThat(digest(await publicationPaths(member, action.sourceRevision, verifiedBaseRevision)) === digest([...action.paths].sort()),
             'EVIDENCE', 'Early draft publication no longer matches the document-only source diff');
         }
         const policy = evaluatePolicy(state, action, { clock: store.clock, configuration: config });
         findings.push(...policy.findings);
         if (operation) reservationChecks.push({ action, policy });
-        const external = ['push', 'build', 'deploy', 'pipeline', 'pr-create', 'pr-update', 'pr-validation', 'merge', 'auto-merge', 'policy-bypass'].includes(action.class) || (action.class === 'test' && action.environment !== 'local');
+        const external = isExternalAction(action);
         if (external) {
           requireThat(operation?.status === 'dispatching' && !operation.dispatchBound, 'OPERATION', 'Prepare and mark-dispatching this exact request before the external call; reconcile previously dispatched calls');
+          await verifyPreparedIntendedOutcome(tx, member, operation.action,
+            config, cycle, operation.intendedOutcome, store.clock);
           requireThat(operation.candidateStamp === await candidateStamp(tx.metadata, tx.manifest), 'STALE', 'Candidate/index/working content metadata changed since the exact operation was prepared');
           if (cycle) requireThat(operation.cycleId === cycle.id && operation.candidateDigest === cycle.candidateDigest, 'STALE', 'Candidate changed; restart local verification and obtain current authority');
         }

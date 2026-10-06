@@ -1,11 +1,11 @@
-import { digest, object, requireThat, text } from './core.mjs';
+import { choice, digest, object, requireThat, text } from './core.mjs';
 
 const LINK_KINDS = ['summary', 'job', 'logs', 'deployment'];
 const adapters = new Map();
 
 export function validateExecutionIdentity(input) {
   object(input, ['provider', 'connection', 'scopeRef', 'definitionRef',
-    'executionRef', 'attemptRef'],
+    'executionRef', 'attemptRef', 'attemptKind'],
   ['provider', 'connection', 'scopeRef', 'executionRef']);
   for (const field of ['provider', 'connection', 'scopeRef', 'executionRef']) {
     text(input[field], `execution identity ${field}`);
@@ -15,6 +15,11 @@ export function validateExecutionIdentity(input) {
       text(input[field], `execution identity ${field}`);
     }
   }
+  if (input.attemptKind !== undefined) {
+    choice(input.attemptKind, ['known', 'not-applicable', 'unknown'], 'execution attempt kind');
+    requireThat((input.attemptKind === 'known') === (input.attemptRef !== undefined),
+      'INPUT', 'Only a known execution attempt has an attempt reference');
+  }
   return {
     provider: input.provider,
     connection: input.connection,
@@ -23,7 +28,80 @@ export function validateExecutionIdentity(input) {
       { definitionRef: input.definitionRef } : {}),
     executionRef: input.executionRef,
     ...(input.attemptRef !== undefined ? { attemptRef: input.attemptRef } : {}),
+    ...(input.attemptKind !== undefined ? { attemptKind: input.attemptKind } : {}),
   };
+}
+
+// The capability is established by a trusted provider adapter, never inferred from an absent attempt.
+export function validateCurrentExecutionIdentity(input, attemptCapability) {
+  const identity = validateExecutionIdentity(input);
+  requireThat(Object.values(identity).every(value => value === value.trim()),
+    'EVIDENCE', 'Current execution identity must use normalized references');
+  requireThat(identity.attemptKind !== 'known' ||
+    !['unknown', 'not-applicable'].includes(identity.attemptRef),
+  'EVIDENCE', 'A known execution attempt requires its actual reference');
+  choice(attemptCapability, ['distinct', 'none', 'unknown'], 'adapter attempt capability');
+  requireThat(identity.attemptKind !== undefined, 'EVIDENCE',
+    'Current execution identity requires an explicit attempt kind');
+  requireThat(
+    (attemptCapability === 'none' && identity.attemptKind === 'not-applicable') ||
+    (attemptCapability === 'distinct' &&
+      ['known', 'unknown'].includes(identity.attemptKind)) ||
+    (attemptCapability === 'unknown' && identity.attemptKind === 'unknown'),
+  'EVIDENCE', 'Execution attempt does not match the adapter capability');
+  return identity;
+}
+
+export function validateExecutionResultIdentity(result, expected = {}) {
+  object(expected, ['provider', 'connection', 'scopeRef', 'definitionRef',
+    'attemptCapability']);
+  const identity = validateCurrentExecutionIdentity(
+    result?.executionIdentity, result?.attemptCapability);
+  for (const field of ['provider', 'connection', 'scopeRef', 'definitionRef']) {
+    if (expected[field] !== undefined) {
+      text(expected[field], `expected execution ${field}`);
+      requireThat(identity[field] === expected[field], 'EVIDENCE',
+        `Execution identity differs from the trusted ${field}`);
+    }
+  }
+  requireThat((expected.attemptCapability === undefined ||
+      result.attemptCapability === expected.attemptCapability) &&
+    (result.provider === undefined || identity.provider === result.provider) &&
+    (result.pipeline === undefined || identity.definitionRef === result.pipeline) &&
+    identity.executionRef === result.executionRef &&
+    (identity.attemptKind === 'known' ?
+      identity.attemptRef === result.attemptRef &&
+        result.attemptCapability === 'distinct' :
+      identity.attemptKind === 'not-applicable' &&
+        result.attemptCapability === 'none' &&
+        result.attemptRef === 'not-applicable') &&
+    (result.providerResultId === undefined ||
+      result.providerResultId === `${result.executionRef}:${result.attemptRef}`),
+  'EVIDENCE', 'Execution identity differs from the proven execution result');
+  return identity;
+}
+
+export function currentExecutionRunKey(input, attemptCapability) {
+  return `run-${digest(validateCurrentExecutionIdentity(input, attemptCapability)).slice(0, 40)}`;
+}
+
+// Old monitor filenames were hashed without attemptKind; preserve them for history lookups only.
+export function legacyExecutionRunKey(input) {
+  const { attemptKind, ...historical } = validateExecutionIdentity(input);
+  void attemptKind;
+  return `run-${digest(historical).slice(0, 40)}`;
+}
+
+export function canCreditExecutionIdentity(input, attemptCapability) {
+  return validateCurrentExecutionIdentity(input, attemptCapability).attemptKind !== 'unknown';
+}
+
+export function validateAdapterExecutionIdentity(adapterId, input) {
+  const adapter = adapters.get(adapterId);
+  requireThat(adapter, 'ADAPTER', `No registered provider adapter is available for ${adapterId}`);
+  requireThat(input?.provider === adapterId, 'EVIDENCE',
+    'Provider adapter does not match the execution identity');
+  return validateCurrentExecutionIdentity(input, adapter.attemptCapability ?? 'unknown');
 }
 
 export function sameExecutionIdentity(left, right) {
@@ -32,7 +110,7 @@ export function sameExecutionIdentity(left, right) {
 }
 
 export function registerProviderAdapter(adapter) {
-  object(adapter, ['id', 'linkKinds', 'normalizeLinkObservation'],
+  object(adapter, ['id', 'linkKinds', 'normalizeLinkObservation', 'attemptCapability'],
     ['id', 'linkKinds', 'normalizeLinkObservation']);
   requireThat(/^[a-z0-9][a-z0-9-]{1,63}$/u.test(adapter.id),
     'ADAPTER', 'Provider adapter ID must be a stable lowercase identifier');
@@ -43,6 +121,10 @@ export function registerProviderAdapter(adapter) {
   'ADAPTER', 'Provider adapter link kinds are invalid');
   requireThat(typeof adapter.normalizeLinkObservation === 'function',
     'ADAPTER', 'Provider adapter requires a normalization function');
+  if (adapter.attemptCapability !== undefined) {
+    choice(adapter.attemptCapability, ['distinct', 'none', 'unknown'],
+      'adapter attempt capability');
+  }
   requireThat(!adapters.has(adapter.id), 'ADAPTER',
     `Provider adapter is already registered: ${adapter.id}`);
   adapters.set(adapter.id, Object.freeze({ ...adapter }));
@@ -90,10 +172,20 @@ export async function verifyProviderLink(adapterId, expectedIdentity,
   let normalized;
   let checkedUrl;
   try {
+    if (expected.attemptKind !== undefined) {
+      validateAdapterExecutionIdentity(adapterId, expected);
+    }
     normalized = await adapter.normalizeLinkObservation(observation);
     object(normalized, ['identity', 'url', 'kind', 'accessible', 'reason'],
       ['identity', 'url', 'kind', 'accessible']);
     normalized.identity = validateExecutionIdentity(normalized.identity);
+    if (expected.attemptKind !== undefined) {
+      const capability = adapter.attemptCapability ?? 'unknown';
+      if (normalized.identity.attemptKind === undefined && capability === 'none') {
+        normalized.identity = { ...normalized.identity, attemptKind: 'not-applicable' };
+      }
+      normalized.identity = validateCurrentExecutionIdentity(normalized.identity, capability);
+    }
     requireThat(adapter.linkKinds.includes(normalized.kind), 'ADAPTER',
       'Provider adapter returned an unsupported link kind');
     requireThat(typeof normalized.accessible === 'boolean', 'ADAPTER',
@@ -140,6 +232,7 @@ export function azureDevOpsScopeRef({ projectId, repositoryId }) {
 registerProviderAdapter({
   id: 'azure-devops',
   linkKinds: ['summary'],
+  attemptCapability: 'none',
   normalizeLinkObservation(observation) {
     object(observation, ['connection', 'build', 'access'],
       ['connection', 'build', 'access']);

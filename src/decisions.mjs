@@ -8,6 +8,59 @@ import { applicableOverride, assurancePending, boundToCycle, currentCycle,
   validateEffect } from './authority.mjs';
 import { candidateContentDigest, candidateSnapshot } from './validation.mjs';
 import { effectiveStagingExecution, stagingExecutionMatches } from './staging.mjs';
+import { selectedPushRemote, validateBinding } from './git.mjs';
+import { requirePublicationSourceObservation, selectedPublicationRepositoryURL,
+  validateSelectedPushRemote } from './repository-observations.mjs';
+import { currentDeployment, publicationDestination, requireCurrentCandidateRevisions,
+  requireCurrentDeployment,
+  requireCurrentRepositoryEvidence } from './current-evidence.mjs';
+
+async function validatePublicationDecision(kind, effect, tx) {
+  if (kind !== 'pr-publication' &&
+      !(kind === 'permission' && effect.grant === 'push')) return;
+  const repositoryId = kind === 'pr-publication' ?
+    effect.repositoryId : effect.scope?.repositoryIds?.length === 1 ?
+      effect.scope.repositoryIds[0] :
+      tx.metadata.members.filter(candidate =>
+        candidate.root === effect.localRepositoryPath).length === 1 ?
+        tx.metadata.members.find(candidate =>
+          candidate.root === effect.localRepositoryPath).repositoryId : undefined;
+  const member = tx.metadata.members.find(candidate =>
+    candidate.repositoryId === repositoryId);
+  requireThat(member && effect.localRepositoryPath === member.root,
+    'BINDING', 'Publication consent requires one currently bound local checkout');
+  await validateBinding(member);
+  let selectedUrl;
+  if (kind === 'pr-publication') {
+    const config = await loadConfig(tx.metadata, repositoryId);
+    selectedUrl = (await selectedPublicationRepositoryURL(member, config.remote,
+      effect.remoteRepositoryURL, effect.target)).remoteRepositoryURL;
+    const hostedObservation = tx.all().find(record =>
+      record.type === 'repository-observation' &&
+      record.repositoryId === repositoryId &&
+      record.localRepositoryPath === member.root &&
+      record.remoteRepositoryURL === selectedUrl);
+    requireThat(hostedObservation, 'EVIDENCE',
+      'PR publication consent requires an independent hosted repository observation');
+    await requirePublicationSourceObservation(tx.metadata, tx.all(),
+      hostedObservation, effect.sourceRepositoryURL);
+  } else {
+    const selected = await selectedPushRemote(member, undefined, effect.target);
+    selectedUrl = validateSelectedPushRemote(selected);
+    requireThat(effect.remoteUrlDigest === digest(selected.pushURLs), 'EVIDENCE',
+      'Push permission must bind the actual current Git push URL');
+    if (effect.delete !== true) requireThat(
+      (await validateBinding(member)).head === effect.sourceRevision,
+      'STALE', 'Push consent must name the current full commit');
+  }
+  requireThat(effect.remoteRepositoryURL === selectedUrl &&
+    publicationDestination(tx.all(), {
+      repositoryId, localRepositoryPath: member.root,
+      remoteRepositoryURL: selectedUrl,
+      ...(kind === 'permission' ? { remoteUrlDigest: effect.remoteUrlDigest } : {}),
+    }, { push: kind === 'permission' }),
+  'EVIDENCE', 'Publication consent requires a current observation of its exact hosted URL');
+}
 
 export async function captureReceipt(store, input) {
   object(input, ['sessionId', 'source', 'input', 'timestamp', 'pendingDecisionId', 'sourceRef'],
@@ -39,6 +92,7 @@ export async function prepareDecision(store, input) {
   requireThat(!requestedId || requestedId.length <= 94, 'INPUT',
     'Decision ID must leave room for the durable event prefix');
   return store.transaction(input.workItemId, async tx => {
+    await validatePublicationDecision(input.kind, input.effect, tx);
     const roles = input.kind === 'approval' ? ['requirements', 'test-plan', 'technical-design'].slice(0, PHASES.indexOf(input.effect.transition.to)) : [];
     const preparedSnapshots = await snapshots(store, input.workItemId, roles, { persist: true });
     const decisionId = requestedId ?? `decision-${digest({
@@ -72,6 +126,21 @@ async function validateCycleDecision(kind, effect, tx, store) {
     await currentTestSpecification(store, tx.checkpoint.workItemId, cycle.tests) === cycle.testSpecDigest,
   'STALE', 'Candidate or Test Plan changed; start a new validation cycle before applying this decision');
   const records = tx.all();
+  if (kind === 'staging-result' ||
+      kind === 'staging-promotion' ||
+      kind === 'stage-completion' && ['DEV', 'STAGING'].includes(effect.completedStage)) {
+    await requireCurrentCandidateRevisions(tx.metadata, cycle, records);
+    const environment = kind === 'staging-promotion' ? 'DEV' :
+      kind === 'staging-result' ? 'STAGING' : effect.completedStage;
+    const deployment = tx.get(cycle.deployments[environment]);
+    if (kind !== 'staging-promotion' || effect.completedStage === 'DEV') {
+      requireCurrentDeployment(cycle, records, deployment, environment);
+      requireThat(effect.deploymentId === deployment.id, 'EVIDENCE',
+        'Decision must identify the current proven deployment');
+    }
+    if (deployment) await requireCurrentRepositoryEvidence(tx.metadata, cycle,
+      records, deployment.repositoryId, deployment.intendedOutcome?.target);
+  }
   const action = { class: kind, environment: kind === 'dev-authorization' ? 'DEV' :
     ['staging-promotion', 'staging-result'].includes(kind) ? 'STAGING' :
       kind === 'stage-completion' &&
@@ -122,7 +191,8 @@ async function validateCycleDecision(kind, effect, tx, store) {
   if (kind === 'staging-result') {
     const deployment = tx.get(cycle.deployments.STAGING);
     action.repositoryId = deployment?.repositoryId;
-    requireThat(deployment?.status === 'succeeded' && effect.deploymentId === deployment.id &&
+    requireThat(currentDeployment(cycle, records, deployment, 'STAGING') &&
+      effect.deploymentId === deployment.id &&
       effect.artifactId === deployment.artifactId && effect.target === deployment.target,
     'EVIDENCE', 'STAGING result must match the current successful deployment, target and artifact');
     const configuration = await loadConfig(tx.metadata,
@@ -168,6 +238,7 @@ export async function applyDecision(store, input) {
     const kind = preliminaryKind ?? existing?.kind;
     const effect = preliminaryEffect ?? existing?.effect;
     validateEffect(kind, effect, { strict: !existing });
+    if (!existing) await validatePublicationDecision(kind, effect, tx);
     if (existing) {
       requireThat(existing.sourceReceiptId === receipt.id && digest(existing.effect) === digest(effect) && existing.kind === kind,
         'ID_CONFLICT', 'Effective decision ID reused with different content');

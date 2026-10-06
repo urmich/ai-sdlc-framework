@@ -1,11 +1,30 @@
-import { PHASES, object, choice, requireThat, strings, text } from './core.mjs';
+import { PHASES, digest, object, choice, requireThat, strings, text } from './core.mjs';
 import { activeEvents, applicableOverride, assurancePending, currentCycle, hasEnvironmentGrant, hasStagingCompletion, hasStageCompletion, matchesScope, permissionMatches, phaseAuthority, reviewPassed, stagePassed } from './authority.mjs';
 import { evaluateReadiness, publicationAuthority } from './pr.mjs';
 import { checkTestStart } from './validation.mjs';
 import { effectiveStagingExecution, stagingExecutionMatches } from './staging.mjs';
+import { currentArtifact, currentDeployment, matchesArtifactContent, publicationDestination } from './current-evidence.mjs';
+import { validateRepositoryIdentity } from './repository-observations.mjs';
 
-export const ACTIONS = ['read', 'bookkeeping', 'document', 'configuration', 'code', 'local-build', 'test', 'push', 'build', 'deploy',
+export const ACTIONS = ['read', 'bookkeeping', 'document', 'configuration', 'code', 'local-build', 'test', 'push', 'build', 'artifact', 'artifact-produce', 'notification', 'deploy',
   'pipeline', 'pr-create', 'pr-update', 'pr-validation', 'merge', 'auto-merge', 'policy-bypass', 'destructive', 'unknown', 'recommend-staging', 'recommend-prod'];
+const EXTERNAL_ACTIONS = new Set(['push', 'build', 'deploy', 'pipeline',
+  'pr-create', 'pr-update', 'pr-validation', 'merge', 'auto-merge',
+  'policy-bypass', 'artifact', 'artifact-produce', 'notification']);
+export function isHostedConfiguration(action) {
+  return action.class === 'configuration' &&
+    (action.target !== undefined && action.target !== 'local' ||
+      ['remoteRepositoryURL', 'remoteUrlDigest', 'sourceRepositoryURL',
+        'provider', 'pipeline', 'policyVersion', 'previousPolicyVersion',
+        'requestedState', 'prId', 'prRecordId'].some(field =>
+        action[field] !== undefined) ||
+      effectiveEnvironments(action).size > 0);
+}
+export function isExternalAction(action) {
+  return EXTERNAL_ACTIONS.has(action.class) ||
+    isHostedConfiguration(action) ||
+    action.class === 'test' && action.environment !== 'local';
+}
 const CANONICAL_ENVIRONMENTS = ['DEV', 'STAGING', 'PROD'];
 const ENVIRONMENT_ACTIONS = new Set(['build', 'deploy', 'pipeline',
   'pr-validation']);
@@ -14,7 +33,12 @@ export function validateAction(action) {
     'testId', 'owner', 'host', 'operationId', 'sourceRef', 'targetRef', 'draft', 'sourceRevision', 'targetRevision',
     'policyVersion', 'prRecordId', 'artifactId', 'externalPermission', 'monitorCapability', 'implicitEnvironments', 'preservesChanges',
     'earlyDraft', 'baseRef', 'remoteUrlDigest', 'force', 'delete', 'deploymentId',
-    'provider', 'pipeline'],
+    'provider', 'pipeline', 'localRepositoryPath', 'remoteRepositoryURL',
+    'sourceRepositoryURL', 'artifactRef', 'artifactSha256',
+    'artifactImmutableVersion', 'artifactRetrievalContext', 'artifactName',
+    'producingExecutionRef', 'producingAttemptRef', 'candidateDigest',
+    'testSpecDigest', 'contentDigest', 'prId',
+    'previousPolicyVersion', 'requestedState', 'recipient', 'toolOptions'],
   ['class']);
   choice(action.class, ACTIONS, 'operation class');
   for (const key of ['paths', 'stages', 'implicitEnvironments']) if (action[key]) strings(action[key], key);
@@ -22,6 +46,54 @@ export function validateAction(action) {
   for (const field of ['provider', 'pipeline']) {
     if (action[field]) text(action[field], field);
   }
+  for (const field of ['localRepositoryPath', 'remoteRepositoryURL',
+    'sourceRepositoryURL']) if (action[field] !== undefined) text(action[field], field, 4096);
+  if (action.localRepositoryPath !== undefined || action.remoteRepositoryURL !== undefined) {
+    validateRepositoryIdentity({
+      localRepositoryPath: action.localRepositoryPath,
+      remoteRepositoryURL: action.remoteRepositoryURL,
+      provider: action.provider ?? 'selected', connection: 'selected',
+      repositoryRef: 'selected',
+    }, {
+      canonicalLocalRepositoryPath: action.localRepositoryPath,
+      verifiedRemoteRepositoryURL: action.remoteRepositoryURL,
+      verifiedProvider: action.provider ?? 'selected', verifiedConnection: 'selected',
+      verifiedRepositoryRef: 'selected',
+    });
+  }
+  if (action.sourceRepositoryURL !== undefined) validateRepositoryIdentity({
+    localRepositoryPath: action.localRepositoryPath,
+    remoteRepositoryURL: action.sourceRepositoryURL,
+    provider: 'selected', connection: 'selected', repositoryRef: 'selected',
+  }, {
+    canonicalLocalRepositoryPath: action.localRepositoryPath,
+    verifiedRemoteRepositoryURL: action.sourceRepositoryURL,
+    verifiedProvider: 'selected', verifiedConnection: 'selected',
+    verifiedRepositoryRef: 'selected',
+  });
+  for (const field of ['artifactRef', 'artifactName', 'producingExecutionRef',
+    'producingAttemptRef', 'candidateDigest', 'testSpecDigest',
+    'contentDigest', 'prId', 'previousPolicyVersion', 'requestedState',
+    'recipient']) if (action[field] !== undefined) text(action[field], field);
+  if (action.toolOptions !== undefined) {
+    requireThat(action.toolOptions !== null &&
+      typeof action.toolOptions === 'object' &&
+      !Array.isArray(action.toolOptions), 'INPUT',
+    'Tool options must be an object');
+    object(action.toolOptions, Object.keys(action.toolOptions));
+  }
+  if (action.artifactSha256 !== undefined) requireThat(
+    typeof action.artifactSha256 === 'string' &&
+      /^[a-f0-9]{64}$/u.test(action.artifactSha256),
+    'INPUT', 'Invalid artifact SHA-256 digest');
+  for (const field of ['artifactImmutableVersion', 'artifactRetrievalContext']) {
+    if (action[field] !== undefined) text(action[field], field);
+  }
+  requireThat(action.artifactImmutableVersion === undefined ?
+    action.artifactRetrievalContext === undefined :
+    action.artifactSha256 === undefined &&
+      action.artifactRetrievalContext !== undefined, 'INPUT',
+  'Immutable artifact version requires retrieval context instead of a digest');
   if (action.earlyDraft !== undefined) requireThat(action.earlyDraft === true && action.draft === true,
     'INPUT', 'earlyDraft must explicitly identify draft publication');
   if (action.earlyDraft) {
@@ -120,6 +192,21 @@ export function evaluatePolicy(state, action, {
   const checkpoint = state.checkpoint;
   const cycle = currentCycle(records, checkpoint);
   const context = { cycleId: cycle?.id, clock };
+  const publication = ['push', 'pr-create', 'pr-update'].includes(action.class);
+  const localRepositoryPath = state.metadata?.members?.find(member =>
+    member.repositoryId === action.repositoryId)?.root;
+  if (action.class === 'push' && !action.remoteRepositoryURL &&
+      localRepositoryPath && action.remoteUrlDigest) {
+    const observed = records.filter(record => record.type === 'repository-observation' &&
+      record.repositoryId === action.repositoryId &&
+      record.localRepositoryPath === localRepositoryPath &&
+      digest([record.remoteRepositoryURL]) === action.remoteUrlDigest);
+    if (observed.length) action = { ...action, localRepositoryPath,
+      remoteRepositoryURL: observed[0].remoteRepositoryURL };
+  }
+  const authorizedDestination = !publication ||
+    (action.localRepositoryPath === localRepositoryPath &&
+      publicationDestination(records, action, { push: action.class === 'push' }));
   const findings = [];
   function rule(name, met, reason, external = false) {
     if (met) return;
@@ -150,7 +237,7 @@ export function evaluatePolicy(state, action, {
   if (action.earlyDraft) rule('early-draft-documents', earlyDraft,
     'Early draft publication must contain only registered documents/framework manifest paths');
   if (earlyDraft && action.class === 'push') {
-    rule('pr-publication', Boolean(publicationAuthority(records, {
+    rule('pr-publication', authorizedDestination && Boolean(publicationAuthority(records, {
       ...action, targetRef: action.baseRef,
     }, clock, { cycleId: cycle?.id })), 'Early draft push authority must match the intended PR source/base/draft');
   }
@@ -191,6 +278,8 @@ export function evaluatePolicy(state, action, {
       'Out-of-scope execution and documentation need separate explicit authority; scope classification remains unchanged');
   }
   const permission = grant => activeEvents(records, context).some(event => permissionMatches(event, grant, action, records));
+  if (publication) rule('publication-destination', authorizedDestination,
+    'Verify the actual local checkout and hosted publication URL before using destination-bound consent', true);
   for (const operation of ['push', 'merge', 'auto-merge', 'policy-bypass']) if (action.class === operation) rule(operation, permission(operation), `Explicit ${operation} authority is absent`);
   if (action.class === 'push') {
     rule('force-push', action.force !== true, 'Force push requires an explicit scoped override');
@@ -199,7 +288,7 @@ export function evaluatePolicy(state, action, {
   if (action.externalPermission === false) rule('external-permission', false, 'External access/policy denies this action; a framework override cannot grant access', true);
   if (action.class === 'destructive') rule('protect-existing-changes', action.preservesChanges === true, 'Destructive operation requires explicit preservation/handoff of existing changes');
   if (['pr-create', 'pr-update'].includes(action.class)) rule('pr-publication',
-    Boolean(publicationAuthority(records, action, clock, { cycleId: cycle?.id })),
+    authorizedDestination && Boolean(publicationAuthority(records, action, clock, { cycleId: cycle?.id })),
     'Publication authority does not match source/target/draft intent or remaining scoped lifetime');
   const environments = effectiveEnvironments(action);
   for (const environment of environments) {
@@ -214,6 +303,9 @@ export function evaluatePolicy(state, action, {
       const readiness = evaluateReadiness(records, {
         environment,
         repositoryId: action.repositoryId,
+        localRepositoryPath: action.localRepositoryPath,
+        remoteRepositoryURL: action.remoteRepositoryURL,
+        prId: action.prId,
         policy: config?.pr ?? {},
         prRecordId: action.prRecordId,
         sourceRevision: action.sourceRevision,
@@ -257,7 +349,13 @@ export function evaluatePolicy(state, action, {
   }
   if (action.class === 'deploy' && action.environment !== 'PROD') {
     const artifact = records.find(r => r.id === cycle?.artifacts[action.environment]);
-    rule('artifact-provenance', Boolean(artifact && artifact.artifactId === action.artifactId && artifact.sourceDigest === cycle.candidateDigest && artifact.environment === action.environment),
+    rule('artifact-provenance', Boolean(currentArtifact(cycle, records, artifact, action.repositoryId) &&
+      artifact.artifactId === action.artifactId && artifact.environment === action.environment &&
+      artifact.artifactRef === action.artifactRef &&
+      matchesArtifactContent(artifact, action) &&
+      artifact.localRepositoryPath === localRepositoryPath &&
+      action.localRepositoryPath === localRepositoryPath &&
+      artifact.remoteRepositoryURL === action.remoteRepositoryURL),
       'A successful matching deployable artifact is required; green PR validation alone is insufficient');
   }
   if (action.class === 'test') {
@@ -283,7 +381,7 @@ export function evaluatePolicy(state, action, {
         const deployment = records.find(r =>
           r.id === cycle.deployments.STAGING);
         rule('deployment-before-test',
-          deployment?.status === 'succeeded' &&
+          currentDeployment(cycle, records, deployment, 'STAGING') &&
             deployment.id === action.deploymentId &&
             deployment.artifactId === action.artifactId &&
             deployment.target === action.target,
@@ -297,7 +395,7 @@ export function evaluatePolicy(state, action, {
       catch (error) { if (error.code !== 'UNIT_FIRST') throw error; rule('unit-first', false, error.message); }
       if (test.environment === 'DEV') {
         const deployment = records.find(r => r.id === cycle.deployments.DEV);
-        rule('deployment-before-test', deployment?.status === 'succeeded' &&
+        rule('deployment-before-test', currentDeployment(cycle, records, deployment, 'DEV') &&
           deployment.id === action.deploymentId && deployment.artifactId === action.artifactId,
         'DEV testing requires the actual current successful deployment and artifact');
       }
@@ -311,6 +409,9 @@ export function evaluatePolicy(state, action, {
     rule('staging-completion', hasStagingCompletion(records, cycle, clock), 'Current deployment-bound user-confirmed STAGING success is missing');
     const readiness = evaluateReadiness(records, { environment: 'PROD', policy: configuration.environments?.PROD?.pr ?? {},
       repositoryId: action.repositoryId,
+      localRepositoryPath: action.localRepositoryPath,
+      remoteRepositoryURL: action.remoteRepositoryURL,
+      prId: action.prId,
       prRecordId: action.prRecordId, sourceRevision: action.sourceRevision, targetRevision: action.targetRevision, policyVersion: action.policyVersion }, { clock });
     rule('prod-pr-readiness', readiness.ready, `Resolve PR prerequisites before presenting PROD as ready: ${readiness.gaps.join('; ')}`);
   }

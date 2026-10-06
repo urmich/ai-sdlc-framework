@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { LIMITS, PHASES, byteSize, digest, recordLimit, requireThat } from './core.mjs';
+import { LIMITS, PHASES, byteSize, detailCommand, digest, recordLimit, requireThat, safeSummary, summaryPage, unsafeSummaryContent } from './core.mjs';
 import { exists, readBytes, readJson } from './files.mjs';
 import { artifactDocumentId, artifactPath, artifactRepositoryId,
   currentTestSpecification, parseRequirements, parseTestPlan } from './artifacts.mjs';
@@ -16,6 +16,55 @@ export function aggregate(findings) {
   const verdict = precedence.find(value => findings.some(f => f.verdict === value)) ?? 'not-applicable';
   return { verdict, exitCode: EXIT_CODES[verdict], findings,
     summary: `${verdict}: ${findings.length} finding(s); ${findings.filter(f => f.verdict === 'unverified').length} require evidence.` };
+}
+function findingDetail(findings, complete, index, options, command) {
+  requireThat(Number.isSafeInteger(index) && index >= 0 && index < findings.length,
+    'INPUT', 'Invalid finding index');
+  const serialized = JSON.stringify(safeSummary(findings[index]));
+  const characters = Array.from(serialized);
+  const offset = options.offset ?? 0;
+  const limit = options.limit ?? 65536;
+  requireThat(Number.isSafeInteger(offset) && offset >= 0 && offset <= characters.length,
+    'INPUT', 'Invalid finding detail offset');
+  requireThat(Number.isSafeInteger(limit) && limit > 0 && limit <= 65536,
+    'INPUT', 'Invalid finding detail limit; expected 1..65536');
+  let count = Math.min(limit, characters.length - offset);
+  while (true) {
+    const nextOffset = offset + count < characters.length ? offset + count : null;
+    const result = { verdict: complete.verdict, exitCode: complete.exitCode,
+      summary: complete.summary, finding: index, total: characters.length,
+      count, offset, nextOffset, detailDigest: digest(findings[index]),
+      detail: characters.slice(offset, offset + count).join(''),
+      ...(nextOffset === null ? {} : {
+        detailCommand: `${command} --finding ${index} --offset ${nextOffset} --limit ${limit}`,
+      }) };
+    if (Buffer.byteLength(JSON.stringify(result)) + 1 <= LIMITS.workingSet) return result;
+    requireThat(count > 1, 'CAPACITY', 'Finding detail cannot fit in the working-set budget');
+    count = Math.floor(count / 2);
+  }
+}
+export function boundedCheck(findings, kind, workItemId, pageOptions = undefined, home = undefined) {
+  const complete = aggregate(findings);
+  const command = detailCommand(`check ${kind}`, workItemId, home);
+  if (pageOptions?.finding !== undefined) return findingDetail(findings, complete,
+    pageOptions.finding, pageOptions, command);
+  if (!pageOptions && Buffer.byteLength(JSON.stringify(complete)) + 1 <= LIMITS.workingSet &&
+      !unsafeSummaryContent(complete)) return complete;
+  const visible = findings.map((finding, index) => byteSize(finding) <= LIMITS.workingSet / 2 &&
+    !unsafeSummaryContent(finding) ? finding : {
+    rule: byteSize(finding.rule) > 512 || unsafeSummaryContent(finding.rule) ?
+      'redacted-or-oversized-rule' : finding.rule,
+    verdict: finding.verdict,
+    ...(finding.originalVerdict ? { originalVerdict: finding.originalVerdict } : {}),
+    ...(finding.eventId ? { eventId: finding.eventId } : {}),
+    detailDigest: digest(finding), detailBytes: byteSize(finding),
+    detailCommand: `${command} --finding ${index} --offset 0 --limit 65536`,
+    detailNotice: 'Read sanitized finding detail in bounded pages.',
+  });
+  return summaryPage(safeSummary(visible), {
+    verdict: complete.verdict, exitCode: complete.exitCode, summary: complete.summary,
+    findingsDigest: digest(findings),
+  }, 'findings', { ...pageOptions, command, digestItems: findings });
 }
 function reporter(findings, state, clock) {
   return (rule, verdict, reason, details = {}) => {
@@ -144,7 +193,7 @@ async function evidenceChecks(store, state, report) {
       'Every planned STAGING test needs passing deployment-bound evidence and explicit completion confirmation');
   }
 }
-export async function check(store, workItemId, kind) {
+export async function check(store, workItemId, kind, pageOptions = undefined) {
   const findings = [];
   try {
     requireThat(['artifacts', 'state', 'history', 'evidence', 'all'].includes(kind), 'INPUT', 'Unknown conformance check');
@@ -153,7 +202,8 @@ export async function check(store, workItemId, kind) {
     const checks = { artifacts: artifactChecks, state: stateChecks, history: historyChecks, evidence: evidenceChecks };
     for (const [name, run] of Object.entries(checks)) if (kind === name || kind === 'all') await run(store, state, report);
   } catch (error) {
-    findings.push({ rule: 'checker', verdict: 'error', reason: `${error.code ?? 'ERROR'}: ${error.message}` });
+    findings.push({ rule: 'checker', verdict: 'error',
+      reason: `${safeSummary(String(error.code ?? 'ERROR'))}: ${safeSummary(String(error.message))}` });
   }
-  return aggregate(findings);
+  return boundedCheck(findings, kind, workItemId, pageOptions, store.home);
 }

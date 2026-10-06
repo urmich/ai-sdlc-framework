@@ -1,8 +1,8 @@
 import path from 'node:path';
-import { LIMITS, parseJson, requireThat, SdlcError } from './core.mjs';
-import { readBytes, readJson } from './files.mjs';
+import { LIMITS, SUMMARY_MAX_OFFSET, SUMMARY_PAGE_LIMIT, parseJson, requireThat, safeSummary, SdlcError } from './core.mjs';
+import { canonicalPath, readBytes, readJson } from './files.mjs';
 import { Store } from './store.mjs';
-import { registerArtifact } from './artifacts.mjs';
+import { loadConfig, registerArtifact } from './artifacts.mjs';
 import { captureReceipt, prepareDecision, applyDecision } from './decisions.mjs';
 import { prepareOperation, markDispatching, recordOperation, addConflict, resolveConflict, pruneWork } from './operations.mjs';
 import { preparePr, adoptPr, updatePrFacts, evaluateReadiness } from './pr.mjs';
@@ -13,11 +13,16 @@ import { startCycle, recordTest, recordArtifact, stagingHandoff } from './valida
 import { gate } from './gate.mjs';
 import { handleHook } from './hooks.mjs';
 import { check } from './checks.mjs';
+import { observeRepository, validateSelectedFetchRemote } from './repository-observations.mjs';
 import { cleanInstall, install, uninstall, doctor, selectMaintenanceSource } from './install.mjs';
+import { currentCycle } from './authority.mjs';
+import { requireCurrentSourceRevision } from './current-evidence.mjs';
+import { selectedFetchRemote } from './git.mjs';
+import { sameNativePath } from './platform.mjs';
 
 export function parseArguments(argv) {
   const flags = {}, words = [];
-  const valued = new Set(['home', 'cwd', 'session', 'work-item', 'repository', 'token', 'operation', 'commit', 'input-file', 'source-root']);
+  const valued = new Set(['home', 'cwd', 'session', 'work-item', 'repository', 'token', 'operation', 'commit', 'input-file', 'evidence-file', 'source-root', 'offset', 'limit', 'finding']);
   const boolean = new Set(['json', 'human', 'help', 'adopt', 'purge', 'purge-existing']);
   for (let index = 0; index < argv.length; index++) {
     const argument = argv[index];
@@ -49,19 +54,20 @@ Usage: sdlc <command> [subcommand] [--work-item ID] [--session ID] [--json|--hum
 Commands:
   doctor | install [--purge-existing] | update | uninstall [--purge] | maintenance select
   init | create | adopt | member bind | artifact register
-  status | resume | context ack
+  status [--offset N --limit N] | resume | context ack
   receipt latest|capture | decision prepare|apply
   op show|prepare|mark-dispatching|record|reconcile | conflict add|resolve
   cycle start | evidence test|artifact | handoff staging
   pr prepare|create-result|adopt|update|evaluate
-  monitor attach|associate|refresh-capabilities|claim|begin-poll|observe|link|notice|interrupt|due|prune
+  repository observe (requires a verified hosting-service observation)
+  monitor attach|associate|refresh-capabilities|claim|begin-poll|observe [--evidence-file FILE]|link|notice|interrupt|due|prune
   audit format|record|replay | gate | hook EVENT
-  check artifacts|state|history|evidence|all | prune
+  check artifacts|state|history|evidence|all [--offset N --limit N] [--finding N] | prune
 JSON mutations read stdin or --input-file FILE. No network, commit or push commands.
 Use --home for isolated COPILOT_HOME; --cwd, --session, --repository identify context.
 See docs/cli.md (installed: <COPILOT_HOME>/sdlc/cli.md) for contracts.`;
 
-export async function runCli(argv = process.argv.slice(2), io = process) {
+export async function runCli(argv = process.argv.slice(2), io = process, { createStore } = {}) {
   const { flags, words } = parseArguments(argv);
   const [command, subcommand] = words;
   if (!command || flags.help || command === 'help') return { result: { help: HELP }, exitCode: 0, human: true };
@@ -75,7 +81,34 @@ export async function runCli(argv = process.argv.slice(2), io = process) {
     '--purge is supported only with uninstall');
   requireThat(!flags['purge-existing'] || command === 'install', 'INPUT',
     '--purge-existing is supported only with install');
-  const store = new Store(flags.home);
+  const hasPageFlags = flags.offset !== undefined || flags.limit !== undefined;
+  requireThat(!hasPageFlags || ['status', 'check'].includes(command), 'INPUT',
+    '--offset and --limit are supported only with status and check');
+  requireThat(flags.finding === undefined || command === 'check', 'INPUT',
+    '--finding is supported only with check');
+  const pageNumber = (name, fallback, maximum, minimum) => {
+    const value = flags[name];
+    if (value === undefined) return fallback;
+    requireThat(/^(0|[1-9][0-9]*)$/u.test(value) &&
+      Number.isSafeInteger(Number(value)) && Number(value) >= minimum &&
+      Number(value) <= maximum, 'INPUT', `Invalid --${name}; expected ${minimum}..${maximum}`);
+    return Number(value);
+  };
+  const isFindingDetail = flags.finding !== undefined;
+  const pageOptions = hasPageFlags || isFindingDetail ? {
+    offset: pageNumber('offset', 0, isFindingDetail ? Number.MAX_SAFE_INTEGER : SUMMARY_MAX_OFFSET, 0),
+    limit: pageNumber('limit', isFindingDetail ? 65536 : 100,
+      isFindingDetail ? 65536 : SUMMARY_PAGE_LIMIT, 1),
+    ...(isFindingDetail ? { finding: pageNumber('finding', undefined,
+      Number.MAX_SAFE_INTEGER, 0) } : {}),
+  } : undefined;
+  requireThat(createStore === undefined || typeof createStore === 'function',
+    'ADAPTER', 'Trusted CLI Store factory must be a function');
+  const store = createStore ? await createStore(flags.home) : new Store(flags.home);
+  const selectedHome = await canonicalPath(new Store(flags.home).home);
+  requireThat(store instanceof Store &&
+    sameNativePath(await canonicalPath(store.home), selectedHome),
+  'ADAPTER', 'Trusted CLI Store must use the selected Copilot home');
   if (command === 'doctor') return { result: await doctor(store), exitCode: 0, human: flags.human };
   if (['install', 'update'].includes(command)) {
     const options = flags['source-root'] ?
@@ -95,7 +128,7 @@ export async function runCli(argv = process.argv.slice(2), io = process) {
   await store.ready();
   const cwd = path.resolve(flags.cwd ?? process.cwd());
   const sessionId = flags.session ?? process.env.SDLC_SESSION_ID;
-  const needsInput = ['init', 'create', 'adopt', 'member', 'artifact', 'receipt', 'decision', 'op', 'conflict', 'cycle', 'evidence', 'pr', 'monitor', 'audit', 'context', 'gate', 'hook', 'maintenance'].includes(command);
+  const needsInput = ['init', 'create', 'adopt', 'member', 'artifact', 'receipt', 'decision', 'op', 'conflict', 'cycle', 'evidence', 'pr', 'repository', 'monitor', 'audit', 'context', 'gate', 'hook', 'maintenance'].includes(command);
   const body = needsInput ? flags['input-file'] ? parseJson((await readBytes(path.resolve(cwd, flags['input-file']))).toString('utf8')) : await stdinJson(io.stdin) : {};
   requireThat(body && typeof body === 'object' && !Array.isArray(body), 'INPUT', 'Command input must be a JSON object');
   if (command === 'gate') return { result: await gate(store, body), exitCode: 0 };
@@ -108,6 +141,11 @@ export async function runCli(argv = process.argv.slice(2), io = process) {
   }
   const work = { ...body, ...(workItemId ? { workItemId } : {}) };
   const session = { ...work, sessionId: body.sessionId ?? sessionId };
+  requireThat(!flags['evidence-file'] || (command === 'monitor' && subcommand === 'observe'),
+    'INPUT', '--evidence-file is supported only with monitor observe');
+  requireThat(command !== 'monitor' || subcommand !== 'observe' ||
+    body.evidenceFilePath === undefined, 'INPUT',
+  'Supply the evidence file only through --evidence-file');
   let result;
   switch (command) {
     case 'init': case 'create': case 'adopt':
@@ -116,7 +154,7 @@ export async function runCli(argv = process.argv.slice(2), io = process) {
     case 'member': requireThat(subcommand === 'bind', 'INPUT', 'Use member bind');
       result = await store.bindMember({ ...session, cwd: body.cwd ?? cwd, repositoryId: body.repositoryId ?? flags.repository }); break;
     case 'artifact': requireThat(subcommand === 'register', 'INPUT', 'Use artifact register'); result = await registerArtifact(store, work); break;
-    case 'status': result = await status(store, workItemId); break;
+    case 'status': result = await status(store, workItemId, pageOptions); break;
     case 'resume': result = await resume(store, { workItemId, sessionId, cwd }); break;
     case 'context': requireThat(subcommand === 'ack', 'INPUT', 'Use context ack'); result = await acknowledgeContext(store, { ...session, cwd, token: flags.token ?? body.token }); break;
     case 'receipt':
@@ -134,7 +172,7 @@ export async function runCli(argv = process.argv.slice(2), io = process) {
         const operationId = flags.operation ?? body.operationId;
         const record = (await store.records(workItemId)).find(record => record.id === operationId);
         requireThat(record?.type === 'operation', 'OPERATION', 'Active operation is unavailable; consult archived terminal evidence');
-        result = { operation: record, nextAction: record.status === 'prepared' ? 'Dispatch only while current authority still applies.' : 'Query the provider read-only using the recorded handle/target/correlation key; never infer no effect from an absent response.' };
+        result = { operation: safeSummary(record), nextAction: record.status === 'prepared' ? 'Dispatch only while current authority still applies.' : 'Query the provider read-only using the recorded handle/target/correlation key; never infer no effect from an absent response.' };
       } else if (subcommand === 'prepare') result = await prepareOperation(store, session);
       else if (subcommand === 'mark-dispatching') result = await markDispatching(store, workItemId, flags.operation ?? body.operationId);
       else if (['record', 'reconcile'].includes(subcommand)) result = await recordOperation(store, work, { reconcile: subcommand === 'reconcile' });
@@ -154,15 +192,46 @@ export async function runCli(argv = process.argv.slice(2), io = process) {
       else if (subcommand === 'update') result = await updatePrFacts(store, work);
       else if (subcommand === 'evaluate') {
         const { workItemId: ignored, ...evaluation } = work;
-        result = evaluateReadiness((await store.load(workItemId)).records, evaluation, { clock: store.clock });
+        const state = await store.load(workItemId);
+        const cycle = currentCycle(state.records, state.checkpoint);
+        const artifactEnvironment = evaluation.environment === 'PROD' ?
+          'STAGING' : evaluation.environment;
+        const selectedArtifact = state.records.find(record =>
+          record.type === 'artifact' &&
+          record.id === cycle?.artifacts[artifactEnvironment]);
+        const evidenceRepositoryId = selectedArtifact?.repositoryId ??
+          (evaluation.localRepositoryPath && evaluation.remoteRepositoryURL ?
+            evaluation.repositoryId ?? state.metadata.members.find(member =>
+              member.root === evaluation.localRepositoryPath)?.repositoryId : undefined);
+        if (evaluation.requireArtifact && cycle && evidenceRepositoryId) {
+          await requireCurrentSourceRevision(state.metadata, cycle,
+            evidenceRepositoryId);
+          const member = state.metadata.members.find(candidate =>
+            candidate.repositoryId === evidenceRepositoryId);
+          requireThat(member, 'STALE', 'Selected artifact checkout is no longer bound');
+          const config = await loadConfig(state.metadata, member.repositoryId);
+          const selected = await selectedFetchRemote(member, config.remote);
+          requireThat(validateSelectedFetchRemote(selected) ===
+            (selectedArtifact?.remoteRepositoryURL ?? evaluation.remoteRepositoryURL), 'STALE',
+          'Selected artifact hosted URL differs from the current Git fetch destination');
+        }
+        result = evaluateReadiness(state.records, evaluation, {
+          clock: store.clock, cycle,
+        });
       } else throw new SdlcError('INPUT', 'Use pr prepare|create-result|adopt|update|evaluate');
       break;
+    case 'repository':
+      requireThat(subcommand === 'observe', 'INPUT', 'Use repository observe');
+      result = await observeRepository(store, { ...work,
+        repositoryId: body.repositoryId ?? flags.repository }); break;
     case 'monitor': {
       const handlers = { attach: attachMonitor, associate: associateMonitor, 'refresh-capabilities': refreshMonitorCapabilities,
         claim: claimMonitor, 'begin-poll': beginPoll, observe: observeMonitor,
         link: verifyMonitorLink, notice: monitorNotice, interrupt: interruptMonitor, due: dueMonitors, prune: pruneMonitor };
       requireThat(handlers[subcommand], 'INPUT', 'Unknown monitor operation');
-      result = await handlers[subcommand](store, body); break;
+      result = await handlers[subcommand](store, subcommand === 'observe' &&
+        flags['evidence-file'] ? { ...body,
+          evidenceFilePath: path.resolve(cwd, flags['evidence-file']) } : body); break;
     }
     case 'maintenance':
       requireThat(subcommand === 'select', 'INPUT', 'Use maintenance select');
@@ -177,7 +246,7 @@ export async function runCli(argv = process.argv.slice(2), io = process) {
       else if (subcommand === 'replay') result = await replayAudit(store, workItemId, { persist: false });
       else throw new SdlcError('INPUT', 'Use audit format|record|replay');
       break;
-    case 'check': result = await check(store, workItemId, subcommand); return { result, exitCode: result.exitCode, human: flags.human };
+    case 'check': result = await check(store, workItemId, subcommand, pageOptions); return { result, exitCode: result.exitCode, human: flags.human };
     case 'prune': result = await pruneWork(store, workItemId); break;
     default: throw new SdlcError('INPUT', `Unknown command: ${command}`);
   }
@@ -186,7 +255,11 @@ export async function runCli(argv = process.argv.slice(2), io = process) {
 export function humanOutput(result) {
   if (result.help) return result.help;
   if (result.trailers) return result.trailers;
-  if (result.summary) return [result.summary, ...result.findings.filter(f => f.verdict !== 'satisfied').map(f => `${f.verdict} ${f.rule}: ${f.reason}`)].join('\n');
+  if (result.finding !== undefined && result.detail !== undefined) return JSON.stringify(result);
+  if (result.total !== undefined && (result.items || result.findings)) return JSON.stringify(result);
+  if (result.summary && result.findings) return [result.summary,
+    ...result.findings.filter(f => f.verdict !== 'satisfied').map(f =>
+      `${f.verdict} ${f.rule}: ${f.reason}`)].join('\n');
   if (result.message) return result.message;
   if (result.nextAction) return `${result.phase ?? 'SDLC'}: ${result.nextAction}${result.orientationToken ? `\nOrientation token: ${result.orientationToken}` : ''}`;
   return JSON.stringify(result, null, 2);

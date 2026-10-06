@@ -8,6 +8,7 @@ import { currentCycle } from './authority.mjs';
 import { invalidateCycleAssurance, invalidateEnvironmentAssurance, startCycle } from './validation.mjs';
 import { loadConfig } from './artifacts.mjs';
 import { resolveActionEnvironment } from './policy.mjs';
+import { matchHostInvocation } from './host-invocations.mjs';
 
 export async function handleHook(store, event, payload) {
   const rawNormalized = normalizeHook(payload);
@@ -78,17 +79,35 @@ export async function handleHook(store, event, payload) {
   }
   const requestFingerprint = fingerprint(rawNormalized.toolName, rawNormalized.toolArgs,
     await canonicalPath(rawNormalized.cwd));
-  const operation = state.records.find(r => r.type === 'operation' &&
+  const matchingOperations = state.records.filter(r => r.type === 'operation' &&
     r.requestFingerprint === requestFingerprint &&
     r.sessionId === sessionId &&
     r.status === 'dispatching' &&
     r.dispatchBound === true &&
     !session.unmanagedFingerprintOverflow &&
     !session.unmanagedRequestFingerprints?.includes(requestFingerprint));
-  if (operation) {
+  const operation = matchingOperations.length === 1 ?
+    matchingOperations[0] : null;
+  if (operation && operation.hostInvocation) {
+    const result = await matchHostInvocation(operation.hostInvocation, {
+      sessionId, toolName: rawNormalized.toolName,
+      toolArgs: rawNormalized.toolArgs, cwd: rawNormalized.cwd,
+    });
+    if (result.status === 'mismatch') {
+      await store.transaction(session.workItemId, tx => {
+        const current = tx.get(operation.id);
+        if (current.status === 'dispatching') {
+          current.status = 'uncertain';
+          current.resultGap = result.reason;
+          tx.put(current);
+        }
+      });
+    }
+  }
+  for (const pending of matchingOperations) {
     await recordOperation(store, {
       workItemId: session.workItemId,
-      operationId: operation.id,
+      operationId: pending.id,
       status: 'uncertain',
     });
   }

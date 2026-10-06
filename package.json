@@ -33,6 +33,9 @@
     "uninstall:copilot": "node bin/sdlc.mjs uninstall"
   },
   "exports": {
+    "./cli": "./src/cli.mjs",
+    "./operations": "./src/operations.mjs",
+    "./pr": "./src/pr.mjs",
     "./provider-adapters": "./src/provider-adapters.mjs",
     "./monitors": "./src/monitors.mjs",
     "./store": "./src/store.mjs"

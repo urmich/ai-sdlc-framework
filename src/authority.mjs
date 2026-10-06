@@ -1,4 +1,6 @@
-import { PHASES, choice, id, object, requireThat, strings, text, timestamp } from './core.mjs';
+import { PHASES, choice, digest, id, object, requireThat, strings, text, timestamp } from './core.mjs';
+import { currentDeployment, hasCurrentExecutionProof, operationMatchesCurrentSource,
+  publicationDestination } from './current-evidence.mjs';
 
 export const KINDS = ['approval', 'stage-completion', 'override', 'out-of-scope-execution',
   'out-of-scope-documentation', 'scope-inclusion', 'pr-publication', 'dev-authorization',
@@ -8,7 +10,8 @@ export function validateEffect(kind, effect, { strict = false } = {}) {
   object(effect, ['transition', 'completedStage', 'cycleId', 'candidateDigest', 'testSpecDigest', 'target',
     'configDigest', 'deploymentId', 'artifactId', 'outcome', 'rules', 'scope', 'lifetime', 'grant', 'repositoryId',
     'sourceRef', 'targetRef', 'draft', 'itemId', 'revokes', 'lifecycleStatus', 'reason', 'confirmation', 'host', 'testIds',
-    'owner', 'status', 'evidenceRef', 'summary', 'blockingFindings', 'remoteUrlDigest', 'sourceRevision', 'force', 'delete']);
+    'owner', 'status', 'evidenceRef', 'summary', 'blockingFindings', 'remoteUrlDigest', 'sourceRevision', 'force', 'delete',
+    'localRepositoryPath', 'remoteRepositoryURL', 'sourceRepositoryURL']);
   const cycleFields = ['cycleId', 'candidateDigest', 'testSpecDigest', 'configDigest', 'target'];
   const kindFields = {
     approval: ['transition'],
@@ -17,14 +20,16 @@ export function validateEffect(kind, effect, { strict = false } = {}) {
     'out-of-scope-execution': ['itemId'],
     'out-of-scope-documentation': ['itemId'],
     'scope-inclusion': ['itemId'],
-    'pr-publication': ['repositoryId', 'sourceRef', 'targetRef', 'draft'],
+    'pr-publication': ['repositoryId', 'sourceRef', 'targetRef', 'draft',
+      'localRepositoryPath', 'remoteRepositoryURL', 'sourceRepositoryURL', 'target'],
     'dev-authorization': [...cycleFields, 'completedStage'],
     'review-result': ['cycleId', 'candidateDigest', 'testSpecDigest', 'configDigest', 'status', 'evidenceRef', 'summary', 'blockingFindings', 'completedStage'],
     'staging-promotion': [...cycleFields, 'completedStage', 'deploymentId'],
     'staging-result': [...cycleFields, 'deploymentId', 'artifactId',
       'testIds', 'outcome', 'owner', 'host', 'evidenceRef'],
     revocation: ['revokes'],
-    permission: ['grant', 'target', 'remoteUrlDigest', 'sourceRef', 'targetRef', 'sourceRevision', 'force', 'delete'],
+    permission: ['grant', 'target', 'remoteUrlDigest', 'sourceRef', 'targetRef', 'sourceRevision', 'force', 'delete',
+      'localRepositoryPath', 'remoteRepositoryURL'],
     'work-completion': ['lifecycleStatus'],
   };
   object(effect, [...kindFields[kind], 'scope', 'lifetime', 'reason']);
@@ -76,16 +81,23 @@ export function validateEffect(kind, effect, { strict = false } = {}) {
   if (kind === 'pr-publication') {
     for (const field of ['repositoryId', 'sourceRef', 'targetRef']) text(effect[field], field);
     requireThat(typeof effect.draft === 'boolean', 'INPUT', 'PR authority must identify draft or ready intent');
+    if (strict) requireThat(['target', 'localRepositoryPath', 'remoteRepositoryURL',
+      'sourceRepositoryURL'].every(field => effect[field] !== undefined),
+    'INPUT', 'New PR publication consent must identify the selected hosted destination and source repository');
+    for (const field of ['target', 'localRepositoryPath', 'remoteRepositoryURL',
+      'sourceRepositoryURL']) if (effect[field] !== undefined) text(effect[field], field, 4096);
   }
   if (kind === 'permission') {
     choice(effect.grant, ['push', 'merge', 'auto-merge', 'policy-bypass', 'prod-execution', 'artifact-location'], 'permission');
     if (effect.grant === 'push') {
       const required = effect.delete === true ?
-        ['target', 'remoteUrlDigest', 'targetRef', 'force', 'delete'] :
-        ['target', 'remoteUrlDigest', 'sourceRef', 'targetRef', 'force', 'delete'];
+        ['target', 'remoteUrlDigest', 'targetRef', 'force', 'delete', 'localRepositoryPath', 'remoteRepositoryURL'] :
+        ['target', 'remoteUrlDigest', 'sourceRef', 'targetRef', 'sourceRevision', 'force', 'delete',
+          'localRepositoryPath', 'remoteRepositoryURL'];
       const complete = required.every(field => effect[field] !== undefined);
       if (strict) requireThat(complete, 'INPUT', 'New push permission must bind remote, refs and destructive behavior');
       for (const field of ['target', 'remoteUrlDigest', 'sourceRef', 'targetRef']) if (effect[field] !== undefined) text(effect[field], field);
+      for (const field of ['localRepositoryPath', 'remoteRepositoryURL']) if (effect[field] !== undefined) text(effect[field], field, 4096);
       if (effect.remoteUrlDigest !== undefined) requireThat(/^[a-f0-9]{64}$/u.test(effect.remoteUrlDigest), 'INPUT', 'Push permission remote URL digest is invalid');
       for (const field of ['sourceRef', 'targetRef']) if (effect[field] !== undefined) requireThat(effect[field].startsWith('refs/heads/'), 'INPUT', 'Push permission refs must be branch refs');
       if (effect.sourceRevision) requireThat(/^[a-f0-9]{40,64}$/u.test(effect.sourceRevision), 'INPUT', 'Push permission source revision is invalid');
@@ -131,6 +143,16 @@ export function activeEvents(records, { cycleId, clock = Date } = {}) {
 }
 export function matchesScope(event, action, records = []) {
   const scope = event.effect.scope ?? {};
+  if (event.kind === 'pr-publication') {
+    const fields = ['target', 'localRepositoryPath', 'remoteRepositoryURL',
+      'sourceRepositoryURL'];
+    if (!fields.every(field => event.effect[field] !== undefined)) return false;
+    if (action.class === 'push' &&
+        digest([action.remoteRepositoryURL]) !== action.remoteUrlDigest) return false;
+    if (!fields.every(field => event.effect[field] === action[field]) ||
+        !publicationDestination(records, action,
+          { push: action.class === 'push' })) return false;
+  }
   for (const key of ['itemId', 'operationId', 'environment', 'target',
     'owner', 'host']) {
     if (scope[key] && scope[key] !== action[key]) return false;
@@ -157,11 +179,16 @@ export function permissionMatches(event, grant, action, records = []) {
     !matchesScope(event, action, records)) return false;
   if (grant !== 'push') return true;
   const required = event.effect.delete === true ?
-    ['target', 'remoteUrlDigest', 'targetRef', 'force', 'delete'] :
-    ['target', 'remoteUrlDigest', 'sourceRef', 'targetRef', 'force', 'delete'];
+    ['target', 'remoteUrlDigest', 'targetRef', 'force', 'delete', 'localRepositoryPath', 'remoteRepositoryURL'] :
+    ['target', 'remoteUrlDigest', 'sourceRef', 'targetRef', 'sourceRevision', 'force', 'delete',
+      'localRepositoryPath', 'remoteRepositoryURL'];
   if (!required.every(field => event.effect[field] !== undefined)) return false;
-  return ['remoteUrlDigest', 'sourceRef', 'targetRef', 'sourceRevision', 'force', 'delete'].every(field =>
-    event.effect[field] === undefined || event.effect[field] === action[field]);
+  if (!action.localRepositoryPath || !action.remoteRepositoryURL ||
+      digest([action.remoteRepositoryURL]) !== action.remoteUrlDigest) return false;
+  return publicationDestination(records, action, { push: true }) &&
+    ['localRepositoryPath', 'remoteRepositoryURL', 'remoteUrlDigest', 'sourceRef',
+      'targetRef', 'sourceRevision', 'force', 'delete'].every(field =>
+      event.effect[field] === undefined || event.effect[field] === action[field]);
 }
 export function currentCycle(records, checkpoint) {
   return records.find(record => record.id === checkpoint.validationCycleRef && record.type === 'cycle') ?? null;
@@ -191,7 +218,7 @@ export function eventAppliesToCycle(event, cycle) {
 }
 export function currentStagingResultEventIds(records, cycle, clock = Date) {
   const deployment = records.find(record => record.id === cycle?.deployments.STAGING);
-  if (!deployment) return new Set();
+  if (!currentDeployment(cycle, records, deployment, 'STAGING')) return new Set();
   const candidates = records.filter(event => event.type === 'event' &&
     event.kind === 'staging-result' && boundToCycle(event.effect, cycle) &&
     event.effect.deploymentId === deployment.id && event.effect.artifactId === deployment.artifactId);
@@ -213,7 +240,7 @@ export function currentStagingResultEventIds(records, cycle, clock = Date) {
 }
 export function latestStagingResultEvent(records, cycle, testId, clock = Date) {
   const deployment = records.find(record => record.id === cycle?.deployments.STAGING);
-  if (!deployment) return null;
+  if (!currentDeployment(cycle, records, deployment, 'STAGING')) return null;
   const rank = { Passed: 0, NotRun: 1, Failed: 2 };
   const latest = records.filter(event => event.type === 'event' &&
     event.kind === 'staging-result' && boundToCycle(event.effect, cycle) &&
@@ -241,6 +268,7 @@ export function currentTestEvidence(cycle, records, test, clock = Date) {
   if (records.some(record => record.type === 'operation' &&
       record.class === 'test' && record.cycleId === cycle?.id &&
       record.action?.testId === test.id &&
+      operationMatchesCurrentSource(cycle, record) &&
       ['dispatching', 'submitted', 'running', 'uncertain']
         .includes(record.status))) return null;
   const evidence = records.find(record => record.id === cycle?.results[test.id] && record.type === 'test-evidence');
@@ -261,7 +289,7 @@ export function currentTestEvidence(cycle, records, test, clock = Date) {
     const deployment = records.find(record =>
       record.id === cycle?.deployments.STAGING &&
       record.type === 'operation' && record.status === 'succeeded');
-    if (!deployment) return null;
+    if (!currentDeployment(cycle, records, deployment, 'STAGING')) return null;
     const observations = [];
     for (const candidate of records.filter(record =>
       record.type === 'test-evidence' &&
@@ -283,6 +311,10 @@ export function currentTestEvidence(cycle, records, test, clock = Date) {
           record.action?.testId === test.id &&
           record.action.environment === 'STAGING' &&
           record.action.configDigest === cycle.configDigest &&
+          hasCurrentExecutionProof(record, records) &&
+          record.resultProof?.status === record.status &&
+          record.resultProof.dispatchId === record.id &&
+          record.resultProof.intendedOutcomeDigest === record.intendedOutcome?.digest &&
           record.action.deploymentId === deployment.id &&
           record.action.artifactId === deployment.artifactId &&
           record.action.target === deployment.target &&
@@ -413,7 +445,22 @@ export function currentTestEvidence(cycle, records, test, clock = Date) {
       evidence.host !== test.location) return null;
   if (test.environment !== 'local') {
     const deployment = records.find(record => record.id === cycle.deployments[test.environment]);
-    if (deployment?.status !== 'succeeded' || evidence.deploymentId !== deployment.id) return null;
+    if (!currentDeployment(cycle, records, deployment, test.environment) ||
+        evidence.deploymentId !== deployment.id ||
+        evidence.artifactId !== deployment.artifactId) return null;
+    if (evidence.operationId) {
+      const operation = records.find(record => record.type === 'operation' &&
+        record.id === evidence.operationId);
+      if (!operation || !hasCurrentExecutionProof(operation, records) ||
+          operation.resultProof?.status !== operation.status ||
+          operation.resultProof.dispatchId !== operation.id ||
+          operation.resultProof.intendedOutcomeDigest !== operation.intendedOutcome?.digest ||
+          operation.cycleId !== cycle.id || operation.candidateDigest !== cycle.candidateDigest ||
+          operation.action?.configDigest !== cycle.configDigest ||
+          operation.action?.deploymentId !== deployment.id ||
+          operation.action?.artifactId !== deployment.artifactId ||
+          operation.target !== deployment.target) return null;
+    }
   }
   return evidence;
 }
@@ -442,7 +489,12 @@ export function hasStageCompletion(records, cycle, stage, clock = Date) {
   return activeEvents(records, { cycleId: cycle?.id, clock }).some(event =>
     event.effect.completedStage === stage && boundToCycle(event.effect, cycle) &&
     (!['DEV', 'STAGING'].includes(stage) ||
-      (Boolean(cycle.deployments[stage]) && event.effect.deploymentId === cycle.deployments[stage])));
+      (currentDeployment(cycle, records,
+        records.find(record => record.id === cycle?.deployments?.[stage]), stage) &&
+        event.effect.deploymentId === cycle.deployments[stage] &&
+        (event.kind === 'staging-promotion' && stage === 'DEV' ||
+          event.effect.target === records.find(record =>
+            record.id === cycle.deployments[stage])?.target))));
 }
 export function hasEnvironmentGrant(records, cycle, environment, action, clock = Date) {
   const kind = environment === 'DEV' ? 'dev-authorization' : 'staging-promotion';

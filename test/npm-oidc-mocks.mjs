@@ -1,8 +1,39 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { promisify } from 'node:util';
 
 // Simulated runner metadata and registry responses: never actual OIDC or publication evidence.
 if (process.env.TEST_NODE_VERSION) Object.defineProperty(process.versions, 'node', { value: process.env.TEST_NODE_VERSION });
+if (process.platform === 'win32') {
+  const originalExecFileSync = childProcess.execFileSync;
+  const originalExecFile = childProcess.execFile;
+  const fixtureNpm = options => {
+    const root = options?.env?.TEST_NPM_ROOT;
+    if (!root || !options.env.PATH?.split(path.delimiter).includes(path.join(root, 'tools'))) {
+      throw new Error('npm fixture must run from its isolated tool directory');
+    }
+    return path.join(root, 'tools', 'npm');
+  };
+  childProcess.execFileSync = (command, args, options) => {
+    if (command !== 'npm') return originalExecFileSync(command, args, options);
+    return originalExecFileSync(process.execPath,
+      [fixtureNpm(options), ...args], options);
+  };
+  const fixtureExecFile = (command, args, options, callback) =>
+    command === 'npm' ?
+      originalExecFile(process.execPath,
+        [fixtureNpm(options), ...args], options, callback) :
+      originalExecFile(command, args, options, callback);
+  const executeOriginal = promisify(originalExecFile);
+  fixtureExecFile[promisify.custom] = (command, args, options) =>
+    command === 'npm' ?
+      executeOriginal(process.execPath, [fixtureNpm(options), ...args], options) :
+      executeOriginal(command, args, options);
+  childProcess.execFile = fixtureExecFile;
+  syncBuiltinESMExports();
+}
 globalThis.fetch = async (input, options) => {
   const root = process.env.TEST_NPM_ROOT;
   if (!root) throw new Error('npm OIDC mocks require an explicit unit-test root');

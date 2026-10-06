@@ -5,11 +5,18 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { fixture } from './helpers.mjs';
+import { fixture, grant, observeFixtureRepository } from './helpers.mjs';
 import { canonical, digest } from '../src/core.mjs';
 import { atomicWrite, readJson, updateJson, withLock, writeJson, safePath } from '../src/files.mjs';
 import { identity } from '../src/git.mjs';
-import { orderRecordRemovals } from '../src/store.mjs';
+import { Store, orderRecordRemovals } from '../src/store.mjs';
+import { validateRecord } from '../src/schemas.mjs';
+import { repositoryObservationKey, pullRequestObservationKey } from '../src/repository-observations.mjs';
+import { parseArguments, runCli } from '../src/cli.mjs';
+import { attachMonitor, readMonitor } from '../src/monitors.mjs';
+import { currentCycle, currentTestEvidence, stagePassed } from '../src/authority.mjs';
+import { currentArtifact, currentDeployment } from '../src/current-evidence.mjs';
+import { formatAudit, recordAudit, replayAudit } from '../src/audit.mjs';
 
 test('T-16 canonical data, atomic replacement, and deterministic write-boundary failures preserve old/new state', async t => {
   const f = await fixture(t);
@@ -58,7 +65,10 @@ test('T-16 old live locks are never stolen; concurrent revision updates serializ
     if (name.includes('.candidate')) await fs.unlink(path.join(f.root, name));
   }
   const file = path.join(f.root, 'registry.json');
-  await Promise.all(Array.from({ length: 8 }, () => updateJson(file, { revision: 0, count: 0 }, value => ({ ...value, count: value.count + 1 }), { waitMs: 3000 })));
+  const updates = await Promise.allSettled(Array.from({ length: 8 }, () =>
+    updateJson(file, { revision: 0, count: 0 },
+      value => ({ ...value, count: value.count + 1 }), { waitMs: 3000 })));
+  for (const update of updates) if (update.status === 'rejected') throw update.reason;
   assert.deepEqual(await readJson(file), { revision: 8, count: 8 });
   await assert.rejects(updateJson(file, {}, value => value, { expectedRevision: 1 }), { code: 'STALE' });
 });
@@ -140,4 +150,288 @@ test('T-16 revocation removal ordering is bounded for overlapping graphs', () =>
   assert.ok(Date.now() - started < 1000);
   assert.ok(ordered.indexOf('event-base') < ordered.indexOf('event-revoke-30'));
   assert.ok(ordered.indexOf('event-revoke-30') < ordered.indexOf('audit-event-revoke-30'));
+});
+
+test('T-101 two checkout paths sharing a hosted URL preserve separate observation records', async t => {
+  const first = await fixture(t);
+  const second = await fixture(t);
+  const url = 'https://git.example.invalid/team/repo.git';
+  const observedAt = '2026-09-08T00:00:00.000Z';
+  const records = [];
+  for (const f of [first, second]) {
+    await f.runGit('remote', 'set-url', 'origin', url);
+    const store = new Store(f.home, {
+      clock: f.clock,
+      verifyRepository: async context => ({
+        canonicalLocalRepositoryPath: context.localRepositoryPath,
+        verifiedRemoteRepositoryURL: context.remoteRepositoryURL,
+        verifiedProvider: 'fixture', verifiedConnection: 'connection-a',
+        verifiedRepositoryRef: 'repo-a', verifiedRevision: 'a'.repeat(40),
+        verifiedDefaultBranchRef: 'refs/heads/main', verifiedObservedAt: observedAt,
+        verifiedEvidenceRef: 'reference-a',
+      }),
+    });
+    records.push(await store.observeRepository({
+      workItemId: f.workItemId, repositoryId: 'primary',
+      localRepositoryPath: f.repo, remoteRepositoryURL: url,
+      provider: 'fixture', connection: 'connection-a', repositoryRef: 'repo-a',
+      revision: 'a'.repeat(40), defaultBranchRef: 'refs/heads/main',
+      observedAt, evidenceRef: 'reference-a',
+    }));
+    assert.equal((await store.records(f.workItemId))
+      .find(record => record.id === records.at(-1).id).localRepositoryPath, f.repo);
+  }
+  assert.notEqual(records[0].id, records[1].id);
+});
+
+test('T-111 schema1 historical records stay readable while new repository and PR observations validate exact fields', () => {
+  const localRepositoryPath = path.resolve('fixture', 'checkout');
+  const remoteRepositoryURL = 'https://git.example.invalid/team/repo.git';
+  const observation = {
+    localRepositoryPath, remoteRepositoryURL, provider: 'fixture',
+    connection: 'connection-a', repositoryRef: 'repo-a',
+    revision: 'a'.repeat(40), defaultBranchRef: 'refs/heads/main',
+    observedAt: '2026-09-08T00:00:00.000Z', evidenceRef: 'read-a',
+  };
+  const verification = {
+    canonicalLocalRepositoryPath: localRepositoryPath,
+    verifiedRemoteRepositoryURL: remoteRepositoryURL,
+    verifiedProvider: 'fixture', verifiedConnection: 'connection-a',
+    verifiedRepositoryRef: 'repo-a',
+  };
+  const repository = {
+    type: 'repository-observation',
+    id: repositoryObservationKey(observation, verification),
+    workItemId: 'wi-example', repositoryId: 'primary', ...observation,
+  };
+  assert.equal(validateRecord(repository), repository);
+  assert.throws(() => validateRecord({ ...repository, unexpected: true }), { code: 'INPUT' });
+  assert.throws(() => validateRecord({ ...repository, evidenceRef: 'other' }), { code: 'SCHEMA' });
+  const pr = {
+    ...observation, pullRequestRef: 'pr-5',
+    sourceRepositoryURL: 'https://git.example.invalid/team/fork.git',
+    sourceBranchRef: 'refs/heads/main', targetBranchRef: 'refs/heads/main',
+    sourceRevision: 'b'.repeat(40), targetRevision: 'c'.repeat(40),
+    state: 'active', sequence: 1,
+  };
+  delete pr.revision; delete pr.defaultBranchRef;
+  const prRecord = {
+    type: 'pr-observation', id: pullRequestObservationKey(pr, {
+      ...verification, verifiedPullRequestRef: pr.pullRequestRef,
+      verifiedSourceRepositoryURL: pr.sourceRepositoryURL,
+    }),
+    workItemId: 'wi-example', repositoryId: 'primary', ...pr,
+  };
+  assert.equal(validateRecord(prRecord), prRecord);
+  assert.throws(() => validateRecord({ ...prRecord, sequence: 2 }), { code: 'SCHEMA' });
+  const historical = { type: 'pr', id: 'pr-historical', workItemId: 'wi-example',
+    provider: 'fixture', connection: 'connection-a', repositoryId: 'primary',
+    sourceRef: 'refs/heads/main', targetRef: 'refs/heads/main',
+    sourceRevision: 'b'.repeat(40), targetRevision: 'c'.repeat(40),
+    prId: '5', state: 'active' };
+  const before = JSON.stringify(historical);
+  assert.equal(validateRecord(historical), historical);
+  assert.equal(JSON.stringify(historical), before);
+});
+
+test('T-111 old decisions, actions, runs, artifacts, PRs, audits and tests load byte-for-byte without new STAGING credit', async t => {
+  const f = await fixture(t);
+  const { event } = await grant(f, 'scope-inclusion',
+    { itemId: 'historical-item' });
+  const run = await attachMonitor(f.store, {
+    identity: {
+      provider: 'azure-devops', connection: 'fixture',
+      scopeRef: 'project-id:repository-id', definitionRef: '17',
+      executionRef: 'historical-run',
+    },
+    origin: 'framework', schedulerAvailable: true, readAvailable: true,
+  });
+  assert.equal(run.identity.attemptKind, undefined);
+  const cycle = {
+    type: 'cycle', id: 'cycle-historical', workItemId: f.workItemId,
+    generation: 1, candidateDigest: digest('old candidate'),
+    sources: [], configDigest: digest('old config'),
+    testSpecDigest: digest('old plan'),
+    tests: [{
+      id: 'T-historical-staging', environment: 'STAGING',
+      owner: 'user', location: 'authorized-machine',
+      implementation: 'historical-suite',
+    }],
+    results: { 'T-historical-staging': 'evidence-historical' },
+    artifacts: { STAGING: 'artifact-historical' },
+    deployments: { STAGING: 'op-historical-deployment' },
+  };
+  const oldRecords = [
+    cycle,
+    {
+      type: 'operation', id: 'op-historical-action',
+      workItemId: f.workItemId, repositoryId: 'primary', class: 'build',
+      action: { class: 'build' }, target: 'historical-build',
+      status: 'succeeded', correlationKey: 'old-build',
+      requestFingerprint: digest('old build request'), dispatchBound: true,
+      handle: 'historical-run', evidenceRef: 'fixture:old-run',
+    },
+    {
+      type: 'operation', id: 'op-historical-deployment',
+      workItemId: f.workItemId, repositoryId: 'primary', class: 'deploy',
+      action: { class: 'deploy', environment: 'STAGING',
+        target: 'staging-target', artifactId: 'old-package',
+        configDigest: cycle.configDigest },
+      target: 'staging-target', status: 'succeeded',
+      correlationKey: 'old-deploy', requestFingerprint: digest('old deploy request'),
+      dispatchBound: true, cycleId: cycle.id,
+      candidateDigest: cycle.candidateDigest, artifactId: 'old-package',
+      evidenceRef: 'fixture:old-deployment',
+    },
+    {
+      type: 'artifact', id: 'artifact-historical', workItemId: f.workItemId,
+      sequence: 1, cycleId: cycle.id, artifactId: 'old-package',
+      environment: 'STAGING', sourceDigest: cycle.candidateDigest,
+      configDigest: cycle.configDigest, buildRunId: 'historical-run',
+      name: 'package', artifactType: 'archive',
+      evidenceRef: 'fixture:old-artifact', status: 'succeeded',
+    },
+    {
+      type: 'pr', id: 'pr-historical-read', workItemId: f.workItemId,
+      provider: 'azure-devops', connection: 'fixture', repositoryId: 'primary',
+      sourceRef: 'refs/heads/feature', targetRef: 'refs/heads/main',
+      sourceRevision: 'a'.repeat(40), targetRevision: 'b'.repeat(40),
+      prId: '17', state: 'active', evidenceRef: 'fixture:old-pr',
+    },
+    {
+      type: 'test-evidence', id: 'evidence-historical',
+      workItemId: f.workItemId, cycleId: cycle.id,
+      testId: 'T-historical-staging', testSpecDigest: cycle.testSpecDigest,
+      candidateDigest: cycle.candidateDigest, environment: 'STAGING',
+      implementation: 'historical-suite', status: 'Passed',
+      observedAt: new Date(f.clock.now()).toISOString(),
+      activity: 'complete', evidenceRef: 'fixture:old-test',
+      artifactId: 'old-package', deploymentId: 'op-historical-deployment',
+      owner: 'user', host: 'authorized-machine',
+    },
+  ];
+  for (const record of oldRecords) assert.equal(validateRecord(record), record);
+  const oldAudit = await formatAudit(f.store, f.workItemId, [event.id]);
+  await f.runGit('add', '.sdlc');
+  await f.runGit('commit', '-qm', `Audit historical scope decision\n\n${oldAudit.trailers}`);
+  const oldCommit = await f.runGit('rev-parse', 'HEAD');
+  assert.deepEqual((await recordAudit(f.store, {
+    workItemId: f.workItemId, repositoryId: 'primary', commit: oldCommit,
+  })).verified, [event.id]);
+  const oldReference = (await f.store.records(f.workItemId)).find(record =>
+    record.type === 'audit-reference' && record.eventId === event.id);
+  assert.equal(oldReference.commit, oldCommit);
+  const storedBytes = ids => Promise.all(ids.map(id =>
+    fs.readFile(f.store.recordPath(f.workItemId, id))));
+  const oldAuditBytes = await storedBytes([event.id, oldReference.id]);
+  const newDecision = await grant(f, 'scope-inclusion', { itemId: 'current-item' });
+  const newRepository = await observeFixtureRepository(f);
+  const newAudit = await formatAudit(f.store, f.workItemId, [newDecision.event.id]);
+  await f.runGit('commit', '--allow-empty', '-qm',
+    `Audit current scope decision\n\n${newAudit.trailers}`);
+  const newCommit = await f.runGit('rev-parse', 'HEAD');
+  assert.deepEqual((await recordAudit(f.store, {
+    workItemId: f.workItemId, repositoryId: 'primary', commit: newCommit,
+  })).verified, [newDecision.event.id]);
+  const newReference = (await f.store.records(f.workItemId)).find(record =>
+    record.type === 'audit-reference' && record.eventId === newDecision.event.id);
+  assert.deepEqual(await storedBytes([event.id, oldReference.id]), oldAuditBytes);
+  await f.store.transaction(f.workItemId, tx => {
+    for (const record of oldRecords) tx.put(record);
+  });
+  const oldIds = [event.id, oldReference.id, ...oldRecords.map(record => record.id)];
+  const oldBytes = await storedBytes(oldIds);
+  const ids = [...oldIds, newDecision.event.id, newRepository.id, newReference.id];
+  const before = await storedBytes(ids);
+  const checkpointPath = path.join(f.store.workPath(f.workItemId), 'checkpoint.json');
+  const checkpointBefore = await fs.readFile(checkpointPath);
+  const monitorPath = path.join(f.store.runtime, 'pipeline-monitors', `${run.key}.json`);
+  const monitorBefore = await fs.readFile(monitorPath);
+  const recoveryToken = await f.store.beginRecovery(f.workItemId);
+  const reopened = await new Store(f.home, { clock: f.clock }).ready();
+  const loaded = await reopened.load(f.workItemId);
+  assert.equal(loaded.recoveryRequired, true);
+  const historical = await reopened.records(f.workItemId);
+  assert.deepEqual(historical.filter(record => ids.includes(record.id))
+    .map(record => record.id).sort(), [...ids].sort());
+  for (const record of oldRecords) assert.deepEqual(
+    historical.find(item => item.id === record.id), record);
+  assert.equal(historical.find(item => item.id === event.id).digest, event.digest);
+  assert.deepEqual(historical.find(item => item.id === oldReference.id), oldReference);
+  assert.equal(historical.find(item => item.id === newRepository.id).remoteRepositoryURL,
+    'https://example.invalid/repository.git');
+  assert.deepEqual(await readMonitor(reopened, run.key), run);
+  const credited = state => {
+    const current = currentCycle(state.records, state.checkpoint);
+    assert.equal(current.id, cycle.id);
+    return {
+      artifact: currentArtifact(current, state.records,
+        state.records.find(record => record.id === 'artifact-historical')),
+      deployment: currentDeployment(current, state.records,
+        state.records.find(record => record.id === 'op-historical-deployment'),
+        'STAGING'),
+      test: currentTestEvidence(current, state.records, current.tests[0], f.clock),
+      stage: stagePassed(current, state.records, 'STAGING', f.clock),
+      operations: state.records.filter(record => record.type === 'operation')
+        .map(record => ({ id: record.id, status: record.status })).sort((a, b) =>
+          a.id.localeCompare(b.id)),
+      testEvidence: state.records.filter(record => record.type === 'test-evidence')
+        .map(record => ({ id: record.id, status: record.status })),
+    };
+  };
+  const beforeCredit = credited(loaded);
+  assert.deepEqual(beforeCredit, {
+    artifact: false, deployment: false, test: null, stage: false,
+    operations: [
+      { id: 'op-historical-action', status: 'succeeded' },
+      { id: 'op-historical-deployment', status: 'succeeded' },
+    ],
+    testEvidence: [{ id: 'evidence-historical', status: 'Passed' }],
+  });
+  const auditBefore = await replayAudit(f.store, f.workItemId);
+  const auditAfter = await replayAudit(reopened, f.workItemId);
+  for (const replay of [auditBefore, auditAfter]) {
+    assert.deepEqual(replay.events.map(record => ({
+      id: record.id, sequence: record.sequence,
+    })), [
+      { id: event.id, sequence: event.sequence },
+      { id: newDecision.event.id, sequence: newDecision.event.sequence },
+    ]);
+    assert.deepEqual(replay.locations.map(entry => ({
+      eventId: entry.eventId, commit: entry.commit,
+    })), [
+      { eventId: event.id, commit: oldCommit },
+      { eventId: newDecision.event.id, commit: newCommit },
+    ]);
+    assert.deepEqual(replay.gaps, []);
+  }
+  assert.deepEqual(credited(await reopened.load(f.workItemId)), beforeCredit);
+  assert.deepEqual(await storedBytes(oldIds), oldBytes);
+  assert.deepEqual(await storedBytes(ids), before);
+  assert.deepEqual(await fs.readFile(checkpointPath), checkpointBefore);
+  assert.deepEqual(await fs.readFile(monitorPath), monitorBefore);
+  await reopened.completeRecovery(f.workItemId, recoveryToken);
+  assert.equal((await reopened.load(f.workItemId)).recoveryRequired, false);
+  assert.deepEqual(credited(await reopened.load(f.workItemId)), beforeCredit);
+});
+
+test('--evidence-file is a valued monitor-observe-only option and cannot override a JSON path', async t => {
+  assert.deepEqual(parseArguments(['monitor', 'observe', '--evidence-file', 'observation.json'])
+    .flags, { 'evidence-file': 'observation.json' });
+  assert.throws(() => parseArguments(['monitor', 'observe', '--evidence-file']), { code: 'INPUT' });
+  const f = await fixture(t);
+  await assert.rejects(runCli(['monitor', 'observe',
+    '--evidence-file', 'intended.json', '--home', f.home,
+    '--cwd', f.repo], {
+    stdin: { isTTY: false, async *[Symbol.asyncIterator]() {
+      yield JSON.stringify({ evidenceFilePath: 'different.json' });
+    } },
+  }), { code: 'INPUT' });
+  await assert.rejects(runCli(['monitor', 'observe', '--home', f.home,
+    '--cwd', f.repo], {
+    stdin: { isTTY: false, async *[Symbol.asyncIterator]() {
+      yield JSON.stringify({ evidenceFilePath: 'different.json' });
+    } },
+  }), { code: 'INPUT' });
+  assert.equal((await fs.readdir(f.root)).includes('different.json'), false);
 });

@@ -24,6 +24,18 @@ Every adapter returns:
 framework. Their meaning and construction must be deterministic within the
 adapter. Do not use display names when the provider supplies stable IDs.
 
+For a new hosted execution or environment-test result, supply the complete
+verified `executionIdentity`, including an explicit `attemptKind`: `known`
+with the actual `attemptRef`, or `not-applicable` only when the adapter proves
+that this execution kind has no distinct attempts. Missing identity is not a
+legacy compatibility shortcut for newly reported results.
+
+A trusted result verifier may additionally return `executionContext` with
+the independently proven provider, connection, execution scope, definition
+and attempt capability. Both initial result recording and reconciliation
+compare that context with the result identity. Do not derive execution scope
+from a repository ID or copy untrusted result fields to create their own proof.
+
 ## Adapter interface
 
 Register an adapter before monitor link verification:
@@ -95,6 +107,36 @@ host integrations import the exported adapter, monitor, and Store modules,
 initialize the Store for the selected Copilot home, and register an adapter
 before calling the monitor API in the same process. Registration is process-local and
 does not modify a separately launched CLI process.
+
+For offline CLI commands that require verified provider facts, a trusted host
+can import `runCli` from `ai-sdlc-framework/cli` and supply `createStore`.
+That function receives the selected Copilot home and returns a `Store`
+constructed with the host's trusted verifier functions. The ordinary
+`bin/sdlc.mjs` command has no such verifiers and rejects unverified provider
+facts. Neither CLI JSON nor repository configuration can supply executable
+adapter code. The host remains responsible for any provider reads; the
+framework dispatcher makes no network call.
+
+If a Git remote has different fetch and push URLs, the trusted host can
+verify the actual push URL through `repository observe` with `pushURL:true`.
+The default observation continues to use the fetch URL. The hosting service
+must verify the exact push destination; similar-looking HTTPS and SSH URLs
+are not assumed equivalent, and observing either URL grants no publication
+permission.
+For an early-draft document-only push, the adapter also verifies one
+`verifiedBranch:{branchRef,revision}` pair from the hosted repository: the
+named full branch ref pointed to that exact commit when observed. A default
+branch name and an unrelated revision cannot substitute for this pair.
+For an early-draft PR, verify the pair against the repository hosting the PR,
+not the source fork's push destination.
+
+For a host that proves a unique tool-call ID, import `prepareOperation` from
+`ai-sdlc-framework/operations`. Pass the documented host adapter contract
+and the host-proven call ID as its third, in-process argument. Preparation
+stores only their binding digests; the verified provider-call result must
+return the same call ID. `op prepare` JSON and hook payloads cannot supply
+this proof. Without a trusted host ID or a provider-proven request link, a
+matching provider result remains uncertain.
 
 ## Azure DevOps reference adapter
 
