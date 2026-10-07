@@ -531,6 +531,35 @@ the native gate; pending T-60 content completeness blocks publication.
 - `test/`: deterministic framework tests and the calculator dry run
 - `.github/workflows/`: validation, scoped release candidates, and explicit live acceptance
 
+## Developer test commands
+
+Requires Node.js 22 or later; no dependency installation is needed.
+
+```text
+npm run test:unit
+npm run test:targeted -- test/pr.test.mjs test/deployment.test.mjs
+npm run test:targeted -- --name "T-130" test/test-runner.test.mjs
+npm test
+npm run test:full
+npm run test:coverage
+```
+
+`test:unit` is the canonical fast 16-case selection, including small adapter
+fixtures. It is fast feedback, **not full validation**. `npm test` and
+`test:full` both discover every top-level `test/*.test.mjs` file. Coverage uses
+that same complete selection. Targeted commands accept explicit test filenames,
+including quoted filenames containing spaces, without shell wildcard expansion.
+
+File workers default to the smaller of 16 and the available CPU count. Set
+`SDLC_TEST_WORKERS` or pass `--workers N` after npm's `--` to select 1-32 workers;
+the explicit option takes precedence. Test files remain separate Node processes.
+Output records the exact selection, configured worker limit, Node executable,
+version, platform/architecture, elapsed milliseconds and actual exit code.
+Missing/invalid files or worker settings and failing child tests fail the command.
+
+See [test-performance evidence and acceptance](docs/test-performance/test-plan.md)
+for measurement gates; exposing the fast selection alone is not a speedup claim.
+
 ## Current limits
 
 - Hooks are advisory event handlers, not a security boundary.
