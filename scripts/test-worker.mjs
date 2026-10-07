@@ -29,7 +29,8 @@ try {
   // Explicit files bypass CLI sorting; cancellation disposes active file processes.
   const tests = run({ ...options, signal: cancellation.signal });
   tests.on('test:fail', () => { process.exitCode ||= 1; });
-  await pipeline(tests, new spec(), process.stdout);
+  // Ending an inherited POSIX capture socket also shuts down the parent's output.
+  await pipeline(tests, new spec(), process.stdout, { end: false });
 } finally {
   process.off('SIGINT', interrupt);
   process.off('SIGTERM', terminate);
