@@ -14,6 +14,57 @@ defaults:
     working-directory: source
 
 jobs:
+  test-command-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm run test:unit
+      - run: npm run test:targeted -- test/test-runner.test.mjs
+      - name: Create an owned test filename containing spaces
+        id: fixture
+        shell: bash
+        run: |
+          node --input-type=module -e '
+            import * as fs from "node:fs/promises";
+            import path from "node:path";
+            const directory = await fs.mkdtemp(path.join("test", ".command-smoke-"));
+            const file = path.join(directory, "test with spaces.test.mjs");
+            try {
+              await fs.writeFile(file, `import test from "node:test"; test("portable public command", () => {});`);
+              await fs.appendFile(process.env.GITHUB_OUTPUT, `file=${file}\n`);
+            } catch (error) {
+              await fs.rm(directory, {recursive: true, force: true});
+              throw error;
+            }
+          '
+      - name: Exercise the public targeted command without a shell glob
+        shell: bash
+        env:
+          SMOKE_FILE: ${{ steps.fixture.outputs.file }}
+        run: npm run test:targeted -- "$SMOKE_FILE"
+      - name: Remove the owned filename and its empty directory
+        if: ${{ always() && steps.fixture.outputs.file != '' }}
+        shell: bash
+        env:
+          SMOKE_FILE: ${{ steps.fixture.outputs.file }}
+        run: |
+          node --input-type=module -e '
+            import * as fs from "node:fs/promises";
+            import path from "node:path";
+            await fs.unlink(process.env.SMOKE_FILE);
+            await fs.rmdir(path.dirname(process.env.SMOKE_FILE));
+          '
   validate-package:
     runs-on: ubuntu-24.04
     timeout-minutes: 20

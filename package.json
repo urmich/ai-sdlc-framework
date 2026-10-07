@@ -20,8 +20,11 @@
     "sdlc": "./bin/sdlc.mjs"
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs",
-    "test:coverage": "node --test --experimental-test-coverage test/*.test.mjs",
+    "test": "node scripts/test-runner.mjs full",
+    "test:unit": "node scripts/test-runner.mjs unit",
+    "test:targeted": "node scripts/test-runner.mjs targeted",
+    "test:full": "node scripts/test-runner.mjs full",
+    "test:coverage": "node scripts/test-runner.mjs coverage",
     "check": "node scripts/check.mjs",
     "package:artifact": "node scripts/package.mjs",
     "package:platforms": "node scripts/package-platforms.mjs",
