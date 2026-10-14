@@ -4,6 +4,8 @@ import { exists, readBytes, readJson } from './files.mjs';
 import { artifactDocumentId, artifactPath, artifactRepositoryId,
   currentTestSpecification, parseRequirements, parseTestPlan } from './artifacts.mjs';
 import { activeEvents, applicableOverride, currentCycle, currentTestEvidence, hasStagingCompletion, reviewPassed } from './authority.mjs';
+import { cycleTests, requireCatalogSpecification } from './validation-catalog.mjs';
+import { resolveTestSpecification } from './artifacts.mjs';
 import { replayAudit } from './audit.mjs';
 import { verifyEvent } from './decisions.mjs';
 import { validateCheckpoint } from './store.mjs';
@@ -163,13 +165,14 @@ async function evidenceChecks(store, state, report) {
   const candidateCurrent = candidateContentDigest(await candidateSnapshot(
     state.metadata, state.manifest)) === cycle.candidateDigest;
   const specificationCurrent = await currentTestSpecification(store,
-    state.checkpoint.workItemId, cycle.tests) === cycle.testSpecDigest;
+    state.checkpoint.workItemId, cycleTests(cycle)) === cycle.testSpecDigest;
+  requireCatalogSpecification(cycle, await resolveTestSpecification(store, state.checkpoint.workItemId));
   report('candidate-identity', candidateCurrent ? 'satisfied' : 'unverified',
     'Current implementation content must match the validation candidate');
   report('test-specification-identity',
     specificationCurrent ? 'satisfied' : 'unverified',
     'Current Test Plan specification must match the validation cycle');
-  for (const test of cycle.tests) {
+  for (const test of cycleTests(cycle)) {
     const result = currentTestEvidence(cycle, state.records, test, store.clock);
     if (!result || result.status === 'NotRun') { report(`test:${test.id}`, 'unverified', 'No conclusive current-cycle result; NotRun is not a pass'); continue; }
     report(`test:${test.id}`, result.status === 'Failed' ? 'violation' : result.evidenceRef ? 'satisfied' : 'unverified',
@@ -187,7 +190,7 @@ async function evidenceChecks(store, state, report) {
   report('candidate-review', reviewPassed(cycle, state.records, store.clock) ? 'satisfied' :
     review?.effect.status === 'ChangesRequired' ? 'violation' : 'unverified',
   'Current candidate needs passing GitHub Copilot CLI /review evidence');
-  const stagingTests = cycle.tests.some(test => test.environment === 'STAGING');
+  const stagingTests = cycleTests(cycle).some(test => test.environment === 'STAGING');
   if (stagingTests) {
     report('staging-completion', hasStagingCompletion(state.records, cycle, store.clock) ? 'satisfied' : 'unverified',
       'Every planned STAGING test needs passing deployment-bound evidence and explicit completion confirmation');

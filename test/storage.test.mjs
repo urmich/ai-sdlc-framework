@@ -1,13 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
+import fsPromises from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fixture, grant, observeFixtureRepository } from './helpers.mjs';
 import { canonical, digest } from '../src/core.mjs';
-import { atomicWrite, readJson, updateJson, withLock, writeJson, safePath } from '../src/files.mjs';
+import { atomicWrite, readBytes, readJson, updateJson, withLock, writeJson, safePath } from '../src/files.mjs';
 import { identity } from '../src/git.mjs';
 import { Store, orderRecordRemovals } from '../src/store.mjs';
 import { validateRecord } from '../src/schemas.mjs';
@@ -31,6 +33,54 @@ test('T-16 canonical data, atomic replacement, and deterministic write-boundary 
     assert.equal(await fs.readFile(file, 'utf8'), ['replaced', 'directory-flushed'].includes(boundary) ? 'new' : 'old');
   }
   assert.equal((await fs.readdir(f.root)).filter(name => name.includes('.write-')).length, 0);
+});
+test('T-16 bounded file confirmation tolerates settling metadata but rejects content changes and continued churn', async t => {
+  for (const scenario of ['settling-metadata', 'changing-content', 'changing-identity', 'changing-size', 'continued-churn']) {
+    await t.test(scenario, async child => {
+      const f = await fixture(child);
+      const file = path.join(f.root, 'bounded-confirmation.json');
+      const original = Buffer.from('unchanged');
+      await fs.writeFile(file, original);
+      const open = fsPromises.open;
+      const times = scenario === 'settling-metadata' ? [0n, 1n, 2n, 2n] :
+        scenario === 'continued-churn' ? [0n, 1n, 2n, 3n] : [0n, 1n, 1n, 1n];
+      let stats = 0;
+      const mocked = child.mock.method(fsPromises, 'open', async (selected, ...options) => {
+        const handle = await open(selected, ...options);
+        if (selected === file) {
+          const stat = handle.stat.bind(handle);
+          handle.stat = async (...args) => {
+            if (scenario === 'changing-content' && stats === 1) {
+              await fs.writeFile(file, 'modified!');
+            }
+            const observed = await stat(...args);
+            const index = stats++;
+            const time = times[Math.min(index, times.length - 1)];
+            return Object.assign(Object.create(Object.getPrototypeOf(observed)),
+              observed, {
+                mtimeNs: 1000n + time, ctimeNs: 2000n + time,
+                ino: observed.ino + (scenario === 'changing-identity' && index >= 2 ? 1n : 0n),
+                size: observed.size + (scenario === 'changing-size' && index >= 2 ? 1n : 0n),
+              });
+          };
+        }
+        return handle;
+      });
+      syncBuiltinESMExports();
+      try {
+        if (scenario === 'settling-metadata') {
+          assert.deepEqual(await readBytes(file, original.length), original);
+          assert.equal(stats, 4);
+        } else {
+          await assert.rejects(readBytes(file, original.length), { code: 'STALE' });
+          assert.ok(stats <= 4, 'Metadata confirmation must remain bounded');
+        }
+      } finally {
+        mocked.mock.restore();
+        syncBuiltinESMExports();
+      }
+    });
+  }
 });
 test('T-16 old live locks are never stolen; concurrent revision updates serialize', async t => {
   const f = await fixture(t);
@@ -71,6 +121,40 @@ test('T-16 old live locks are never stolen; concurrent revision updates serializ
   for (const update of updates) if (update.status === 'rejected') throw update.reason;
   assert.deepEqual(await readJson(file), { revision: 8, count: 8 });
   await assert.rejects(updateJson(file, {}, value => value, { expectedRevision: 1 }), { code: 'STALE' });
+});
+test('T-16 a changing recovery-guard owner remains contention without stealing ownership', async t => {
+  const f = await fixture(t);
+  const lock = path.join(f.root, 'changing-owner.lock');
+  const guard = `${lock}.recovery-guard`;
+  const ownerFile = path.join(guard, 'owner.json');
+  const owner = { token: 'original', host: os.hostname(), pid: process.pid };
+  await writeJson(ownerFile, owner);
+  const lstat = fsPromises.lstat;
+  let changed = false;
+  let actionRan = false;
+  const mocked = t.mock.method(fsPromises, 'lstat', async (file, options) => {
+    const stat = await lstat(file, options);
+    if (file === ownerFile && options?.bigint && !changed) {
+      changed = true;
+      await writeJson(ownerFile, { ...owner, token: 'replacement' });
+    }
+    return stat;
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(withLock(lock, () => { actionRan = true; },
+      { waitMs: 0 }), { code: 'LOCK_BUSY' });
+    assert.equal(changed, true);
+    assert.equal(actionRan, false);
+    assert.equal((await readJson(ownerFile)).token, 'replacement');
+    await assert.rejects(fs.stat(lock), { code: 'ENOENT' });
+  } finally {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+    await fs.unlink(ownerFile);
+    await fs.rmdir(guard);
+  }
+  assert.equal(await withLock(lock, () => 'guard available'), 'guard available');
 });
 test('T-48 batch work-item locks are acquired before any invalidation action', async t => {
   const f = await fixture(t);

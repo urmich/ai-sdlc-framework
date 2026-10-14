@@ -8,6 +8,7 @@ import { validateManifest } from './schemas.mjs';
 import { HOST_PLATFORMS, SHELL_FAMILIES, sameNativePath } from './platform.mjs';
 import { STAGING_OWNERS } from './staging.mjs';
 import { validateToolAdapter } from './tool-arguments.mjs';
+import { cycleTests, objectReference } from './validation-catalog.mjs';
 
 export const ROLES = ['requirements', 'test-plan', 'technical-design'];
 export function artifactRepositoryId(locator, manifest) {
@@ -388,7 +389,22 @@ export async function resolveTestSpecification(store, workItemId, suppliedTests)
         plan: testSpecificationDigest(document.contents),
       })),
     });
+  const sourceSnapshots = documents.map(document => ({
+    schemaVersion: 1, kind: 'specification-snapshot', workItemId,
+    locator: document.locatorKey, contents: document.contents,
+  }));
   return { tests: planned, digest: specificationDigest,
+    sourceSnapshots,
+    bindings: documents.map((document, index) => ({
+      locator: document.specificationKey,
+      specificationDigest: testSpecificationDigest(document.contents),
+      snapshotRef: objectReference(sourceSnapshots[index]),
+      ...(document.bindingDigest ? { bindingDigest: document.bindingDigest } : {}),
+    })),
+    traceability: documents.flatMap(document => parseTestPlan(document.contents)
+      .filter(test => !test.outOfScope).map(test => ({
+        testId: test.id, requirements: test.requirements ?? [], conditions: test.conditions ?? [],
+      }))),
     plans: documents.map(document => ({
       locator: document.locatorKey,
       testIds: document.tests.map(test => test.id),
@@ -404,7 +420,7 @@ export async function synchronizeTestPlan(store, workItemId, transactionOptions 
     const documents = await testPlanDocuments(store, workItemId, tx.manifest, tx.metadata);
     requireThat(documents.length > 0, 'ARTIFACT',
       'The Test Plan locator is unavailable; evidence remains pending synchronization');
-    const statuses = new Map(cycle.tests.map(test =>
+    const statuses = new Map(cycleTests(cycle).map(test =>
       [test.id, currentTestEvidence(cycle, tx.all(), test, store.clock)?.status ?? 'NotRun']));
     let changed = false;
     for (const definition of documents) {

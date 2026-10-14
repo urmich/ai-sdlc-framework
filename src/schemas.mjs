@@ -5,6 +5,8 @@ import { validatePullRequestObservation, validateRepositoryObservation } from '.
 import { validateCurrentExecutionIdentity, validateExecutionResultIdentity } from './provider-adapters.mjs';
 import { hasImmutableArtifactIdentity } from './current-evidence.mjs';
 import { validateArtifactResultIdentity } from './external-results.mjs';
+import { validateObjectReference } from './validation-catalog.mjs';
+import { validateResetBarrier } from './validation-evidence.mjs';
 
 const FIELDS = {
   event: ['schemaVersion', 'sequence', 'kind', 'effect', 'sourceReceiptId', 'sourceReceiptDigest', 'inputDigest', 'sessionId', 'repositoryIds', 'snapshots', 'occurredAt', 'digest'],
@@ -14,14 +16,17 @@ const FIELDS = {
     'retryOverrideId', 'priorUncertainOperationId', 'dispatchStartedAt', 'handle', 'evidenceRef', 'expectedMet', 'providerStatus', 'updatedAt', 'candidateStamp',
     'terminalSequence', 'deploymentSequence', 'stageOverride', 'dispatchAmbiguous',
     'environmentBoundaryApplied', 'reservedEventIds', 'intendedOutcome',
-    'intendedOutcomeGap', 'hostInvocation', 'resultProof', 'resultGap'],
+    'intendedOutcomeGap', 'hostInvocation', 'resultProof', 'resultGap',
+    'testResetBarrier', 'executionSourceRef'],
   reservation: ['eventId', 'operationId'],
   cycle: ['generation', 'candidateDigest', 'sources', 'configDigest', 'testSpecDigest', 'tests', 'results', 'artifacts',
     'deployments', 'reviewRef', 'step', 'pendingPlanSync', 'cause', 'createdAt', 'lastEvidenceSequence',
     'assuranceInvalidated', 'invalidatedEnvironments',
-    'environmentInvalidationSequences', 'lastDeploymentSequence'],
+    'environmentInvalidationSequences', 'lastDeploymentSequence', 'storageVersion',
+    'testCatalogRef', 'testOutcomeRef', 'resultBarriers'],
   'test-evidence': ['sequence', 'cycleId', 'testId', 'testSpecDigest', 'candidateDigest', 'environment', 'implementation',
-    'status', 'observedAt', 'activity', 'evidenceRef', 'runId', 'artifactId', 'deploymentId', 'operationId', 'expectedMet', 'owner', 'host', 'eventId'],
+    'status', 'observedAt', 'activity', 'evidenceRef', 'runId', 'artifactId', 'deploymentId', 'operationId', 'expectedMet', 'owner', 'host', 'eventId',
+    'configDigest', 'executionSources', 'executionSourceDigest', 'retainedPayloadRef', 'operationDigest', 'operationState'],
   artifact: ['sequence', 'selectedAt', 'cycleId', 'artifactId', 'environment', 'sourceDigest', 'configDigest', 'buildRunId', 'name', 'artifactType', 'evidenceRef', 'status',
     'repositoryId', 'localRepositoryPath', 'remoteRepositoryURL',
     'provider', 'connection', 'repositoryRef',
@@ -104,6 +109,19 @@ export function validateRecord(record) {
     requireThat(expected === digest(content), 'DIGEST', 'Effective event content digest mismatch');
   }
   if (record.type === 'operation') {
+    if (record.executionSourceRef !== undefined) {
+      requireThat(record.class === 'test' && typeof record.cycleId === 'string',
+        'SCHEMA', 'Test dispatch source must belong to a validation-cycle operation');
+      validateObjectReference(record.executionSourceRef);
+    }
+    if (record.testResetBarrier !== undefined) {
+      const barrier = record.testResetBarrier;
+      validateResetBarrier(barrier);
+      requireThat(record.class === 'test' && barrier.operationId === record.id &&
+        Number.isSafeInteger(barrier.sequence) && barrier.sequence >= 0 &&
+        Number.isSafeInteger(barrier.eventSequence) && barrier.eventSequence >= 0 &&
+        Number.isFinite(Date.parse(barrier.at)), 'SCHEMA', 'Dispatch reset barrier differs from its operation');
+    }
     choice(record.status, ['prepared', 'dispatching', 'submitted', 'running', 'uncertain', 'succeeded', 'failed', 'cancelled', 'not-started'], 'operation state');
     for (const field of ['repositoryId', 'class', 'target', 'requestFingerprint', 'correlationKey']) text(record[field], field);
     requireThat(typeof record.dispatchBound === 'boolean', 'SCHEMA', 'Operation dispatch binding must be explicit');
@@ -200,11 +218,46 @@ export function validateRecord(record) {
       'SCHEMA', 'Operation deployment sequence is invalid');
   }
   if (record.type === 'cycle') {
-    requireThat(Number.isSafeInteger(record.generation) && record.generation > 0 && Array.isArray(record.tests) && Array.isArray(record.sources), 'SCHEMA', 'Invalid validation-cycle schema');
+    requireThat(Number.isSafeInteger(record.generation) && record.generation > 0 && Array.isArray(record.sources), 'SCHEMA', 'Invalid validation-cycle schema');
     for (const field of ['candidateDigest', 'configDigest', 'testSpecDigest']) text(record[field], field);
-    for (const field of ['results', 'artifacts', 'deployments']) requireThat(record[field] && typeof record[field] === 'object' && !Array.isArray(record[field]), 'SCHEMA', `Invalid cycle ${field}`);
+    if (record.storageVersion === 2) {
+      requireThat(record.tests === undefined && record.results === undefined &&
+        record.resultBarriers === undefined, 'SCHEMA', 'Referenced cycles cannot embed definitions or results');
+      validateObjectReference(record.testCatalogRef);
+      validateObjectReference(record.testOutcomeRef);
+    } else {
+      requireThat(record.storageVersion === undefined && Array.isArray(record.tests) &&
+        record.testCatalogRef === undefined && record.testOutcomeRef === undefined,
+      'SCHEMA', 'Inline cycle storage is invalid');
+      requireThat(record.results && typeof record.results === 'object' && !Array.isArray(record.results),
+        'SCHEMA', 'Invalid cycle results');
+      if (record.resultBarriers !== undefined) {
+        requireThat(record.resultBarriers && typeof record.resultBarriers === 'object' &&
+          !Array.isArray(record.resultBarriers), 'SCHEMA', 'Cycle reset barriers must be keyed by test');
+        for (const [testId, barrier] of Object.entries(record.resultBarriers)) {
+          id(testId); validateResetBarrier(barrier);
+        }
+      }
+    }
+    for (const field of ['artifacts', 'deployments']) requireThat(record[field] && typeof record[field] === 'object' && !Array.isArray(record[field]), 'SCHEMA', `Invalid cycle ${field}`);
   }
-  if (record.type === 'test-evidence') choice(record.status, ['NotRun', 'Passed', 'Failed'], 'test outcome');
+  if (record.type === 'test-evidence') {
+    choice(record.status, ['NotRun', 'Passed', 'Failed'], 'test outcome');
+    if (record.retainedPayloadRef !== undefined) validateObjectReference(record.retainedPayloadRef);
+    if (record.executionSources !== undefined) {
+      requireThat(Array.isArray(record.executionSources) &&
+        record.executionSourceDigest === digest(record.executionSources) &&
+        typeof record.configDigest === 'string', 'EVIDENCE', 'Execution source identity is invalid');
+    }
+    if (record.operationDigest !== undefined) requireThat(/^[a-f0-9]{64}$/u.test(record.operationDigest),
+      'EVIDENCE', 'Operation proof commitment is invalid');
+    if (record.operationState !== undefined) {
+      requireThat(record.status === 'NotRun' && typeof record.operationId === 'string', 'EVIDENCE',
+        'Operation progress state belongs only to nonconclusive test evidence');
+      choice(record.operationState, ['dispatching', 'submitted', 'running', 'succeeded', 'failed', 'cancelled'],
+        'observed test operation state');
+    }
+  }
   if (record.type === 'artifact') {
     requireThat(Number.isSafeInteger(record.sequence) && record.sequence > 0,
       'SCHEMA', 'Artifact selection sequence is invalid');

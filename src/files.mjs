@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -57,16 +58,64 @@ export async function safePath(root, relative) {
 export async function privateDirectory(directory) {
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
 }
+async function boundedHandleBytes(handle, limit, file) {
+  const chunks = [];
+  let size = 0;
+  while (true) {
+    const chunk = Buffer.alloc(Math.min(65536, limit + 1 - size));
+    const { bytesRead } = await handle.read(chunk, 0, chunk.length, size);
+    if (!bytesRead) break;
+    size += bytesRead;
+    requireThat(size <= limit, 'CAPACITY', `File grew beyond ${limit} bytes: ${file}`);
+    chunks.push(chunk.subarray(0, bytesRead));
+  }
+  return Buffer.concat(chunks, size);
+}
 export async function readBytes(file, limit = LIMITS.input) {
   if (file instanceof URL) file = fileURLToPath(file);
   requireThat(sameNativePath(await canonicalPath(file), path.resolve(file)), 'PATH', `Refusing an unresolved symlink read: ${file}`);
-  const handle = await fs.open(file, 'r');
+  const before = await fs.lstat(file, { bigint: true });
+  requireThat(before.isFile() && !before.isSymbolicLink(), 'PATH', 'Read requires a regular non-link file');
+  // Parent-directory/junction races still require a stronger host filesystem contract.
+  const handle = await fs.open(file, fsConstants.O_RDONLY |
+    (process.platform === 'win32' ? 0 : fsConstants.O_NOFOLLOW));
   try {
-    const stat = await handle.stat();
-    requireThat(stat.isFile() && stat.size <= limit, 'CAPACITY', `File is not regular or exceeds ${limit} bytes: ${file}`);
-    const result = await handle.readFile();
-    requireThat(result.length <= limit, 'CAPACITY', `File grew beyond ${limit} bytes: ${file}`);
-    return result;
+    const stat = await handle.stat({ bigint: true });
+    requireThat(stat.isFile() && stat.dev === before.dev && stat.ino === before.ino,
+      'STALE', 'File identity changed while opening');
+    requireThat(stat.size <= BigInt(limit), 'CAPACITY', `File exceeds ${limit} bytes: ${file}`);
+    const bytes = await boundedHandleBytes(handle, limit, file);
+    let after = await handle.stat({ bigint: true });
+    if (after.mtimeNs !== stat.mtimeNs || after.ctimeNs !== stat.ctimeNs) {
+      let settled = false;
+      // Bound metadata settling; content or identity changes are never retried.
+      for (let confirmation = 0; confirmation < 2; confirmation++) {
+        const confirmationStart = after;
+        const confirmed = await boundedHandleBytes(handle, limit, file);
+        const confirmationEnd = await handle.stat({ bigint: true });
+        requireThat(confirmationEnd.isFile() &&
+          confirmationEnd.dev === stat.dev &&
+          confirmationEnd.ino === stat.ino &&
+          confirmationEnd.size === stat.size &&
+          confirmationEnd.size === confirmationStart.size,
+        'STALE', 'File identity or size changed during bounded confirmation');
+        requireThat(bytes.equals(confirmed), 'STALE', 'File content changed during bounded read');
+        after = confirmationEnd;
+        if (confirmationEnd.mtimeNs === confirmationStart.mtimeNs &&
+            confirmationEnd.ctimeNs === confirmationStart.ctimeNs) {
+          settled = true;
+          break;
+        }
+      }
+      requireThat(settled, 'STALE', 'File metadata did not settle during bounded confirmation');
+    }
+    const selected = await fs.lstat(file, { bigint: true });
+    requireThat(after.size === stat.size && BigInt(bytes.length) === stat.size &&
+      selected.dev === stat.dev &&
+      selected.ino === stat.ino && !selected.isSymbolicLink() &&
+      sameNativePath(await canonicalPath(file), path.resolve(file)),
+    'STALE', 'File changed during bounded read');
+    return bytes;
   } finally { await handle.close(); }
 }
 export async function readJson(file, { optional = false, limit = LIMITS.input } = {}) {
@@ -164,7 +213,7 @@ async function withRecoveryGuard(file, action) {
           optional: true,
           limit: 2048,
         }).catch(readError => {
-          if (['ENOENT', 'JSON'].includes(readError.code)) return null;
+          if (['ENOENT', 'JSON', 'STALE'].includes(readError.code)) return null;
           // A Windows reader can race with removal of the guard directory.
           if (competingWindowsLockRead(readError)) return null;
           throw readError;

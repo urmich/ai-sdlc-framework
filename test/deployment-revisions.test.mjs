@@ -117,9 +117,9 @@ test('an empty commit cannot reuse a prior deployment for environment admissions
   await assert.rejects(recordTest(f.store, {
     ...stagingResult, evidenceRef: 'fixture:staging-test-B',
   }), { code: 'STALE' });
-  await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id,
+  await assert.rejects(recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id,
     testId: 'T-unit', status: 'Passed', expectedMet: true,
-    owner: 'agent', host: 'local', evidenceRef: 'fixture:local-B' });
+    owner: 'agent', host: 'local', evidenceRef: 'fixture:local-B' }), { code: 'STALE' });
   const historicalResult = await finishFixtureOperation(f,
     delayedDevTest.operation, { alreadyDispatched: true });
   assert.equal(historicalResult.status, 'succeeded');

@@ -397,6 +397,7 @@ test('T-12/T-20 once-only unit-first override remains usable at evidence recordi
     cycleId: cycle.id, testId: 'T-integration', operationId: 'fabricated-operation',
     status: 'Passed', expectedMet: true, evidenceRef: 'fixture:mismatched-operation',
     owner: 'agent', host: 'local' }), { code: 'OPERATION' });
+  await fs.unlink(path.join(f.store.workPath(f.workItemId), 'evidence', 'fabricated-operation.json'));
   await fs.writeFile(path.join(f.repo, 'new-cycle.mjs'), 'export const next = true;\n');
   const next = await startCycle(f.store, { workItemId: f.workItemId,
     configDigest: 'v1', cause: 'new cycle after once-only execution' });

@@ -150,7 +150,14 @@ export async function verifyNetworkNegativeControls(boundary, directory) {
         error.code !== 0 && /EPERM|EACCES|ENOENT|Cannot find module|permission denied/iu.test(error.stderr),
       'Direct npm CLI execution must fail even without PATH lookup');
     }
-    await assert.rejects(boundary.execute('/bin/sh', ['-c', 'command -v npm']), { code: 1 });
+    const nodeLookup = await boundary.execute('/bin/sh', ['-c', 'command -v node']);
+    assert.equal(nodeLookup.stdout.trim(), path.join(boundary.environment.PATH, 'node'),
+      'The isolated shell must resolve the explicitly allowed Node executable');
+    assert.equal(nodeLookup.stderr.trim(), '');
+    // Missing-command lookup exits differ between POSIX shells.
+    const npmLookup = await boundary.execute('/bin/sh', ['-c', 'if command -v npm; then exit 74; fi']);
+    assert.equal(npmLookup.stdout.trim(), '', 'npm must not be discoverable inside isolation');
+    assert.equal(npmLookup.stderr.trim(), '', 'The absence control must not hide a shell or boundary error');
     assert.ok(!Object.keys(boundary.environment).some(key => /^(npm_|node_options$|node_path$)/iu.test(key)));
     return { adapter: boundary.name, httpDenied: true, httpsDenied: true, directNpmDenied: true };
   } finally {

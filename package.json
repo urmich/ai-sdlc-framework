@@ -41,7 +41,8 @@
     "./pr": "./src/pr.mjs",
     "./provider-adapters": "./src/provider-adapters.mjs",
     "./monitors": "./src/monitors.mjs",
-    "./store": "./src/store.mjs"
+    "./store": "./src/store.mjs",
+    "./github": "./src/github.mjs"
   },
   "files": [
     "bin",
@@ -51,6 +52,7 @@
     "README.md",
     "docs/cli.md",
     "docs/provider-adapters.md",
+    "docs/github-adapters.md",
     "docs/ado-acceptance-test.md"
   ]
 }

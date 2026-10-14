@@ -32,10 +32,10 @@ async function scratch(t) {
   return directory;
 }
 
-function invoke(args) {
+function invoke(args, environment = {}) {
   const child = spawn(process.execPath, [
     path.join(repositoryRoot, 'scripts', 'test-runner.mjs'), ...args,
-  ], { cwd: repositoryRoot, env: { ...process.env, SDLC_TEST_WORKERS: '2' }, shell: false });
+  ], { cwd: repositoryRoot, env: { ...process.env, SDLC_TEST_WORKERS: '2', ...environment }, shell: false });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', data => { stdout += data; });
@@ -150,6 +150,42 @@ test('T-130 public runner preserves a real failing child and still executes the 
   assert.match(result.stdout + result.stderr, /runner failure diagnostic/u);
   assert.equal(await fs.readFile(marker, 'utf8'), 'passed');
   assert.equal(summary(result.stdout, 'end').exitCode, 1);
+});
+
+test('T-GHB24 native execution evidence distinguishes passing, failing and skipped assertions without overwriting reports', async t => {
+  const directory = await scratch(t);
+  const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'runner-evidence-'));
+  t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+  const file = path.join(directory, 'outcomes.test.mjs');
+  await fs.writeFile(file, `import test from 'node:test';
+import assert from 'node:assert/strict';
+test('actual passing assertion', () => assert.equal(2 + 2, 4));
+test('actual failing assertion', () => assert.equal(2 + 2, 5));
+test('unexecuted assertion', {skip: true}, () => assert.fail('must not execute'));
+`);
+  const reportPath = path.join(evidence, 'outcomes.json');
+  const result = await invoke(['targeted', file], { SDLC_TEST_REPORT_FILE: reportPath }).done;
+  assert.equal(result.code, 1, result.stdout + result.stderr);
+  const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+  assert.equal(report.profile, 'targeted');
+  assert.equal(report.platform, process.platform);
+  assert.equal(report.architecture, process.arch);
+  const outcomes = Object.fromEntries(report.executions.map(item => [item.name, item.status]));
+  assert.equal(outcomes['actual passing assertion'], 'Passed');
+  assert.equal(outcomes['actual failing assertion'], 'Failed');
+  assert.equal(outcomes['unexecuted assertion'], 'Skipped');
+  assert.equal(report.summary.success, false);
+  assert.deepEqual([report.summary.counts.passed, report.summary.counts.failed,
+    report.summary.counts.skipped], [1, 1, 1]);
+  assert.ok(report.executions.every(item => item.file.startsWith('test/') && !path.isAbsolute(item.file)));
+  const original = await fs.readFile(reportPath);
+  const overwrite = await invoke(['targeted', file], { SDLC_TEST_REPORT_FILE: reportPath }).done;
+  assert.equal(overwrite.code, 1);
+  assert.deepEqual(await fs.readFile(reportPath), original);
+  const outside = await invoke(['targeted', file],
+    { SDLC_TEST_REPORT_FILE: path.join(directory, 'outside.json') }).done;
+  assert.equal(outside.code, 1);
+  await assert.rejects(fs.stat(path.join(directory, 'outside.json')), { code: 'ENOENT' });
 });
 
 test('T-130 public runner preserves caller file order rather than sorting the expensive-first queue', async t => {

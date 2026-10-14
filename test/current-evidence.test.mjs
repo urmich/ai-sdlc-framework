@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { lookupOperation } from '../src/validation-evidence.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { digest } from '../src/core.mjs';
@@ -261,11 +262,11 @@ test('a proven build archived before first artifact admission can be selected an
   const artifact = await fixtureArtifact(f, cycle, producer);
   let state = await f.store.load(f.workItemId);
   assert.equal(currentArtifact(cycle, state.records, artifact), true);
-  assert.equal(state.records.find(record => record.id === producer.id)?.resultProof?.providerResultId,
+  assert.equal(lookupOperation(state.records, producer.id)?.resultProof?.providerResultId,
     artifact.buildRunId);
   await pruneWork(f.store, f.workItemId);
   state = await f.store.load(f.workItemId);
-  assert.equal(state.records.some(record => record.id === producer.id), true);
+  assert.equal(state.records.some(record => record.id === producer.id), false);
   assert.equal(currentArtifact(cycle, state.records, artifact), true);
   await assert.rejects(recordArtifact(f.store, {
     ...Object.fromEntries(['workItemId', 'cycleId', 'artifactId', 'environment',

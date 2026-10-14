@@ -1,6 +1,9 @@
 import { PHASES, choice, digest, id, object, requireThat, strings, text, timestamp } from './core.mjs';
 import { currentDeployment, hasCurrentExecutionProof, operationMatchesCurrentSource,
   publicationDestination } from './current-evidence.mjs';
+import { cycleTests } from './validation-catalog.mjs';
+import { executionSourceEligible, lookupOperation, observationAfterReset,
+  reduceTestHistory, testHistory } from './validation-evidence.mjs';
 
 export const KINDS = ['approval', 'stage-completion', 'override', 'out-of-scope-execution',
   'out-of-scope-documentation', 'scope-inclusion', 'pr-publication', 'dev-authorization',
@@ -216,6 +219,14 @@ export function isCycleBoundEvent(event) {
 export function eventAppliesToCycle(event, cycle) {
   return !isCycleBoundEvent(event) || boundToCycle(event.effect, cycle);
 }
+function latestResultEvent(events, records, cycle, testId) {
+  const selected = reduceTestHistory(events.filter(event =>
+    event.effect.testIds?.includes(testId)).map(event => ({
+    id: event.id, eventId: event.id, testId, sequence: event.sequence,
+    observedAt: event.occurredAt, status: event.effect.outcome,
+  })), { eligible: evidence => observationAfterReset(cycle, records, evidence) });
+  return selected ? events.find(event => event.id === selected.id) : null;
+}
 export function currentStagingResultEventIds(records, cycle, clock = Date) {
   const deployment = records.find(record => record.id === cycle?.deployments.STAGING);
   if (!currentDeployment(cycle, records, deployment, 'STAGING')) return new Set();
@@ -227,13 +238,8 @@ export function currentStagingResultEventIds(records, cycle, clock = Date) {
     clock,
   }).map(event => event.id));
   const result = new Set();
-  for (const test of cycle.tests.filter(item => testCheckpoint(item) === 'STAGING')) {
-    const rank = { Passed: 0, NotRun: 1, Failed: 2 };
-    const latest = candidates.filter(event => event.effect.testIds?.includes(test.id))
-      .sort((left, right) =>
-        Date.parse(left.occurredAt) - Date.parse(right.occurredAt) ||
-        rank[left.effect.outcome] - rank[right.effect.outcome] ||
-        left.sequence - right.sequence).at(-1);
+  for (const test of cycleTests(cycle).filter(item => testCheckpoint(item) === 'STAGING')) {
+    const latest = latestResultEvent(candidates, records, cycle, test.id);
     if (latest && activeIds.has(latest.id)) result.add(latest.id);
   }
   return result;
@@ -241,15 +247,11 @@ export function currentStagingResultEventIds(records, cycle, clock = Date) {
 export function latestStagingResultEvent(records, cycle, testId, clock = Date) {
   const deployment = records.find(record => record.id === cycle?.deployments.STAGING);
   if (!currentDeployment(cycle, records, deployment, 'STAGING')) return null;
-  const rank = { Passed: 0, NotRun: 1, Failed: 2 };
-  const latest = records.filter(event => event.type === 'event' &&
+  const candidates = records.filter(event => event.type === 'event' &&
     event.kind === 'staging-result' && boundToCycle(event.effect, cycle) &&
     event.effect.deploymentId === deployment.id && event.effect.artifactId === deployment.artifactId &&
-    event.effect.testIds?.includes(testId))
-    .sort((left, right) =>
-      Date.parse(left.occurredAt) - Date.parse(right.occurredAt) ||
-      rank[left.effect.outcome] - rank[right.effect.outcome] ||
-      left.sequence - right.sequence).at(-1) ?? null;
+    event.effect.testIds?.includes(testId));
+  const latest = latestResultEvent(candidates, records, cycle, testId);
   if (!latest) return null;
   return activeEvents(records, {
     cycleId: cycle.id,
@@ -271,7 +273,18 @@ export function currentTestEvidence(cycle, records, test, clock = Date) {
       operationMatchesCurrentSource(cycle, record) &&
       ['dispatching', 'submitted', 'running', 'uncertain']
         .includes(record.status))) return null;
-  const evidence = records.find(record => record.id === cycle?.results[test.id] && record.type === 'test-evidence');
+  const evidence = reduceTestHistory(testHistory(cycle, records, test.id), {
+    sourceTime: result => result.operationId ?
+      lookupOperation(records, result.operationId)?.updatedAt ?? result.observedAt :
+      result.eventId ? records.find(record => record.id === result.eventId)?.occurredAt ?? result.observedAt :
+        result.observedAt,
+    eligible: result => result.cycleId === cycle.id &&
+      result.candidateDigest === cycle.candidateDigest &&
+      result.testSpecDigest === cycle.testSpecDigest &&
+      !(result.status === 'NotRun' && ['dispatching', 'submitted', 'running'].includes(result.operationState) &&
+        ['succeeded', 'failed', 'cancelled'].includes(lookupOperation(records, result.operationId)?.status)) &&
+      executionSourceEligible(cycle, result) && observationAfterReset(cycle, records, result),
+  });
   if (testCheckpoint(test) === 'review' && /(?:^|[\s/])\/review(?:$|[\s/:])/u.test(test.implementation)) {
     const review = activeEvents(records, { cycleId: cycle?.id, clock }).find(record =>
       record.id === cycle?.reviewRef && record.kind === 'review-result' && boundToCycle(record.effect, cycle));
@@ -291,7 +304,7 @@ export function currentTestEvidence(cycle, records, test, clock = Date) {
       record.type === 'operation' && record.status === 'succeeded');
     if (!currentDeployment(cycle, records, deployment, 'STAGING')) return null;
     const observations = [];
-    for (const candidate of records.filter(record =>
+    for (const candidate of testHistory(cycle, records, test.id).filter(record =>
       record.type === 'test-evidence' &&
       record.testId === test.id &&
       record.cycleId === cycle.id &&
@@ -299,37 +312,37 @@ export function currentTestEvidence(cycle, records, test, clock = Date) {
       record.testSpecDigest === cycle.testSpecDigest &&
       record.deploymentId === deployment.id &&
       record.artifactId === deployment.artifactId &&
-      record.environment === 'STAGING')) {
+      record.environment === 'STAGING' && executionSourceEligible(cycle, record) &&
+      observationAfterReset(cycle, records, record))) {
       if (candidate.operationId) {
-        const operation = records.find(record =>
-          record.id === candidate.operationId &&
-          record.type === 'operation' &&
-          ['succeeded', 'failed', 'cancelled'].includes(record.status) &&
-          record.class === 'test' &&
-          record.cycleId === cycle.id &&
-          record.candidateDigest === cycle.candidateDigest &&
-          record.action?.testId === test.id &&
-          record.action.environment === 'STAGING' &&
-          record.action.configDigest === cycle.configDigest &&
-          hasCurrentExecutionProof(record, records) &&
-          record.resultProof?.status === record.status &&
-          record.resultProof.dispatchId === record.id &&
-          record.resultProof.intendedOutcomeDigest === record.intendedOutcome?.digest &&
-          record.action.deploymentId === deployment.id &&
-          record.action.artifactId === deployment.artifactId &&
-          record.action.target === deployment.target &&
-          record.target === deployment.target &&
-          record.action.owner === candidate.owner &&
-          record.action.host === candidate.host &&
+        const operation = lookupOperation(records, candidate.operationId);
+        const matching = operation &&
+          ['succeeded', 'failed', 'cancelled'].includes(operation.status) &&
+          operation.class === 'test' &&
+          operation.cycleId === cycle.id &&
+          operation.candidateDigest === cycle.candidateDigest &&
+          operation.action?.testId === test.id &&
+          operation.action.environment === 'STAGING' &&
+          operation.action.configDigest === cycle.configDigest &&
+          hasCurrentExecutionProof(operation, records) &&
+          operation.resultProof?.status === operation.status &&
+          operation.resultProof.dispatchId === operation.id &&
+          operation.resultProof.intendedOutcomeDigest === operation.intendedOutcome?.digest &&
+          operation.action.deploymentId === deployment.id &&
+          operation.action.artifactId === deployment.artifactId &&
+          operation.action.target === deployment.target &&
+          operation.target === deployment.target &&
+          operation.action.owner === candidate.owner &&
+          operation.action.host === candidate.host &&
           (candidate.status === 'Passed' ?
-            record.status === 'succeeded' &&
-              record.expectedMet === true :
+            operation.status === 'succeeded' &&
+              operation.expectedMet === true :
             candidate.status === 'Failed' ?
-              (record.status === 'failed' ||
-                record.expectedMet === false) :
+              (operation.status === 'failed' ||
+                operation.expectedMet === false) :
               candidate.status === 'NotRun' &&
-                record.status === 'cancelled'));
-        if (!operation || !Number.isFinite(Date.parse(operation.updatedAt))) {
+                operation.status === 'cancelled');
+        if (!matching || !Number.isFinite(Date.parse(operation.updatedAt))) {
           continue;
         }
         observations.push({
@@ -397,11 +410,7 @@ export function currentTestEvidence(cycle, records, test, clock = Date) {
       record.effect.deploymentId === deployment.id &&
       record.effect.artifactId === deployment.artifactId &&
       record.effect.testIds?.includes(test.id));
-    const rank = { Passed: 0, NotRun: 1, Failed: 2 };
-    const latestAll = allEvents.sort((left, right) =>
-      Date.parse(left.occurredAt) - Date.parse(right.occurredAt) ||
-      rank[left.effect.outcome] - rank[right.effect.outcome] ||
-      left.sequence - right.sequence).at(-1);
+    const latestAll = latestResultEvent(allEvents, records, cycle, test.id);
     const activeIds = new Set(activeEvents(records, {
       cycleId: cycle.id,
       clock,
@@ -432,11 +441,9 @@ export function currentTestEvidence(cycle, records, test, clock = Date) {
         },
       });
     }
-    return observations.sort((left, right) =>
-      Date.parse(left.observedAt) - Date.parse(right.observedAt) ||
-      rank[left.evidence.status] - rank[right.evidence.status] ||
-      left.evidence.id.localeCompare(right.evidence.id)).at(-1)?.evidence ??
-      null;
+    return reduceTestHistory(observations.map(item =>
+      ({ ...item.evidence, observedAt: item.observedAt })),
+    { eligible: result => observationAfterReset(cycle, records, result) });
   }
   if (!evidence || evidence.cycleId !== cycle.id || evidence.candidateDigest !== cycle.candidateDigest ||
     evidence.testSpecDigest !== cycle.testSpecDigest) return null;
@@ -449,8 +456,7 @@ export function currentTestEvidence(cycle, records, test, clock = Date) {
         evidence.deploymentId !== deployment.id ||
         evidence.artifactId !== deployment.artifactId) return null;
     if (evidence.operationId) {
-      const operation = records.find(record => record.type === 'operation' &&
-        record.id === evidence.operationId);
+      const operation = lookupOperation(records, evidence.operationId);
       if (!operation || !hasCurrentExecutionProof(operation, records) ||
           operation.resultProof?.status !== operation.status ||
           operation.resultProof.dispatchId !== operation.id ||
@@ -468,7 +474,7 @@ export function stagePassed(cycle, records, environment, clock = Date) {
   if (cycle?.pendingPlanSync || assurancePending(cycle, records)) return false;
   if (cycle?.invalidatedEnvironments?.includes(environment)) return false;
   const checkpoint = environment === 'local' ? 'pre-review' : environment;
-  const tests = cycle?.tests.filter(test => testCheckpoint(test) === checkpoint) ?? [];
+  const tests = cycleTests(cycle).filter(test => testCheckpoint(test) === checkpoint);
   return tests.length > 0 && tests.every(test => {
     const evidence = currentTestEvidence(cycle, records, test, clock);
     return evidence?.status === 'Passed';

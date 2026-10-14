@@ -3,11 +3,14 @@ import { LIMITS, PHASES, digest, id, now, object, recordLimit, requireThat, safe
 import { immutableJson, readBytes, readJson, updateJson } from './files.mjs';
 import { currentTestSpecification, loadConfig, snapshots,
   synchronizeTestPlan } from './artifacts.mjs';
-import { applicableOverride, assurancePending, boundToCycle, currentCycle,
+import { applicableOverride, assurancePending, boundToCycle, currentCycle, currentTestEvidence,
   hasStageCompletion, matchesScope, reviewPassed, stagePassed,
   validateEffect } from './authority.mjs';
 import { candidateContentDigest, candidateSnapshot } from './validation.mjs';
 import { effectiveStagingExecution, stagingExecutionMatches } from './staging.mjs';
+import { cycleTests, requireCatalogSpecification } from './validation-catalog.mjs';
+import { captureCycleResultEvents, selectTestObservation } from './validation-evidence.mjs';
+import { resolveTestSpecification } from './artifacts.mjs';
 import { selectedPushRemote, validateBinding } from './git.mjs';
 import { requirePublicationSourceObservation, selectedPublicationRepositoryURL,
   validateSelectedPushRemote } from './repository-observations.mjs';
@@ -123,8 +126,9 @@ async function validateCycleDecision(kind, effect, tx, store) {
     'Validation assurance was invalidated; start a new cycle before recording stage decisions');
   requireThat(boundToCycle(effect, cycle), 'STALE', 'Decision does not match the current candidate, cycle, configuration and test specification');
   requireThat(candidateContentDigest(await candidateSnapshot(tx.metadata, tx.manifest)) === cycle.candidateDigest &&
-    await currentTestSpecification(store, tx.checkpoint.workItemId, cycle.tests) === cycle.testSpecDigest,
+    await currentTestSpecification(store, tx.checkpoint.workItemId, cycleTests(cycle)) === cycle.testSpecDigest,
   'STALE', 'Candidate or Test Plan changed; start a new validation cycle before applying this decision');
+  requireCatalogSpecification(cycle, await resolveTestSpecification(store, tx.checkpoint.workItemId));
   const records = tx.all();
   if (kind === 'staging-result' ||
       kind === 'staging-promotion' ||
@@ -204,7 +208,7 @@ async function validateCycleDecision(kind, effect, tx, store) {
       'STAGING result owner/location does not match the effective execution contract');
     requireThat(matchesScope({ effect }, action, records), 'AUTHORITY',
       'STAGING result scope does not match the current deployment');
-    requireThat(effect.testIds.every(testId => cycle.tests.some(test =>
+    requireThat(effect.testIds.every(testId => cycleTests(cycle).some(test =>
       test.id === testId && test.environment === 'STAGING' &&
       (execution.overrideId ||
         (test.owner === effect.owner && test.location === effect.host)))),
@@ -238,7 +242,9 @@ export async function applyDecision(store, input) {
     const kind = preliminaryKind ?? existing?.kind;
     const effect = preliminaryEffect ?? existing?.effect;
     validateEffect(kind, effect, { strict: !existing });
-    if (!existing) await validatePublicationDecision(kind, effect, tx);
+    if (!existing) {
+      await validatePublicationDecision(kind, effect, tx);
+    }
     if (existing) {
       requireThat(existing.sourceReceiptId === receipt.id && digest(existing.effect) === digest(effect) && existing.kind === kind,
         'ID_CONFLICT', 'Effective decision ID reused with different content');
@@ -281,15 +287,10 @@ export async function applyDecision(store, input) {
     }
     if (kind === 'staging-result') {
       const cycle = currentCycle(tx.all(), tx.checkpoint);
+      captureCycleResultEvents(tx, cycle, [event]);
       for (const testId of effect.testIds) {
-        const evidence = tx.get(cycle.results[testId]);
-        const operation = evidence?.operationId ?
-          tx.get(evidence.operationId) : null;
-        if (!operation?.updatedAt ||
-            Date.parse(receipt.capturedAt) >=
-              Date.parse(operation.updatedAt)) {
-          delete cycle.results[testId];
-        }
+        const test = cycleTests(cycle).find(item => item.id === testId);
+        selectTestObservation(cycle, testId, currentTestEvidence(cycle, tx.all(), test, store.clock));
       }
       cycle.pendingPlanSync = true;
       tx.put(cycle);

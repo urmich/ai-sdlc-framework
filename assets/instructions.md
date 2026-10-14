@@ -28,6 +28,24 @@ Repository-specific instructions remain higher priority unless they conflict
 with security, data integrity, explicit lifecycle requirements, or user
 authority.
 
+After session resume or compaction, recover the existing work item before
+dependent work. Reread the applicable focused guides and relevant authoritative
+Requirements, Test Plan and Technical Design; recover the approved scope,
+current branch/candidate, checkpoint prerequisites, pending execution handles
+and persisted evidence. Use the summary only to locate these originals.
+For managed assurance, run `sdlc resume` and acknowledge its current token with
+`sdlc context ack` only after this retrieval. An accepted token records the
+current orientation generation; it does not prove reading, understanding,
+approval or passing tests.
+Keep this recovery rule in the persistent host-loaded entry instructions, not
+only in conversation. Existing supported hooks persist orientation invalidation;
+do not assume every hook can inject reminders, that the host always delivers
+them, or that instructions guarantee model compliance. Missing recovery remains
+unmanaged/uncredited, not a framework veto of a permitted user-directed action.
+Recover known execution handles and results before starting replacement runs.
+Compaction, missing conversational memory and report formatting alone never
+justify rerunning tests.
+
 Framework lifecycle stages are advisory. An explicit user instruction to skip
 or reorder Requirements, Test Design, Technical Design, Coding, Review,
 orientation, or stage-validation/progression takes precedence over that stage

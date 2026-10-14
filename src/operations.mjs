@@ -9,7 +9,7 @@ import { operationMatchesCurrentSource, requireCurrentCandidateRevisions,
   requireCurrentSourceRevision } from './current-evidence.mjs';
 import { deriveIntendedOutcome, effectActionClass, intendedOutcomesMayMatch,
   operationResultProof, validateOperationResult } from './external-results.mjs';
-import { prepareHostInvocation } from './host-invocations.mjs';
+import { matchHostInvocation, prepareHostInvocation } from './host-invocations.mjs';
 import { loadConfig, synchronizeTestPlan } from './artifacts.mjs';
 import { effectiveEnvironments, evaluatePolicy, isExternalAction,
   isHostedConfiguration, resolveActionEnvironment, validateAction } from './policy.mjs';
@@ -20,6 +20,24 @@ phaseAuthority,
 testCheckpoint } from './authority.mjs';
 import { candidateContentDigest, candidateSnapshot, candidateStamp, committedSourceSnapshot } from './validation.mjs';
 import { normalizeToolName, sameNativePath } from './platform.mjs';
+import { cycleTests, flushValidationObjects, requireCatalogSpecification } from './validation-catalog.mjs';
+import { allOperationClaims, appendTestObservation, bindExecutionEvidence,
+  captureOperationExecutionSource, cycleResultIds, lookupOperation, resetCycleResults,
+  selectTestObservation, stageCycleEvidence, testResetBarrier } from './validation-evidence.mjs';
+import { resolveTestSpecification } from './artifacts.mjs';
+import { MAPPABLE_FIELDS } from './tool-arguments.mjs';
+
+const dispatchSecurityFields = [...new Set([
+  'class', 'repositoryId', 'environment', 'target', 'configDigest', 'stages',
+  'sourceRef', 'targetRef', 'draft', 'sourceRevision', 'targetRevision', 'policyVersion', 'prRecordId',
+  'artifactId', 'testId', 'owner', 'host', 'implicitEnvironments', 'externalPermission',
+  'monitorCapability', 'preservesChanges', 'earlyDraft', 'outOfScope', 'itemId',
+  'baseRef', 'remoteUrlDigest', 'force', 'delete', 'deploymentId', 'provider',
+  'pipeline', 'localRepositoryPath', 'remoteRepositoryURL', 'sourceRepositoryURL',
+  'artifactRef', 'artifactSha256', 'artifactImmutableVersion', 'artifactRetrievalContext',
+  'artifactName', 'producingExecutionRef', 'producingAttemptRef', 'contentDigest',
+  'recipient', 'toolOptions', ...MAPPABLE_FIELDS,
+])];
 
 export const TERMINAL = ['succeeded', 'failed', 'cancelled', 'not-started'];
 export function nextDeploymentSequence(cycle, records) {
@@ -363,7 +381,15 @@ export async function prepareOperation(store, input, host = {}) {
     void ignoredOperationId;
     const effectFingerprint = digest({ ...effectAction,
       class: effectActionClass(effectAction.class) });
-    const previous = tx.get(operationId) ?? await readJson(path.join(store.workPath(input.workItemId), 'evidence', `${operationId}.json`), { optional: true });
+    const activeRecord = tx.get(operationId);
+    requireThat(!activeRecord || activeRecord.type === 'operation',
+      'ID_CONFLICT', 'Operation ID collides with another active record');
+    const previous = lookupOperation(tx.all(), operationId);
+    if (!previous) {
+      const collision = await readJson(path.join(store.workPath(input.workItemId),
+        'evidence', `${operationId}.json`), { optional: true, limit: 65537 });
+      requireThat(!collision, 'ID_CONFLICT', 'Operation ID collides with another archived record');
+    }
     if (previous) {
       requireThat(previous.requestFingerprint === requestFingerprint &&
         digest(previous.action) === digest(action),
@@ -419,6 +445,8 @@ export async function prepareOperation(store, input, host = {}) {
       }
     }
     const stamp = await candidateStamp(tx.metadata, tx.manifest);
+    if (cycle?.storageVersion === 2) requireCatalogSpecification(cycle,
+      await resolveTestSpecification(store, input.workItemId));
     if (cycle) requireThat(candidateContentDigest(await candidateSnapshot(tx.metadata, tx.manifest)) === cycle.candidateDigest, 'STALE', 'Candidate changed; restart local validation before remote work');
     requireThat(await candidateStamp(tx.metadata, tx.manifest) === stamp, 'STALE', 'Candidate changed during preparation; recompute the operation');
     if (['push', 'pr-create', 'pr-update', 'artifact', 'artifact-produce',
@@ -451,97 +479,200 @@ export async function prepareOperation(store, input, host = {}) {
 export async function markDispatching(store, workItemId, operationId) {
   let deploymentChanged = false;
   const result = await store.transaction(workItemId, async tx => {
-    const operation = tx.get(operationId);
-    requireThat(operation?.type === 'operation', 'OPERATION', 'Prepared operation is unavailable');
-    requireThat(operation.status === 'prepared' || (operation.status === 'dispatching' && !operation.dispatchBound), 'UNCERTAIN', 'Operation was dispatched or is uncertain; reconcile instead of retrying');
-    const member = tx.metadata.members.find(m => m.repositoryId === operation.repositoryId);
-    await validateBinding(member);
-    const configuration = await loadConfig(tx.metadata, member.repositoryId);
-    const policy = evaluatePolicy({ ...tx, records: tx.all() },
-      operation.action, { clock: store.clock, configuration });
-    requireThat(policy.allowed, 'GATE', 'Authority changed before dispatch', policy.findings);
-    const cycle = currentCycle(tx.all(), tx.checkpoint);
-    requireThat(!operation.cycleId || operation.cycleId === cycle?.id, 'STALE', 'Prepared operation belongs to a superseded cycle');
-    if (isExternalAction(operation.action)) {
-      await verifyPreparedIntendedOutcome(tx, member, operation.action,
-        configuration, cycle, operation.intendedOutcome, store.clock);
-    }
-    if (operation.retryOverrideId) {
-      requireThat(activeEvents(tx.all(), {
-        cycleId: cycle?.id,
-        clock: store.clock,
-      }).some(event => event.id === operation.retryOverrideId),
-      'AUTHORITY', 'Uncertain-retry authority is revoked or expired');
-    }
-    if (operation.class === 'test' && cycle?.id === operation.cycleId) {
-      const test = cycle.tests.find(candidate =>
-        candidate.id === operation.action.testId);
-      if (test) {
-        delete cycle.results[test.id];
-        cycle.pendingPlanSync = true;
-        if (testCheckpoint(test) === 'pre-review') {
-          cycle.reviewRef = null;
-          cycle.step = 'local-testing';
-        }
-        tx.put(cycle);
-      }
-    }
-    reserveOnceAuthorities(tx, operation, policy, cycle, store.clock);
-    operation.status = 'dispatching';
-    operation.dispatchStartedAt ??= now(store.clock);
-    const environmentEffects = new Set(
-      operation.class === 'deploy' || operation.class === 'pipeline' ||
-      operation.action.implicitEnvironments?.length ?
-        [operation.action.environment, ...(operation.action.stages ?? []),
-          ...(operation.action.implicitEnvironments ?? [])]
-          .filter(environment => ['DEV', 'STAGING'].includes(environment)) : []);
-    if (environmentEffects.has('DEV')) environmentEffects.add('STAGING');
-    if (environmentEffects.size && cycle?.id === operation.cycleId) {
-      if (operation.class === 'deploy') {
-        operation.deploymentSequence ??= nextDeploymentSequence(cycle, tx.all());
-        cycle.lastDeploymentSequence = Math.max(
-          cycle.lastDeploymentSequence ?? 0,
-          operation.deploymentSequence);
-      }
-      operation.environmentBoundaryApplied = true;
-      const invalidated = new Set(cycle.invalidatedEnvironments ?? []);
-      for (const environment of environmentEffects) invalidated.add(environment);
-      cycle.invalidatedEnvironments = [...invalidated].sort();
-      cycle.environmentInvalidationSequences ??= {};
-      for (const environment of environmentEffects) {
-        const previousSequence = Math.max(0, ...tx.all().filter(record =>
-          record.type === 'operation' &&
-          record.class === 'deploy' &&
-          record.cycleId === cycle.id &&
-          record.action.environment === environment &&
-          record.id !== operation.id)
-          .map(record => record.deploymentSequence ?? 0));
-        cycle.environmentInvalidationSequences[environment] = Math.max(
-          cycle.environmentInvalidationSequences[environment] ?? 0,
-          previousSequence);
-        if (!(operation.class === 'deploy' &&
-            environment === operation.action.environment)) {
-          delete cycle.artifacts[environment];
-        }
-        delete cycle.deployments[environment];
-        for (const test of cycle.tests) {
-          if (testCheckpoint(test) === environment) delete cycle.results[test.id];
-        }
-      }
-      if (operation.class === 'deploy') {
-        cycle.deployments[operation.action.environment] = operation.id;
-      }
-      cycle.pendingPlanSync = true;
-      cycle.step = operation.class === 'deploy' ?
-        `${operation.action.environment.toLowerCase()}-running` :
-        'environment-pipeline-running';
-      tx.put(cycle);
-      deploymentChanged = true;
-    }
-    tx.put(operation);
-    return operation;
+    const result = await dispatchOperationInTransaction(store, tx, operationId);
+    deploymentChanged = result.environmentBoundaryApplied === true;
+    return result;
   });
   if (deploymentChanged) await synchronizeTestPlan(store, workItemId);
+  return result;
+}
+
+async function dispatchOperationInTransaction(store, tx, operationId, { atomicClaim = false } = {}) {
+  const operation = tx.get(operationId);
+  requireThat(operation?.type === 'operation', 'OPERATION', 'Prepared operation is unavailable');
+  requireThat(operation.status === 'prepared' || (operation.status === 'dispatching' && !operation.dispatchBound), 'UNCERTAIN', 'Operation was dispatched or is uncertain; reconcile instead of retrying');
+  const member = tx.metadata.members.find(m => m.repositoryId === operation.repositoryId);
+  await validateBinding(member);
+  const configuration = await loadConfig(tx.metadata, member.repositoryId);
+  const policy = evaluatePolicy({ ...tx, records: tx.all() },
+    operation.action, { clock: store.clock, configuration });
+  requireThat(policy.allowed, 'GATE', 'Authority changed before dispatch', policy.findings);
+  const cycle = currentCycle(tx.all(), tx.checkpoint);
+  requireThat(!operation.cycleId || operation.cycleId === cycle?.id, 'STALE', 'Prepared operation belongs to a superseded cycle');
+  if (isExternalAction(operation.action)) {
+    await verifyPreparedIntendedOutcome(tx, member, operation.action,
+      configuration, cycle, operation.intendedOutcome, store.clock);
+  }
+  if (operation.retryOverrideId) {
+    requireThat(activeEvents(tx.all(), {
+      cycleId: cycle?.id,
+      clock: store.clock,
+    }).some(event => event.id === operation.retryOverrideId),
+    'AUTHORITY', 'Uncertain-retry authority is revoked or expired');
+  }
+  if (operation.class === 'test' && cycle?.id === operation.cycleId) {
+    const sources = await candidateSnapshot(tx.metadata, tx.manifest);
+    requireThat(candidateContentDigest(sources) === cycle.candidateDigest, 'STALE',
+      'Candidate content changed before test dispatch');
+    captureOperationExecutionSource(tx, cycle, operation, sources);
+    const test = cycleTests(cycle).find(candidate =>
+      candidate.id === operation.action.testId);
+    if (test) {
+      resetCycleResults(tx, cycle, item => item.id === test.id, { operationId: operation.id });
+      operation.testResetBarrier = structuredClone(testResetBarrier(cycle, test.id));
+      cycle.pendingPlanSync = true;
+      if (testCheckpoint(test) === 'pre-review') {
+        cycle.reviewRef = null;
+        cycle.step = 'local-testing';
+      }
+      tx.put(cycle);
+    }
+  }
+  reserveOnceAuthorities(tx, operation, policy, cycle, store.clock);
+  operation.status = 'dispatching';
+  if (atomicClaim) operation.dispatchBound = true;
+  operation.dispatchStartedAt ??= now(store.clock);
+  const environmentEffects = new Set(
+    operation.class === 'deploy' || operation.class === 'pipeline' ||
+    operation.action.implicitEnvironments?.length ?
+      [operation.action.environment, ...(operation.action.stages ?? []),
+        ...(operation.action.implicitEnvironments ?? [])]
+        .filter(environment => ['DEV', 'STAGING'].includes(environment)) : []);
+  if (environmentEffects.has('DEV')) environmentEffects.add('STAGING');
+  if (environmentEffects.size && cycle?.id === operation.cycleId) {
+    if (operation.class === 'deploy') {
+      operation.deploymentSequence ??= nextDeploymentSequence(cycle, tx.all());
+      cycle.lastDeploymentSequence = Math.max(
+        cycle.lastDeploymentSequence ?? 0,
+        operation.deploymentSequence);
+    }
+    operation.environmentBoundaryApplied = true;
+    const invalidated = new Set(cycle.invalidatedEnvironments ?? []);
+    for (const environment of environmentEffects) invalidated.add(environment);
+    cycle.invalidatedEnvironments = [...invalidated].sort();
+    cycle.environmentInvalidationSequences ??= {};
+    for (const environment of environmentEffects) {
+      const previousSequence = Math.max(0, ...tx.all().filter(record =>
+        record.type === 'operation' &&
+        record.class === 'deploy' &&
+        record.cycleId === cycle.id &&
+        record.action.environment === environment &&
+        record.id !== operation.id)
+        .map(record => record.deploymentSequence ?? 0));
+      cycle.environmentInvalidationSequences[environment] = Math.max(
+        cycle.environmentInvalidationSequences[environment] ?? 0,
+        previousSequence);
+      if (!(operation.class === 'deploy' &&
+          environment === operation.action.environment)) {
+        delete cycle.artifacts[environment];
+      }
+      delete cycle.deployments[environment];
+      resetCycleResults(tx, cycle, test => testCheckpoint(test) === environment);
+    }
+    if (operation.class === 'deploy') {
+      cycle.deployments[operation.action.environment] = operation.id;
+    }
+    cycle.pendingPlanSync = true;
+    cycle.step = operation.class === 'deploy' ?
+      `${operation.action.environment.toLowerCase()}-running` :
+      'environment-pipeline-running';
+    tx.put(cycle);
+  }
+  if (atomicClaim) requireThat(operation.candidateStamp === await candidateStamp(tx.metadata, tx.manifest),
+    'STALE', 'Candidate changed while validating the atomic dispatch claim');
+  tx.put(operation);
+  return operation;
+}
+
+/**
+ * Trusted in-process dispatch boundary. Call instead of markDispatching + a
+ * second gate claim, and perform the external effect only after this resolves.
+ * Plan synchronization follows the durable claim. Any subsequent failure leaves
+ * a claimed/uncertain call, never retry authority.
+ */
+export async function claimOperationDispatch(store, input) {
+  object(input, ['workItemId', 'operationId', 'invocation', 'adapterContract', 'hostCallId'],
+    ['workItemId', 'operationId', 'invocation', 'adapterContract', 'hostCallId']);
+  id(input.workItemId); id(input.operationId);
+  object(input.invocation, ['sessionId', 'toolName', 'toolArgs', 'cwd'],
+    ['sessionId', 'toolName', 'toolArgs', 'cwd']);
+  requireThat(input.adapterContract?.propagatesUniqueCallId === true,
+    'ADAPTER', 'Atomic dispatch requires a trusted unique host-call contract');
+  const result = await store.transaction(input.workItemId, async tx => {
+    const operation = tx.get(input.operationId);
+    requireThat(operation?.type === 'operation', 'OPERATION', 'Prepared operation is unavailable');
+    requireThat(operation.status === 'prepared' && operation.dispatchBound === false,
+      'UNCERTAIN', 'Dispatch is claimed, uncertain or historical; reconcile instead of redispatching');
+    requireThat(operation.sessionId === input.invocation.sessionId,
+      'OPERATION', 'Dispatch invocation belongs to another session');
+    const match = await matchHostInvocation(operation.hostInvocation, {
+      ...input.invocation, hostCallId: input.hostCallId,
+    }, { adapterContract: input.adapterContract });
+    requireThat(match.status === 'matched', 'OPERATION',
+      `Dispatch invocation differs from the exact prepared host identity: ${match.reason ?? match.status}`);
+    requireThat(operation.candidateStamp === await candidateStamp(tx.metadata, tx.manifest),
+      'STALE', 'Candidate changed after operation preparation');
+    const cycle = currentCycle(tx.all(), tx.checkpoint);
+    if (cycle) {
+      const specification = await resolveTestSpecification(store, input.workItemId);
+      requireThat(specification.digest === cycle.testSpecDigest, 'STALE', 'Test specification changed after preparation');
+      requireCatalogSpecification(cycle, specification);
+      requireThat(operation.cycleId === cycle.id && operation.candidateDigest === cycle.candidateDigest &&
+        candidateContentDigest(await candidateSnapshot(tx.metadata, tx.manifest)) === cycle.candidateDigest,
+      'STALE', 'Prepared operation belongs to a different current candidate');
+    } else requireThat(operation.cycleId === null, 'STALE', 'Prepared operation has no current cycle');
+    const member = tx.metadata.members.find(item => item.repositoryId === operation.repositoryId);
+    requireThat(member && operation.bindingKey === bindingKey(await validateBinding(member)) &&
+      sameNativePath(await canonicalPath(input.invocation.cwd), member.root),
+    'BINDING', 'Dispatch invocation differs from the bound member checkout');
+    requireThat(!allOperationClaims(tx.all()).some(record => record.id !== operation.id &&
+      record.hostInvocation?.hostAdapterId === operation.hostInvocation.hostAdapterId &&
+      record.hostInvocation?.hostContractDigest === operation.hostInvocation.hostContractDigest &&
+      record.hostInvocation?.hostCallIdDigest === operation.hostInvocation.hostCallIdDigest),
+    'OPERATION', 'The trusted host-call identity already belongs to another operation');
+    const session = await readJson(store.sessionPath(operation.sessionId));
+    requireThat(!session.unmanagedFingerprintOverflow &&
+      !session.unmanagedRequestFingerprints?.includes(operation.requestFingerprint),
+    'OPERATION', 'An unmanaged identical invocation requires reconciliation');
+    const { assertOriented } = await import('./recovery.mjs');
+    try {
+      await assertOriented(store, input.workItemId, member, { ...tx, records: tx.all() }, operation.sessionId);
+    } catch (error) {
+      if (error.code !== 'ORIENTATION') throw error;
+      requireThat(applicableOverride(tx.all(), 'orientation', operation.action,
+        { cycleId: cycle?.id, clock: store.clock }), 'ORIENTATION', error.message);
+    }
+    const configuration = await loadConfig(tx.metadata, member.repositoryId);
+    const { classifyTool, normalizeHook } = await import('./gate.mjs');
+    const actions = await classifyTool(store, normalizeHook(input.invocation), { ...tx, records: tx.all() },
+      member, configuration);
+    requireThat(actions.length > 0, 'OPERATION', 'Invocation has no independently classified action');
+    for (const action of actions) {
+      requireThat(action.class === operation.action.class ||
+        action.class === 'unknown' && applicableOverride(tx.all(), 'supported-operation',
+          operation.action, { cycleId: cycle?.id, clock: store.clock }),
+      'OPERATION', 'Prepared action differs from the independently classified invocation');
+      if (action.class === 'unknown') continue;
+      for (const field of dispatchSecurityFields) if (action[field] !== undefined) {
+        requireThat(operation.action[field] !== undefined &&
+          digest(operation.action[field]) === digest(action[field]), 'OPERATION',
+        `Prepared ${field} differs from the actual invocation`);
+      }
+    }
+    const { resolveRepositoryDefaultBranch } = await import('./repository-observations.mjs');
+    const branch = await resolveRepositoryDefaultBranch(store, input.workItemId, member.repositoryId);
+    requireThat(member.linkedWorktree || branch.resolved && member.branch !== branch.branchRef ||
+      applicableOverride(tx.all(), 'repository-workflow', operation.action,
+        { cycleId: cycle?.id, clock: store.clock }), 'GATE',
+    'Atomic dispatch requires a verified feature branch/worktree or scoped override');
+    requireThat(operation.candidateStamp === await candidateStamp(tx.metadata, tx.manifest),
+      'STALE', 'Candidate changed during dispatch validation');
+    await store.fault('dispatch:validated');
+    return dispatchOperationInTransaction(store, tx, operation.id, { atomicClaim: true });
+  });
+  if (result.environmentBoundaryApplied === true) {
+    await synchronizeTestPlan(store, input.workItemId);
+  }
   return result;
 }
 export async function recordOperation(store, input, { reconcile = false } = {}) {
@@ -580,26 +711,24 @@ export async function recordOperation(store, input, { reconcile = false } = {}) 
           'EVIDENCE', 'Host-call proof lacks a supported dispatch binding');
         }
         const dispatch = { ...verified.dispatch, status: operation.status };
-        const provisional = validateOperationResult(operation.intendedOutcome,
-          dispatch, verified.observation, {
-            executionContext,
-            requireArtifactExecutionIdentity: true,
-            previousTerminal: operation.resultProof ?? null,
-          });
-        const archivedProofs = provisional.status === 'uncertain' ? [] :
-          await store.archivedOperationProofs(input.workItemId, provisional);
+        const priorResults = allOperationClaims(tx.all()).filter(record => record.resultProof)
+          .map(operationResultProof);
+        const resultOptions = {
+          executionContext,
+          requireArtifactExecutionIdentity: true,
+          priorResults,
+          previousTerminal: operation.resultProof ?? null,
+        };
         checked = validateOperationResult(operation.intendedOutcome,
-          dispatch, verified.observation, {
-            executionContext,
-            requireArtifactExecutionIdentity: true,
-            priorResults: [
-              ...tx.all().filter(record =>
-                record.type === 'operation' && record.resultProof)
-                .map(operationResultProof),
-              ...archivedProofs,
-            ],
-            previousTerminal: operation.resultProof ?? null,
-          });
+          dispatch, verified.observation, resultOptions);
+        if (checked.status !== 'uncertain' && tx.operationHistory === undefined &&
+            typeof store.archivedOperationProofs === 'function') {
+          const archived = await store.archivedOperationProofs(input.workItemId, checked);
+          checked = validateOperationResult(operation.intendedOutcome,
+            dispatch, verified.observation, {
+              ...resultOptions, priorResults: [...priorResults, ...archived],
+            });
+        }
         if (checked.status !== 'uncertain') {
           for (const [field, value] of [
             ['status', checked.status],
@@ -688,7 +817,7 @@ export async function recordOperation(store, input, { reconcile = false } = {}) 
         ['succeeded', 'failed', 'cancelled'].includes(status) &&
         cycle?.id === operation.cycleId &&
         cycle.candidateDigest === operation.candidateDigest) {
-      const test = cycle.tests.find(candidate =>
+      const test = cycleTests(cycle).find(candidate =>
         candidate.id === operation.action.testId);
       let currentRevision = true;
       if (test && test.environment !== 'local') {
@@ -719,8 +848,7 @@ export async function recordOperation(store, input, { reconcile = false } = {}) 
                   .map(record => record.deploymentSequence ?? 0));
               delete cycle.artifacts[environment];
               delete cycle.deployments[environment];
-              for (const planned of cycle.tests.filter(item =>
-                item.environment === environment)) delete cycle.results[planned.id];
+              resetCycleResults(tx, cycle, item => item.environment === environment);
             }
             cycle.pendingPlanSync = true;
             cycle.step = 'local-testing';
@@ -763,8 +891,9 @@ export async function recordOperation(store, input, { reconcile = false } = {}) 
           ...(operation.action.deploymentId ?
             { deploymentId: operation.action.deploymentId } : {}),
         };
-        tx.put(evidence);
-        cycle.results[test.id] = evidence.id;
+        await bindExecutionEvidence(store, tx, cycle, test, evidence);
+        appendTestObservation(tx, cycle, evidence);
+        selectTestObservation(cycle, test.id, currentTestEvidence(cycle, tx.all(), test, store.clock));
         cycle.lastEvidenceSequence = evidence.sequence;
         cycle.pendingPlanSync = true;
         tx.put(cycle);
@@ -794,9 +923,13 @@ export async function pruneWork(store, workItemId) {
   const archived = [];
   await withObservationRetention(store, workItemId, async (tx, monitorDependencies) => {
     const cycle = currentCycle(tx.all(), tx.checkpoint);
-    const selectedEvidence = (cycle?.tests ?? []).map(test =>
+    const selectedEvidence = cycleTests(cycle).map(test =>
       currentTestEvidence(cycle, tx.all(), test, store.clock))
       .filter(Boolean);
+    tx.validationDependencies = selectedEvidence.flatMap(evidence => [
+      evidence, ...(evidence.operationId ?
+        [lookupOperation(tx.all(), evidence.operationId)].filter(Boolean) : []),
+    ]);
     const currentEvidenceIds = new Set(selectedEvidence
       .map(evidence => evidence.id)
       .filter(id => !id.startsWith('derived-')));
@@ -804,7 +937,7 @@ export async function pruneWork(store, workItemId) {
       .map(evidence => evidence.eventId).filter(Boolean));
     const dependencies = new Set([cycle?.id, cycle?.reviewRef,
       ...Object.values(cycle?.deployments ?? {}),
-      ...Object.values(cycle?.results ?? {}), ...currentEvidenceIds,
+      ...Object.values(cycleResultIds(cycle)), ...currentEvidenceIds,
       ...Object.values(cycle?.artifacts ?? {})].filter(Boolean));
     for (const artifact of tx.all().filter(record =>
       record.type === 'artifact' &&
@@ -868,7 +1001,12 @@ export async function pruneWork(store, workItemId) {
       const obsoleteReservation = record.type === 'reservation' && obsoleteReservationIds.has(record.id);
       if (!terminalOperation && !resolvedConflict && !obsoleteEvidence && !oldCycle &&
         !obsoleteEvent && !obsoleteAuditReference && !obsoleteReservation) continue;
+      if (oldCycle && record.storageVersion === 2) {
+        stageCycleEvidence(tx, record);
+        await flushValidationObjects(store, workItemId, tx);
+      }
       await immutableJson(path.join(store.workPath(workItemId), 'evidence', `${record.id}.json`), record);
+      if (record.type === 'operation') tx.operationHistory.set(record.id, record);
       tx.remove(record.id); archived.push(record.id);
     }
     archived.push(...await archiveSupersededObservations(store, tx, { monitorDependencies }));

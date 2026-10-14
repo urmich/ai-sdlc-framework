@@ -14,6 +14,18 @@ configuration changes after Coding is authorized.
   requirement intentionally changes them.
 - Do not commit or push without applicable user authority.
 
+- Establish the exact local readiness gate and its required selectors/platforms
+  before substantial execution. Keep Review, post-publication CI, environment
+  tests and distribution/release acceptance at their declared checkpoints.
+  A pending later-stage check is not automatically a failed local check.
+- New findings do not extend the requested scope. Obtain explicit inclusion
+  before adding features, adapters, validation platforms or new acceptance
+  obligations; report out-of-scope findings separately.
+- Freeze the candidate before final validation. Do not mutate tested inputs
+  while their execution is running. Queue newly authorized changes until that
+  execution and its source verification finish, then identify the actual delta
+  and validate it without relabeling earlier results as the changed candidate.
+
 ## 2. Small, coherent changes
 
 - Work in focused increments with one concern and one reason to change.
