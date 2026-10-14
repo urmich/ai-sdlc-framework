@@ -3,6 +3,7 @@ import { git, selectedFetchRemote, validateBinding } from './git.mjs';
 import { sameExecutionIdentity, validateCurrentExecutionIdentity,
   validateExecutionResultIdentity } from './provider-adapters.mjs';
 import { validateSelectedFetchRemote } from './repository-observations.mjs';
+import { lookupOperation } from './validation-evidence.mjs';
 
 const fullRevision = /^[a-f0-9]{40,64}$/u;
 const sha256 = /^[a-f0-9]{64}$/u;
@@ -235,8 +236,7 @@ export function currentArtifact(cycle, records, artifact, repositoryId = artifac
       (artifact.producingAttemptCapability === 'distinct' &&
         typeof artifact.producingAttemptRef === 'string' &&
         !['unknown', 'not-applicable', ''].includes(artifact.producingAttemptRef)))) return false;
-  const producer = records.find(record => record.type === 'operation' &&
-    record.id === artifact.producingOperationId);
+  const producer = lookupOperation(records, artifact.producingOperationId);
   return Boolean(producer && ['build', 'pipeline'].includes(producer.class) &&
     producer.status === 'succeeded' && hasCurrentExecutionProof(producer, records) &&
     producer.resultProof?.status === 'succeeded' &&

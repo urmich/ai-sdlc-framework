@@ -1,7 +1,7 @@
 import path from 'node:path';
 import os from 'node:os';
 import * as fs from 'node:fs/promises';
-import { LIMITS, PHASES, budget, choice, digest, id, newId, object, recordLimit, requireThat, safeRecord, text } from './core.mjs';
+import { LIMITS, PHASES, budget, byteSize, choice, digest, id, newId, object, recordLimit, requireThat, safeRecord, text } from './core.mjs';
 import { atomicWrite, canonicalPath, exists, immutableJson, listJson, privateDirectory, readBytes, readJson, safePath, updateJson, withLock, writeJson } from './files.mjs';
 import { bindingKey, identity, sameBinding, validateBinding } from './git.mjs';
 import { validateManifest, validateRecord } from './schemas.mjs';
@@ -12,6 +12,13 @@ import { bindCurrentRepositoryIdentities, currentArtifact, currentDeployment,
   hasCurrentExecutionProof, operationMatchesCurrentSource,
   snapshotCurrentRepositoryIdentities } from './current-evidence.mjs';
 import { operationResultProof, sameResultResource } from './external-results.mjs';
+import { cycleTests, flushValidationObjects } from './validation-catalog.mjs';
+import { allOperationClaims, appendTestObservation, bindExecutionEvidence,
+  bindOperationHistory, captureCycleResultEvents, cycleNeedsEvidenceWrite, cycleResultIds, observationAfterReset,
+  prepareCycleEvidence, prepareOperationHistory, prepareValidationHistory,
+  restoreTestReset, selectTestObservation, stageCycleEvidence, testHistory } from './validation-evidence.mjs';
+import { validateExecutionSource } from './validation-evidence.mjs';
+import { readValidationObject } from './validation-catalog.mjs';
 
 export function emptyCheckpoint(workItemId, repositoryId) {
   return { schemaVersion: 1, revision: 0, workItemId, lifecycleStatus: 'active', phase: 'requirements',
@@ -130,7 +137,7 @@ function recoverEnvironmentSelections(cycle, records, changed) {
       `${environment.toLowerCase()}-${latestDeployment.status}`;
   }
 }
-function recoverResultProjections(records, clock = Date) {
+async function recoverResultProjections(records, clock = Date, context) {
   const changed = [];
   const existingEvidenceIds = new Set(records.filter(record =>
     record.type === 'test-evidence').map(record => record.id));
@@ -142,7 +149,7 @@ function recoverResultProjections(records, clock = Date) {
       ...records.filter(record => record.type === 'test-evidence' &&
         record.cycleId === cycle.id)
         .map(record => record.sequence ?? 0));
-    for (const operation of records.filter(record =>
+    for (const operation of allOperationClaims(records).filter(record =>
       record.type === 'operation' && record.class === 'test' &&
       record.cycleId === cycle.id &&
       ['succeeded', 'failed', 'cancelled'].includes(record.status) &&
@@ -157,14 +164,14 @@ function recoverResultProjections(records, clock = Date) {
           currentDeployment(cycle, records, records.find(candidate =>
             candidate.id === cycle.deployments[record.action?.environment]),
           record.action?.environment))) &&
-      !records.some(evidence => evidence.type === 'test-evidence' &&
+      !testHistory(cycle, records, record.action?.testId).some(evidence =>
         evidence.operationId === record.id &&
         ((record.status === 'succeeded' &&
           record.expectedMet === true && evidence.status === 'Passed') ||
         ((record.status === 'failed' ||
           record.expectedMet === false) && evidence.status === 'Failed') ||
         (record.status === 'cancelled' && evidence.status === 'NotRun'))))) {
-      const test = cycle.tests.find(candidate =>
+      const test = cycleTests(cycle).find(candidate =>
         candidate.id === operation.action?.testId);
       if (!test || !operation.updatedAt) continue;
       const evidence = {
@@ -199,27 +206,33 @@ function recoverResultProjections(records, clock = Date) {
       };
       validateRecord(evidence);
       safeRecord(evidence, recordLimit(evidence));
-      records.push(evidence);
-      changed.push(evidence.id);
+      if (!observationAfterReset(cycle, records, evidence)) continue;
+      await bindExecutionEvidence(context.store, context, cycle, test, evidence);
+      appendTestObservation(context, cycle, evidence);
+      if (cycle.storageVersion !== 2) changed.push(evidence.id);
     }
-    const evidence = records.filter(record =>
-      record.type === 'test-evidence' &&
-      record.cycleId === cycle.id &&
-      record.testSpecDigest === cycle.testSpecDigest);
+    const evidence = cycleTests(cycle).flatMap(test => testHistory(cycle, records, test.id));
     cycle.lastEvidenceSequence = Math.max(cycle.lastEvidenceSequence ?? 0,
       ...evidence.map(result => result.sequence ?? 0));
-    for (const test of cycle.tests) {
+    for (const test of cycleTests(cycle)) {
       if (invalidatedEnvironments.has(test.environment)) continue;
-      const inFlightRetest = records.some(record =>
+      const inFlightRetests = records.filter(record =>
         record.type === 'operation' && record.class === 'test' &&
         record.cycleId === cycle.id &&
         record.action?.testId === test.id &&
         operationMatchesCurrentSource(cycle, record) &&
         ['dispatching', 'submitted', 'running', 'uncertain']
           .includes(record.status));
+      const superseded = new Set(inFlightRetests.map(record => record.priorUncertainOperationId));
+      const inFlightRetest = inFlightRetests.filter(record => !superseded.has(record.id))
+        .sort((left, right) => Date.parse(left.dispatchStartedAt ?? left.createdAt) -
+          Date.parse(right.dispatchStartedAt ?? right.createdAt) ||
+          (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)).at(-1);
       if (inFlightRetest) {
-        if (cycle.results[test.id]) {
-          delete cycle.results[test.id];
+        if (inFlightRetest.testResetBarrier && restoreTestReset(cycle, test.id,
+          inFlightRetest.testResetBarrier)) changed.push(cycle.id);
+        if (cycleResultIds(cycle)[test.id]) {
+          selectTestObservation(cycle, test.id, null);
           cycle.pendingPlanSync = true;
           changed.push(cycle.id);
         }
@@ -229,37 +242,12 @@ function recoverResultProjections(records, clock = Date) {
         }
         continue;
       }
-      const projectedBefore = cycle.results[test.id];
-      if (test.environment !== 'STAGING') {
-        const sourceTime = result => {
-          const operation = result.operationId ? records.find(record =>
-            record.id === result.operationId &&
-            record.type === 'operation') : null;
-          const event = result.eventId ? records.find(record =>
-            record.id === result.eventId && record.type === 'event') : null;
-          return Date.parse(operation?.updatedAt ?? event?.occurredAt ??
-            result.observedAt);
-        };
-        const rank = { Passed: 0, NotRun: 1, Failed: 2 };
-        const latest = evidence.filter(result => result.testId === test.id)
-          .sort((left, right) => {
-            const time = sourceTime(left) - sourceTime(right);
-            if (time) return time;
-            const direct = !left.operationId && !left.eventId &&
-              !right.operationId && !right.eventId;
-            return direct ?
-              (left.sequence ?? 0) - (right.sequence ?? 0) :
-              rank[left.status] - rank[right.status] ||
-                (left.sequence ?? 0) - (right.sequence ?? 0);
-          }).at(-1);
-        if (latest) cycle.results[test.id] = latest.id;
-      }
+      const projectedBefore = cycleResultIds(cycle)[test.id];
       const result = currentTestEvidence(cycle, records, test, clock);
       const resultId = result && !result.id.startsWith('derived-') ?
         result.id : undefined;
       if (projectedBefore === resultId) continue;
-      if (resultId) cycle.results[test.id] = resultId;
-      else delete cycle.results[test.id];
+      selectTestObservation(cycle, test.id, result);
       if (test.environment === 'local' ||
           resultId && !existingEvidenceIds.has(resultId)) {
         cycle.pendingPlanSync = true;
@@ -352,14 +340,10 @@ export class Store {
   workPath(workItemId) { return path.join(this.runtime, 'work-items', id(workItemId)); }
   recordPath(workItemId, recordId) { return path.join(this.workPath(workItemId), 'records', `${id(recordId)}.json`); }
   async archivedOperationProofs(workItemId, proposedProof) {
-    const directory = path.join(this.workPath(workItemId), 'evidence');
+    const history = await prepareOperationHistory(this, workItemId, []);
     const matchingProofs = [];
-    for (const name of await listJson(directory)) {
-      const record = await readJson(await safePath(directory, name), {
-        limit: LIMITS.workingSet,
-      });
-      if (record.type !== 'operation' || !record.resultProof) continue;
-      validateRecord(record);
+    for (const record of history.values()) {
+      if (!record.resultProof) continue;
       const proof = operationResultProof(record);
       if (proposedProof.causalKey &&
           proof.causalKey === proposedProof.causalKey ||
@@ -477,6 +461,28 @@ export class Store {
   async load(workItemId, { recoverCheckpoint = false } = {}) {
     const { manifest, metadata } = await this.manifest(workItemId);
     const records = await this.records(workItemId);
+    const historical = await prepareValidationHistory(this, workItemId, records);
+    const operationHistory = historical.operations;
+    bindOperationHistory(records, operationHistory, historical.evidence);
+    const validationObjects = new Map();
+    const context = { store: this, storeClock: this.clock, validationObjects,
+      checkpoint: { policyGeneration: 0 }, all: () => records,
+      get: recordId => records.find(record => record.id === recordId),
+      put: record => {
+        validateRecord(record); safeRecord(record, recordLimit(record));
+        const index = records.findIndex(item => item.id === record.id);
+        if (index < 0) records.push(record); else records[index] = record;
+      } };
+    for (const operation of allOperationClaims(records)) {
+      if (operation.executionSourceRef) validateExecutionSource(
+        await readValidationObject(this, workItemId, operation.executionSourceRef, context), operation);
+    }
+    for (const cycle of records.filter(record => record.type === 'cycle')) {
+      await prepareCycleEvidence(this, cycle, context);
+      captureCycleResultEvents(context, cycle, [
+        ...historical.events.values(), ...records.filter(record => record.type === 'event'),
+      ]);
+    }
     const cycles = new Map(records.filter(record => record.type === 'cycle')
       .map(cycle => [cycle.id, cycle]));
     const hostedRepositoryIds = new Set(records.filter(record =>
@@ -498,7 +504,11 @@ export class Store {
       await atomicWrite(path.join(this.workPath(workItemId), 'recovery', `checkpoint-${digest(original)}.bin`), original);
       saved = null;
     }
-    const recoveredRecordIds = recoverResultProjections(records, this.clock);
+    context.checkpoint = saved ?? emptyCheckpoint(workItemId, metadata.coordinatorId);
+    const recoveredRecordIds = await recoverResultProjections(records, this.clock, context);
+    for (const cycle of records.filter(record => record.type === 'cycle')) {
+      if (cycleNeedsEvidenceWrite(cycle) && !recoveredRecordIds.includes(cycle.id)) recoveredRecordIds.push(cycle.id);
+    }
     const checkpoint = projectCheckpoint(saved ?? emptyCheckpoint(workItemId, metadata.coordinatorId), records);
     const assuranceMarker = await readJson(this.assurancePath(workItemId), { optional: true });
     const assurancePending = Boolean(assuranceMarker);
@@ -512,7 +522,8 @@ export class Store {
     const recoveryRequired = !saved || await exists(this.recoveryPath(workItemId));
     return { checkpoint, records, manifest, metadata, checkpointMissing: !saved,
       recoveryRequired, recoveredRecordIds, assurancePending,
-      assuranceMarker, repositoryIdentities: identities };
+      assuranceMarker, repositoryIdentities: identities, operationHistory,
+      validationObjects, archivedTestEvidence: historical.evidence };
   }
   async transaction(workItemId, action, { expectedRevision, recoverCheckpoint = false,
     allowRecoveryRequired = false, skipUnchanged = false } = {}) {
@@ -580,9 +591,10 @@ export class Store {
       const removals = new Set();
       const tx = {
         ...state,
+        storeClock: this.clock,
         get: recordId => pending.get(recordId),
-        all: () => bindCurrentRepositoryIdentities([...pending.values()],
-          state.repositoryIdentities),
+        all: () => bindOperationHistory(bindCurrentRepositoryIdentities([...pending.values()],
+          state.repositoryIdentities), state.operationHistory, state.archivedTestEvidence),
         put: record => {
           id(record.id);
           validateRecord(record);
@@ -593,16 +605,27 @@ export class Store {
         remove: recordId => { pending.delete(recordId); writes.delete(recordId); removals.add(recordId); },
       };
       const result = await action(tx);
+      for (const cycle of tx.all().filter(record => record.type === 'cycle')) stageCycleEvidence(tx, cycle);
       if (skipUnchanged && writes.size === 0 && removals.size === 0) return result;
       const projected = projectCheckpoint(tx.checkpoint, [...pending.values()]);
       projected.revision = state.checkpoint.revision + 1;
       budget(projected, LIMITS.checkpoint, 'Checkpoint');
       budget([...pending.values()], LIMITS.workingSet, 'Active work-item records');
+      // Retention can durably archive obsolete records under this same lock.
+      const persistedRecords = await this.records(workItemId);
+      const peak = new Map(persistedRecords.map(record => [record.id, record]));
+      for (const record of writes.values()) {
+        const previous = peak.get(record.id);
+        if (!previous || byteSize(record) > byteSize(previous)) peak.set(record.id, record);
+      }
+      budget([...peak.values()], LIMITS.workingSet, 'Persisted pre-removal working set');
       requireThat(projected.blockerRefs.length <= LIMITS.blockers, 'CAPACITY', 'At most 20 active blockers are allowed');
       requireThat([...pending.values()].filter(r => r.type === 'operation' && !['succeeded', 'failed', 'cancelled', 'not-started'].includes(r.status)).length <= LIMITS.unresolved,
         'CAPACITY', 'At most 20 unresolved operations are allowed; reconcile existing work');
       // The effective event is the transaction's commit record. Its projection can always be rebuilt.
-      const ordered = [...writes.values()].sort((a, b) => Number(a.type === 'event') - Number(b.type === 'event'));
+      await flushValidationObjects(this, workItemId, tx);
+      const writeOrder = record => record.type === 'event' ? 2 : record.type === 'cycle' ? 1 : 0;
+      const ordered = [...writes.values()].sort((a, b) => writeOrder(a) - writeOrder(b));
       for (const record of ordered) {
         const file = this.recordPath(workItemId, record.id);
         if (record.type === 'event') await immutableJson(file, record);

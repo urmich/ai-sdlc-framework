@@ -61,6 +61,19 @@ publication consent; one URL never implicitly authorizes the other.
 one branch-to-commit fact by the hosting-service adapter; an unrelated
 default-branch name and observed commit do not prove that relationship.
 
+GitHub integration uses a thin public trusted-host boundary for existing core
+consumers, not compulsory native-capability/control-plane commands. Authorized
+provider tools may own actual operations; the CLI retains exact context/results,
+authority accounting and recovery. See
+[GitHub trusted-host integration](github-adapters.md) for retained delivery
+outcomes and removed default features. Repository JSON cannot load executable
+adapters or self-attest provider evidence. The actual facade retains 28 exports
+from seven nested modules: connection, execution-adapter, host, repository,
+schemas, store-bridge and transport. Manual six-verifier callbacks and existing
+legacy operations supply core admission; no native domain registry/evaluator
+or deleted control-plane command is required. Integrated package/test adaptation
+is separate and current validation remains `NotRun` until matching execution.
+
 ```json
 {
   "sessionId": "current-session",
@@ -176,6 +189,25 @@ the same offline dispatcher records them. The ordinary `bin/sdlc.mjs` has no
 provider verifiers and rejects such facts rather than trusting unverified
 input. See [Provider adapters](provider-adapters.md) for the in-process
 boundary; the framework dispatcher does not contact a provider.
+
+Preserve the existing six callbacks: `verifyRepository`, `verifyPullRequest`,
+`verifyCheckResults`, `verifyOperationResult`, `verifyArtifact` and
+`verifyProviderVersion`. The nine existing result families remain required:
+`execution`, `test`, `artifact`, `deployment`, `pull-request`, `git-ref`,
+`merge`, `policy` and `notification`. Exact repository/source/candidate/PR/check/
+run/attempt/artifact/release/deployment context is not an API-count claim.
+Local builds stay local; policy results need exact authority, and publication
+does not prove personal notification delivery. Reads and provider permissions
+grant no writes. Protect raw provider responses/logs/causes, private handles/
+user paths and signed URLs; retain safe identities and sanitized references.
+
+The actual GitHub host exposes `storeOptions`, `legacyOperations`,
+`adapterContract` and `missingVerifiers`. Its legacy `prepare`, `claimDispatch`,
+`recordResult` and read-only `reconcile` use the same selected-home Store.
+`claimDispatch` requires independent IAM returning exact `true`, checks
+cancellation before and after awaited authorization, then uses the existing
+atomic claim. The caller owns the separately authorized physical provider
+effect; no CLI command or host method implicitly dispatches or retries it.
 
 ```json
 {"workItemId":"wi-example","repositoryId":"primary","sessionId":"session-1","cwd":"/project"}
@@ -393,6 +425,15 @@ status/activity/evidence metadata. The same candidate/spec/config does not reset
 Changed source/test/config creates a new unit-first cycle; no network work occurs.
 It also invalidates prior candidate Review.
 
+Larger complete plans use a referenced cycle rather than embedding every
+definition/result in active records. Immutable catalogs, copy-on-write outcome
+pages and retained evidence are stored below the selected work item's
+`validation/objects` directory. The 100-case inline, 256-KiB active-record,
+16-KiB checkpoint and 4-MiB object limits are unchanged. Missing, corrupt,
+misbound or incomplete referenced content is an evidence gap, never an empty
+test list or a passing aggregate. Historical execution source identity remains
+distinct from the cycle's current source selection.
+
 `evidence test` takes `{workItemId,cycleId,testId,status}` plus conclusive-result
 fields `evidenceRef,expectedMet,owner,host`; optional
 `artifactId,deploymentId,runId,activity`. DEV evidence requires the current
@@ -405,6 +446,31 @@ Evidence persists first, then visible plan statuses synchronize. A synchronizati
 failure keeps pending state for recovery instead of erasing the result.
 A latest deployment-bound STAGING failure is displayed as `Failed` immediately and
 supersedes an earlier pass; evidence for a superseded deployment is not current.
+
+`evidence tests` takes `{workItemId,cycleId,results:[...]}`; each row has the
+same individual fields and admission checks as `evidence test`. Duplicate IDs,
+incomplete outcomes and changed source/specification reject the transaction.
+Batching does not waive unit-first, owner/location, causal or deployment checks.
+Every unexecuted required row remains `NotRun`.
+
+`evidence retain` takes `{workItemId,evidenceRef}` with a local `file:` reference
+and returns a checked `validation-evidence:<sha256>:<bytes>` reference. Retained
+content is bounded and sanitized. Retention proves availability/integrity, not
+that a test ran or passed; sanitization that removes required proof cannot
+satisfy admission. The ordinary CLI does not fetch remote evidence.
+
+`evidence show` takes `{workItemId,cycleId,testId}` and returns the exact test's
+current reduced status and retained observation history. Archived cycles are
+explicitly historical and their results do not grant current readiness or
+authority. Resets remain durable barriers; a late pre-reset result cannot
+restore an earlier passing selection.
+
+For trusted in-process external execution, `claimOperationDispatch` is exported
+by `ai-sdlc-framework/operations`. It atomically validates and claims the exact
+prepared invocation, unique host-call binding and current authority before the
+host performs the effect. This is not an online CLI subcommand or permission
+grant. An already claimed or uncertain operation must be reconciled rather than
+redispatched.
 
 ### Candidate Review through Copilot CLI `/review`
 
@@ -489,6 +555,11 @@ also require complete verified execution identity.
 4. `op record`: `{workItemId,operationId,status,handle?,evidenceRef?,target?,
    requestFingerprint?,expectedMet?,providerStatus?}`.
 5. `op reconcile` uses the same result shape after a **read-only** provider query.
+
+Operation IDs share the work-item record namespace. Preparation rejects
+`ID_CONFLICT` when an explicit ID belongs to another active or archived record,
+including a conflict, cycle or approval event; no ledger evidence is replaced.
+An existing operation ID is reusable only for the same exact request and action.
 
 A trusted host that propagates a unique call ID imports `prepareOperation`
 from `ai-sdlc-framework/operations` and passes its documented adapter

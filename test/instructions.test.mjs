@@ -101,6 +101,51 @@ test('T-37 focused engineering instructions are separated and installed by task 
   }
 });
 
+test('T-37 bounded recovery and evidence rules require explicit reset without erasing history', async () => {
+  const [entry, knowledge, coding, testing] = await Promise.all([
+    fs.readFile('assets/instructions.md', 'utf8'),
+    readGuide('knowledge-retrieval'), readGuide('coding'), readGuide('testing'),
+  ]);
+  const compact = contents => contents.replace(/\s+/gu, ' ');
+  assert.match(compact(entry),
+    /After session resume or compaction.*Use the summary only to locate these originals.*acknowledge.*only after this retrieval/u);
+  assert.match(compact(entry),
+    /does not prove reading, understanding, approval or passing tests/u);
+  assert.match(compact(entry),
+    /do not assume every hook can inject reminders.*host always delivers.*unmanaged\/uncredited, not a framework veto/u);
+  assert.match(compact(knowledge),
+    /proportionate time or attempt limit.*Stop when that question is answered.*do not broaden/u);
+  assert.match(compact(knowledge),
+    /permission or capability blocker ends that investigation.*separate explicit scope and authority/u);
+  assert.match(compact(coding),
+    /Keep Review, post-publication CI, environment tests and distribution\/release acceptance at their declared checkpoints/u);
+  assert.match(compact(coding),
+    /New findings do not extend the requested scope.*explicit inclusion/u);
+  const execution = compact(section(testing, '10. Execution discipline'));
+  assert.match(execution,
+    /original execution's recorded inputs against independently established inputs required for the current validation target/u);
+  assert.match(execution,
+    /additions, modifications and deletions.*Mandatory evidence invalidation and reset/u);
+  assert.match(execution,
+    /\*\*When:\*\*.*tested behavior or dependencies, shared fixtures, selected cases\/assertions, test specification, artifact, configuration, toolchain\/platform\/environment, required prerequisites or freshness/u);
+  assert.match(execution,
+    /aggregate checkpoint pass that depends on it.*whole-candidate identity.*all results bound to it/u);
+  assert.match(execution,
+    /impact or applicability is unknown, remove current credit.*preserve the original execution and its outcome unchanged/u);
+  assert.match(execution,
+    /old and new input identities, invalidation reason, affected case IDs and dependent checkpoints.*`Passed` or `Failed` projections to `NotRun`/u);
+  assert.match(execution,
+    /Invalidation is not a new failing execution.*completed execution that actually failed/u);
+  assert.match(execution,
+    /Reuse proven unaffected results only when the contract explicitly permits it.*never rewrite old evidence/u);
+  assert.match(execution,
+    /fresh cycle or full local checkpoint.*reset that entire required current projection.*prescribed unit-first sequence/u);
+  assert.match(execution,
+    /Selective invalidation does not waive that requirement.*Deletion does not remove a required case/u);
+  assert.equal((testing.match(/^\| Do \|/gmu) ?? []).length, 2);
+  assert.equal((testing.match(/^\| Do not \|/gmu) ?? []).length, 2);
+});
+
 test('T-43 installed instructions keep framework guardrails advisory', async () => {
   const global = await fs.readFile('assets/instructions.md', 'utf8');
   for (const phrase of [

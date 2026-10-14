@@ -126,6 +126,7 @@ export async function run(plan) {
   };
   console.log(`[test-runner:start] ${JSON.stringify(metadata)}`);
   const env = { ...process.env };
+  if (env.SDLC_TEST_REPORT_FILE) env.SDLC_TEST_REPORT_PROFILE = plan.profile;
   // This is a new test run even when a test invokes the public command.
   delete env.NODE_TEST_CONTEXT;
   const child = spawn(process.execPath, plan.args, {

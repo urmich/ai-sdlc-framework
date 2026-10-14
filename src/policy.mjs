@@ -2,6 +2,7 @@ import { PHASES, digest, object, choice, requireThat, strings, text } from './co
 import { activeEvents, applicableOverride, assurancePending, currentCycle, hasEnvironmentGrant, hasStagingCompletion, hasStageCompletion, matchesScope, permissionMatches, phaseAuthority, reviewPassed, stagePassed } from './authority.mjs';
 import { evaluateReadiness, publicationAuthority } from './pr.mjs';
 import { checkTestStart } from './validation.mjs';
+import { cycleTests } from './validation-catalog.mjs';
 import { effectiveStagingExecution, stagingExecutionMatches } from './staging.mjs';
 import { currentArtifact, currentDeployment, matchesArtifactContent, publicationDestination } from './current-evidence.mjs';
 import { validateRepositoryIdentity } from './repository-observations.mjs';
@@ -359,7 +360,7 @@ export function evaluatePolicy(state, action, {
       'A successful matching deployable artifact is required; green PR validation alone is insufficient');
   }
   if (action.class === 'test') {
-    const test = cycle?.tests.find(t => t.id === action.testId);
+    const test = cycleTests(cycle).find(t => t.id === action.testId);
     rule('test-specification', Boolean(test), 'Declare the test in the current validation cycle');
     if (test) {
       rule('test-target', test.environment === action.environment, 'Execution environment differs from the Test Plan');

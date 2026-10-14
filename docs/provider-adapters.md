@@ -5,6 +5,18 @@ execution identity used by monitoring and PR readiness. Generic framework code
 does not parse provider URLs or guess how a provider names projects, workflows,
 builds, jobs, or attempts.
 
+GitHub's thin public provider boundary and retained core outcomes are described
+in [GitHub trusted-host integration](github-adapters.md). Authorized provider
+tools may own native actions; the framework verifies exact context and results
+through its existing consumers rather than duplicating an exhaustive API catalog.
+The actual GitHub facade retains 28 exports from seven nested modules:
+connection, execution-adapter, host, repository, schemas, store-bridge and
+transport. Its host uses manual six-verifier closures and existing
+`legacyOperations`, not native domain factories. Integrated package/test
+adaptation is separate and current validation remains `NotRun`.
+Preserve every existing Azure baseline obligation and all nine result families;
+descriptive registration is neither working support nor passing acceptance.
+
 ## Normalized execution identity
 
 Every adapter returns:
@@ -35,6 +47,13 @@ the independently proven provider, connection, execution scope, definition
 and attempt capability. Both initial result recording and reconciliation
 compare that context with the result identity. Do not derive execution scope
 from a repository ID or copy untrusted result fields to create their own proof.
+
+For an authorized action, independently verify the exact requested destination
+and resulting effect. A repository name, requested asset name and deployment
+target are distinct facts; similar names cannot resolve conflicting identities
+or confer permission. Release/version/bytes and deployment context remain
+required where the existing artifact/operation contract needs them, without a
+separate release-administration or native control-plane SDK.
 
 ## Adapter interface
 
@@ -116,6 +135,38 @@ constructed with the host's trusted verifier functions. The ordinary
 facts. Neither CLI JSON nor repository configuration can supply executable
 adapter code. The host remains responsible for any provider reads; the
 framework dispatcher makes no network call.
+
+The existing Store verifier boundary is `verifyRepository`,
+`verifyPullRequest`, `verifyCheckResults`, `verifyOperationResult`,
+`verifyArtifact` and `verifyProviderVersion`. Preserve their actual schemas and
+the selected canonical home. The retained result families are `execution`,
+`test`, `artifact`, `deployment`, `pull-request`, `git-ref`, `merge`, `policy`
+and `notification`, including generic baseline consumers that are not native
+provider endpoints. Notification publication is not personal delivery proof;
+policy results remain independently authorized, not a policy-management SDK.
+
+Trusted online hosts use `claimOperationDispatch` from the existing
+`ai-sdlc-framework/operations` export before invoking a prepared effect. The
+claim binds the exact invocation and unique host call to current candidate,
+specification, configuration and authority in one Store transaction. A separate
+`markDispatching`/claim sequence creates an interruption window and must not be
+used by a trusted dispatcher. Provider/IAM authorization is still required;
+claimed or uncertain operations are reconciled read-only, never blindly retried.
+
+The GitHub host's `legacyOperations` exposes `prepare`, `claimDispatch`,
+`recordResult` and `reconcile`. Its dispatch wrapper requires the original
+host/Store-bound preparation, independent `authorize(operation) === true` and
+cancellation checks before and after awaited IAM, then invokes the existing
+atomic claim. The caller owns the authorized physical effect; neither that
+host nor the offline dispatcher performs an implicit provider mutation.
+
+Lifecycle stages remain advisory and user-governed. A prepared/claimed
+operation, verified observation, passing check or document label cannot create
+user consent, external permission, Review completion or environment authority.
+Currentness guards preserve exact source/candidate/spec/configuration and keep
+stale/archived results historical. Protect raw responses/logs/causes, credentials,
+private handles/user paths and signed URLs with safe bounded identities and
+sanitized evidence references.
 
 If a Git remote has different fetch and push URLs, the trusted host can
 verify the actual push URL through `repository observe` with `pushURL:true`.

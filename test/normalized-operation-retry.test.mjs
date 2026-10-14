@@ -112,6 +112,51 @@ async function seedLegacyOperation(f, operation, suppliedAction) {
   return stored;
 }
 
+test('operation IDs cannot replace active conflicts, cycles or approval events', async t => {
+  const snapshot = async f => {
+    const directory = path.join(f.store.workPath(f.workItemId), 'records');
+    return {
+      records: await Promise.all((await fs.readdir(directory)).sort().map(async name =>
+        [name, await fs.readFile(path.join(directory, name))])),
+      checkpoint: await fs.readFile(path.join(f.store.workPath(f.workItemId), 'checkpoint.json')),
+    };
+  };
+  const rejectCollision = async (f, record) => {
+    const before = await snapshot(f);
+    await assert.rejects(prepareOperation(f.store, {
+      workItemId: f.workItemId, sessionId: f.sessionId, operationId: record.id,
+      action: { class: 'read', repositoryId: 'primary', target: 'README.md' },
+      request: { toolName: 'fixture_read', toolArgs: { path: 'README.md' }, cwd: f.repo },
+      correlationKey: `collision-${record.type}`, intent: 'Read without replacing any ledger evidence',
+    }), { code: 'ID_CONFLICT', message: 'Operation ID collides with another active record' });
+    assert.deepEqual(await snapshot(f), before);
+    assert.deepEqual((await f.store.records(f.workItemId)).find(item => item.id === record.id), record);
+  };
+  await t.test('open conflict without Coding authority', async child => {
+    const f = await fixture(child);
+    await fs.writeFile(path.join(f.repo, 'README.md'), 'Isolated read-only source.\n');
+    await f.runGit('add', '.');
+    await f.runGit('commit', '-qm', 'Read-only collision fixture');
+    assert.equal((await f.store.records(f.workItemId)).some(record => record.type === 'event'), false);
+    const conflict = { type: 'conflict', id: 'conflict-collision', workItemId: f.workItemId,
+      reason: 'Preserve the open blocker', status: 'open', references: [] };
+    await f.store.transaction(f.workItemId, tx => tx.put(conflict));
+    await rejectCollision(f, conflict);
+    assert.ok((await f.store.load(f.workItemId)).checkpoint.blockerRefs.includes(conflict.id));
+  });
+  for (const kind of ['cycle', 'event']) {
+    await t.test(kind === 'cycle' ? 'current cycle' : 'captured approval event', async child => {
+      const f = await coding(await fixture(child));
+      const { cycle } = await startCycle(f.store, { workItemId: f.workItemId,
+        tests: testDefinitions(), configDigest: 'collision-config', cause: 'Protect active record identities' });
+      const record = (await f.store.records(f.workItemId)).find(item =>
+        kind === 'cycle' ? item.id === cycle.id : item.type === 'event');
+      assert.ok(record);
+      await rejectCollision(f, record);
+    });
+  }
+});
+
 test('T-124 SHA-256 legacy abbreviated revisions cannot exclude the same full commit or ambiguous hash width', async t => {
   const { f, action, sourceRevision, prepare, uncertain } =
     await retryFixture(t, { objectFormat: 'sha256' });

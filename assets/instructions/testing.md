@@ -13,6 +13,15 @@ reviewing tests.
 - Keep test implementation, execution status, readiness, and evidence separate.
   `NotRun` is never equivalent to `Passed`.
 
+- During Test Design, bind each planned case to its required executable
+  assertions or exact procedure, checkpoint, platform and prerequisites.
+  Confirm selectors and evidence collection before the first substantial run;
+  do not defer case-level correspondence until final acceptance.
+- Capture commands, selectors, exits, sanitized results and independently
+  established source/test/configuration/environment identities from the first
+  run. Use existing reporting and storage; do not add a second evidence system
+  merely to reformat results.
+
 ## 2. Test selection
 
 For changed behavior, cover as applicable:
@@ -100,6 +109,76 @@ Do not chase a percentage target with weak assertions.
   success does not authorize remote DEV/STAGING execution.
 
 ## 10. Execution discipline
+
+- Persist execution output as it is produced and record completed case results
+  promptly through the supported evidence/Test Plan mechanism. Mark a case
+  `Passed` only when all its required assertions and result prerequisites are
+  satisfied; a partial or interrupted suite does not complete its checkpoint.
+  If the runner finalizes a report only at exit, retain the ongoing capture and
+  reconcile that report rather than rerunning solely for evidence formatting.
+- To reuse completed evidence, compare the original execution's recorded inputs
+  against independently established inputs required for the current validation
+  target: exact selected cases/assertions, tested source/artifact identity, test
+  specification, configuration, toolchain/platform/environment and checkpoint
+  prerequisites, including required freshness. Compare content identities and
+  required conditions, not branch names, version labels or remembered claims.
+  Admit reuse only when all dimensions required by the declared validation
+  contract match. Unknown applicability is unverified, not `Passed` or `Failed`.
+- Recover a known running execution's handle, inputs and output before deciding
+  whether another run is needed. Running, partial and interrupted executions
+  are not completed passing evidence, even when some case results are available.
+- Keep original execution records immutable; maintain current status/reference
+  projections separately and preserve original failures and superseded passes.
+  Persistence protects the historical record, not its applicability to later
+  inputs. Never rewrite an original candidate identity to manufacture current
+  evidence or use broad suite totals to pass an unexecuted case.
+- Formatting a report or maintaining status/reference fields does not itself
+  invalidate tests only where the declared validation contract excludes those
+  changes from tested/specification identity. Do not invent such exclusions.
+- A change from candidate A to B includes additions, modifications and deletions,
+  not just new features. Before claiming readiness for B, compare the actual
+  delta against the inputs and conditions recorded with each required result.
+
+Mandatory evidence invalidation and reset:
+
+- **When:** invalidate current credit if a change affects a case's tested
+  behavior or dependencies, shared fixtures, selected cases/assertions, test
+  specification, artifact, configuration, toolchain/platform/environment,
+  required prerequisites or freshness. Invalidated required case evidence also
+  invalidates any aggregate checkpoint pass that depends on it. Formatting-only
+  changes qualify for reuse only under an explicit existing contract exclusion.
+- **Extent:** use the declared validation contract and case/dependency bindings
+  to determine which current results lose credit. If exact whole-candidate
+  identity is required, any change to that identity invalidates all results
+  bound to it, even for an addition or a seemingly unrelated change. If impact
+  or applicability is unknown, remove current credit for potentially affected
+  results and report the uncertainty; do not assume a change is isolated.
+- **How:** preserve the original execution and its outcome unchanged. Record
+  its reference, the old and new input identities, invalidation reason, affected
+  case IDs and dependent checkpoints in the existing status/evidence mechanism.
+  Reset affected current `Passed` or `Failed` projections to `NotRun`, clear
+  their current passing/readiness credit and keep the old evidence as history.
+  Invalidation is not a new failing execution; mark `Failed` only from an
+  applicable completed execution that actually failed.
+- **Replacement:** run the affected required validation and store new results
+  under their actual execution/input identities. Restore current credit only
+  from complete applicable evidence. Reuse proven unaffected results only when
+  the contract explicitly permits it and all required applicability comparisons
+  succeed; never rewrite old evidence to make it current.
+- **Required cycles:** if the repository requires a fresh cycle or full local
+  checkpoint after a candidate-changing fix, reset that entire required current
+  projection and run its prescribed unit-first sequence. Selective invalidation
+  does not waive that requirement. Deletion does not remove a required case or
+  acceptance obligation without an authorized scope change.
+
+Examples (two good and two bad patterns):
+
+| Pattern | Action |
+| --- | --- |
+| Do | After compaction, recover the original completed report and verify its recorded inputs against the current required inputs. Reconcile admissible outcomes without rerunning for lost conversational memory. |
+| Do | Modifying or deleting a shared tested dependency changes candidate A to B. Preserve A's reports, reset affected current cases and dependent checkpoint credit to `NotRun`, record why, and capture B's required validation. If the contract binds the whole candidate, reset all bound results and run the full required checkpoint. |
+| Do not | Rerun an unchanged, valid execution merely to obtain a different report format, or overwrite its original evidence while updating the Test Plan. |
+| Do not | Treat successful context acknowledgement as proof that guides were understood, tests passed, a stage completed or an external action was authorized. |
 
 - After each candidate-changing fix, restart the required local validation
   sequence from unit tests, then run the remaining pre-Review local tests.

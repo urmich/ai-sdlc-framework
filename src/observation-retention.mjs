@@ -84,6 +84,7 @@ export async function withObservationRetention(store, workItemId, action, option
         checkpoint: structuredClone(tx.checkpoint),
         manifest: structuredClone(tx.manifest),
         recoveryRequired: tx.recoveryRequired,
+        validationDependencies: structuredClone(tx.validationDependencies ?? []),
         earlyRemovedIds: new Set(),
       });
       try { return await action(tx, dependencies); }
@@ -115,6 +116,9 @@ function retainedObservationIds(tx, monitorDependencies) {
   for (const group of groups.values()) retain(newest(group).id);
   for (const record of records.filter(record => !observationTypes.has(record.type))) {
     retain(record.id);
+  }
+  for (const dependency of tx.validationDependencies ?? []) {
+    walk(dependency, retain);
   }
   walk(tx.checkpoint, retain);
   walk(tx.manifest, retain);
@@ -172,6 +176,7 @@ function retainedObservationIds(tx, monitorDependencies) {
       if (field !== 'previousObservationKey') visitContexts(item, context);
     }
   };
+  for (const dependency of tx.validationDependencies ?? []) visitContexts(dependency);
   for (let index = 0; index < queue.length; index++) {
     const record = queue[index];
     walk(record, retain);
@@ -279,9 +284,9 @@ function commitWorkingSet(snapshot, pending, earlyRemovedIds) {
 /**
  * Call only inside a work-item transaction, passing the snapshot from
  * withObservationRetention, after the last put. Original and replacement heads
- * must coexist within the budget until Store finishes its writes. If necessary,
- * reclaim only durably archived observations obsolete in both dependency
- * snapshots before those writes; never reorder current heads or dependencies.
+ * must coexist within the budget until Store finishes its writes. Reclaim only
+ * durably archived observations obsolete in both dependency snapshots before
+ * those writes; scheduled removals do not reduce the persisted pre-commit peak.
  * Returns archived IDs; historical predecessor links do not pin refresh chains.
  */
 export async function archiveSupersededObservations(store, tx, { monitorDependencies = [] } = {}) {

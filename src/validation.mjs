@@ -1,11 +1,14 @@
-import { LIMITS, choice, digest, id, newId, now, object, requireThat, text } from './core.mjs';
-import { readJson, safePath } from './files.mjs';
+import { LIMITS, budget, choice, digest, id, newId, now, object, requireThat, text } from './core.mjs';
+import { readBytes, readJson, safePath } from './files.mjs';
 import { git, validateBinding } from './git.mjs';
 import { currentTestSpecification, loadConfig, resolveTestSpecification,
   synchronizeTestPlan } from './artifacts.mjs';
-import { applicableOverride, assurancePending, boundToCycle, currentCycle, hasEnvironmentGrant, latestStagingResultEvent, stagePassed, testCheckpoint } from './authority.mjs';
+import { applicableOverride, assurancePending, boundToCycle, currentCycle, currentTestEvidence, hasEnvironmentGrant, latestStagingResultEvent, stagePassed, testCheckpoint } from './authority.mjs';
+import { cycleTests, requireCatalogSpecification, validateTestDefinitions } from './validation-catalog.mjs';
+import { appendTestObservation, bindExecutionEvidence, initializeReferencedCycle,
+  lookupOperation, lookupTestEvidence, observationAfterReset, resetCycleResults, selectTestObservation } from './validation-evidence.mjs';
 import { effectiveStagingExecution, stagingExecutionGuidance,
-  stagingExecutionMatches, STAGING_OWNERS } from './staging.mjs';
+  stagingExecutionMatches } from './staging.mjs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { currentDeployment, hasCurrentExecutionProof, hasImmutableArtifactIdentity, matchesProducerExecution,
@@ -122,7 +125,8 @@ export async function candidateStamp(metadata, manifest) {
           await safePath(member.root, path.relative(member.root, path.resolve(path.dirname(file), link)));
           dirty.push([name, 'symlink', link]);
         } else {
-          dirty.push([name, String(stat.size), String(stat.mtimeNs), String(stat.ctimeNs), String(stat.mode)]);
+          // Windows metadata churn is not a source edit; bind exact bytes instead.
+          dirty.push([name, digest(await readBytes(file, LIMITS.artifact)), String(stat.mode)]);
         }
       } catch (error) { if (error.code === 'ENOENT') dirty.push([name, 'deleted']); else throw error; }
     }
@@ -131,33 +135,16 @@ export async function candidateStamp(metadata, manifest) {
   return digest(members);
 }
 export function validateTests(tests) {
-  requireThat(Array.isArray(tests) && tests.length > 0 && tests.length <= 100, 'INPUT', 'Provide 1..100 required test definitions');
-  requireThat(new Set(tests.map(test => test.id)).size === tests.length, 'INPUT', 'Duplicate test ID');
-  for (const test of tests) {
-    object(test, ['id', 'environment', 'level', 'checkpoint', 'mode', 'owner', 'location', 'implementation', 'expected'],
-      ['id', 'environment', 'level', 'checkpoint', 'mode', 'owner', 'location', 'implementation', 'expected']);
-    id(test.id); choice(test.environment, ['local', 'DEV', 'STAGING'], 'test environment');
-    choice(test.checkpoint, ['pre-review', 'review', 'post-review', 'DEV', 'STAGING'], 'test checkpoint');
-    requireThat((test.environment === 'DEV') === (test.checkpoint === 'DEV') &&
-      (test.environment === 'STAGING') === (test.checkpoint === 'STAGING') &&
-      (test.environment === 'local') === ['pre-review', 'review', 'post-review'].includes(test.checkpoint),
-    'INPUT', 'Test checkpoint must match its execution environment');
-    choice(test.mode, ['automated', 'semi-automated', 'manual'], 'test mode');
-    choice(test.owner, STAGING_OWNERS, 'test execution owner');
-    for (const field of ['level', 'location', 'implementation']) text(test[field], field, 500);
-    text(test.expected, 'expected', 2000);
-    if (test.mode === 'manual') requireThat(test.owner === 'user', 'HOST', 'Manual tests belong to the user');
-  }
-  requireThat(tests.some(test => testCheckpoint(test) === 'pre-review' && test.level === 'unit'),
-    'INPUT', 'The required pre-Review local sequence must begin with unit tests');
+  validateTestDefinitions(tests, { inline: true });
 }
 export async function startCycle(store, input, transactionOptions = {}) {
   object(input, ['workItemId', 'tests', 'configDigest', 'cause', 'assuranceToken'], ['workItemId', 'configDigest', 'cause']);
-  const specification = await resolveTestSpecification(store, input.workItemId, input.tests);
-  validateTests(specification.tests); text(input.configDigest, 'configuration digest'); text(input.cause, 'restart cause', 300);
+  text(input.configDigest, 'configuration digest'); text(input.cause, 'restart cause', 300);
   if (input.assuranceToken) text(input.assuranceToken, 'assurance token');
   let assuranceTokens = [];
   const result = await store.transaction(input.workItemId, async tx => {
+    const specification = await resolveTestSpecification(store, input.workItemId, input.tests);
+    validateTestDefinitions(specification.tests, { inline: specification.tests.length <= 100 });
     const marker = tx.all().find(record => record.type === 'assurance-marker');
     assuranceTokens = input.assuranceToken ? [input.assuranceToken] :
       (marker?.obligations ?? []).map(obligation => obligation.token);
@@ -175,14 +162,22 @@ export async function startCycle(store, input, transactionOptions = {}) {
         previous.candidateDigest === candidateDigest &&
         previous.testSpecDigest === testSpecDigest &&
         previous.configDigest === input.configDigest) {
+      requireCatalogSpecification(previous, specification);
       if (digest(previous.sources) !== digest(sources)) {
         const revisionChanged = previous.sources.some(source =>
           sources.find(current => current.repositoryId === source.repositoryId)?.revision !== source.revision);
         if (revisionChanged) {
           previous.artifacts = {};
           previous.deployments = {};
-          for (const test of previous.tests.filter(item => item.environment !== 'local')) {
-            delete previous.results[test.id];
+          resetCycleResults(tx, previous, test => test.environment !== 'local');
+          previous.invalidatedEnvironments = [...new Set([
+            ...(previous.invalidatedEnvironments ?? []), 'DEV', 'STAGING',
+          ])];
+          previous.environmentInvalidationSequences ??= {};
+          for (const environment of ['DEV', 'STAGING']) {
+            previous.environmentInvalidationSequences[environment] = Math.max(
+              previous.environmentInvalidationSequences[environment] ?? 0,
+              previous.lastDeploymentSequence ?? 0);
           }
           previous.step = 'local-testing';
           previous.pendingPlanSync = true;
@@ -197,6 +192,7 @@ export async function startCycle(store, input, transactionOptions = {}) {
       testSpecDigest, tests: specification.tests, results: {}, artifacts: {}, deployments: {}, reviewRef: null,
       step: 'local-testing', pendingPlanSync: true, cause: input.cause, createdAt: now(store.clock),
       lastDeploymentSequence: 0 };
+    if (specification.tests.length > 100) initializeReferencedCycle(tx, cycle, specification);
     tx.put(cycle);
     tx.checkpoint.artifactGeneration++;
     return { cycle, reset: true, nextAction: 'Run the full local unit suite, then all remaining required local tests. No DEV action is authorized.' };
@@ -221,7 +217,7 @@ export async function invalidateCycleAssurance(store, workItemId, cause) {
   return store.transaction(workItemId, tx => {
     const cycle = currentCycle(tx.all(), tx.checkpoint);
     if (!cycle) return { invalidated: false };
-    cycle.results = {};
+    resetCycleResults(tx, cycle);
     cycle.artifacts = {};
     cycle.deployments = {};
     cycle.reviewRef = null;
@@ -247,9 +243,7 @@ export async function invalidateEnvironmentAssurance(store, workItemId, environm
     for (const environment of affected) {
       delete cycle.artifacts[environment];
       delete cycle.deployments[environment];
-      for (const test of cycle.tests.filter(item => item.environment === environment)) {
-        delete cycle.results[test.id];
-      }
+      resetCycleResults(tx, cycle, test => test.environment === environment);
       cycle.invalidatedEnvironments = [...new Set([
         ...(cycle.invalidatedEnvironments ?? []),
         ...affected,
@@ -278,40 +272,29 @@ export async function invalidateEnvironmentAssurance(store, workItemId, environm
 export function checkTestStart(cycle, records, test, { unitFirstOverride = false } = {}) {
   requireThat(cycle, 'EVIDENCE', 'Start a validation cycle first');
   if (testCheckpoint(test) === 'pre-review' && test.level !== 'unit' && !unitFirstOverride) {
-    const units = cycle.tests.filter(t => testCheckpoint(t) === 'pre-review' && t.level === 'unit');
-    requireThat(units.every(t => records.find(r => r.id === cycle.results[t.id])?.status === 'Passed'),
+    const units = cycleTests(cycle).filter(t => testCheckpoint(t) === 'pre-review' && t.level === 'unit');
+    requireThat(units.every(t => currentTestEvidence(cycle, records, t)?.status === 'Passed'),
       'UNIT_FIRST', 'Run the full required local unit suite before other local tests');
   }
 }
-function testEvidenceSourceTime(evidence, records) {
-  if (!evidence) return Number.NEGATIVE_INFINITY;
-  if (evidence.operationId) {
-    const operation = records.find(record =>
-      record.id === evidence.operationId && record.type === 'operation');
-    const observed = Date.parse(operation?.updatedAt);
-    if (Number.isFinite(observed)) return observed;
-  }
-  if (evidence.eventId) {
-    const event = records.find(record =>
-      record.id === evidence.eventId && record.type === 'event');
-    const observed = Date.parse(event?.occurredAt);
-    if (Number.isFinite(observed)) return observed;
-  }
-  const observed = Date.parse(evidence.observedAt);
-  return Number.isFinite(observed) ? observed : Number.NEGATIVE_INFINITY;
-}
-export async function recordTest(store, input) {
+async function recordTestInTransaction(store, input, tx) {
   object(input, ['workItemId', 'cycleId', 'testId', 'status', 'evidenceRef', 'runId', 'artifactId', 'deploymentId', 'operationId', 'expectedMet', 'owner', 'host', 'activity', 'eventId'],
     ['workItemId', 'cycleId', 'testId', 'status']);
   choice(input.status, ['NotRun', 'Passed', 'Failed'], 'test status');
-  const result = await store.transaction(input.workItemId, async tx => {
     const cycle = currentCycle(tx.all(), tx.checkpoint);
     requireThat(cycle?.id === input.cycleId, 'STALE', 'Late result belongs to a historical validation cycle');
     requireThat(!assurancePending(cycle, tx.all()), 'STALE',
       'Validation assurance was invalidated; start a new cycle before recording test evidence');
-    requireThat(candidateContentDigest(await candidateSnapshot(tx.metadata, tx.manifest)) === cycle.candidateDigest, 'STALE', 'Candidate changed; start local revalidation from unit tests');
-    requireThat(await currentTestSpecification(store, input.workItemId, cycle.tests) === cycle.testSpecDigest, 'STALE', 'Test specification changed; restart validation');
-    const test = cycle.tests.find(t => t.id === input.testId);
+    if (!tx.testAdmissionSnapshot) {
+      const sources = await candidateSnapshot(tx.metadata, tx.manifest);
+      requireThat(candidateContentDigest(sources) === cycle.candidateDigest &&
+        digest(sources) === digest(cycle.sources), 'STALE', 'Candidate source changed; restart or reselect the validation cycle');
+      const specification = await resolveTestSpecification(store, input.workItemId, cycleTests(cycle));
+      requireThat(specification.digest === cycle.testSpecDigest, 'STALE', 'Test specification changed; restart validation');
+      requireCatalogSpecification(cycle, specification);
+      tx.testAdmissionSnapshot = { sources, specification };
+    }
+    const test = cycleTests(cycle).find(t => t.id === input.testId);
     requireThat(test, 'INPUT', 'Test is not part of the current specification');
     requireThat(!cycle.invalidatedEnvironments?.includes(test.environment), 'STALE',
       `${test.environment} assurance is invalidated; reconcile or complete a new managed deployment`);
@@ -326,18 +309,13 @@ export async function recordTest(store, input) {
     let stagingExecution;
     if (input.operationId) {
       const operationId = id(input.operationId, 'operation ID');
-      operation = tx.get(operationId);
-      if (!operation) {
-        operation = await readJson(path.join(store.workPath(input.workItemId),
-          'evidence', `${operationId}.json`), { optional: true });
-        if (operation) tx.put(operation);
-      }
+      operation = lookupOperation(tx.all(), operationId);
       requireThat(operation?.type === 'operation' && operation.class === 'test' &&
         operation.id === operationId && operation.workItemId === input.workItemId &&
         operation.cycleId === cycle.id && operation.candidateDigest === cycle.candidateDigest &&
-        ['dispatching', 'running', 'succeeded', 'failed'].includes(operation.status) &&
+        ['dispatching', 'submitted', 'running', 'succeeded', 'failed', 'cancelled'].includes(operation.status) &&
         operation.action.testId === test.id && operation.action.environment === test.environment &&
-        (test.environment === 'local' ||
+        (test.environment === 'local' || input.status === 'NotRun' ||
           (hasCurrentExecutionProof(operation, tx.all()) &&
             operation.resultProof?.status === operation.status &&
             operation.resultProof.dispatchId === operation.id &&
@@ -345,6 +323,16 @@ export async function recordTest(store, input) {
         (test.environment !== 'DEV' || (operation.action.deploymentId === input.deploymentId &&
           operation.action.artifactId === input.artifactId)),
       'OPERATION', 'Test evidence operation does not match the planned test execution');
+      if (input.status === 'NotRun') {
+        requireThat(['dispatching', 'submitted', 'running'].includes(operation.status) ||
+          operation.status === 'cancelled' &&
+            (input.activity === undefined || input.activity === 'cancelled'),
+        'OPERATION', 'A terminal test operation cannot accept late pending or running progress');
+        requireThat((input.expectedMet === undefined || input.expectedMet === false) &&
+          (input.owner === undefined || input.owner === operation.action.owner) &&
+          (input.host === undefined || input.host === operation.action.host),
+        'EVIDENCE', 'Nonconclusive evidence cannot claim a met expectation or a different execution owner/host');
+      }
       if (test.environment === 'STAGING') {
         const deployment = tx.get(cycle.deployments.STAGING);
         const configuration = await loadConfig(tx.metadata,
@@ -470,29 +458,61 @@ export async function recordTest(store, input) {
       environment: test.environment, implementation: test.implementation, status: input.status,
       observedAt: now(store.clock), activity: input.activity ?? (input.status === 'NotRun' ? 'pending' : 'complete') };
     for (const key of ['evidenceRef', 'runId', 'artifactId', 'deploymentId', 'operationId', 'expectedMet', 'owner', 'host', 'eventId']) if (input[key] !== undefined) evidence[key] = input[key];
-    tx.put(evidence);
-    const previous = tx.get(cycle.results[test.id]);
-    const rank = { Passed: 0, NotRun: 1, Failed: 2 };
-    const nextTime = testEvidenceSourceTime(evidence, tx.all());
-    const previousTime = testEvidenceSourceTime(previous, tx.all());
-    const directTie = nextTime === previousTime &&
-      !evidence.operationId && !evidence.eventId &&
-      !previous?.operationId && !previous?.eventId;
-    if (!previous || nextTime > previousTime ||
-        (directTie && evidence.sequence > previous.sequence) ||
-        (nextTime === previousTime && !directTie &&
-          rank[evidence.status] >= rank[previous.status])) {
-      cycle.results[test.id] = evidence.id;
+    if (operation && evidence.status === 'NotRun') {
+      evidence.owner ??= operation.action.owner;
+      evidence.host ??= operation.action.host;
+      if (operation.status === 'cancelled') evidence.activity = 'cancelled';
     }
+    requireThat(observationAfterReset(cycle, tx.all(), evidence), 'STALE',
+      'Result belongs to an execution before the current reset barrier');
+    await bindExecutionEvidence(store, tx, cycle, test, evidence);
+    const committed = lookupTestEvidence(cycle, tx.all(), evidence.id);
+    if (committed) {
+      const content = ({ sequence, observedAt, ...record }) => record;
+      requireThat(digest(content(committed)) === digest(content(evidence)), 'ID_CONFLICT',
+        'Execution report identity was reused with a different result');
+      requireThat(observationAfterReset(cycle, tx.all(), committed), 'STALE',
+        'Committed execution report predates the current reset barrier');
+      return committed;
+    }
+    appendTestObservation(tx, cycle, evidence);
+    selectTestObservation(cycle, test.id, currentTestEvidence(cycle, tx.all(), test, store.clock));
     cycle.lastEvidenceSequence = evidence.sequence;
     cycle.step = stagePassed(cycle, tx.all(), 'DEV') ? 'awaiting-dev-completion' :
       stagePassed(cycle, tx.all(), 'local') ? 'awaiting-local-completion' : 'local-testing';
     tx.put(cycle);
     cycle.pendingPlanSync = true;
     return evidence;
+}
+export async function recordTests(store, input) {
+  object(input, ['workItemId', 'cycleId', 'results'], ['workItemId', 'cycleId', 'results']);
+  requireThat(Array.isArray(input.results) && input.results.length > 0,
+    'INPUT', 'Supply individual test results');
+  budget(input, LIMITS.input, 'Test result submission');
+  requireThat(new Set(input.results.map(result => result.testId)).size === input.results.length,
+    'INPUT', 'A submission cannot contain duplicate test IDs');
+  const result = await store.transaction(input.workItemId, async tx => {
+    const evidence = [];
+    for (const row of input.results) {
+      object(row, ['testId', 'status', 'evidenceRef', 'runId', 'artifactId', 'deploymentId',
+        'operationId', 'expectedMet', 'owner', 'host', 'activity', 'eventId'], ['testId', 'status']);
+      evidence.push(await recordTestInTransaction(store, {
+        ...row, workItemId: input.workItemId, cycleId: input.cycleId,
+      }, tx));
+    }
+    requireThat(digest(await candidateSnapshot(tx.metadata, tx.manifest)) ===
+      digest(tx.testAdmissionSnapshot.sources) &&
+      (await resolveTestSpecification(store, input.workItemId)).digest ===
+        tx.testAdmissionSnapshot.specification.digest,
+    'STALE', 'Candidate or specification changed during evidence admission');
+    return evidence;
   });
   await synchronizeTestPlan(store, input.workItemId);
   return result;
+}
+export async function recordTest(store, input) {
+  const { workItemId, cycleId, ...result } = input;
+  return (await recordTests(store, { workItemId, cycleId, results: [result] }))[0];
 }
 export async function recordArtifact(store, input) {
   object(input, ['workItemId', 'cycleId', 'artifactId', 'environment', 'sourceDigest', 'configDigest', 'buildRunId', 'name', 'artifactType', 'evidenceRef', 'status',
@@ -537,10 +557,7 @@ export async function recordArtifact(store, input) {
         }),
     'EVIDENCE', 'Artifact requires the current verified local checkout and hosted repository');
     const producingOperationId = id(input.producingOperationId, 'producing operation ID');
-    const activeProducer = tx.get(producingOperationId);
-    const producer = activeProducer ?? await readJson(path.join(
-      store.workPath(input.workItemId), 'evidence',
-      `${producingOperationId}.json`), { optional: true, limit: LIMITS.record });
+    const producer = lookupOperation(tx.all(), producingOperationId);
     requireThat(producer?.type === 'operation' &&
       producer.id === producingOperationId &&
       producer.workItemId === input.workItemId &&
@@ -598,7 +615,6 @@ export async function recordArtifact(store, input) {
     choice(input.environment, ['DEV', 'STAGING'], 'artifact environment');
     requireThat(input.status === 'succeeded', 'EVIDENCE', 'Only successful, available artifacts may be selected');
     for (const key of ['artifactId', 'buildRunId', 'name', 'artifactType', 'evidenceRef']) text(input[key], key);
-    if (!activeProducer) tx.put(producer);
     const archived = [];
     for (const name of await fs.readdir(path.join(
       store.workPath(input.workItemId), 'evidence')).catch(error => {
@@ -665,7 +681,7 @@ export async function stagingHandoff(store, workItemId) {
   const execution = effectiveStagingExecution(state.records, cycle,
     configuration, { action, clock: store.clock });
   requireThat(execution.resolved, 'CONFIG', execution.reason);
-  const tests = cycle.tests.filter(test => test.environment === 'STAGING');
+  const tests = cycleTests(cycle).filter(test => test.environment === 'STAGING');
   requireThat(tests.length > 0, 'INPUT',
     'No STAGING tests are planned');
   requireThat(execution.overrideId || tests.every(test =>

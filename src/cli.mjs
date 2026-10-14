@@ -9,7 +9,8 @@ import { preparePr, adoptPr, updatePrFacts, evaluateReadiness } from './pr.mjs';
 import { associateMonitor, attachMonitor, refreshMonitorCapabilities, claimMonitor, beginPoll, observeMonitor, verifyMonitorLink, monitorNotice, interruptMonitor, dueMonitors, pruneMonitor } from './monitors.mjs';
 import { formatAudit, recordAudit, replayAudit } from './audit.mjs';
 import { status, resume, acknowledgeContext } from './recovery.mjs';
-import { startCycle, recordTest, recordArtifact, stagingHandoff } from './validation.mjs';
+import { startCycle, recordTest, recordTests, recordArtifact, stagingHandoff } from './validation.mjs';
+import { readTestEvidence, retainTestEvidence } from './validation-evidence.mjs';
 import { gate } from './gate.mjs';
 import { handleHook } from './hooks.mjs';
 import { check } from './checks.mjs';
@@ -57,7 +58,7 @@ Commands:
   status [--offset N --limit N] | resume | context ack
   receipt latest|capture | decision prepare|apply
   op show|prepare|mark-dispatching|record|reconcile | conflict add|resolve
-  cycle start | evidence test|artifact | handoff staging
+  cycle start | evidence test|tests|retain|show|artifact | handoff staging
   pr prepare|create-result|adopt|update|evaluate
   repository observe (requires a verified hosting-service observation)
   monitor attach|associate|refresh-capabilities|claim|begin-poll|observe [--evidence-file FILE]|link|notice|interrupt|due|prune
@@ -183,8 +184,18 @@ export async function runCli(argv = process.argv.slice(2), io = process, { creat
       result = await (subcommand === 'add' ? addConflict : resolveConflict)(store, work); break;
     case 'cycle': requireThat(subcommand === 'start', 'INPUT', 'Use cycle start'); result = await startCycle(store, work); break;
     case 'evidence':
-      requireThat(['test', 'artifact'].includes(subcommand), 'INPUT', 'Use evidence test|artifact');
-      result = await (subcommand === 'test' ? recordTest : recordArtifact)(store, work); break;
+      requireThat(['test', 'tests', 'retain', 'show', 'artifact'].includes(subcommand), 'INPUT', 'Use evidence test|tests|retain|show|artifact');
+      result = await ({ test: recordTest, tests: recordTests, retain: retainTestEvidence,
+        show: readTestEvidence, artifact: recordArtifact }[subcommand])(store, work);
+      if (subcommand === 'tests') {
+        const recorded = result;
+        const state = await store.load(workItemId);
+        result = { recorded: recorded.length, cycleId: work.cycleId,
+          resultIdsDigest: (await import('./core.mjs')).digest(recorded.map(item => item.id)),
+          outcomeRef: currentCycle(state.records, state.checkpoint)?.testOutcomeRef ?? null,
+          detail: 'Use evidence show with each required testId; batch recording does not grant lifecycle completion.' };
+      }
+      break;
     case 'handoff': requireThat(subcommand === 'staging', 'INPUT', 'Use handoff staging'); result = await stagingHandoff(store, workItemId); break;
     case 'pr':
       if (subcommand === 'prepare') result = await preparePr(store, work);

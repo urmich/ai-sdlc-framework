@@ -49,16 +49,22 @@ test('T-24/T-26/T-27/T-28 DEV artifact-deployment-test chain and policy-owned ST
       owner: 'agent', host: 'development-machine', artifactId: dev.artifactId,
       deploymentId: dev.operation.id },
     request: devTestRequest, correlationKey: 'test-DEV', intent: 'Test the current DEV deployment' });
-  await finishFixtureOperation(f, devTest.operation);
-  const wrongTargetOperation = { ...devTest.operation, id: 'op-wrong-dev-target',
+  const devTestResult = await finishFixtureOperation(f, devTest.operation);
+  const wrongTargetOperation = { ...devTestResult,
     target: 'other-dev-target', action: { ...devTest.operation.action, target: 'other-dev-target' } };
-  await writeJson(path.join(f.store.workPath(f.workItemId), 'evidence',
-    `${wrongTargetOperation.id}.json`), wrongTargetOperation);
-  await assert.rejects(recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id,
-    testId: 'T-dev', status: 'Passed', artifactId: dev.artifactId,
-    deploymentId: dev.operation.id, operationId: wrongTargetOperation.id,
-    expectedMet: true, owner: 'agent', host: 'development-machine',
-    evidenceRef: 'fixture:wrong-dev-target' }), { code: 'OPERATION' });
+  const wrongTargetFile = f.store.recordPath(f.workItemId, devTestResult.id);
+  await writeJson(wrongTargetFile, wrongTargetOperation);
+  try {
+    await assert.rejects(recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id,
+      testId: 'T-dev', status: 'Passed', artifactId: dev.artifactId,
+      deploymentId: dev.operation.id, operationId: wrongTargetOperation.id,
+      expectedMet: true, owner: 'agent', host: 'development-machine',
+      evidenceRef: 'fixture:wrong-dev-target' }), {
+      code: 'EVIDENCE', message: 'DEV test operation target differs from the current deployment target',
+    });
+  } finally {
+    await writeJson(wrongTargetFile, devTestResult);
+  }
   await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id, testId: 'T-dev', status: 'Passed',
     artifactId: dev.artifactId, deploymentId: dev.operation.id, expectedMet: true,
     operationId: devTest.operation.id, owner: 'agent', host: 'development-machine',

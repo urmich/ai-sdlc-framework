@@ -8,6 +8,7 @@ import { verifyEvent } from './decisions.mjs';
 import { effectiveEnvironments } from './policy.mjs';
 import { candidateContentDigest, candidateSnapshot, startCycle } from './validation.mjs';
 import { TERMINAL } from './operations.mjs';
+import { cycleTests } from './validation-catalog.mjs';
 import { resolveDefaultBranch } from './repository-observations.mjs';
 import { currentDeployment, ensureCurrentRepositoryIdentities,
   selectedRepositoryIdentity } from './current-evidence.mjs';
@@ -112,7 +113,7 @@ export async function assertOriented(store, workItemId, member, state, sessionId
   return token;
 }
 function laterCheckpointAction(cycle, records, clock) {
-  const tests = cycle.tests.filter(test => ['review', 'post-review'].includes(testCheckpoint(test)));
+  const tests = cycleTests(cycle).filter(test => ['review', 'post-review'].includes(testCheckpoint(test)));
   const failed = tests.filter(test => currentTestEvidence(cycle, records, test, clock)?.status === 'Failed');
   const describe = items => {
     const visible = items.slice(0, 5).map(test => test.id).join(', ');
@@ -141,8 +142,8 @@ export function nextAction(state, clock = Date) {
     if (review?.effect.status === 'Blocked') return 'Resolve the reported /review capability or evidence blocker.';
     return 'Run GitHub Copilot CLI /review for the current locally validated candidate, then capture the user-confirmed result.';
   }
-  const hasDev = cycle.tests.some(test => testCheckpoint(test) === 'DEV');
-  const hasStaging = cycle.tests.some(test => testCheckpoint(test) === 'STAGING');
+  const hasDev = cycleTests(cycle).some(test => testCheckpoint(test) === 'DEV');
+  const hasStaging = cycleTests(cycle).some(test => testCheckpoint(test) === 'STAGING');
   const stagingDeployment = records.find(record => record.id === cycle.deployments.STAGING);
   const stagingPromotions = activeEvents(records, { cycleId: cycle.id, clock }).filter(event =>
     event.kind === 'staging-promotion' && event.effect.cycleId === cycle.id);
@@ -258,7 +259,7 @@ export async function status(store, workItemId, pageOptions = undefined) {
     pendingDecisions: state.records.filter(record => record.type === 'pending-decision').map(record => ({ id: record.id, kind: record.kind, effect: record.effect })),
     cycle: cycle ? { id: cycle.id, step: cycle.step, candidateDigest: cycle.candidateDigest,
       review: state.records.find(record => record.id === cycle.reviewRef && record.type === 'event' && record.kind === 'review-result')?.effect ?? null,
-      tests: cycle.tests.map(test => ({ id: test.id, environment: test.environment,
+      tests: cycleTests(cycle).map(test => ({ id: test.id, environment: test.environment,
         checkpoint: test.checkpoint,
         status: currentTestEvidence(cycle, state.records, test, store.clock)?.status ?? 'NotRun',
         detail: currentTestEvidence(cycle, state.records, test, store.clock)?.activity ??

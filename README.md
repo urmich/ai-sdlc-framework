@@ -116,6 +116,19 @@ The installed framework has no runtime package dependencies and no
 cloud-provider network client. Provider operations remain owned by Copilot's authorized
 tools.
 
+GitHub integration targets a thin trusted-host boundary for grounded development
+and delivery, not a duplicate of every GitHub API. It retains exact repository,
+source, candidate, PR/check, run/attempt, artifact/release/deployment results,
+the existing nine result families and the Azure baseline. Authorized provider
+tools may own native actions; the framework owns evidence, current context,
+authority accounting and recovery. The ordinary dispatcher stays offline.
+See the [GitHub integration guide](docs/github-adapters.md) for retained outcomes
+and removed default administration/control-plane features. The actual public
+boundary has seven nested modules and 28 facade exports, with manually supplied
+six-verifier Store wiring and existing legacy operations. Integrated package/
+installer and direct test adaptation are separate; current validation remains
+`NotRun`, not a claim of completed acceptance.
+
 ## Install from npm
 
 The public npm package is the primary distribution. The same command works in
@@ -519,6 +532,7 @@ the native gate; pending T-60 content completeness blocks publication.
 | [Technical Design](docs/technical-design.md) | Detailed implementation, state, authorization, recovery, and evidence contracts |
 | [CLI reference](docs/cli.md) | Installation, commands, structured inputs, and operational behavior |
 | [Provider adapter guide](docs/provider-adapters.md) | Generic execution identity, Azure DevOps adapter, and extension contract |
+| [GitHub integration guide](docs/github-adapters.md) | Thin trusted-host boundary, retained delivery/context outcomes, authority and current acceptance limits |
 | [Azure DevOps acceptance test](docs/ado-acceptance-test.md) | Agent prompt and evidence checklist for a safe existing-repository handoff |
 | [Release CI and acceptance](docs/release-ci.md) | Scoped gates, immutable bundle, draft/npm handoffs, and postpublication evidence |
 
@@ -556,6 +570,15 @@ the explicit option takes precedence. Test files remain separate Node processes.
 Output records the exact selection, configured worker limit, Node executable,
 version, platform/architecture, elapsed milliseconds and actual exit code.
 Missing/invalid files or worker settings and failing child tests fail the command.
+
+For requirement-level evidence, set `SDLC_TEST_REPORT_FILE` to a new JSON file
+inside an existing repository-local `.test-data` directory. The runner records
+actual named assertions, native platform identity and complete pass/fail/skip
+counts; it refuses to overwrite evidence. Nested fixture runners do not inherit
+the report destination. `SDLC_TEST_REPORT_CONTEXT` can supply the independently
+frozen candidate/specification/configuration identity. The report does not
+create approval or acceptance credit: exact assertion bindings and unchanged
+source must be verified separately.
 
 See [test-performance evidence and acceptance](docs/test-performance/test-plan.md)
 for measurement gates; exposing the fast selection alone is not a speedup claim.

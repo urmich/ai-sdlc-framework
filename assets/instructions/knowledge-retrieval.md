@@ -63,3 +63,22 @@ Confirm that you can identify:
 
 If any missing fact would make the action destructive, externally visible, or
 materially wasteful, resolve it before proceeding.
+
+## 6. Bounded discovery and recovery
+
+- Before expensive investigation, identify its exact in-scope question, required
+  proof and a proportionate time or attempt limit. Stop when that question is
+  answered; do not broaden the work because another feature or gap is noticed.
+- A demonstrated host/provider permission or capability blocker ends that
+  investigation. Preserve the evidence and report the affected checkpoint.
+  Replacement infrastructure, elevation or policy changes require separate
+  explicit scope and authority; a delivery deadline grants neither.
+- After compaction or resume, reread only the relevant authoritative guides and
+  artifacts. Recover the approved scope, current branch/candidate, pending
+  actions, blockers and execution/evidence references rather than repeating
+  broad discovery or starting a second workflow.
+- A summary cannot replace an approval, an exact result or an active execution
+  handle. Retrieve the original reference when needed. A missing result is
+  unverified, not proof of failure, permission to retry or reason to launch a
+  duplicate. If the original evidence is lost or its applicability cannot be
+  established, report that exact gap and follow the declared validation contract.

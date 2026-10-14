@@ -4,6 +4,7 @@ import { listJson, readJson } from './files.mjs';
 import { commitMessage, history } from './git.mjs';
 import { verifyEvent } from './decisions.mjs';
 import { activeEvents, boundToCycle, currentCycle, currentStagingResultEventIds, eventAppliesToCycle } from './authority.mjs';
+import { bindOperationHistory } from './validation-evidence.mjs';
 
 export function formatEvents(events) {
   requireThat(events.length > 0, 'INPUT', 'Select at least one effective event to audit');
@@ -103,7 +104,8 @@ export async function replayAudit(store, workItemId, { persist = false, recovery
     const cycle = currentCycle(tx.all(), tx.checkpoint);
     tx.checkpoint.policyGeneration = Math.max(tx.checkpoint.policyGeneration ?? 0,
       ...events.map(event => event.sequence));
-    const currentStagingResultIds = currentStagingResultEventIds([...tx.all(), ...events], cycle, store.clock);
+    const currentStagingResultIds = currentStagingResultEventIds(
+      bindOperationHistory([...tx.all(), ...events], tx.operationHistory, tx.archivedTestEvidence), cycle, store.clock);
     const required = new Set(activeEvents(events, { cycleId: cycle?.id, clock: store.clock })
       .filter(event => eventAppliesToCycle(event, cycle) &&
         (event.kind !== 'staging-result' || currentStagingResultIds.has(event.id))).map(event => event.id));

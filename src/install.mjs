@@ -15,14 +15,21 @@ const INVALID_LOCK_STALE_MS = 1000;
 const REQUIRED_INSTALLED_FILES = [
   'sdlc/bin/sdlc.mjs',
   ...['artifacts', 'audit', 'authority', 'checks', 'cli', 'core', 'decisions',
-    'files', 'gate', 'git', 'hooks', 'install', 'monitors', 'operations',
+    'current-evidence', 'external-results', 'files', 'gate', 'git', 'hooks',
+    'host-invocations', 'install', 'monitor-evidence', 'monitors',
+    'observation-retention', 'operations',
     'platform', 'policy', 'pr', 'provider-adapters', 'recovery', 'schemas',
-    'staging', 'store',
-    'validation'].map(name => `sdlc/src/${name}.mjs`),
+    'repository-observations', 'staging', 'store', 'tool-arguments',
+    'validation', 'validation-catalog', 'validation-evidence'].map(name => `sdlc/src/${name}.mjs`),
+  'sdlc/src/github.mjs',
+  ...['connection', 'execution-adapter', 'host', 'repository', 'schemas',
+    'store-bridge', 'transport']
+    .map(name => `sdlc/src/github/${name}.mjs`),
   'sdlc/package.json',
   'hooks/sdlc.json',
   'sdlc/cli.md',
   'sdlc/provider-adapters.md',
+  'sdlc/github-adapters.md',
   'sdlc/lifecycle-intent.md',
   ...['sdlc', 'sdlc-requirements', 'sdlc-test-design',
     'sdlc-technical-design', 'sdlc-coding'].map(name =>
@@ -232,6 +239,10 @@ export async function distribution(home, sourceRoot = SOURCE_ROOT) {
     await readBytes(path.join(sourceRoot, 'docs', 'cli.md'))));
   files.set('sdlc/provider-adapters.md', canonicalInstalledText(
     await readBytes(path.join(sourceRoot, 'docs', 'provider-adapters.md'))));
+  requireThat(await exists(path.join(sourceRoot, 'docs', 'github-adapters.md')),
+    'INSTALL', 'Replacement package is incomplete: missing docs/github-adapters.md');
+  files.set('sdlc/github-adapters.md', canonicalInstalledText(
+    await readBytes(path.join(sourceRoot, 'docs', 'github-adapters.md'))));
   files.set('sdlc/lifecycle-intent.md', canonicalInstalledText(
     await readBytes(path.join(sourceRoot, 'assets', 'lifecycle-intent.md'))));
   const instructions = render(

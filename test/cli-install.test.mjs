@@ -40,12 +40,17 @@ test('T-23 install/update/uninstall preserve user files, paths with spaces, modi
   const lifecycleIntent = path.join(f.home, 'sdlc/lifecycle-intent.md');
   assert.ok(await fs.stat(lifecycleIntent));
   const installedGlobal = await fs.readFile(instructions, 'utf8');
+  assert.match(installedGlobal,
+    /After session resume or compaction[\s\S]*An accepted token[\s\S]*does not prove reading/u);
   const installedCodingSkill = await fs.readFile(
     path.join(f.home, 'skills/sdlc-coding/SKILL.md'), 'utf8');
   for (const name of ['knowledge-retrieval', 'coding', 'testing', 'building', 'reviewing']) {
     const installedPath = path.join(f.home, `sdlc/instructions/${name}.md`);
     assert.ok(installedGlobal.includes(JSON.stringify(installedPath)));
     assert.ok(installedCodingSkill.includes(JSON.stringify(installedPath)));
+    assert.deepEqual(await fs.readFile(installedPath), canonicalInstalledText(
+      await fs.readFile(path.join('assets', 'instructions', `${name}.md`))),
+    'Installed focused guidance must preserve the current source instructions');
   }
   assert.ok(installedGlobal.includes(JSON.stringify(lifecycleIntent)));
   for (const skill of ['sdlc', 'sdlc-requirements', 'sdlc-test-design',
