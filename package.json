@@ -1,6 +1,6 @@
 {
   "name": "ai-sdlc-framework",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Offline, receipt-bound SDLC workflow for GitHub Copilot CLI",
   "author": "Michael Urinovsky",
   "license": "MIT",
