@@ -12,6 +12,8 @@ import { canonicalPath } from '../src/files.mjs';
 import { validateRecord } from '../src/schemas.mjs';
 
 const execute = promisify(execFile);
+const packageVersion = JSON.parse(await fs.readFile(
+  new URL('../package.json', import.meta.url), 'utf8')).version;
 
 test('T-115 native Windows candidate loads all eight advisory hooks in an isolated Copilot home',
   { skip: process.platform !== 'win32' }, async t => {
@@ -68,7 +70,7 @@ test('T-115 native Windows candidate loads all eight advisory hooks in an isolat
       })).stdout);
     const before = await fixtureDoctor();
     assert.equal(before.installed, true);
-    assert.equal(before.frameworkVersion, '0.3.1');
+    assert.equal(before.frameworkVersion, packageVersion);
     assert.deepEqual(before.findings, []);
 
     const config = JSON.parse(await fs.readFile(
