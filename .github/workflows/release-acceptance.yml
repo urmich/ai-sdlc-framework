@@ -56,6 +56,21 @@ jobs:
           github-token: ${{ github.token }}
           path: source/.test-data/release-bundle
           merge-multiple: true
+      - name: Provision pinned workspace-local Homebrew for public acceptance
+        env:
+          HOMEBREW_BREW_COMMIT: 99fd9a8eed4ff942c448da0c1f11156302441e4a
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/source/.test-data/homebrew-acceptance"
+          test ! -e "$root"
+          git init -q "$root"
+          git -C "$root" remote add origin https://github.com/Homebrew/brew.git
+          git -C "$root" fetch --quiet --depth=1 origin "$HOMEBREW_BREW_COMMIT"
+          git -C "$root" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$root" rev-parse HEAD)" = "$HOMEBREW_BREW_COMMIT"
+          brew="$root/bin/brew"
+          test -x "$brew"
+          echo "SDLC_PUBLIC_HOMEBREW_BREW=$brew" >> "$GITHUB_ENV"
       - name: Verify saved evidence, anonymously download, then execute native Apple Silicon lifecycle
         env:
           CHECK_NPM: ${{ inputs.check_npm }}

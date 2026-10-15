@@ -435,6 +435,10 @@ native distribution tests.
 stable acceptance is `NotRun`/`Blocked`, not Passed. Prereleases mark published
 Homebrew acceptance `NotApplicable` and retain the native local-formula gate. Native Windows,
 Intel and WinGet community/client acceptance remain explicitly `NotRun`.
+The acceptance workflow provisions the same pinned Homebrew revision as the
+prepublication gates in a fresh workspace-owned prefix. Public formula
+installation and dependency linking do not modify or depend on the runner's
+preinstalled Homebrew prefix; existing global symlinks are never overwritten.
 The acceptance result is a new artifact, never a mutation of prepublication
 evidence. OS/network/package-manager policy failures must be investigated through
 approved channels; no workflow disables controls or promises a CFS bypass.

@@ -809,3 +809,21 @@ test('release workflow statically separates validation, sealing, opt-in publicat
   assert.match(acceptance, /ACCEPTANCE_VERIFIER_COMMIT: \$\{\{ github\.sha \}\}/u);
   assert.doesNotMatch(acceptance, /ref: \$\{\{ inputs\.source_commit \}\}/u);
 });
+
+test('postpublication Homebrew acceptance uses an isolated pinned workspace prefix', async () => {
+  const workflow = await fs.readFile('.github/workflows/release.yml', 'utf8');
+  const acceptance = await fs.readFile('.github/workflows/release-acceptance.yml', 'utf8');
+  const provision = acceptance.match(
+    /      - name: Provision pinned workspace-local Homebrew for public acceptance\n([\s\S]*?)(?=      - )/u)?.[1];
+  assert.ok(provision, 'Public acceptance must not install dependencies into the runner Homebrew prefix');
+  const pin = workflow.match(/HOMEBREW_BREW_COMMIT: ([a-f0-9]{40})/u)?.[1];
+  assert.ok(pin);
+  assert.ok(provision.includes(`HOMEBREW_BREW_COMMIT: ${pin}`));
+  assert.match(provision, /root="\$GITHUB_WORKSPACE\/source\/\.test-data\/homebrew-acceptance"/u);
+  assert.match(provision, /test ! -e "\$root"/u);
+  assert.match(provision, /git -C "\$root" fetch --quiet --depth=1 origin "\$HOMEBREW_BREW_COMMIT"/u);
+  assert.match(provision, /test "\$\(git -C "\$root" rev-parse HEAD\)" = "\$HOMEBREW_BREW_COMMIT"/u);
+  assert.match(provision, /SDLC_PUBLIC_HOMEBREW_BREW=\$brew.*"\$GITHUB_ENV"/u);
+  assert.ok(acceptance.indexOf(provision) < acceptance.indexOf('node scripts/accept-release.mjs'));
+  assert.doesNotMatch(acceptance, /brew (?:unlink|link .*--overwrite)|HOMEBREW_NO_REQUIRE_TAP_TRUST/u);
+});
