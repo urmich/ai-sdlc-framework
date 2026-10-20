@@ -138,6 +138,8 @@ export function requireHomebrewBottlePlan(plan, { prefix, target }) {
   requireThat(root?.version === homebrewToolchain.node, 'HOST',
     `Homebrew Node must remain exactly ${homebrewToolchain.node}; no latest/system runtime substitute is allowed`);
   const unavailable = plan.entries.filter(entry => !entry.bottleAvailable || !entry.compatible || !entry.pourable ||
+    typeof entry.builtCellar !== 'string' || entry.builtCellar === '/Cellar' ||
+    !(['any', 'any_skip_relocation'].includes(entry.builtCellar) || path.posix.isAbsolute(entry.builtCellar)) ||
     !/^[a-f0-9]{64}$/u.test(entry.sha256 ?? '') ||
     typeof entry.bottleTag !== 'string' || !/^[a-z][a-z0-9_]+$/u.test(entry.bottleTag) ||
     (entry.bottleTag !== 'all' && (target === 'macos-arm64' ?
@@ -299,8 +301,20 @@ export async function bootstrapNativeToolchain(options) {
         'The complete Homebrew dependency snapshot must match its selected immutable core commit');
       console.log(`Checking native Homebrew bottle eligibility for ${options.target} ` +
         `(limit ${homebrewSetupLimits.preflightMs / 1000}s); source compilation is not permitted.`);
-      const bottlePlan = JSON.parse(await run('brew-node-bottle-plan', brew, ['ruby', '-e', homebrewBottlePlanSource],
-        repositoryRoot, environment, homebrewSetupLimits.preflightMs));
+      const probeDirectory = path.join(directory, 'brew-probe');
+      await fs.mkdir(probeDirectory);
+      const probeFile = path.join(probeDirectory, 'brew-sdlc-bottle-plan.rb');
+      const probeSource = `#!${rubyExecutable}\n${homebrewBottlePlanSource}`;
+      await fs.writeFile(probeFile, probeSource, { flag: 'wx', mode: 0o755 });
+      await fs.writeFile(path.join(directory, 'homebrew-bottle-probe.json'), `${JSON.stringify({
+        schemaVersion: 1, kind: 'source-owned-homebrew-command', command: 'sdlc-bottle-plan',
+        path: path.relative(directory, probeFile), sha256: digest(Buffer.from(probeSource)),
+        bytes: Buffer.byteLength(probeSource), brewCommit: actualCommit, coreCommit: actualCoreCommit,
+      })}\n`, { flag: 'wx' });
+      // `brew ruby` reinitializes global.rb after its parent consumed ARM prefix defaults.
+      const bottlePlan = JSON.parse(await run('brew-node-bottle-plan', brew, ['sdlc-bottle-plan'],
+        repositoryRoot, { ...environment, PATH: `${probeDirectory}${path.delimiter}${environment.PATH}` },
+        homebrewSetupLimits.preflightMs));
       const retainedBottlePlan = sanitizeExecutionPayload(Buffer.from(JSON.stringify(bottlePlan)));
       requireThat(digest(retainedBottlePlan) === digest(bottlePlan), 'UNSAFE',
         'Bottle eligibility identities cannot be rewritten while retaining setup evidence');

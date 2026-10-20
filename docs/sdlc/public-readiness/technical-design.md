@@ -1001,6 +1001,16 @@ compatibility or pourability fails. Upload immutable bootstrap diagnostics as
 soon as provisioning finishes, before the full suite; retain later cleanup in
 a separate artifact so observation never requires interrupting healthy tests.
 
+Run the source-owned Ruby probe through Homebrew's supported external-command
+loader in its already initialized process. The pinned `brew ruby` command
+executes a second Ruby instance after the parent `global.rb` has consumed the
+ARM default-prefix environment variable; the second initialization computes an
+invalid `/Cellar` and falsely rejects an available ARM bottle. Keep the probe
+in a new owned checkout-local command directory, bind its exact bytes in the
+bootstrap evidence, and scope its PATH entry to that single invocation.
+Do not patch Brew constants, alter upstream formula metadata, force bottles or
+change relocation policy to compensate for the initialization error.
+
 Fixed-cellar Node/OpenSSL bottles require the genuinely owned short prefix
 allocated by `native-homebrew-prefix.mjs`, not the long checkout path or an
 existing global installation. Bind its literal filesystem identity and marker

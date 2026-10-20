@@ -497,6 +497,8 @@ test('T-PRD015 Homebrew bottle preflight rejects absent native or non-relocatabl
     selected => { selected.nativeTag = 'arm64_sequoia'; },
     selected => { selected.macosVersion = '26.0'; },
     selected => { selected.entries[0].bottleAvailable = false; },
+    selected => { selected.entries[0].builtCellar = '/Cellar'; },
+    selected => { selected.entries[0].builtCellar = 'relative/Cellar'; },
     selected => { selected.relocationEnabled = 'false'; },
     selected => { selected.entries[1].sha256 = 'not-an-integrity-digest'; },
   ]) {
