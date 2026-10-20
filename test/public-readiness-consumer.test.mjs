@@ -252,6 +252,19 @@ test('T-PRD083 fenced examples cannot define requirements or satisfy real covera
     assert.equal(inspected.complete, false);
     assert.deepEqual(inspected.uncovered, ['AC-801.2']);
   }
+  for (const indentation of ['    ', '\t']) {
+    const input = {
+      repositoryId: 'consumer', sourceRevision: 'a'.repeat(40),
+      requirements: [{ path: requirementPath, contents: requirements.replace(
+        '- AC-801.2:', `- Additional required conditions:\n${indentation}- AC-801.2:`) }],
+      testPlans: [{ path: planPath,
+        contents: plan.replace('FR-801; AC-801.1; AC-801.2', 'FR-801; AC-801.1') }],
+    };
+    const inspected = inspectCoverage({ ...input,
+      body: renderCoverageSection(prepareCoverage(input)) });
+    assert.equal(inspected.complete, false);
+    assert.deepEqual(inspected.uncovered, ['AC-801.2']);
+  }
 });
 
 test('T-PRD084 offline coverage prepare and inspect never execute configured Git filters', async t => {

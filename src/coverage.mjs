@@ -85,10 +85,6 @@ function* definitionLines(contents, label) {
       yield [index, ''];
       continue;
     }
-    if (/^(?: {4}| {0,3}\t)/u.test(line)) {
-      yield [index, ''];
-      continue;
-    }
     const opening = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
     if (opening && (opening[1][0] === '~' || !opening[2].includes('`'))) {
       fence = { marker: opening[1][0], length: opening[1].length };
@@ -183,6 +179,10 @@ function testsFrom(contents) {
   const result = [];
   let headings;
   for (const [index, line] of definitionLines(contents, 'Test Plan')) {
+    if (/^(?: {4}| {0,3}\t)/u.test(line)) {
+      headings = undefined;
+      continue;
+    }
     if (!line.trim().startsWith('|')) { headings = undefined; continue; }
     requireThat(line.trim().endsWith('|'), 'COVERAGE',
       `Unclosed Test Plan row at line ${index + 1}`);
