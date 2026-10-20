@@ -325,8 +325,8 @@ jobs:
           if (payload.length !== handoff.size || hash(payload) !== handoff.sha256 ||
               `sha512-${hash(payload, 'sha512', 'base64')}` !== handoff.integrity) throw new Error('Exact tgz integrity mismatch');
           // Read package metadata to stdout as data only: never extract or import package code.
-          const pkg = JSON.parse(execFileSync('tar', ['-xOzf', source, 'package/package.json'],
-            { encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, timeout: 30_000 }));
+          const pkg = JSON.parse(execFileSync('tar', ['-xOzf', handoff.filename, 'package/package.json'],
+            { cwd: path.dirname(source), encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, timeout: 30_000 }));
           if (pkg.name !== handoff.packageName || pkg.version !== handoff.version ||
               pkg.repository?.url !== 'https://github.com/urmich/ai-sdlc-framework.git' ||
               Object.keys(pkg.publishConfig ?? {}).sort().join(',') !== 'access,registry' ||

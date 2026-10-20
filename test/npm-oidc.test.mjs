@@ -180,6 +180,9 @@ if (process.argv[2] === '--version') {
           exitCode: typeof error.code === 'number' ? error.code : null,
           code: typeof error.code === 'string' ? error.code : null,
           stderrMessage: message === undefined ? null : safeSummary(message),
+          stderrDetails: error.stderr.split(/\r?\n/u)
+            .filter(line => /\b(?:bsdtar|tar)(?:\.exe)?:/iu.test(line))
+            .slice(0, 4).map(line => safeSummary(line.slice(0, 512))),
           stderrTextSha256: sha256(Buffer.from(error.stderr)),
           stderrTextBytes: Buffer.byteLength(error.stderr),
           stdoutTextSha256: sha256(Buffer.from(error.stdout)),
