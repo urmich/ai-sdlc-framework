@@ -631,7 +631,8 @@ async function assertDurableRunningCheckpoint(t, { hiddenLease = false } = {}) {
 import * as fs from 'node:fs/promises';import {setTimeout as delay} from 'node:timers/promises';
 test('completed root before blocker',()=>assert.equal(2+2,4));
 test('silent blocked root',async()=>{
-  await fs.writeFile(${JSON.stringify(marker)},JSON.stringify({pid:process.pid,producerPid:process.ppid}));
+  await fs.writeFile(${JSON.stringify(`${marker}.pending`)},JSON.stringify({pid:process.pid,producerPid:process.ppid}),{flag:'wx'});
+  await fs.rename(${JSON.stringify(`${marker}.pending`)},${JSON.stringify(marker)});
   const deadline=Date.now()+20000;
   while(!(await fs.stat(${JSON.stringify(release)}).catch(error=>{
     if(error.code!=='ENOENT')throw error;return null;
