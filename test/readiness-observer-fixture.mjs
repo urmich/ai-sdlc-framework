@@ -648,6 +648,16 @@ export async function observerApiFixture(t, options = {}) {
     event: 'pull_request', action: 'opened', baseChanged: false, requiresNative: true,
     runId: String(runId), attempt: '1' };
   logs.set(intentJob.id, `${at(0.5)} sdlc-validation-intent:${JSON.stringify(intent)}\n`);
+  const minimumNodeJob = { ...structuredClone(jobs[0]), id: 1102,
+    name: nativeWorkflowContract.minimumNodeJob, steps: [
+      [nativeWorkflowContract.steps.checkout, 2, 3],
+      [nativeWorkflowContract.steps.minimumNodeSetup, 4, 5],
+      [nativeWorkflowContract.steps.minimumNodeExecution, 6, 60],
+      [nativeWorkflowContract.steps.minimumNodeRetention, 61, 62],
+    ].map(([name, start, finish], index) => ({ name, number: index + 1, conclusion: 'success',
+      started_at: at(start), completed_at: at(finish) })) };
+  jobs.push(minimumNodeJob);
+  logs.set(minimumNodeJob.id, `${at(2)} [command]/usr/bin/git log -1 --format=%H\n${at(2.1)} ${revisions.merge}\n`);
   const artifacts = new Map();
   const artifactBytes = new Map();
   let artifactId = 200;
@@ -660,6 +670,8 @@ export async function observerApiFixture(t, options = {}) {
     artifactBytes.set(id, bytes);
   };
   putArtifact('candidate', `frozen-candidate-${runId}-1`, archive(entries));
+  putArtifact('minimum-node', `${nativeWorkflowContract.minimumNodeArtifactPrefix}${runId}-1`,
+    archive(new Map([['minimum-runtime-fixture.json', { fixtureOnly: true }]])));
   for (const [target, lane] of lanes) putArtifact(target, `native-evidence-${target}-${runId}-1`, archive(lane.data));
   const coverageInput = { repositoryId: 'primary', sourceRevision: revisions.head,
     requirements: [{ artifactId: 'public-readiness', path: 'docs/sdlc/public-readiness/requirements.md',
@@ -802,6 +814,8 @@ export async function observerApiFixture(t, options = {}) {
       const currentArtifacts = new Map();
       putArtifact('candidate', `frozen-candidate-${executionId}-1`, archive(frozen.entries),
         currentArtifacts, executionId);
+      putArtifact('minimum-node', `${nativeWorkflowContract.minimumNodeArtifactPrefix}${executionId}-1`,
+        archive(new Map([['minimum-runtime-fixture.json', { fixtureOnly: true }]])), currentArtifacts, executionId);
       for (const [target, lane] of currentLanes) putArtifact(target,
         `native-evidence-${target}-${executionId}-1`, archive(lane.data), currentArtifacts, executionId);
       const currentPr = { ...structuredClone(pr), number, user: { id: authorId }, merge_commit_sha: mergeSha,

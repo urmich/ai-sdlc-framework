@@ -13,7 +13,7 @@ import { digest } from '../src/core.mjs';
 import { canonical } from '../src/core.mjs';
 import { observerApiFixture, nativeReplayFixture } from './readiness-observer-fixture.mjs';
 import { reconcilePrReadiness } from '../scripts/pr-readiness.mjs';
-import { renderObserverSummary, retainObserverResult } from '../scripts/pr-observer.mjs';
+import { readTrustedMinimumNodeJob, renderObserverSummary, retainObserverResult } from '../scripts/pr-observer.mjs';
 import { nativeStageSelections, nativeConfigurationDigest, replayNativeEvidence,
   validateNativePreviousLifecycle, nativeWorkflowContract, nativeSpecification } from '../scripts/native-validation.mjs';
 import { testSpecificationDigest } from '../src/artifacts.mjs';
@@ -162,6 +162,68 @@ test('T-PRD021 unbound native component procedures remain required NotRun rather
 });
 
 const verdict = snapshot => snapshot.prs[0].verdicts['framework/validation'];
+
+test('T-PRD016 minimum-runtime prerequisite rejects missing failed skipped or unbound provider jobs despite four passing native lanes', async t => {
+  const f = await observerApiFixture(t);
+  const selected = f.jobs.find(job => job.name === nativeWorkflowContract.minimumNodeJob);
+  const original = structuredClone(selected);
+  const originalLogs = f.logs.get(selected.id);
+  const expected = { runId: f.run.id, attempt: f.run.run_attempt,
+    expectedHead: f.revisions.head, expectedMerge: f.revisions.merge };
+  assert.deepEqual(readTrustedMinimumNodeJob(selected, originalLogs, expected), {
+    jobId: selected.id, runId: f.run.id, attempt: f.run.run_attempt,
+    headSha: f.revisions.head, mergeSha: f.revisions.merge,
+  });
+  assert.equal(f.jobs.filter(job => job.name.startsWith('native-') && job.conclusion === 'success').length, 4);
+  for (const change of [
+    () => { f.jobs.splice(f.jobs.indexOf(selected), 1); },
+    () => { selected.conclusion = 'failure'; },
+    () => { selected.conclusion = 'skipped'; },
+    () => { selected.status = 'in_progress'; },
+    () => { selected.run_attempt++; },
+    () => { selected.head_sha = f.revisions.base; },
+    () => { selected.labels = ['windows-2022']; },
+    () => { selected.steps[2].name = 'Unrelated successful command'; },
+    () => { selected.steps[2].conclusion = 'skipped'; },
+    () => { selected.steps[3].conclusion = 'failure'; },
+    () => { selected.steps[2].number = selected.steps[1].number; },
+    () => { f.jobs.push(structuredClone(selected)); },
+    () => { f.logs.set(selected.id, originalLogs.replaceAll(f.revisions.merge, f.revisions.head)); },
+    () => { f.logs.set(selected.id, originalLogs.replaceAll('10:00:02', '10:00:20')); },
+  ]) {
+    Object.assign(selected, structuredClone(original));
+    f.logs.set(selected.id, originalLogs);
+    if (!f.jobs.includes(selected)) f.jobs.push(selected);
+    change();
+    const snapshot = await f.connect().host.snapshot();
+    assert.equal(snapshot.complete, true);
+    assert.equal(verdict(snapshot).status, 'NotRun');
+    assert.ok(verdict(snapshot).blockers.some(message => /minimum-runtime/iu.test(message)));
+    assert.equal(f.calls.some(call => /\/actions\/artifacts\/\d+\/zip$/u.test(new URL(call.url).pathname)), false,
+      'An unproven prerequisite cannot borrow the passing native artifacts');
+    f.jobs.splice(0, f.jobs.length, ...f.jobs.filter(job =>
+      job.name !== nativeWorkflowContract.minimumNodeJob || job === selected));
+  }
+  Object.assign(selected, structuredClone(original));
+  f.logs.set(selected.id, originalLogs);
+  const artifact = structuredClone(f.artifacts.get('minimum-node'));
+  for (const change of [
+    () => { f.artifacts.delete('minimum-node'); },
+    () => { f.artifacts.get('minimum-node').expired = true; },
+    () => { f.artifacts.get('minimum-node').name = 'minimum-node-evidence-101-2'; },
+    () => { f.artifacts.get('minimum-node').workflow_run.id++; },
+    () => { f.artifacts.get('minimum-node').workflow_run.head_sha = f.revisions.base; },
+    () => { f.artifacts.get('minimum-node').digest = null; },
+  ]) {
+    f.artifacts.set('minimum-node', structuredClone(artifact));
+    change();
+    const snapshot = await f.connect().host.snapshot();
+    assert.equal(verdict(snapshot).status, 'NotRun');
+    assert.ok(verdict(snapshot).blockers.some(message => /minimum-runtime/iu.test(message)));
+    assert.equal(f.calls.some(call => /\/actions\/artifacts\/\d+\/zip$/u.test(new URL(call.url).pathname)), false);
+  }
+  f.assertReadOnly();
+});
 
 test('T-PRD016 API-only native admission restores a complete original four-lane six-case fixture without candidate execution', async t => {
   const f = await observerApiFixture(t);

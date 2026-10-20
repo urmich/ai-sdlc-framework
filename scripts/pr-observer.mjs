@@ -43,6 +43,7 @@ const reporterPaths = [
 ];
 const revision = /^[a-f0-9]{40}$/u;
 const sha256 = /^[a-f0-9]{64}$/u;
+const checkoutCommitPattern = /^\[command\](?:"(?:[A-Za-z]:[\\/]|\/)[^"\r\n]*[\\/]git(?:\.exe)?"|(?:[A-Za-z]:[\\/]|\/)[^\s"]*[\\/]git(?:\.exe)?|git(?:\.exe)?)\s+log -1 --format=%H\s*$/u;
 const labels = { 'linux-x64': 'ubuntu-24.04', 'windows-x64': 'windows-2022',
   'macos-arm64': 'macos-15', 'macos-x64': 'macos-15-intel' };
 const platforms = { 'linux-x64': 'linux', 'windows-x64': 'win32',
@@ -84,6 +85,40 @@ export function readTrustedValidationIntent(job, logs, { repositoryId, runId, at
     facts.baseSha === pr.base.sha && facts.mergeSha === pr.merge_commit_sha, 'EVIDENCE',
   'The current PR producer intent has a stale source tuple');
   return facts;
+}
+
+export function readTrustedMinimumNodeJob(job, logs, { runId, attempt, expectedHead, expectedMerge }) {
+  requireThat(job?.name === native.nativeWorkflowContract.minimumNodeJob &&
+    Number.isSafeInteger(job.id) && job.id > 0 &&
+    revision.test(expectedHead ?? '') && revision.test(expectedMerge ?? '') &&
+    job.run_id === runId && job.run_attempt === attempt && job.head_sha === expectedHead &&
+    job.status === 'completed' && job.conclusion === 'success' &&
+    Array.isArray(job.labels) && job.labels.includes(labels['linux-x64']) &&
+    typeof logs === 'string' && Array.isArray(job.steps), 'EVIDENCE',
+  'T-PRD014-LX requires the successful current minimum-runtime compatibility job');
+  const names = [native.nativeWorkflowContract.steps.checkout,
+    native.nativeWorkflowContract.steps.minimumNodeSetup,
+    native.nativeWorkflowContract.steps.minimumNodeExecution,
+    native.nativeWorkflowContract.steps.minimumNodeRetention];
+  const steps = names.map(name => {
+    const matches = job.steps.filter(step => step?.name === name);
+    requireThat(matches.length === 1 && matches[0].conclusion === 'success' &&
+      Number.isSafeInteger(matches[0].number) && matches[0].number > 0, 'EVIDENCE',
+    'A required minimum-runtime compatibility step is missing, failed or ambiguous');
+    return matches[0];
+  });
+  requireThat(steps.every((step, index) => index === 0 || step.number > steps[index - 1].number),
+    'EVIDENCE', 'Minimum-runtime compatibility checkout/setup/execution/retention ordering differs');
+  const checkout = steps[0];
+  const lines = logs.split(/\r?\n/u).flatMap(line => {
+    const match = /^(\d{4}-\d\d-\d\dT\S+Z)\s+(.*)$/u.exec(line);
+    return match && Date.parse(match[1]) >= Date.parse(checkout.started_at) &&
+      Date.parse(match[1]) < Date.parse(checkout.completed_at) + 1000 ? [match[2]] : [];
+  });
+  requireThat(lines.some((line, index) => checkoutCommitPattern.test(line) &&
+    lines[index + 1]?.trim() === expectedMerge), 'EVIDENCE',
+  'Minimum-runtime compatibility checkout does not establish the current tested merge commit');
+  return { jobId: job.id, runId, attempt, headSha: job.head_sha, mergeSha: expectedMerge };
 }
 
 async function mapReads(values, operation) {
@@ -164,8 +199,7 @@ export function readTrustedJobContext(job, logs, {
   'EVIDENCE', 'Trusted runner context differs from the current PR/source/attempt');
   if (steps.length > 1) {
     const checkout = lines.filter(line => within(line, steps[1]));
-    const command = /^\[command\](?:"(?:[A-Za-z]:[\\/]|\/)[^"\r\n]*[\\/]git(?:\.exe)?"|(?:[A-Za-z]:[\\/]|\/)[^\s"]*[\\/]git(?:\.exe)?|git(?:\.exe)?)\s+log -1 --format=%H\s*$/u;
-    requireThat(checkout.some((line, index) => command.test(line.text) &&
+    requireThat(checkout.some((line, index) => checkoutCommitPattern.test(line.text) &&
       checkout[index + 1]?.text.trim() === context.mergeSha),
     'EVIDENCE', 'Actual checkout output does not establish the tested merge commit');
   }
@@ -466,6 +500,12 @@ export function createPrReadinessHost({
       });
       if (String(intent.prNumber) !== String(pr.number)) continue;
       if (!intent.requiresNative) continue;
+      const minimumJobs = jobs.filter(job => job.name === native.nativeWorkflowContract.minimumNodeJob);
+      requireThat(minimumJobs.length === 1, 'EVIDENCE',
+        'T-PRD014-LX minimum-runtime compatibility job is missing or ambiguous');
+      const minimumNode = readTrustedMinimumNodeJob(minimumJobs[0], await log(minimumJobs[0]), {
+        runId: run.id, attempt: run.run_attempt, expectedHead: pr.head.sha, expectedMerge: pr.merge_commit_sha,
+      });
       const freezes = jobs.filter(job => job.name === native.nativeWorkflowContract.sourceJob);
       requireThat(freezes.length === 1, 'EVIDENCE', 'Required source freeze job is missing or ambiguous');
       readTrustedJobContext(freezes[0], await log(freezes[0]), {
@@ -494,6 +534,20 @@ export function createPrReadinessHost({
         return failedVerdict('Actual producer source tuple is stale or belongs to another PR');
       }
       const artifacts = await api.list(`/actions/runs/${run.id}/artifacts?per_page=100`, 'artifacts');
+      const minimumArtifacts = artifacts.filter(artifact =>
+        artifact.name === `${native.nativeWorkflowContract.minimumNodeArtifactPrefix}${run.id}-${run.run_attempt}` &&
+        artifact.expired === false);
+      requireThat(minimumArtifacts.length === 1, 'EVIDENCE',
+        'T-PRD014-LX requires one exact retained minimum-runtime compatibility artifact');
+      const minimumArtifact = minimumArtifacts[0];
+      requireThat(minimumArtifact.workflow_run?.id === run.id &&
+        minimumArtifact.workflow_run.repository_id === api.repositoryId &&
+        minimumArtifact.workflow_run.head_repository_id === pr.head.repo.id &&
+        minimumArtifact.workflow_run.head_sha === pr.head.sha &&
+        Number.isSafeInteger(minimumArtifact.id) && minimumArtifact.id > 0 &&
+        /^sha256:[a-f0-9]{64}$/u.test(minimumArtifact.digest ?? '') &&
+        Number.isSafeInteger(minimumArtifact.size_in_bytes) && minimumArtifact.size_in_bytes > 0,
+      'EVIDENCE', 'Minimum-runtime compatibility retention differs from the current source/run artifact');
       const candidates = artifacts.filter(artifact =>
         artifact.name === `frozen-candidate-${run.id}-${run.run_attempt}` && artifact.expired === false);
       requireThat(candidates.length === 1, 'EVIDENCE', 'One exact Linux-frozen candidate artifact is required');
@@ -611,6 +665,7 @@ export function createPrReadinessHost({
         blockers: [...result.blockers, ...projection.evaluation.cases.filter(test => test.status !== 'Passed')
           .map(test => `Required component ${test.testId}: ${test.status}`)],
         inputDigest: digest({ run: run.id, attempt: run.run_attempt,
+          minimumNode,
           source: pr.merge_commit_sha, artifacts: artifacts.map(artifact =>
             ({ id: artifact.id, digest: artifact.digest, expired: artifact.expired })),
           cases: [...result.requiredCases, ...definition.requiredCaseIds],
