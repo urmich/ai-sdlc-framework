@@ -22,6 +22,7 @@
   "scripts": {
     "test": "node scripts/test-runner.mjs full",
     "test:unit": "node scripts/test-runner.mjs unit",
+    "test:critical": "node scripts/test-runner.mjs critical",
     "test:targeted": "node scripts/test-runner.mjs targeted",
     "test:full": "node scripts/test-runner.mjs full",
     "test:coverage": "node scripts/test-runner.mjs coverage",
@@ -42,6 +43,7 @@
     "./provider-adapters": "./src/provider-adapters.mjs",
     "./monitors": "./src/monitors.mjs",
     "./store": "./src/store.mjs",
+    "./evidence": "./src/evidence.mjs",
     "./github": "./src/github.mjs"
   },
   "files": [
@@ -50,9 +52,13 @@
     "assets",
     "packaging/standalone",
     "README.md",
-    "docs/cli.md",
-    "docs/provider-adapters.md",
-    "docs/github-adapters.md",
-    "docs/ado-acceptance-test.md"
+    "CONTRIBUTING.md",
+    "SUPPORT.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
+    "OWNERSHIP.md",
+    "RELEASING.md",
+    "CHANGELOG.md",
+    "docs"
   ]
 }

@@ -26,6 +26,10 @@ Do not add unrelated discoveries unless documentation or scope inclusion was
 explicitly requested; retain out-of-scope labels.
 
 Check IDs and DoDs. Present it for user completion review.
+Use the shipped `sdlc/templates/pr-coverage.md` contract for later PR coverage:
+author stable FR/AC definitions now, but do not invent complete coverage before
+a Test Plan exists. The framework prepares PR-description metadata in memory;
+do not add coverage/index/binding/policy files or impose a consumer CI gate.
 Use natural task language: summarize what was understood, then say the
 equivalent of “Next, let’s design the Test Plan so we have a quality gate for
 these outcomes.” Use conventional professional terminology and avoid obscure

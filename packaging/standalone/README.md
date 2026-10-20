@@ -10,22 +10,26 @@ there are no runtime npm dependencies or installer network requests.
 
 ```sh
 npm run package:artifact
-npm run package:platforms -- --artifact dist/ai-sdlc-framework-0.3.0.tgz \
+version="$(node -p 'JSON.parse(require("node:fs").readFileSync("package.json", "utf8")).version')"
+npm run package:platforms -- --artifact "dist/ai-sdlc-framework-$version.tgz" \
   --windows-launcher /absolute/path/to/sdlc.exe
 npm run verify:platforms -- --windows-launcher /absolute/path/to/sdlc.exe
 npm run test:distribution
 ```
 
 Use the version from `package.json`, not a separately chosen channel version.
-The generic default build supports all four targets. Its `complete` flag means
-all library targets, not release eligibility. The current
-[release orchestration policy](../../docs/release-ci.md) explicitly selects
-`macos-arm64,macos-x64,windows-x64` and excludes Linux publication. Intel standalone
-archives and stable Homebrew metadata are published after mandatory deterministic
-archive/formula URL/checksum/architecture validation and host Homebrew audit/style
-with the correct Node runtime dependency, without claiming native
-Intel lifecycle acceptance. CI verifies
-that exact allowlist and separate required evidence instead of using `complete`.
+The default archive targets are `macos,windows-x64`: one shared JavaScript/shell
+Mac archive, plus the separate Windows PE archive. The Mac file is not a
+Universal 2 Mach-O binary and bundles no Node runtime. Its `complete` flag means
+the complete archive inventory, not release eligibility. The future
+[release orchestration policy](../../docs/releases/release-ci.md) separately
+requires fresh Linux x64, Windows x64, Mac arm64 and Mac Intel native R-PRE
+reports for the same frozen bytes. Linux is a development validation host, not
+a standalone release target. Metadata simulation or Rosetta cannot replace
+native Intel or Windows execution. Both Homebrew architectures consume the
+same shared Mac URL/hash with native Node. Existing published 0.4.0 archives
+and their legacy readers remain unchanged.
+CI checks the archive inventory and native evidence separately from `complete`.
 Other ad hoc target subsets do not establish release eligibility.
 The output directory must contain only the exact owned candidate filenames.
 Packaging never recursively clears an output directory.
@@ -51,8 +55,11 @@ Exports for release orchestration:
   platform archive. This works with only that archive, descriptor and
   checksum file; other release archives need not be downloaded.
 
-Every archive contains `package/`, the exact `.tgz`, `LICENSE`,
+Every archive contains one expanded `package/` payload, `LICENSE`,
 `payload-manifest.json`, `platform.json`, and only its allowed launchers.
+Shared macOS v2 contains no embedded `.tgz` and no native binary. Windows v1
+retains its exact npm `.tgz` and separate native PE. Legacy v1 Mac archives remain
+readable; these immutable historical bytes are not newly generated assets.
 The external descriptor and `SHA256SUMS` are never embedded in an archive.
 Canonical JSON recursively sorts keys and uses UTF-8/LF without timestamps.
 The inventory records regular files, sizes, hashes and permission modes.
@@ -160,19 +167,17 @@ This channel neither changes those controls nor promises a bypass.
 ## Native CI integration
 
 Set `SDLC_DISTRIBUTION_TARGET` to the actual native target when requiring native
-evidence. The current release's only mandatory native target is `macos-arm64`, covering
-both standalone and Homebrew lifecycle;
-Windows is cross-validated; Intel archive/formula evidence is mandatory and
-non-execution-only for the target payload. Intel and ARM64 both require actual
-Homebrew audit/style, and ARM64 must complete those checks before lifecycle
-execution. Native Intel lifecycle remains explicitly `NotRun`.
+evidence. Required validation hosts are Linux x64, Windows x64, native macOS
+arm64 and native macOS Intel x64. Both Mac hosts require actual Homebrew
+audit/style and standalone/Homebrew lifecycle, and Windows requires its real
+PE/PowerShell/cmd/hook lifecycle, not merely cross-build metadata.
 The test asserts actual
 `process.platform`, `process.arch`, native machine architecture and absence of
 Rosetta. Set `SDLC_WINDOWS_LAUNCHER` to the independently rebuilt Windows
 executable to include Windows ZIP/native lifecycle tests. Windows native CI
 fails rather than skips if the expected target is Windows and this input is
-missing. Without that input, local non-Windows tests verify the three POSIX
-archives and ZIP codec fixtures, not a native Windows release.
+missing. Local POSIX library fixtures and ZIP codec tests do not establish
+native Windows execution or introduce a Linux release archive.
 `SDLC_DISTRIBUTION_TARGETS` selects the exact archive set.
 `SDLC_RELEASE_DIR` selects an already frozen/downloaded release: independent
 fixture builds must match its payload and platform archive digests, and native
@@ -196,9 +201,10 @@ validated per-process network-and-npm-filesystem isolation adapter and remains
 `NotRun` for this specific gate. Proxy settings, global firewall edits, or a
 foreign-OS container cannot substitute for the missing native evidence.
 
-Retain the required arm64/native, Windows/cross-validation and Intel/deterministic
-archive/formula results, with explicit Intel native `NotRun`, and descriptor/checksum
-digests in one immutable release bundle.
+Retain all four required validation lanes and the exact shared Mac,
+Windows PE, descriptor/checksum identities in one immutable release bundle.
+Both Mac native results remain NotRun until actually executed; a missing lane
+prevents admission rather than becoming an optional exemption.
 Native Homebrew/WinGet validation and anonymous live acceptance are distinct
 evidence; local package tests do not establish public availability or
 package-manager acceptance. Missing native Homebrew integration is a release
@@ -206,3 +212,10 @@ blocker, not an optional passing standalone result.
 Prereleases never include stable package-manager metadata or claim
 published-Homebrew acceptance. A future local-formula gate must retain its own
 prerelease evidence outside the release asset directory.
+
+## Historical 0.4.0
+
+The immutable 0.4.0 release used separate Mac arm64/x64 v1 archives, each with
+its existing embedded npm archive. Its original time-bounded native acceptance
+policy is historical; it cannot exempt either Mac or Windows from the new
+required native lanes. The shared v2 payload does not rewrite old archives.

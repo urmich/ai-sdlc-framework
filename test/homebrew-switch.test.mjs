@@ -1,3 +1,10 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "applicability": [
+    {"options": "nativeMac", "platforms": ["macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Mac filesystem/runtime switching contracts execute independently on both native architectures.", "prerequisites": ["Native Mac Node", "Owned Homebrew/channel fixtures"]}
+  ],
+  "surfaces": [{"coverage": "direct", "paths": ["packaging/homebrew/switch-state.mjs"]}]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';

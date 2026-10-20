@@ -1,6 +1,7 @@
 import { canonical, digest, object, requireThat, text } from './core.mjs';
 import { sameExecutionIdentity, validateCurrentExecutionIdentity,
   validateExecutionResultIdentity } from './provider-adapters.mjs';
+import { validatePrDescriptionAction } from './pr-description.mjs';
 
 const FAMILIES = Object.freeze({
   'local-build': 'execution',
@@ -33,6 +34,7 @@ const ACTION_FIELDS = new Set([
   'producingAttemptRef', 'owner', 'host', 'stages', 'implicitEnvironments',
   'paths', 'toolOptions', 'force', 'delete', 'earlyDraft', 'monitorCapability',
   'externalPermission', 'preservesChanges', 'outOfScope', 'itemId',
+  'descriptionDigest', 'coverageDigest', 'previousDescriptionDigest', 'descriptionVersion',
 ]);
 const TARGET_FIELDS = [
   'repositoryId', 'localRepositoryPath', 'remoteRepositoryURL',
@@ -48,6 +50,7 @@ const EFFECT_FIELDS = [
   'producingAttemptRef', 'sourceRepositoryURL', 'owner', 'host',
   'stages', 'implicitEnvironments',
   'paths', 'toolOptions', 'force', 'delete', 'earlyDraft',
+  'descriptionDigest', 'coverageDigest', 'previousDescriptionDigest', 'descriptionVersion',
 ];
 const TERMINAL = new Set(['succeeded', 'failed', 'cancelled', 'not-started']);
 const IN_PROGRESS = new Set(['submitted', 'running', 'uncertain']);
@@ -70,6 +73,8 @@ const RESULT_FIELDS = new Set([
   'remoteRepositoryURL', 'remoteUrlDigest', 'autoMergeEnabled',
   'terminalStatus', 'failureRef', 'executionIdentity', 'retrievalContext',
   'artifactImmutableVersion', 'artifactRetrievalContext',
+  'descriptionDigest', 'coverageDigest', 'previousDescriptionDigest',
+  'descriptionVersion', 'previousDescriptionVersion',
 ]);
 
 function plain(value) {
@@ -274,6 +279,7 @@ export function deriveIntendedOutcome(action) {
   requireThat(Object.keys(action).every(key =>
     ACTION_FIELDS.has(key) || key === 'operationId'), 'INPUT',
   'Intended outcome must use pre-dispatch action fields only');
+  validatePrDescriptionAction(action);
   requireThat(nonempty(action.repositoryId), 'INPUT',
     'Intended outcome requires a repository');
   const isLocal = action.class === 'local-build' ||
@@ -453,6 +459,13 @@ function requiredResult(intended, observed) {
         equal('sourceRepositoryURL', requested.sourceRepositoryURL) &&
         (target.remoteRepositoryURL === undefined ||
           result.targetRepositoryURL === target.remoteRepositoryURL) &&
+        (requested.descriptionDigest === undefined ||
+          equal('descriptionDigest', requested.descriptionDigest) &&
+          equal('coverageDigest', requested.coverageDigest) &&
+          nonempty(result.descriptionVersion) &&
+          (kind !== 'pr-update' ||
+            equal('previousDescriptionDigest', requested.previousDescriptionDigest) &&
+            equal('previousDescriptionVersion', requested.descriptionVersion))) &&
         (requested.requestedState === undefined ||
           result.state === requested.requestedState);
     case 'git-ref':

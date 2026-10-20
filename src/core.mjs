@@ -61,13 +61,32 @@ export function digest(value) {
   return createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : canonical(value)).digest('hex');
 }
 export function byteSize(value) { return Buffer.byteLength(canonical(value)); }
-const sensitiveKey = /^(?:rawPrompt|fullPrompt|prompt|rawProviderResponse|providerPayload|accessToken|access_token|clientSecret|client_secret|password|authorization|credentials|secret|headers|token|sig|signature|apiKey|api_key)$/iu;
-const credentialQueryKey = /^(?:sig|signature|token|access[_-]?token|client[_-]?secret|api[_-]?key|key|password|authorization|x-amz-(?:signature|credential|security-token))$/iu;
-const credentialAssignment = /(?<![\p{L}\p{N}_])(?:\\?["'])?(?:rawPrompt|fullPrompt|prompt|rawProviderResponse|providerPayload|accessToken|access_token|clientSecret|client_secret|password|authorization|credentials|secret|headers|token|sig|signature|apiKey|api_key|x-amz-(?:signature|credential|security-token))(?:\\?["'])?\s*[:=]/iu;
+const sensitiveKey = /^(?:rawPrompt|fullPrompt|prompt|rawProviderResponse|providerPayload|accessToken|access_token|clientSecret|client_secret|password|authorization|credentials|secret|headers|token|sig|signature|apiKey|api_key|jwt)$/iu;
+const credentialQueryKey = /^(?:sig|signature|token|jwt|access[_-]?token|client[_-]?secret|api[_-]?key|key|password|authorization|x-amz-(?:signature|credential|security-token))$/iu;
+const credentialAssignment = /(?<![\p{L}\p{N}_])(?:\\?["'])?(?:rawPrompt|fullPrompt|prompt|rawProviderResponse|providerPayload|accessToken|access_token|clientSecret|client_secret|password|authorization|credentials|secret|headers|token|sig|signature|apiKey|api_key|jwt|x-amz-(?:signature|credential|security-token))(?:\\?["'])?\s*[:=]/iu;
 const credentialAssignments = new RegExp(credentialAssignment.source, 'giu');
 const queryPair = /([?&]([^=&#\s"'\\]+)=)([^&#\s<>;,]+)/gu;
 const webUrl = /https?:\/\/[^\s<>`]+/giu;
 const redactedValue = /^\[redacted(?::[a-f0-9]{64})?\]$/iu;
+const jwtToken = /(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{8,}={0,2})\.([A-Za-z0-9_-]+={0,2})\.([A-Za-z0-9_-]*={0,2})(?![A-Za-z0-9_-])/gu;
+function jwtHeader(value) {
+  if (value.length > 4096) return true;
+  try {
+    const header = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
+    return Boolean(header && typeof header === 'object' && !Array.isArray(header) &&
+      typeof header.alg === 'string' && header.alg.trim());
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    return false;
+  }
+}
+function hasJwt(value) {
+  return [...value.matchAll(jwtToken)].some(match => jwtHeader(match[1]));
+}
+function redactJwtText(value) {
+  return value.replace(jwtToken, (match, header) =>
+    jwtHeader(header) ? `[redacted:${digest(match)}]` : match);
+}
 function decodeCredentialText(value) {
   try { return decodeURIComponent(value); }
   catch {
@@ -90,7 +109,8 @@ function hasCredentialClue(value) {
   for (let attempt = 0; attempt < 3; attempt++) {
     if ([...current.matchAll(credentialAssignments)].some(match =>
       !redactedValue.test(current.slice(match.index + match[0].length).trim())) ||
-      /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|(?:ghp|github_pat)_[a-zA-Z0-9_]{20,}/iu.test(current)) return true;
+      /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|(?:ghp|github_pat)_[a-zA-Z0-9_]{20,}/iu.test(current) ||
+      hasJwt(current)) return true;
     const decoded = decodeCredentialText(current);
     if (decoded === current) break;
     current = decoded;
@@ -99,12 +119,13 @@ function hasCredentialClue(value) {
 }
 function redactCredentialUrls(value) {
   return value.replace(webUrl, match => {
-    const trailing = match.match(/[,;.)}]+$/u)?.[0] ?? '';
-    const candidate = match.slice(0, match.length - trailing.length);
+    const safeMatch = redactJwtText(match);
+    const trailing = safeMatch.match(/[,;.)}]+$/u)?.[0] ?? '';
+    const candidate = safeMatch.slice(0, safeMatch.length - trailing.length);
     let url;
     try { url = new URL(candidate); }
     catch { return `[unparseable-url:${digest(candidate)}]${trailing}`; }
-    let changed = Boolean(url.username || url.password);
+    let changed = safeMatch !== match || Boolean(url.username || url.password);
     url.username = '';
     url.password = '';
     if (hasCredentialClue(url.pathname)) {
@@ -135,11 +156,11 @@ function redactCredentialQueries(value) {
       !redactedValue.test(queryValue) ? `${prefix}[redacted]` : pair);
 }
 function redactPlainText(value) {
-  return redactCredentialQueries(value)
+  return redactJwtText(redactCredentialQueries(value)
     .replace(/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|$)/giu,
       match => `[redacted:${digest(match)}]`)
     .replace(/(?:ghp|github_pat)_[A-Za-z0-9_]{20,}/giu,
-      match => `[redacted:${digest(match)}]`);
+      match => `[redacted:${digest(match)}]`));
 }
 function redactTextUrls(value) {
   const assigned = redactSensitiveAssignments(value);

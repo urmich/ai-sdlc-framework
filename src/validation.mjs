@@ -4,9 +4,13 @@ import { git, validateBinding } from './git.mjs';
 import { currentTestSpecification, loadConfig, resolveTestSpecification,
   synchronizeTestPlan } from './artifacts.mjs';
 import { applicableOverride, assurancePending, boundToCycle, currentCycle, currentTestEvidence, hasEnvironmentGrant, latestStagingResultEvent, stagePassed, testCheckpoint } from './authority.mjs';
-import { cycleTests, requireCatalogSpecification, validateTestDefinitions } from './validation-catalog.mjs';
+import { cycleTests, OUTCOME_PAGE_SIZE, requireCatalogSpecification, stageValidationObject,
+  validateTestDefinitions } from './validation-catalog.mjs';
 import { appendTestObservation, bindExecutionEvidence, initializeReferencedCycle,
-  lookupOperation, lookupTestEvidence, observationAfterReset, resetCycleResults, selectTestObservation } from './validation-evidence.mjs';
+  lookupOperation, lookupTestEvidence, observationAfterReset, resetCycleResults, retainedPayloadReference,
+  sameExecutionSources, selectTestObservation, testResetBarrier } from './validation-evidence.mjs';
+import { createEvidenceBundle, readinessCaseProof, refreshReadinessEvaluation,
+  requireReadinessEvaluation } from './validation-readiness.mjs';
 import { effectiveStagingExecution, stagingExecutionGuidance,
   stagingExecutionMatches } from './staging.mjs';
 import { createHash } from 'node:crypto';
@@ -269,11 +273,11 @@ export async function invalidateEnvironmentAssurance(store, workItemId, environm
     return { invalidated: true, environments: affected };
   }, { allowRecoveryRequired: true });
 }
-export function checkTestStart(cycle, records, test, { unitFirstOverride = false } = {}) {
+export function checkTestStart(cycle, records, test, { unitFirstOverride = false, clock = Date } = {}) {
   requireThat(cycle, 'EVIDENCE', 'Start a validation cycle first');
   if (testCheckpoint(test) === 'pre-review' && test.level !== 'unit' && !unitFirstOverride) {
     const units = cycleTests(cycle).filter(t => testCheckpoint(t) === 'pre-review' && t.level === 'unit');
-    requireThat(units.every(t => currentTestEvidence(cycle, records, t)?.status === 'Passed'),
+    requireThat(units.every(t => currentTestEvidence(cycle, records, t, clock)?.status === 'Passed'),
       'UNIT_FIRST', 'Run the full required local unit suite before other local tests');
   }
 }
@@ -373,6 +377,11 @@ async function recordTestInTransaction(store, input, tx) {
           'EVIDENCE', 'A failed test operation cannot produce a passing test result');
         if (operation.expectedMet !== undefined) requireThat(operation.expectedMet === input.expectedMet,
           'EVIDENCE', 'Test evidence expected-result evaluation differs from its operation');
+        const normalized = tx.normalizedImports?.get(test.id);
+        if (normalized) requireThat(
+          digest(operation.resultProof?.executionIdentity ?? null) === digest(normalized.context.producer) &&
+            operation.resultProof?.attemptCapability === normalized.context.attemptCapability,
+          'PROVENANCE', 'Normalized report belongs to a different managed execution or attempt');
       }
     }
     const testAction = operation ? { ...operation.action, operationId: operation.id } : {
@@ -382,7 +391,9 @@ async function recordTestInTransaction(store, input, tx) {
     };
     const unitFirstOverride = applicableOverride(tx.all(), 'unit-first', testAction,
       { cycleId: cycle.id, clock: store.clock });
-    checkTestStart(cycle, tx.all(), test, { unitFirstOverride: Boolean(unitFirstOverride) });
+    if (!(tx.normalizedImports?.has(test.id) && input.status === 'NotRun')) {
+      checkTestStart(cycle, tx.all(), test, { unitFirstOverride: Boolean(unitFirstOverride), clock: store.clock });
+    }
     if (test.environment === 'STAGING') {
       const deployment = tx.get(cycle.deployments.STAGING);
       testAction.repositoryId = deployment?.repositoryId ??
@@ -450,6 +461,13 @@ async function recordTestInTransaction(store, input, tx) {
         input.owner === test.owner && input.host === test.location,
       'HOST',
       'Execution owner/location does not match the effective Test Plan contract');
+      if (tx.normalizedImports?.has(test.id) && test.environment !== 'local') {
+        const artifact = tx.get(cycle.artifacts[test.environment]);
+        requireThat(artifact?.type === 'artifact' && artifact.artifactId === input.artifactId &&
+          tx.normalizedImports.get(test.id).context.artifacts.some(item =>
+          item.sha256 === artifact.artifactSha256), 'EVIDENCE',
+        'Normalized environment evidence did not test the current deployed artifact');
+      }
     }
     const evidence = { type: 'test-evidence', id: newId('evidence'), workItemId: input.workItemId,
       sequence: Math.max(cycle.lastEvidenceSequence ?? 0,
@@ -463,6 +481,13 @@ async function recordTestInTransaction(store, input, tx) {
       evidence.host ??= operation.action.host;
       if (operation.status === 'cancelled') evidence.activity = 'cancelled';
     }
+    const imported = tx.normalizedImports?.get(test.id);
+    if (imported) Object.assign(evidence, imported.source, {
+      configDigest: imported.context.configDigest,
+      executionSources: structuredClone(imported.context.sources),
+      executionSourceDigest: digest(imported.context.sources),
+      retainedPayloadRef: imported.ref,
+    });
     requireThat(observationAfterReset(cycle, tx.all(), evidence), 'STALE',
       'Result belongs to an execution before the current reset barrier');
     await bindExecutionEvidence(store, tx, cycle, test, evidence);
@@ -478,8 +503,8 @@ async function recordTestInTransaction(store, input, tx) {
     appendTestObservation(tx, cycle, evidence);
     selectTestObservation(cycle, test.id, currentTestEvidence(cycle, tx.all(), test, store.clock));
     cycle.lastEvidenceSequence = evidence.sequence;
-    cycle.step = stagePassed(cycle, tx.all(), 'DEV') ? 'awaiting-dev-completion' :
-      stagePassed(cycle, tx.all(), 'local') ? 'awaiting-local-completion' : 'local-testing';
+    cycle.step = stagePassed(cycle, tx.all(), 'DEV', store.clock) ? 'awaiting-dev-completion' :
+      stagePassed(cycle, tx.all(), 'local', store.clock) ? 'awaiting-local-completion' : 'local-testing';
     tx.put(cycle);
     cycle.pendingPlanSync = true;
     return evidence;
@@ -506,6 +531,135 @@ export async function recordTests(store, input) {
         tx.testAdmissionSnapshot.specification.digest,
     'STALE', 'Candidate or specification changed during evidence admission');
     return evidence;
+  });
+  await synchronizeTestPlan(store, input.workItemId);
+  return result;
+}
+function retainReadinessObject(tx, workItemId, content) {
+  return stageValidationObject(tx, {
+    schemaVersion: 1, kind: 'execution-payload', workItemId, content,
+    provenance: { sourceDigest: digest(content), sanitizer: 'sdlc-normalized-v1' },
+  });
+}
+function retainReadinessBundle(tx, workItemId, bundle) {
+  const mappings = bundle.objects.map(entry => ({
+    originalRef: entry.ref, retainedRef: retainReadinessObject(tx, workItemId, entry.value),
+  }));
+  const objectMapRefs = [];
+  for (let index = 0; index < mappings.length; index += OUTCOME_PAGE_SIZE) {
+    objectMapRefs.push(retainReadinessObject(tx, workItemId, {
+      kind: 'normalized-object-map', index: objectMapRefs.length,
+      objects: mappings.slice(index, index + OUTCOME_PAGE_SIZE),
+    }));
+  }
+  return retainReadinessObject(tx, workItemId, {
+    kind: 'normalized-readiness-import', manifest: bundle.manifest,
+    manifestRef: bundle.manifestRef, objectMapRefs,
+  });
+}
+export async function recordReadiness(store, input) {
+  object(input, ['workItemId', 'cycleId', 'evaluation', 'bindings'],
+    ['workItemId', 'cycleId', 'evaluation']);
+  id(input.workItemId); id(input.cycleId);
+  requireReadinessEvaluation(input.evaluation);
+  const bindings = input.bindings ?? [];
+  requireThat(Array.isArray(bindings) && new Set(bindings.map(binding => binding.testId)).size ===
+    bindings.length, 'INPUT', 'Supply unique managed case bindings');
+  for (const binding of bindings) {
+    object(binding, ['testId', 'operationId', 'eventId', 'artifactId', 'deploymentId'], ['testId']);
+    Object.values(binding).forEach(value => id(value));
+  }
+  const result = await store.transaction(input.workItemId, async tx => {
+    const cycle = currentCycle(tx.all(), tx.checkpoint);
+    requireThat(cycle?.id === input.cycleId && tx.checkpoint.phase === 'coding' &&
+      !assurancePending(cycle, tx.all()), 'STALE',
+    'Normalized admission requires the legitimate current Coding validation cycle');
+    const sources = await candidateSnapshot(tx.metadata, tx.manifest);
+    const specification = await resolveTestSpecification(store, input.workItemId, cycleTests(cycle));
+    requireThat(candidateContentDigest(sources) === cycle.candidateDigest &&
+      digest(sources) === digest(cycle.sources) && specification.digest === cycle.testSpecDigest,
+    'STALE', 'Candidate or Test Plan changed before normalized admission');
+    requireCatalogSpecification(cycle, specification);
+    tx.testAdmissionSnapshot = { sources, specification };
+    const original = requireReadinessEvaluation(input.evaluation);
+    const tests = cycleTests(cycle);
+    requireThat(original.spec.cases.every(test => tests.some(planned => planned.id === test.id)) &&
+      bindings.every(binding => original.spec.cases.some(test => test.id === binding.testId)),
+    'EVIDENCE', 'Normalized cases or bindings are not part of the current managed Test Plan');
+    const barriers = original.spec.cases.flatMap(test => {
+      const barrier = testResetBarrier(cycle, test.id);
+      return barrier ? [{ testId: test.id, notBefore: barrier.at }] : [];
+    });
+    const evaluation = refreshReadinessEvaluation(input.evaluation, {
+      now: now(store.clock), barriers,
+    });
+    const proofs = evaluation.cases.map(result => readinessCaseProof(evaluation, result.testId));
+    for (const proof of proofs) {
+      const test = tests.find(test => test.id === proof.definition.id);
+      const trace = specification.traceability?.find(row => row.testId === test.id);
+      requireThat(proof.context.candidateDigest === cycle.candidateDigest &&
+        proof.context.testSpecDigest === cycle.testSpecDigest &&
+        proof.context.configDigest === cycle.configDigest &&
+        sameExecutionSources(proof.context.sources, cycle.sources) &&
+        proof.context.environment === test.environment &&
+        proof.definition.mode === test.mode && proof.definition.owner === test.owner &&
+        proof.definition.location === test.location &&
+        proof.definition.checkpoint === testCheckpoint(test) &&
+        proof.definition.expectedDigest === digest(test.expected) &&
+        (!trace || digest([...proof.definition.conditions].sort()) ===
+          digest([...trace.conditions].sort())),
+      'EVIDENCE', 'Normalized execution does not match the authoritative managed case definition');
+    }
+    const importRef = retainReadinessBundle(tx, input.workItemId, createEvidenceBundle(evaluation));
+    const evidence = [];
+    const blocked = [];
+    tx.normalizedImports = new Map();
+    proofs.sort((left, right) => Number(tests.find(test => test.id === right.definition.id).level === 'unit') -
+      Number(tests.find(test => test.id === left.definition.id).level === 'unit') ||
+      (left.source?.sourceObservedAt ?? '').localeCompare(right.source?.sourceObservedAt ?? ''));
+    for (const proof of proofs) {
+      const test = tests.find(test => test.id === proof.definition.id);
+      const units = tests.filter(test => testCheckpoint(test) === 'pre-review' && test.level === 'unit');
+      if (testCheckpoint(test) === 'pre-review' && test.level !== 'unit' &&
+          !units.every(unit => {
+            const current = currentTestEvidence(cycle, tx.all(), unit, store.clock);
+            return current?.status === 'Passed' && current.sourceCompletedAt &&
+              proof.source && Date.parse(current.sourceCompletedAt) <= Date.parse(proof.source.sourceStartedAt);
+          })) {
+        const problem = { testId: test.id, code: 'UNIT_FIRST',
+          message: 'Every required local unit execution must complete successfully before this execution starts' };
+        blocked.push(problem);
+        proof.status = 'NotRun';
+        proof.blockers = [...proof.blockers, problem];
+        proof.source = null;
+      }
+      const barrier = testResetBarrier(cycle, test.id);
+      if (proof.status === 'NotRun' && barrier && proof.source &&
+          Date.parse(proof.source.sourceObservedAt) <= Date.parse(barrier.at)) proof.source = null;
+      const assertionPageRefs = [];
+      for (let index = 0; index < proof.selected.length; index += OUTCOME_PAGE_SIZE) {
+        assertionPageRefs.push(retainReadinessObject(tx, input.workItemId, {
+          kind: 'normalized-case-observations', testId: test.id, index: assertionPageRefs.length,
+          observations: proof.selected.slice(index, index + OUTCOME_PAGE_SIZE),
+        }));
+      }
+      const ref = retainReadinessObject(tx, input.workItemId, {
+        kind: 'normalized-case-admission', cycleId: cycle.id, testId: test.id,
+        status: proof.status, importRef, assertionPageRefs, blockers: proof.blockers,
+      });
+      tx.normalizedImports.set(test.id, { ...proof, ref });
+      const binding = bindings.find(binding => binding.testId === test.id) ?? {};
+      evidence.push(await recordTestInTransaction(store, {
+        ...binding, workItemId: input.workItemId, cycleId: cycle.id, testId: test.id,
+        status: proof.status, expectedMet: proof.status === 'Passed',
+        owner: test.owner, host: test.location, evidenceRef: retainedPayloadReference(ref),
+        activity: proof.status === 'NotRun' ? 'blocked' : 'complete',
+      }, tx));
+    }
+    requireThat(digest(await candidateSnapshot(tx.metadata, tx.manifest)) === digest(sources) &&
+      (await resolveTestSpecification(store, input.workItemId)).digest === specification.digest,
+    'STALE', 'Candidate or Test Plan changed during normalized admission');
+    return { evaluation, evidence, blocked, importRef };
   });
   await synchronizeTestPlan(store, input.workItemId);
   return result;

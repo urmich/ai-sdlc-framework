@@ -1,3 +1,9 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "variants": [
+    {"expression": "`FR-059 ${environment} ${kind} cannot conclude from a bare run and attempt`", "domains": {"environment": ["DEV", "STAGING"], "kind": ["build", "pipeline", "pr-validation", "test"]}}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';

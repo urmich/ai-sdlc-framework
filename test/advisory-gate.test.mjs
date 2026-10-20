@@ -1,3 +1,10 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "applicability": [
+    {"names": ["T-42 intact 1.2.0 installation updates while conflicts preserve owned content"], "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Historical compatibility remains required; absent authentic input is blocked, never passed or privately fetched.", "prerequisites": ["Verified authentic v1.2.0 compatibility fixture available without private history"]}
+  ],
+  "surfaces": [{"coverage": "process", "paths": ["src/gate.mjs"]}]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
@@ -868,6 +875,7 @@ async function oldSourceRoot(root) {
   await fs.mkdir(source, { recursive: true });
   let listed;
   try {
+    // The old installer must receive its original tagged documentation layout.
     listed = await runFile('git', ['ls-tree', '-r', '--name-only', 'v1.2.0',
       '--', 'bin', 'src', 'assets', 'docs/cli.md', 'package.json'], {
       cwd: path.resolve('.'),

@@ -21,13 +21,12 @@ const formula = await generateHomebrewFormula({ descriptor, artifactDirectory })
 // Include formula metadata in the final release descriptor (exclude contents/mode).
 ```
 
-Stable publication includes **both macOS arm64 and x64 metadata**. The generator
-defaults to `architectures: ['arm64', 'x64']`, requires both exact archives,
-rehashes them, and checks their filenames, sizes and architecture-specific
-digests. Stable requests omitting either architecture are rejected.
-Deterministic x64 archive and formula-metadata validation is mandatory;
-the Intel native lifecycle remains explicitly **NotRun/non-blocking** until
-native results exist. Metadata availability is not a claim of native execution.
+Stable future publication uses **one shared macOS archive and checksum**.
+The generator defaults to `architectures: ['arm64', 'x64']`, rehashes that exact
+shared archive and checks its filename, size and digest. Stable requests
+omitting either supported architecture are rejected. Both native Apple Silicon
+and native Intel lifecycle results are mandatory, alongside native Windows and
+Linux shared-code validation. Metadata is not proof of native execution.
 
 The shared platform verifier remains
 responsible for the archive inventory, embedded payload, version and platform
@@ -36,8 +35,7 @@ identity. Both are required release gates.
 Stable output references exactly:
 
 ```text
-https://github.com/urmich/ai-sdlc-framework/releases/download/v<VERSION>/ai-sdlc-framework-<VERSION>-macos-arm64.tar.gz
-https://github.com/urmich/ai-sdlc-framework/releases/download/v<VERSION>/ai-sdlc-framework-<VERSION>-macos-x64.tar.gz
+https://github.com/urmich/ai-sdlc-framework/releases/download/v<VERSION>/ai-sdlc-framework-<VERSION>-macos.tar.gz
 ```
 
 Only stable SemVer versions produce public formula metadata; prereleases and
@@ -75,23 +73,41 @@ formulas can be generated through the API with `mode: 'candidate'` and
 `architectures: ['arm64']` or `['x64']`. These do not update stable metadata
 or substitute for native execution evidence.
 
-Run `scripts/homebrew-lifecycle.mjs` on native macOS arm64, using an
+Run `scripts/homebrew-lifecycle.mjs` separately on native macOS arm64 and x64, using an
 isolated Homebrew prefix and independently verified candidate bundles. The
 script exercises real brew style/audit, install with `--skip-link`, formula
 test, explicit framework lifecycle, upgrade and uninstall. It snapshots an
 isolated Copilot home around package-manager operations. The runner requires
 actual `darwin`, `uname -m`, and no Rosetta translation. It selects only the
-host's archive for local installation, but stable-formula validation still
-requires both macOS archives. No Windows, WinGet or Linux input is needed.
-Native arm64 is mandatory; native Intel remains explicit NotRun/non-blocking.
+host's native Node while both hosts consume the same shared archive digest.
+No Windows, WinGet or Linux archive input is needed by Homebrew itself.
+Both Mac native lifecycles are mandatory and remain NotRun until executed.
 Local evidence does not satisfy T-52.
 
 ```sh
 node scripts/homebrew-lifecycle.mjs \
   --brew "$PWD/.test-data/homebrew/bin/brew" \
-  --candidate-dir "$PWD/dist" \
-  --root "$PWD/.test-data/homebrew-lifecycle"
+  --candidate-dir "$VERIFIED_PREVIOUS_ASSETS" \
+  --upgrade-dir "$EXACT_FROZEN_CURRENT_ASSETS" \
+  --root "$PWD/.test-data/homebrew-lifecycle" \
+  --mode candidate \
+  --previous-descriptor-sha256 "$SUPPORTED_PREVIOUS_DESCRIPTOR_SHA256" \
+  --previous-checksums-sha256 "$SUPPORTED_PREVIOUS_CHECKSUMS_SHA256" \
+  --current-descriptor-sha256 "$EXPECTED_DESCRIPTOR_SHA256" \
+  --current-checksums-sha256 "$EXPECTED_CHECKSUMS_SHA256"
 ```
+
+All four pins above must come from independently verified previous/public and
+frozen-current identities; no example digest or environment placeholder is
+evidence. The initial `--candidate-dir` is the verified **older** release and
+`--upgrade-dir` the exact **newer** candidate. Candidate mode uses test-only
+loopback formulas and keeps public acceptance NotRun. Validation selects native
+Node 22.23.3; the shipped consumer minimum remains Node >=22.
+
+After publication, `--mode public` uses the same four external pins and exact
+downloaded previous/current public directories. It executes the retained
+published formula bytes/URLs without regeneration. Legacy `stable` diagnostic
+formula-revision work is never accepted as required R-PRE/R-POST upgrade proof.
 
 The runner refuses to modify a system Homebrew prefix. A local clone of an
 existing Homebrew checkout under `.test-data` can provide the isolated prefix;
@@ -99,8 +115,10 @@ install its actual `node@22` dependency first. Keep `HOME`, `HOMEBREW_CACHE`,
 `HOMEBREW_LOGS`, `HOMEBREW_TEMP` and `TMPDIR` inside that local test tree during
 bootstrap. A nondefault prefix may require building a dependency from source.
 The runner records JSON evidence and the exact generated formulas under its
-new `--root`. Its `formulas` object binds the stable, candidate and upgrade
-snapshots independently by path, SHA-256 and size; applicable brew command
+new `--root`. `evidence.json` retains `previousIdentity`, `currentIdentity`,
+`mode`, `upgradeKind`, `archiveInputs`, `publicAcceptance` and the candidate/
+upgrade formula snapshots independently by path, SHA-256 and size; exact public
+formula records identify `source: exact-published-bytes`. Applicable brew command
 records carry the exact formula identity used by that command. Candidate URLs
 contain a run-specific local port, so their hashes cannot be reused from a
 different run or reconstructed from a later formula generation.
@@ -112,9 +130,11 @@ or mismatched run/command digests. Include its returned `directory`,
 `evidenceSha256` and `formulas` together; never mix one run's path with another
 run's candidate or upgrade hashes.
 
-With one bundle the runner exercises a real formula-revision upgrade
-using the same verified payload; add `--upgrade-dir NEXT_BUNDLE` to exercise a
-version-changing upgrade. CI should use successive candidate versions too.
+A same-version formula-revision experiment is not the required upgrade proof.
+Required PR/release admission uses an independently authenticated supported
+previous public release as the initial installation and the frozen candidate as
+the version-changing upgrade target. Missing or same-version prior input is a
+blocked prerequisite, not a substitute reinstall or a formula revision.
 Every brew operation in a switch sets `HOMEBREW_NO_INSTALL_CLEANUP=1`, including
 read/link/unlink operations and reverse switching. After candidate installation,
 the helper requires captured old kegs and dependency identities to remain
@@ -274,10 +294,17 @@ Stable T-52 acceptance remains **NotRun** until separately authorized publicatio
 anonymous clients verify exact descriptor/checksum/asset bytes and real
 published tap install/upgrade/uninstall with empty caches. The local candidate
 gate neither publishes nor claims public tap availability. Stable publication
-requires deterministic arm64+x64 archive/formula metadata, native macOS arm64,
-and its postpublication Homebrew acceptance. Native Intel execution remains
-explicit NotRun/non-blocking, not inferred from cross-packaging or metadata.
-Linux is out of scope.
+requires one deterministic shared archive/formula plus both native macOS
+lifecycles and their postpublication Homebrew acceptance. Native Windows and
+Linux shared-code validation are required release lanes; Linux standalone is
+not a supported distribution. Native results cannot be inferred from metadata.
 Prerelease published-Homebrew acceptance is **not applicable**. Prereleases must
 still pass the local-formula T-51 native tests; they never require or update a
 published stable Homebrew formula.
+
+## Historical 0.4.0
+
+Published 0.4.0 retains its separate per-CPU Mac v1 archives and older
+time-bounded acceptance history. Those assets and outcomes are immutable.
+They neither satisfy the new mandatory four-lane contract nor authorize
+rebuilding/replacing that release. Legacy readers remain compatible.

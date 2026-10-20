@@ -1,3 +1,13 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "direct", "paths": ["src/github/store-bridge.mjs"]}],
+  "variants": [
+    {"expression": "`actual host ${family} result`", "domains": {"family": ["execution", "artifact", "deployment", "test", "pull-request", "git-ref", "merge", "policy", "notification"]}},
+    {"expression": "timing", "names": ["before", "during-IAM", "rejecting-IAM", "rejecting-unaborted-IAM"]},
+    {"expression": "kind", "names": ["default", "private-error", "private-object", "ordinary-error"], "parentNames": {"default": ["before", "during-IAM", "rejecting-IAM"], "private-error": ["before", "during-IAM", "rejecting-IAM"], "private-object": ["before", "during-IAM", "rejecting-IAM"], "ordinary-error": ["rejecting-unaborted-IAM"]}},
+    {"expression": "mode", "names": ["missing", "non-true"]}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createGitHubHost, createGitHubStore } from 'ai-sdlc-framework/github';

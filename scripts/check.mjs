@@ -3,10 +3,12 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import assert from 'node:assert/strict';
+import { checkDocumentation } from './check-docs.mjs';
 const execute = promisify(execFile);
 async function files(directory) {
   const paths = [];
   for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+    if (directory === 'test' && entry.isDirectory() && entry.name.startsWith('.runner-fixture-')) continue;
     const file = path.join(directory, entry.name);
     if (entry.isDirectory()) paths.push(...await files(file));
     else paths.push(file);
@@ -36,4 +38,6 @@ for (const name of ['knowledge-retrieval', 'coding', 'testing', 'building', 'rev
 }
 const pkg = JSON.parse(await fs.readFile('package.json', 'utf8'));
 assert.equal(pkg.type, 'module'); assert.ok(!pkg.dependencies);
-console.log(`Checked ${sources.length} JavaScript modules, 5 skills, 5 focused instructions, 8 hook events and dependency-free package metadata.`);
+const docs = await checkDocumentation();
+assert.deepEqual(docs.diagnostics, [], docs.diagnostics.join('\n'));
+console.log(`Checked ${sources.length} JavaScript modules, 5 skills, 5 focused instructions, 8 hook events, ${docs.files} documentation files and dependency-free package metadata.`);

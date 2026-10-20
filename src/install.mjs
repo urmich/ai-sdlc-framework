@@ -7,6 +7,7 @@ import { atomicWrite, canonicalPath, exists, readBytes, readJson,
   recoverDeadLock, safePath, updateJson, withLock, within,
   writeJson } from './files.mjs';
 import { platformCapabilities } from './platform.mjs';
+import { checkPackagedDocumentation, rebaseDocumentationLinks } from './documentation-links.mjs';
 
 const SOURCE_ROOT = fileURLToPath(new URL('../', import.meta.url));
 const INSTALL_LOCK = '.ai-sdlc-framework.install.lock';
@@ -15,12 +16,13 @@ const INVALID_LOCK_STALE_MS = 1000;
 const REQUIRED_INSTALLED_FILES = [
   'sdlc/bin/sdlc.mjs',
   ...['artifacts', 'audit', 'authority', 'checks', 'cli', 'core', 'decisions',
-    'current-evidence', 'external-results', 'files', 'gate', 'git', 'hooks',
-    'host-invocations', 'install', 'monitor-evidence', 'monitors',
+    'coverage', 'coverage-cli', 'current-evidence', 'evidence', 'external-results', 'files', 'gate', 'git', 'hooks',
+    'documentation-links', 'host-invocations', 'install', 'monitor-evidence', 'monitors',
     'observation-retention', 'operations',
-    'platform', 'policy', 'pr', 'provider-adapters', 'recovery', 'schemas',
-    'repository-observations', 'staging', 'store', 'tool-arguments',
-    'validation', 'validation-catalog', 'validation-evidence'].map(name => `sdlc/src/${name}.mjs`),
+    'platform', 'policy', 'pr', 'pr-description', 'provider-adapters', 'recovery', 'schemas',
+    'readiness-cli', 'repository-observations', 'staging', 'store', 'tool-arguments',
+    'validation', 'validation-catalog', 'validation-evidence', 'validation-readiness',
+    'validation-report'].map(name => `sdlc/src/${name}.mjs`),
   'sdlc/src/github.mjs',
   ...['connection', 'execution-adapter', 'host', 'repository', 'schemas',
     'store-bridge', 'transport']
@@ -35,7 +37,8 @@ const REQUIRED_INSTALLED_FILES = [
     'sdlc-technical-design', 'sdlc-coding'].map(name =>
     `skills/${name}/SKILL.md`),
   ...['engineering-instructions', 'requirements', 'technical-design',
-    'test-plan'].map(name => `sdlc/templates/${name}.md`),
+    'test-plan', 'pr-coverage'].map(name => `sdlc/templates/${name}.md`),
+  'sdlc/templates/pr-coverage.schema.json',
   ...['knowledge-retrieval', 'coding', 'testing', 'building',
     'reviewing'].map(name => `sdlc/instructions/${name}.md`),
 ];
@@ -235,28 +238,48 @@ export async function distribution(home, sourceRoot = SOURCE_ROOT) {
     handler.args = [...handler.args.map(arg => arg === '__SDLC_ENTRY__' ? entry : arg), '--home', home];
   }
   files.set('hooks/sdlc.json', Buffer.from(`${canonical(hooks)}\n`));
-  files.set('sdlc/cli.md', canonicalInstalledText(
-    await readBytes(path.join(sourceRoot, 'docs', 'cli.md'))));
-  files.set('sdlc/provider-adapters.md', canonicalInstalledText(
-    await readBytes(path.join(sourceRoot, 'docs', 'provider-adapters.md'))));
-  requireThat(await exists(path.join(sourceRoot, 'docs', 'github-adapters.md')),
-    'INSTALL', 'Replacement package is incomplete: missing docs/github-adapters.md');
-  files.set('sdlc/github-adapters.md', canonicalInstalledText(
-    await readBytes(path.join(sourceRoot, 'docs', 'github-adapters.md'))));
+  for (const relative of await filesUnder(path.join(sourceRoot, 'docs'))) {
+    files.set(path.posix.join('sdlc', 'docs', relative.split(path.sep).join('/')),
+      canonicalInstalledText(await readBytes(path.join(sourceRoot, 'docs', relative),
+        LIMITS.artifact)));
+  }
+  for (const name of ['README.md', 'CONTRIBUTING.md', 'SUPPORT.md', 'SECURITY.md',
+    'CODE_OF_CONDUCT.md', 'OWNERSHIP.md', 'RELEASING.md', 'CHANGELOG.md', 'LICENSE']) {
+    requireThat(await exists(path.join(sourceRoot, name)), 'INSTALL',
+      `Replacement package is incomplete: missing ${name}`);
+    files.set(`sdlc/${name}`, canonicalInstalledText(
+      await readBytes(path.join(sourceRoot, name), LIMITS.artifact)));
+  }
+  for (const [name, source] of [
+    ['cli.md', 'docs/reference/cli.md'],
+    ['provider-adapters.md', 'docs/integrations/provider-adapters.md'],
+    ['github-adapters.md', 'docs/integrations/github-adapters.md'],
+  ]) {
+    const content = files.get(`sdlc/${source}`);
+    requireThat(content, 'INSTALL',
+      `Replacement package is incomplete: missing ${source}`);
+    const installed = rebaseDocumentationLinks(content.toString('utf8'),
+      `sdlc/${source}`, `sdlc/${name}`);
+    files.set(`sdlc/${name}`, Buffer.from(installed));
+  }
   files.set('sdlc/lifecycle-intent.md', canonicalInstalledText(
     await readBytes(path.join(sourceRoot, 'assets', 'lifecycle-intent.md'))));
   const instructions = render(
     await readBytes(path.join(sourceRoot, 'assets', 'instructions.md'))).toString('utf8');
+  const block = `${BLOCK_START}\n${instructions.trimEnd()}\n${BLOCK_END}`;
   for (const relative of REQUIRED_INSTALLED_FILES) {
     requireThat(files.has(relative), 'INSTALL',
       `Replacement package is incomplete: missing ${relative}`);
   }
+  const documentation = await checkPackagedDocumentation(files, { managedInstructions: block });
+  requireThat(documentation.diagnostics.length === 0, 'INSTALL',
+    `Replacement package has invalid documentation: ${documentation.diagnostics.join('; ')}`);
   const pkg = JSON.parse(files.get('sdlc/package.json').toString('utf8'));
   requireThat(pkg.name === 'ai-sdlc-framework' &&
     pkg.bin?.sdlc === './bin/sdlc.mjs' &&
     typeof pkg.version === 'string' && pkg.version,
   'INSTALL', 'Replacement package metadata is invalid');
-  return { files, block: `${BLOCK_START}\n${instructions.trimEnd()}\n${BLOCK_END}` };
+  return { files, block };
 }
 async function installLocked(store, {
   sourceRoot = SOURCE_ROOT,
@@ -323,14 +346,19 @@ async function installLocked(store, {
     }
 }
 export async function install(store, options = {}) {
+  store.home = await canonicalPath(store.home);
+  const sourceRoot = options.sourceRoot ?? SOURCE_ROOT;
+  const prepared = await distribution(store.home, sourceRoot);
+  const preparedVersion = JSON.parse(prepared.files.get('sdlc/package.json').toString('utf8')).version;
   await store.ready();
-  return withLock(installLock(store), () => installLocked(store, options));
+  return withLock(installLock(store), () =>
+    installLocked(store, { ...options, prepared, preparedVersion }));
 }
 export async function cleanInstall(store, {
   sourceRoot = SOURCE_ROOT,
   fault = async () => {},
 } = {}) {
-  await prepareMaintenanceHome(store);
+  store.home = await canonicalPath(store.home);
   const source = await canonicalPath(sourceRoot);
   const executingSource = await canonicalPath(SOURCE_ROOT);
   requireThat(!within(store.home, executingSource), 'INSTALL_CONFLICT',
@@ -338,7 +366,8 @@ export async function cleanInstall(store, {
   requireThat(!within(store.home, source), 'INSTALL_CONFLICT',
     'Clean installation source must be outside COPILOT_HOME');
   const prepared = await distribution(store.home, source);
-  const preparedVersion = await sourceVersion(source);
+  const preparedVersion = JSON.parse(prepared.files.get('sdlc/package.json').toString('utf8')).version;
+  await prepareMaintenanceHome(store);
   const lock = installLock(store);
   await preparePurgeLock(lock);
   return withLock(lock, async () => {

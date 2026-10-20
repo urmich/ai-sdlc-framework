@@ -1,3 +1,50 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "process", "paths": ["scripts/test-runner.mjs", "scripts/test-worker.mjs"]}],
+  "resources": {
+    "workers": 2,
+    "names": [
+      "T-130 SIGINT cancels active file workers before the public runner returns",
+      "T-130 SIGTERM cancels active file workers before the public runner returns",
+      "T-136 public runner enforces 2 real file workers and executes every file once"
+    ],
+    "owner": "runner-resource-contract",
+    "reason": "These actual overlap/cancellation callbacks need two slots reserved before their deadlines start."
+  },
+  "applicability": [{
+    "names": [
+      "T-130 SIGINT cancels active file workers before the public runner returns",
+      "T-130 SIGTERM cancels active file workers before the public runner returns",
+      "T-136 public runner enforces 1 real file workers and executes every file once",
+      "T-136 public runner enforces 2 real file workers and executes every file once"
+    ],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "The requested real worker count is an execution prerequisite, not permission to multiply a nested host allocation.",
+    "prerequisites": ["Aggregate host allocation supports the declared one/two actual file workers"]
+  }],
+  "variants": [
+    {"expression": "`T-130 ${signal} cancels active file workers before the public runner returns`", "domains": {"signal": ["SIGINT", "SIGTERM"]}},
+    {"expression": "`T-136 public runner enforces ${workers} real file workers and executes every file once`", "domains": {"workers": ["1", "2"]}}
+  ],
+  "plannedCases": [
+    {"id": "T-PRD010", "selectors": [
+      {"name": "T-130 public runner preserves caller file order rather than sorting the expensive-first queue", "parents": []},
+      {"name": "T-136 public runner enforces 1 real file workers and executes every file once", "parents": []},
+      {"name": "T-136 public runner enforces 2 real file workers and executes every file once", "parents": []}
+    ]},
+    {"id": "T-PRD007", "selectors": [
+      {"name": "T-130 public runner preserves a real failing child and still executes the passing sibling", "parents": []},
+      {"name": "T-130 SIGINT cancels active file workers before the public runner returns", "parents": []},
+      {"name": "T-130 SIGTERM cancels active file workers before the public runner returns", "parents": []}
+    ]},
+    {"id": "T-PRD018", "selectors": [
+      {"name": "T-GHB24 native execution evidence distinguishes passing, failing and skipped assertions without overwriting reports", "parents": []},
+      {"name": "T-130 SIGINT cancels active file workers before the public runner returns", "parents": []},
+      {"name": "T-130 SIGTERM cancels active file workers before the public runner returns", "parents": []}
+    ]}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -6,6 +53,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createPlan, parseOptions, repositoryRoot, unitFiles } from '../scripts/test-runner.mjs';
+import { readTestBudget } from '../scripts/test-budget.mjs';
 
 const canonicalNames = [
   'T-101 selected fetch remote requires exactly one credential-free URL',
@@ -79,7 +127,7 @@ test('T-130 full and coverage profiles discover every top-level test file exactl
     assert.deepEqual(plan.files.map(file => path.basename(file)).sort(), expected);
     assert.equal(new Set(plan.files).size, expected.length);
     assert.equal(plan.args.includes('--experimental-test-coverage'), profile === 'coverage');
-    assert.equal(path.basename(plan.files[0]), 'deployment.test.mjs');
+    assert.equal(path.basename(plan.files[0]), 'observation-retention-refresh.test.mjs');
   }
 });
 
@@ -136,6 +184,9 @@ test('unselected failure', () => assert.fail('must not run'));
   assert.ok(end.elapsedMs > 0);
   assert.equal(end.exitCode, 0);
   assert.equal(end.signal, null);
+  const missing = await invoke(['targeted', '--workers', '1', '--name', '^no matching assertion$', file]).done;
+  assert.equal(missing.code, 2, missing.stdout + missing.stderr);
+  assert.match(missing.stderr, /no test assertions/u);
 });
 
 test('T-130 public runner preserves a real failing child and still executes the passing sibling', async t => {
@@ -161,12 +212,14 @@ test('T-GHB24 native execution evidence distinguishes passing, failing and skipp
 import assert from 'node:assert/strict';
 test('actual passing assertion', () => assert.equal(2 + 2, 4));
 test('actual failing assertion', () => assert.equal(2 + 2, 5));
-test('unexecuted assertion', {skip: true}, () => assert.fail('must not execute'));
+test('unexecuted assertion', {skip: 'Owned unavailable-adapter fixture'}, () => assert.fail('must not execute'));
 `);
   const reportPath = path.join(evidence, 'outcomes.json');
-  const result = await invoke(['targeted', file], { SDLC_TEST_REPORT_FILE: reportPath }).done;
+  const result = await invoke(['targeted', '--workers', '1', file], { SDLC_TEST_REPORT_FILE: reportPath }).done;
   assert.equal(result.code, 1, result.stdout + result.stderr);
-  const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+  const retainedReport = await fs.readFile(reportPath, 'utf8');
+  assert.ok(retainedReport.trim(), result.stdout + result.stderr);
+  const report = JSON.parse(retainedReport);
   assert.equal(report.profile, 'targeted');
   assert.equal(report.platform, process.platform);
   assert.equal(report.architecture, process.arch);
@@ -174,7 +227,25 @@ test('unexecuted assertion', {skip: true}, () => assert.fail('must not execute')
   assert.equal(outcomes['actual passing assertion'], 'Passed');
   assert.equal(outcomes['actual failing assertion'], 'Failed');
   assert.equal(outcomes['unexecuted assertion'], 'Skipped');
+  assert.equal(report.executions.find(item => item.name === 'unexecuted assertion').skipReason,
+    'Owned unavailable-adapter fixture');
+  assert.ok(report.command.includes('targeted'));
+  assert.equal(report.executable, process.execPath);
   assert.equal(report.summary.success, false);
+  assert.equal(report.complete, true);
+  assert.equal(report.exitCode, 1);
+  assert.ok(Date.parse(report.finishedAt) >= Date.parse(report.startedAt));
+  const journalPath = `${reportPath}.journal.ndjson`;
+  const originalJournal = await fs.readFile(journalPath);
+  const journal = originalJournal.toString('utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(journal[0].kind, 'execution-start');
+  assert.equal(journal.at(-1).kind, 'execution-end');
+  assert.ok(journal.some(event => event.kind === 'registration'));
+  assert.ok(journal.some(event => event.kind === 'start'));
+  assert.deepEqual(journal.map(event => event.sequence),
+    Array.from({ length: journal.length }, (_, index) => index + 1));
+  assert.ok(journal.some(event => event.kind === 'completion' &&
+    event.status === 'Failed' && event.diagnostic.message));
   assert.deepEqual([report.summary.counts.passed, report.summary.counts.failed,
     report.summary.counts.skipped], [1, 1, 1]);
   assert.ok(report.executions.every(item => item.file.startsWith('test/') && !path.isAbsolute(item.file)));
@@ -182,10 +253,65 @@ test('unexecuted assertion', {skip: true}, () => assert.fail('must not execute')
   const overwrite = await invoke(['targeted', file], { SDLC_TEST_REPORT_FILE: reportPath }).done;
   assert.equal(overwrite.code, 1);
   assert.deepEqual(await fs.readFile(reportPath), original);
+  assert.deepEqual(await fs.readFile(journalPath), originalJournal);
   const outside = await invoke(['targeted', file],
     { SDLC_TEST_REPORT_FILE: path.join(directory, 'outside.json') }).done;
   assert.equal(outside.code, 1);
   await assert.rejects(fs.stat(path.join(directory, 'outside.json')), { code: 'ENOENT' });
+});
+
+test('T-PRD018 unsafe failure diagnostics terminate without hanging or manufacturing complete evidence',
+  { timeout: 30000 }, async t => {
+    const directory = await scratch(t);
+    const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'runner-rejected-'));
+    t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+    const file = path.join(directory, 'rejected.test.mjs');
+    await fs.writeFile(file, "import test from 'node:test';import assert from 'node:assert/strict';" +
+      "test('unsupported diagnostic fixture',()=>assert.fail(\"unsupported ['quoted diagnostic']\"));\n");
+    const reportPath = path.join(evidence, 'rejected.json');
+    const pending = invoke(['targeted', file], { SDLC_TEST_REPORT_FILE: reportPath });
+    t.after(async () => {
+      if (pending.child.exitCode === null && pending.child.signalCode === null) pending.child.kill();
+      await pending.done;
+    });
+    const result = await pending.done;
+    assert.notEqual(result.code, 0);
+    const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+    assert.equal(report.complete, false);
+    assert.equal(report.evidenceError.code, 'UNSAFE');
+    assert.ok(!report.executions.some(row => row.status === 'Passed'));
+    const rows = (await fs.readFile(`${reportPath}.journal.ndjson`, 'utf8')).trim().split('\n').map(JSON.parse);
+    assert.ok(rows.some(row => row.kind === 'evidence-rejected' && row.code === 'UNSAFE'));
+    assert.equal(rows.at(-1).kind, 'execution-end');
+    assert.equal(rows.at(-1).complete, false);
+  });
+
+test('T-PRD018 nested concurrent results retain exact ancestry and safe original selector identities', async t => {
+  const directory = await scratch(t);
+  const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'runner-nested-'));
+  t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+  const file = path.join(directory, 'nested.test.mjs');
+  await fs.writeFile(file, `export const validationDeclarations = {"schemaVersion":1,"variants":[
+  {"expression":"name","names":["first","second"]}
+]};
+import test from 'node:test';
+import assert from 'node:assert/strict';
+test('outer', {concurrency: 2}, async parent => {
+  await Promise.all(['first','second'].map(name => parent.test(name, async child => {
+    await child.test('same leaf name', () => assert.equal(name.length > 0, true));
+  })));
+});
+`);
+  const reportPath = path.join(evidence, 'nested.json');
+  const result = await invoke(['targeted', file], { SDLC_TEST_REPORT_FILE: reportPath }).done;
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+  assert.equal(report.complete, true);
+  const leaves = report.executions.filter(item => item.name === 'same leaf name');
+  assert.equal(leaves.length, 2);
+  assert.deepEqual(leaves.map(item => item.parents).sort(),
+    [['outer', 'first'], ['outer', 'second']]);
+  assert.ok(leaves.every(item => item.nameDigest && item.parentDigests.length === 2));
 });
 
 test('T-130 public runner preserves caller file order rather than sorting the expensive-first queue', async t => {
@@ -223,6 +349,8 @@ function processRunning(pid) {
 
 for (const [signal, exitCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
   test(`T-130 ${signal} cancels active file workers before the public runner returns`, async t => {
+    const allocation = process.env.SDLC_TEST_BUDGET ? await readTestBudget() : null;
+    if (allocation && allocation.capacity < 2) { t.skip('Two real file workers require two host slots'); return; }
     const directory = await scratch(t);
     const entered = path.join(directory, 'entered');
     const release = path.join(directory, 'release');
@@ -247,6 +375,10 @@ test('cancel worker ${id}', async () => {
     }
     const env = { ...process.env };
     delete env.NODE_TEST_CONTEXT;
+    const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'runner-cancellation-'));
+    t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+    const reportPath = path.join(evidence, 'cancelled.json');
+    env.SDLC_TEST_REPORT_FILE = reportPath;
     const runner = pathToFileURL(path.join(repositoryRoot, 'scripts', 'test-runner.mjs')).href;
     const child = spawn(process.execPath, ['--input-type=module', '--eval', `
 import {createPlan,parseOptions,run} from ${JSON.stringify(runner)};
@@ -268,6 +400,11 @@ if(process.connected) process.disconnect();
       await waitFor(async () => (await fs.readdir(entered)).length === 2, 'two running cancellation workers');
       pids = (await fs.readdir(entered)).map(Number);
       assert.ok(pids.every(processRunning));
+      await waitFor(async () => {
+        const contents = await fs.readFile(`${reportPath}.journal.ndjson`, 'utf8');
+        return contents.includes('"kind":"start"');
+      }, 'durably flushed running output before final report');
+      assert.equal((await fs.readFile(reportPath)).length, 0);
       await new Promise((resolve, reject) =>
         child.send({ signal }, error => error ? reject(error) : resolve()));
       const actual = await done;
@@ -275,6 +412,11 @@ if(process.connected) process.disconnect();
       assert.match(stdout, /\bcancelled [1-9]\d*\b/u);
       assert.equal(summary(stdout, 'end').interruptedBy, signal);
       assert.ok(pids.every(pid => !processRunning(pid)), 'Runner returned with surviving file workers');
+      const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+      assert.equal(report.complete, false);
+      assert.equal(report.exitCode, exitCode);
+      assert.ok(report.summary.counts.cancelled > 0);
+      assert.ok(report.executions.some(item => item.status === 'Cancelled'));
     } finally {
       await fs.writeFile(path.join(release, 'stop'), '');
       await done;
@@ -285,6 +427,8 @@ if(process.connected) process.disconnect();
 
 for (const workers of [1, 2]) {
   test(`T-136 public runner enforces ${workers} real file workers and executes every file once`, async t => {
+    const allocation = process.env.SDLC_TEST_BUDGET ? await readTestBudget() : null;
+    if (allocation && allocation.capacity < workers) { t.skip('Requested real workers exceed the host allocation'); return; }
     const directory = await scratch(t);
     const entered = path.join(directory, 'entered');
     const finished = path.join(directory, 'finished');

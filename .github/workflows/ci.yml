@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   push:
     branches: [main]
   workflow_dispatch:
@@ -9,78 +10,323 @@ on:
 permissions:
   contents: read
 
+env:
+  SUPPORTED_PREVIOUS_VERSION: ${{ vars.SUPPORTED_PREVIOUS_VERSION }}
+  SUPPORTED_PREVIOUS_DESCRIPTOR_SHA256: ${{ vars.SUPPORTED_PREVIOUS_DESCRIPTOR_SHA256 }}
+  SUPPORTED_PREVIOUS_CHECKSUMS_SHA256: ${{ vars.SUPPORTED_PREVIOUS_CHECKSUMS_SHA256 }}
+
 defaults:
   run:
     working-directory: source
+    shell: bash
 
 jobs:
-  test-command-smoke:
+  intent:
+    name: Classify native validation intent
+    permissions: {}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      requires-native: ${{ steps.intent.outputs.requiresNative }}
+    steps:
+      - name: Record validation intent
+        id: intent
+        working-directory: ${{ github.workspace }}
+        env:
+          SDLC_EVENT: ${{ github.event_name }}
+          SDLC_ACTION: ${{ github.event.action || '' }}
+          SDLC_BASE_CHANGED: ${{ github.event.changes.base != null }}
+          SDLC_REPOSITORY_ID: ${{ github.repository_id }}
+          SDLC_PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          SDLC_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+          SDLC_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          SDLC_MERGE_SHA: ${{ github.sha }}
+        run: |
+          node -e '
+            const e = process.env;
+            const baseChanged = e.SDLC_BASE_CHANGED === "true";
+            const requiresNative = e.SDLC_EVENT !== "pull_request" ||
+              e.SDLC_ACTION !== "edited" || baseChanged;
+            console.log("sdlc-validation-intent:" + JSON.stringify({
+              repositoryId: e.SDLC_REPOSITORY_ID, prNumber: e.SDLC_PR_NUMBER,
+              headSha: e.SDLC_HEAD_SHA, baseSha: e.SDLC_BASE_SHA, mergeSha: e.SDLC_MERGE_SHA,
+              event: e.SDLC_EVENT, action: e.SDLC_ACTION, baseChanged, requiresNative,
+              runId: e.GITHUB_RUN_ID, attempt: e.GITHUB_RUN_ATTEMPT
+            }));
+            require("fs").appendFileSync(e.GITHUB_OUTPUT, "requiresNative=" + requiresNative + "\n");
+          '
+  source:
+    needs: intent
+    if: ${{ needs.intent.outputs.requires-native == 'true' }}
+    name: Freeze source candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    outputs:
+      source-commit: ${{ steps.validation.outputs.sourceCommit }}
+      descriptor-sha256: ${{ steps.validation.outputs.descriptorSha256 }}
+      checksums-sha256: ${{ steps.validation.outputs.checksumsSha256 }}
+      candidate-artifact-id: ${{ steps.candidate.outputs.artifact-id }}
+    steps:
+      - name: Record trusted execution context
+        working-directory: ${{ github.workspace }}
+        env:
+          SDLC_REPOSITORY_ID: ${{ github.repository_id }}
+          SDLC_PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          SDLC_HEAD_REPOSITORY_ID: ${{ github.event.pull_request.head.repo.id || '' }}
+          SDLC_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+          SDLC_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          SDLC_MERGE_SHA: ${{ github.sha }}
+          SDLC_EVENT: ${{ github.event_name }}
+        run: |
+          node -e '
+            const e = process.env;
+            console.log("sdlc-run-context:" + JSON.stringify({
+              repositoryId: e.SDLC_REPOSITORY_ID, prNumber: e.SDLC_PR_NUMBER || null,
+              headRepositoryId: e.SDLC_HEAD_REPOSITORY_ID || null,
+              headSha: e.SDLC_HEAD_SHA || null, baseSha: e.SDLC_BASE_SHA || null,
+              mergeSha: e.SDLC_MERGE_SHA, event: e.SDLC_EVENT,
+              runId: e.GITHUB_RUN_ID, attempt: e.GITHUB_RUN_ATTEMPT,
+              ImageOS: e.ImageOS, ImageVersion: e.ImageVersion,
+              platform: process.platform, architecture: process.arch,
+              resources: { availableParallelism: require("node:os").availableParallelism(),
+                totalMemoryBytes: require("node:os").totalmem(), configuredWorkers: e.SDLC_TEST_WORKERS ?? null }
+            }));
+          '
+      - name: Check out exact candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: source
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Materialize committed source bytes
+        run: |
+          git config --local core.autocrlf false
+          git config --local core.eol lf
+          git -c core.autocrlf=false -c core.eol=lf checkout-index --force --all
+      - name: Select pinned native Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.23.3'
+          architecture: x64
+          check-latest: false
+      - name: Select pinned native Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        env:
+          GOTOOLCHAIN: local
+        with:
+          go-version: '1.27.1'
+          check-latest: false
+          cache: false
+      - name: Select pinned native CPython
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12.10'
+          architecture: x64
+          check-latest: false
+      - name: Provision isolated native toolchain
+        env:
+          GOTOOLCHAIN: local
+        run: node scripts/native-toolchain.mjs --target linux-x64 --output-dir .test-data/bootstrap-linux-x64
+      - name: Freeze exact source candidate
+        id: validation
+        env:
+          EXPECTED_SOURCE_COMMIT: ${{ github.sha }}
+        run: >-
+          node scripts/native-validation.mjs
+          --target linux-x64 --profile pr
+          --candidate-dir .test-data/frozen-candidate
+          --evidence-dir .test-data/native-linux-x64
+          --build-candidate true
+          --phase candidate
+      - name: Retain frozen candidate
+        id: candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: frozen-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/.test-data/frozen-candidate
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+      - name: Retain source freeze evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: source-freeze-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            source/.test-data/native-linux-x64/*.json
+            source/.test-data/native-linux-x64/*.ndjson
+            source/.test-data/native-linux-x64/*.md
+            source/.test-data/native-linux-x64/tools-*/*.json
+            source/.test-data/native-linux-x64/tools-*/*.ndjson
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Retain native bootstrap diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-bootstrap-linux-x64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            source/.test-data/bootstrap-linux-x64/*.json
+            source/.test-data/bootstrap-linux-x64/*.ndjson
+            source/.test-data/bootstrap-linux-x64/crypto-fixture/fixture.json
+            source/.test-data/bootstrap-linux-x64/crypto-fixture/public-intoto.sigstore
+            source/.test-data/bootstrap-linux-x64/crypto-fixture/offline-trust/*.json
+          if-no-files-found: warn
+          retention-days: 90
+
+  native:
+    needs: [intent, source]
+    if: ${{ needs.intent.outputs.requires-native == 'true' }}
+    name: native-${{ matrix.target }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2022, macos-14]
+        include:
+          - target: linux-x64
+            os: ubuntu-24.04
+            architecture: x64
+          - target: windows-x64
+            os: windows-2022
+            architecture: x64
+          - target: macos-arm64
+            os: macos-15
+            architecture: arm64
+          - target: macos-x64
+            os: macos-15-intel
+            architecture: x64
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 360
+    steps:
+      - name: Record trusted execution context
+        working-directory: ${{ github.workspace }}
+        env:
+          SDLC_REPOSITORY_ID: ${{ github.repository_id }}
+          SDLC_PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          SDLC_HEAD_REPOSITORY_ID: ${{ github.event.pull_request.head.repo.id || '' }}
+          SDLC_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+          SDLC_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          SDLC_MERGE_SHA: ${{ github.sha }}
+          SDLC_EVENT: ${{ github.event_name }}
+        run: |
+          node -e '
+            const e = process.env;
+            console.log("sdlc-run-context:" + JSON.stringify({
+              repositoryId: e.SDLC_REPOSITORY_ID, prNumber: e.SDLC_PR_NUMBER || null,
+              headRepositoryId: e.SDLC_HEAD_REPOSITORY_ID || null,
+              headSha: e.SDLC_HEAD_SHA || null, baseSha: e.SDLC_BASE_SHA || null,
+              mergeSha: e.SDLC_MERGE_SHA, event: e.SDLC_EVENT,
+              runId: e.GITHUB_RUN_ID, attempt: e.GITHUB_RUN_ATTEMPT,
+              ImageOS: e.ImageOS, ImageVersion: e.ImageVersion,
+              platform: process.platform, architecture: process.arch,
+              resources: { availableParallelism: require("node:os").availableParallelism(),
+                totalMemoryBytes: require("node:os").totalmem(), configuredWorkers: e.SDLC_TEST_WORKERS ?? null }
+            }));
+          '
+      - name: Check out exact candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: source
+          ref: ${{ needs.source.outputs.source-commit }}
+          persist-credentials: false
+      - name: Materialize committed source bytes
+        run: |
+          git config --local core.autocrlf false
+          git config --local core.eol lf
+          git -c core.autocrlf=false -c core.eol=lf checkout-index --force --all
+      - name: Select pinned native Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.23.3'
+          architecture: ${{ matrix.architecture }}
+          check-latest: false
+      - name: Select pinned native Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        env:
+          GOTOOLCHAIN: local
+        with:
+          go-version: '1.27.1'
+          check-latest: false
+          cache: false
+      - name: Select pinned native CPython
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12.10'
+          architecture: ${{ matrix.architecture }}
+          check-latest: false
+      - name: Provision isolated native toolchain
+        env:
+          GOTOOLCHAIN: local
+          NATIVE_TARGET: ${{ matrix.target }}
+        run: node scripts/native-toolchain.mjs --target "$NATIVE_TARGET" --output-dir ".test-data/bootstrap-$NATIVE_TARGET"
+      - name: Retrieve exact frozen candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          artifact-ids: ${{ needs.source.outputs.candidate-artifact-id }}
+          path: source/.test-data/frozen-candidate
+          merge-multiple: true
+      - name: Execute native validation
+        env:
+          NATIVE_TARGET: ${{ matrix.target }}
+          EXPECTED_SOURCE_COMMIT: ${{ needs.source.outputs.source-commit }}
+          EXPECTED_DESCRIPTOR_SHA256: ${{ needs.source.outputs.descriptor-sha256 }}
+          EXPECTED_CHECKSUMS_SHA256: ${{ needs.source.outputs.checksums-sha256 }}
+        run: >-
+          node scripts/native-validation.mjs
+          --target "$NATIVE_TARGET" --profile pr
+          --candidate-dir .test-data/frozen-candidate
+          --evidence-dir ".test-data/native-$NATIVE_TARGET"
+          --build-candidate false
+      - name: Retain native validation evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-evidence-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            source/.test-data/native-${{ matrix.target }}/*.json
+            source/.test-data/native-${{ matrix.target }}/*.ndjson
+            source/.test-data/native-${{ matrix.target }}/*.md
+            source/.test-data/native-${{ matrix.target }}/tools-*/*.json
+            source/.test-data/native-${{ matrix.target }}/tools-*/*.ndjson
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Retain native bootstrap diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-bootstrap-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            source/.test-data/bootstrap-${{ matrix.target }}/*.json
+            source/.test-data/bootstrap-${{ matrix.target }}/*.ndjson
+            source/.test-data/bootstrap-${{ matrix.target }}/crypto-fixture/fixture.json
+            source/.test-data/bootstrap-${{ matrix.target }}/crypto-fixture/public-intoto.sigstore
+            source/.test-data/bootstrap-${{ matrix.target }}/crypto-fixture/offline-trust/*.json
+          if-no-files-found: warn
+          retention-days: 90
+
+  producer-summary:
+    permissions: {}
+    name: Native producer completeness
+    if: ${{ always() }}
+    needs: [intent, source, native]
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-        with:
-          path: source
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - run: npm run test:unit
-      - run: npm run test:targeted -- test/test-runner.test.mjs
-      - name: Create an owned test filename containing spaces
-        id: fixture
-        shell: bash
-        run: |
-          node --input-type=module -e '
-            import * as fs from "node:fs/promises";
-            import path from "node:path";
-            const directory = await fs.mkdtemp(path.join("test", ".command-smoke-"));
-            const file = path.join(directory, "test with spaces.test.mjs");
-            try {
-              await fs.writeFile(file, `import test from "node:test"; test("portable public command", () => {});`);
-              await fs.appendFile(process.env.GITHUB_OUTPUT, `file=${file}\n`);
-            } catch (error) {
-              await fs.rm(directory, {recursive: true, force: true});
-              throw error;
-            }
-          '
-      - name: Exercise the public targeted command without a shell glob
-        shell: bash
+      - name: Report complete producer scheduling
+        working-directory: ${{ github.workspace }}
         env:
-          SMOKE_FILE: ${{ steps.fixture.outputs.file }}
-        run: npm run test:targeted -- "$SMOKE_FILE"
-      - name: Remove the owned filename and its empty directory
-        if: ${{ always() && steps.fixture.outputs.file != '' }}
+          SOURCE_RESULT: ${{ needs.source.result }}
+          NATIVE_RESULT: ${{ needs.native.result }}
+          INTENT_RESULT: ${{ needs.intent.result }}
+          REQUIRES_NATIVE: ${{ needs.intent.outputs.requires-native }}
         shell: bash
-        env:
-          SMOKE_FILE: ${{ steps.fixture.outputs.file }}
         run: |
-          node --input-type=module -e '
-            import * as fs from "node:fs/promises";
-            import path from "node:path";
-            await fs.unlink(process.env.SMOKE_FILE);
-            await fs.rmdir(path.dirname(process.env.SMOKE_FILE));
-          '
-  validate-package:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: source
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Use project-local scratch storage
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/.test-data/ci-scratch"
-          echo "TMPDIR=$GITHUB_WORKSPACE/.test-data/ci-scratch" >> "$GITHUB_ENV"
-      - run: npm run check
-      - run: npm test
-      - run: npm run package:artifact
-      - run: npm run verify:package
+          test "$INTENT_RESULT" = success
+          if test "$REQUIRES_NATIVE" = false; then
+            printf 'Metadata-only edit: native assertions were not executed; this is not native passing evidence.\n'
+            test "$SOURCE_RESULT" = skipped && test "$NATIVE_RESULT" = skipped
+            exit
+          fi
+          test "$REQUIRES_NATIVE" = true
+          printf 'Source freeze: %s\nAll four parallel native lanes: %s\n' "$SOURCE_RESULT" "$NATIVE_RESULT"
+          printf 'Provider-verified framework/validation is evaluated independently by the trusted observer.\n'
+          test "$SOURCE_RESULT" = success && test "$NATIVE_RESULT" = success

@@ -1,6 +1,14 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": []
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
+import path from 'node:path';
+import { fixture } from './helpers.mjs';
+import { loadConfig } from '../src/artifacts.mjs';
+import { distribution } from '../src/install.mjs';
 
 const guideNames = ['knowledge-retrieval', 'coding', 'testing', 'building', 'reviewing'];
 const readGuide = name => fs.readFile(`assets/instructions/${name}.md`, 'utf8');
@@ -249,11 +257,11 @@ test('T-49 every lifecycle skill uses one unmistakable override-intent contract'
 test('T-50 STAGING guidance is policy-driven across every instruction surface', async () => {
   const paths = [
     'README.md',
-    'docs/design-overview.md',
-    'docs/requirements.md',
-    'docs/test-plan.md',
-    'docs/technical-design.md',
-    'docs/cli.md',
+    'docs/architecture/design-overview.md',
+    'docs/sdlc/core-framework/requirements.md',
+    'docs/sdlc/core-framework/test-plan.md',
+    'docs/sdlc/core-framework/technical-design.md',
+    'docs/reference/cli.md',
     'assets/instructions.md',
     'assets/templates/test-plan.md',
     ...['sdlc', 'sdlc-requirements', 'sdlc-test-design',
@@ -276,4 +284,29 @@ test('T-50 STAGING guidance is policy-driven across every instruction surface', 
     /user[\s\S]*agent[\s\S]*provider[\s\S]*external-system/iu);
   assert.match(contents,
     /individual[\s\S]*(?:Passed|passing)[\s\S]*completion[\s\S]*(?:confirmation|decision)/iu);
+});
+
+test('T-PRD009 repository critical/affected guidance does not replace a consumer local checkpoint', async t => {
+  const guide = await fs.readFile('docs/contributing/README.md', 'utf8');
+  assert.match(guide, /Local critical plus affected/u);
+  assert.match(guide, /opt-in local exhaustive runs/u);
+  assert.match(guide, /Every PR[\s\S]*complete applicable hosted validation/u);
+  const f = await fixture(t);
+  const config = { schemaVersion: 1, commands: [{
+    command: 'consumer-own-test-command',
+    action: { class: 'test', environment: 'local' },
+  }] };
+  const file = path.join(f.repo, '.sdlc/config.json');
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify(config));
+  const { metadata } = await f.store.manifest(f.workItemId);
+  const before = await fs.readFile(file);
+  const { files } = await distribution(f.home);
+  assert.deepEqual(await loadConfig(metadata, 'primary'), config);
+  assert.deepEqual(await fs.readFile(file), before);
+  assert.ok(![...files.keys()].some(key => /(?:^|\/)\.github\/|(?:^|\/)\.sdlc\/config\.json$/u.test(key)));
+  const instructions = files.get('sdlc/instructions/coding.md').toString('utf8');
+  assert.match(files.get('sdlc/instructions/knowledge-retrieval.md').toString('utf8'),
+    /compatible repository rules before/u);
+  assert.doesNotMatch(instructions, /npm run test:critical|framework\/coverage/u);
 });

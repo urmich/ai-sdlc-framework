@@ -1,3 +1,14 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "variants": [
+    {"expression": "`FR-059 ${order} non-Azure aliases have exactly one public poll owner`", "domains": {"order": ["historical-first", "current-first"]}},
+    {"expression": "`FR-059 ${order} non-Azure no-attempt aliases use trusted adapter proof`", "domains": {"order": ["historical-first", "current-first"]}},
+    {"expression": "`FR-059/063 ${order} archived alias attaches retain bytes and cannot restart polling`", "domains": {"order": ["historical-first", "current-first"]}},
+    {"expression": "`FR-063 ${order} alias attach racing archive leaves one immutable history record`", "domains": {"order": ["historical-first", "current-first"]}},
+    {"expression": "`FR-059 different ${field} is not conflated with a known historical attempt`", "domains": {"field": ["provider", "connection", "scope", "definition", "missing definition", "run", "attempt", "unknown attempt", "historical unknown attempt"]}},
+    {"expression": "`FR-059 ${name} does not prove historical/current equivalence`", "domains": {"name": ["missing adapter", "link-only adapter", "unknown adapter capability", "incompatible adapter capability", "unknown distinct attempt", "unknown provider attempt"]}}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';

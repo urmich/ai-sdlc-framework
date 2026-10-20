@@ -5,7 +5,7 @@ import { Store } from './store.mjs';
 import { loadConfig, registerArtifact } from './artifacts.mjs';
 import { captureReceipt, prepareDecision, applyDecision } from './decisions.mjs';
 import { prepareOperation, markDispatching, recordOperation, addConflict, resolveConflict, pruneWork } from './operations.mjs';
-import { preparePr, adoptPr, updatePrFacts, evaluateReadiness } from './pr.mjs';
+import { preparePr, preparePrDescription, adoptPr, updatePrFacts, evaluateReadiness } from './pr.mjs';
 import { associateMonitor, attachMonitor, refreshMonitorCapabilities, claimMonitor, beginPoll, observeMonitor, verifyMonitorLink, monitorNotice, interruptMonitor, dueMonitors, pruneMonitor } from './monitors.mjs';
 import { formatAudit, recordAudit, replayAudit } from './audit.mjs';
 import { status, resume, acknowledgeContext } from './recovery.mjs';
@@ -20,6 +20,8 @@ import { currentCycle } from './authority.mjs';
 import { requireCurrentSourceRevision } from './current-evidence.mjs';
 import { selectedFetchRemote } from './git.mjs';
 import { sameNativePath } from './platform.mjs';
+import { runCoverageCommand } from './coverage-cli.mjs';
+import { runReadinessCommand } from './readiness-cli.mjs';
 
 export function parseArguments(argv) {
   const flags = {}, words = [];
@@ -59,14 +61,16 @@ Commands:
   receipt latest|capture | decision prepare|apply
   op show|prepare|mark-dispatching|record|reconcile | conflict add|resolve
   cycle start | evidence test|tests|retain|show|artifact | handoff staging
-  pr prepare|create-result|adopt|update|evaluate
+  coverage prepare|inspect (in-memory PR-description metadata; no provider write)
+  readiness evaluate|report (offline; origin gaps remain NotRun without a trusted host)
+  pr description-prepare|prepare|create-result|adopt|update|evaluate
   repository observe (requires a verified hosting-service observation)
   monitor attach|associate|refresh-capabilities|claim|begin-poll|observe [--evidence-file FILE]|link|notice|interrupt|due|prune
   audit format|record|replay | gate | hook EVENT
   check artifacts|state|history|evidence|all [--offset N --limit N] [--finding N] | prune
 JSON mutations read stdin or --input-file FILE. No network, commit or push commands.
 Use --home for isolated COPILOT_HOME; --cwd, --session, --repository identify context.
-See docs/cli.md (installed: <COPILOT_HOME>/sdlc/cli.md) for contracts.`;
+See docs/reference/cli.md (installed: <COPILOT_HOME>/sdlc/cli.md) for contracts.`;
 
 export async function runCli(argv = process.argv.slice(2), io = process, { createStore } = {}) {
   const { flags, words } = parseArguments(argv);
@@ -126,6 +130,23 @@ export async function runCli(argv = process.argv.slice(2), io = process, { creat
     exitCode: 0,
     human: flags.human,
   };
+  if (['coverage', 'readiness'].includes(command)) {
+    const cwd = path.resolve(flags.cwd ?? process.cwd());
+    let input;
+    try {
+      input = flags['input-file'] ?
+        parseJson((await readBytes(path.resolve(cwd, flags['input-file']))).toString('utf8')) :
+        await stdinJson(io.stdin);
+    } catch (error) {
+      if (!(error instanceof SdlcError) || error.code !== 'JSON') throw error;
+      throw new SdlcError('JSON', `Malformed ${command} command input`);
+    }
+    const execution = command === 'coverage' ?
+      await runCoverageCommand(store, { subcommand, cwd, flags, input }) :
+      await runReadinessCommand({ subcommand, cwd, input });
+    return { ...execution,
+      human: flags.human };
+  }
   await store.ready();
   const cwd = path.resolve(flags.cwd ?? process.cwd());
   const sessionId = flags.session ?? process.env.SDLC_SESSION_ID;
@@ -198,7 +219,8 @@ export async function runCli(argv = process.argv.slice(2), io = process, { creat
       break;
     case 'handoff': requireThat(subcommand === 'staging', 'INPUT', 'Use handoff staging'); result = await stagingHandoff(store, workItemId); break;
     case 'pr':
-      if (subcommand === 'prepare') result = await preparePr(store, work);
+      if (subcommand === 'description-prepare') result = await preparePrDescription(store, work);
+      else if (subcommand === 'prepare') result = await preparePr(store, work);
       else if (['adopt', 'create-result'].includes(subcommand)) result = await adoptPr(store, work);
       else if (subcommand === 'update') result = await updatePrFacts(store, work);
       else if (subcommand === 'evaluate') {
@@ -229,7 +251,7 @@ export async function runCli(argv = process.argv.slice(2), io = process, { creat
         result = evaluateReadiness(state.records, evaluation, {
           clock: store.clock, cycle,
         });
-      } else throw new SdlcError('INPUT', 'Use pr prepare|create-result|adopt|update|evaluate');
+      } else throw new SdlcError('INPUT', 'Use pr description-prepare|prepare|create-result|adopt|update|evaluate');
       break;
     case 'repository':
       requireThat(subcommand === 'observe', 'INPUT', 'Use repository observe');

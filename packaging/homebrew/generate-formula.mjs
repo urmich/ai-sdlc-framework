@@ -62,12 +62,18 @@ export async function generateHomebrewFormula({
     throw new Error('Stable metadata cannot contain a candidate URL');
   }
   const archives = {};
+  const sharedFilename = `${NAME}-${descriptor.version}-macos.tar.gz`;
+  const shared = descriptor.files.some(file => file.filename === sharedFilename);
+  if (shared && descriptor.files.some(file => /^ai-sdlc-framework-.*-macos-(?:arm64|x64)\.tar\.gz$/u.test(file.filename))) {
+    throw new Error('Shared macOS metadata cannot also require architecture-specific archives');
+  }
   for (const arch of selected) {
-    const filename = `${NAME}-${descriptor.version}-macos-${arch}.tar.gz`;
+    const filename = shared ? sharedFilename : `${NAME}-${descriptor.version}-macos-${arch}.tar.gz`;
     const record = descriptor.files.find(file => file.filename === filename);
     if (record?.kind !== 'archive') throw new Error(`Missing macOS ${arch} archive: ${filename}`);
     const file = path.join(artifactDirectory, filename);
-    if (!(await fs.lstat(file)).isFile()) throw new Error(`Archive must be a regular file: ${filename}`);
+    const stat = await fs.lstat(file);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`Archive must be a regular file: ${filename}`);
     const bytes = await fs.readFile(file);
     if (bytes.length !== record.size || digest(bytes) !== record.sha256) {
       throw new Error(`Archive checksum or size mismatch: ${filename}`);
@@ -78,7 +84,7 @@ export async function generateHomebrewFormula({
 ${mode === 'candidate' ? `${indent}version "${descriptor.version}" if version.to_s != "${descriptor.version}"\n` : ''}${indent}sha256 "${archives[arch].sha256}"
 `;
   const single = selected.length === 1;
-  const conditionalSources = single ? '' : `  on_macos do
+  const conditionalSources = single || shared ? '' : `  on_macos do
 ${selected.map(arch => `    ${arch === 'arm64' ? 'on_arm' : 'on_intel'} do
 ${sourceLines(arch, '      ')}    end
 `).join('')}  end
@@ -87,7 +93,7 @@ ${sourceLines(arch, '      ')}    end
   const contents = `${mode === 'candidate' ? '# Test-only local candidate; never publish to the stable tap.\n' : ''}class AiSdlcFramework < Formula
   desc "Offline, receipt-bound SDLC workflow for GitHub Copilot CLI"
   homepage "${REPOSITORY}"
-${single ? sourceLines(selected[0], '  ') : ''}  license "MIT"
+${single || shared ? sourceLines(selected[0], '  ') : ''}  license "MIT"
 
 ${single ? `  depends_on arch: :${selected[0] === 'arm64' ? 'arm64' : 'x86_64'}\n` : ''}  depends_on :macos
   depends_on "node@22"

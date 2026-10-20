@@ -1,300 +1,718 @@
-name: Release candidate
+name: Release
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
     inputs:
-      release_repository:
-        description: Approved public asset repository (owner/repository)
+      source_commit:
+        description: Exact accepted protected-main source SHA (must equal this dispatch)
         type: string
         required: true
-      publish_draft:
-        description: Upload exact assets to a matching pre-existing tag as a draft only
-        type: boolean
-        default: false
-      publish_npm:
-        description: Hand the same verified tgz to npm (requires npm environment approval)
-        type: boolean
-        default: false
+      version:
+        description: Exact existing package.json version (never bumped by this workflow)
+        type: string
+        required: true
+      release_repository:
+        description: Explicit public GitHub release destination (owner/repository)
+        type: string
+        required: true
+      release_intent_id:
+        description: Stable immutable logical release intent ID
+        type: string
+        required: true
+      saved_run_id:
+        description: Retry only - original saved bundle/evidence run ID
+        type: string
+        required: false
+      saved_bundle_artifact_id:
+        description: Retry only - exact original immutable bundle artifact ID
+        type: string
+        required: false
+      saved_bundle_sha256:
+        description: Retry only - original bundle manifest SHA-256
+        type: string
+        required: false
+      saved_evidence_artifact_id:
+        description: Retry only - original prepublication evidence artifact ID
+        type: string
+        required: false
+      saved_candidate_artifact_id:
+        description: Prepublication retry only - exact original frozen candidate artifact ID
+        type: string
+        required: false
+      saved_candidate_identity:
+        description: Prepublication retry only - original descriptorSha256/checksumsSha256 JSON
+        type: string
+        required: false
 
 permissions:
   contents: read
 
 defaults:
   run:
+    shell: bash
     working-directory: source
 
 concurrency:
-  group: release-${{ github.repository }}-${{ github.ref }}
+  group: release-${{ inputs.release_repository }}-${{ inputs.version }}
   cancel-in-progress: false
 
 env:
-  # Tag builds need an explicitly approved repository variable; never infer a private source repo.
-  RELEASE_REPOSITORY: ${{ inputs.release_repository || vars.RELEASE_REPOSITORY }}
+  RELEASE_REPOSITORY: ${{ inputs.release_repository }}
+  RELEASE_INTENT_ID: ${{ inputs.release_intent_id }}
+  EXPECTED_SOURCE_COMMIT: ${{ inputs.source_commit }}
+  SUPPORTED_PREVIOUS_VERSION: ${{ vars.SUPPORTED_PREVIOUS_VERSION }}
+  SUPPORTED_PREVIOUS_DESCRIPTOR_SHA256: ${{ vars.SUPPORTED_PREVIOUS_DESCRIPTOR_SHA256 }}
+  SUPPORTED_PREVIOUS_CHECKSUMS_SHA256: ${{ vars.SUPPORTED_PREVIOUS_CHECKSUMS_SHA256 }}
 
 jobs:
-  candidate:
+  preflight:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    outputs:
-      artifact_id: ${{ steps.upload.outputs.artifact-id }}
-      source_commit: ${{ steps.prepare.outputs.sourceCommit }}
-      version: ${{ steps.prepare.outputs.version }}
-      descriptor_sha256: ${{ steps.prepare.outputs.descriptorSha256 }}
-      checksums_sha256: ${{ steps.prepare.outputs.checksumsSha256 }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      statuses: read
+      pull-requests: read
     steps:
-      - uses: actions/checkout@v4
+      - name: Reject invalid release entry before checking out or executing selected source
+        working-directory: .
+        run: |
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch &&
+          test "$GITHUB_REF" = refs/heads/main &&
+          test "$EXPECTED_SOURCE_COMMIT" = "$GITHUB_SHA" || {
+            echo "::error::Release requires one explicit exact protected-main dispatch."
+            exit 1
+          }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ inputs.source_commit }}
           path: source
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '22'
-      - uses: actions/setup-go@v5
+          node-version: '22.23.3'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
-          go-version-file: source/cmd/sdlc-launcher/go.mod
-          cache: false
-      - name: Use project-local scratch storage
+          python-version: '3.12.10'
+      - name: Check complete retry selection before any build or publication effect
+        env:
+          SAVED_RUN: ${{ inputs.saved_run_id }}
+          SAVED_BUNDLE: ${{ inputs.saved_bundle_artifact_id }}
+          SAVED_HASH: ${{ inputs.saved_bundle_sha256 }}
+          SAVED_EVIDENCE: ${{ inputs.saved_evidence_artifact_id }}
+          SAVED_CANDIDATE: ${{ inputs.saved_candidate_artifact_id }}
+          SAVED_CANDIDATE_IDENTITY: ${{ inputs.saved_candidate_identity }}
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/.test-data/release-scratch"
-          echo "TMPDIR=$GITHUB_WORKSPACE/.test-data/release-scratch" >> "$GITHUB_ENV"
-      - run: npm run check
-      - run: npm test
-      - name: Wrap exact tgz, freeze final metadata, and prepare deferred T-60 identity inputs
+          node --input-type=module -e '
+            const e=process.env, values=[e.SAVED_RUN,e.SAVED_BUNDLE,e.SAVED_HASH,e.SAVED_EVIDENCE];
+            if(e.SAVED_CANDIDATE) {
+              const pins=JSON.parse(e.SAVED_CANDIDATE_IDENTITY);
+              if(e.SAVED_BUNDLE||e.SAVED_HASH||e.SAVED_EVIDENCE||!(/^[1-9]\d*$/.test(e.SAVED_CANDIDATE)&&/^[1-9]\d*$/.test(e.SAVED_RUN))||
+                Object.keys(pins).sort().join(",")!=="checksumsSha256,descriptorSha256"||
+                !Object.values(pins).every(v=>/^[a-f0-9]{64}$/.test(v))) throw new Error("Select one original frozen candidate with exact metadata pins");
+            } else if(e.SAVED_CANDIDATE_IDENTITY||values.some(Boolean)&&(!values.every(Boolean)||!values.filter((_,i)=>i!==2).every(v=>/^[1-9]\d*$/.test(v))||!/^[a-f0-9]{64}$/.test(e.SAVED_HASH))) throw new Error("Retry requires all exact saved identities; never repack an uncertain release");
+          '
+      - name: Verify source, destination, authority, pins, policy and explicit channel prerequisites
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NPM_TRUSTED_PUBLISHER_REPOSITORY: ${{ vars.NPM_TRUSTED_PUBLISHER_REPOSITORY }}
+          NPM_TRUSTED_PUBLISHER_CALLER: ${{ vars.NPM_TRUSTED_PUBLISHER_CALLER }}
+          NPM_TRUSTED_PUBLISHER_ENVIRONMENT: ${{ vars.NPM_TRUSTED_PUBLISHER_ENVIRONMENT }}
+          SAVED_BUNDLE_ARTIFACT_ID: ${{ inputs.saved_bundle_artifact_id }}
+          SAVED_CANDIDATE_ARTIFACT_ID: ${{ inputs.saved_candidate_artifact_id }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          node scripts/publish-release.mjs preflight --source-commit "$EXPECTED_SOURCE_COMMIT" \
+            --version "$RELEASE_VERSION" --repository "$RELEASE_REPOSITORY" \
+            --release-intent-id "$RELEASE_INTENT_ID" --output-file .test-data/release-preflight.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.22.0'
+      - name: Verify publishing toolchain availability and integrity before any tag or asset effect
+        run: node scripts/npm-handoff.mjs preflight --output-dir .test-data/publishing-preflight
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/.test-data/release-preflight.json
+          if-no-files-found: warn
+          retention-days: 90
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-publishing-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/.test-data/publishing-preflight/tooling.json
+          if-no-files-found: warn
+          retention-days: 90
+
+  candidate:
+    if: inputs.saved_bundle_artifact_id == ''
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id || inputs.saved_candidate_artifact_id }}
+      artifact_run_id: ${{ inputs.saved_candidate_artifact_id != '' && inputs.saved_run_id || github.run_id }}
+      descriptor_sha256: ${{ steps.prepare.outputs.descriptorSha256 || steps.resume.outputs.descriptorSha256 }}
+      checksums_sha256: ${{ steps.prepare.outputs.checksumsSha256 || steps.resume.outputs.checksumsSha256 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.source_commit }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.3'
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.10'
+      - name: Provision and verify exact workspace toolchain before freezing the candidate
+        if: inputs.saved_candidate_artifact_id == ''
+        run: node scripts/native-toolchain.mjs --target linux-x64 --output-dir .test-data/candidate-tools
+      - name: Freeze exact npm, shared Mac, Windows PE and manager metadata once
+        if: inputs.saved_candidate_artifact_id == ''
         id: prepare
         run: |
-          node scripts/release-bundle.mjs prepare \
-            --output-dir .test-data/candidate --repository "$RELEASE_REPOSITORY"
-      - name: Retain frozen candidate (never merge wildcard artifacts)
+          node scripts/native-validation.mjs --target linux-x64 --profile r-pre --phase candidate \
+            --candidate-dir .test-data/candidate --evidence-dir .test-data/candidate-report --build-candidate true
+      - if: inputs.saved_candidate_artifact_id == ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: upload
-        uses: actions/upload-artifact@v4
         with:
           name: release-candidate-${{ github.run_id }}-${{ github.run_attempt }}
           path: source/.test-data/candidate/
           include-hidden-files: true
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 90
+          compression-level: 0
+      - if: inputs.saved_candidate_artifact_id != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ inputs.saved_candidate_artifact_id }}
+          run-id: ${{ inputs.saved_run_id }}
+          github-token: ${{ github.token }}
+          path: source/.test-data/candidate
+          merge-multiple: true
+      - if: inputs.saved_candidate_artifact_id != ''
+        id: resume
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SAVED_CANDIDATE_ID: ${{ inputs.saved_candidate_artifact_id }}
+          SAVED_CANDIDATE_IDENTITY: ${{ inputs.saved_candidate_identity }}
+          SAVED_RUN_ID: ${{ inputs.saved_run_id }}
+        run: |
+          node scripts/release-bundle.mjs resume-candidate --candidate-dir .test-data/candidate \
+            --artifact-id "$SAVED_CANDIDATE_ID" --run-id "$SAVED_RUN_ID" --identity "$SAVED_CANDIDATE_IDENTITY"
 
   release-gates:
+    name: native-${{ matrix.target }}
     needs: candidate
     strategy:
       fail-fast: false
       matrix:
         include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+            architecture: x64
+          - target: windows-x64
+            runner: windows-2022
+            architecture: x64
           - target: macos-arm64
             runner: macos-15
+            architecture: arm64
           - target: macos-x64
-            runner: macos-15
-          - target: windows-x64
-            runner: ubuntu-24.04
-    # macos-15 is Apple Silicon. The gate verifies Node, machine architecture and absence of Rosetta.
-    # Intel runs metadata-only checks on macOS so Homebrew activates on_macos; native Intel remains NotRun.
+            runner: macos-15-intel
+            architecture: x64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      actions: read
     env:
-      EXPECTED_SOURCE_COMMIT: ${{ needs.candidate.outputs.source_commit }}
       EXPECTED_DESCRIPTOR_SHA256: ${{ needs.candidate.outputs.descriptor_sha256 }}
       EXPECTED_CHECKSUMS_SHA256: ${{ needs.candidate.outputs.checksums_sha256 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ inputs.source_commit }}
           path: source
           persist-credentials: false
-      - if: startsWith(matrix.target, 'macos-')
-        name: Provision pinned workspace-local Homebrew
-        env:
-          HOMEBREW_BREW_COMMIT: 99fd9a8eed4ff942c448da0c1f11156302441e4a
-          RELEASE_TARGET: ${{ matrix.target }}
-        run: |
-          set -euo pipefail
-          root="$GITHUB_WORKSPACE/source/.test-data/homebrew"
-          test ! -e "$root"
-          git init -q "$root"
-          git -C "$root" remote add origin https://github.com/Homebrew/brew.git
-          git -C "$root" fetch --quiet --depth=1 origin "$HOMEBREW_BREW_COMMIT"
-          git -C "$root" checkout --quiet --detach FETCH_HEAD
-          test "$(git -C "$root" rev-parse HEAD)" = "$HOMEBREW_BREW_COMMIT"
-          brew="$root/bin/brew"
-          test -x "$brew"
-          echo "SDLC_HOMEBREW_BREW=$brew" >> "$GITHUB_ENV"
-          if test "$RELEASE_TARGET" = macos-arm64; then
-            env HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 \
-              HOMEBREW_NO_INSTALL_CLEANUP=1 "$brew" install node@22
-            node_prefix="$(env HOMEBREW_NO_AUTO_UPDATE=1 "$brew" --prefix node@22)"
-            test -x "$node_prefix/bin/node"
-            test "$("$node_prefix/bin/node" -p 'process.platform')" = darwin
-            test "$("$node_prefix/bin/node" -p 'process.arch')" = arm64
-          fi
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '22'
-      - name: Use workspace-owned scratch storage
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/.test-data/gate-scratch"
-          echo "TMPDIR=$GITHUB_WORKSPACE/.test-data/gate-scratch" >> "$GITHUB_ENV"
-      - if: matrix.target == 'windows-x64'
-        uses: actions/setup-go@v5
+          node-version: '22.23.3'
+          architecture: ${{ matrix.architecture }}
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
-          go-version-file: source/cmd/sdlc-launcher/go.mod
+          go-version: '1.27.1'
           cache: false
-      - if: matrix.target == 'windows-x64'
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
-          python-version: '3.12'
-      - if: matrix.target == 'windows-x64'
-        name: Install pinned schema validation dependencies (not payload dependencies)
-        run: python3 -m pip install --disable-pip-version-check -r .github/release-requirements.txt
-      - uses: actions/download-artifact@v4
+          python-version: '3.12.10'
+          architecture: ${{ matrix.architecture }}
+      - name: Verify actual native image, pinned tools and owned Homebrew baseline
+        env:
+          NATIVE_TARGET: ${{ matrix.target }}
+        run: node scripts/native-toolchain.mjs --target "$NATIVE_TARGET" --output-dir .test-data/native-tools
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           artifact-ids: ${{ needs.candidate.outputs.artifact_id }}
+          run-id: ${{ needs.candidate.outputs.artifact_run_id }}
+          github-token: ${{ github.token }}
           path: source/.test-data/candidate
           merge-multiple: true
-      - name: Require ARM64 native and audit/style, Intel metadata audit/style, or Windows cross-only evidence
+      - name: Fresh complete native R-PRE inventory against the frozen unpublished bytes
         env:
           RELEASE_TARGET: ${{ matrix.target }}
         run: |
           node scripts/release-gate.mjs --candidate-dir .test-data/candidate \
             --evidence-dir .test-data/evidence --target "$RELEASE_TARGET"
-      - name: Retain truthful gate evidence, including failures and explicit NotRun
-        if: always()
-        uses: actions/upload-artifact@v4
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: release-gate-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: source/.test-data/evidence/*.json
+          path: source/.test-data/evidence/
+          include-hidden-files: true
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
 
   release-bundle:
-    needs: [candidate, release-gates]
+    if: always() && needs.preflight.result == 'success' && (needs.release-gates.result == 'success' || inputs.saved_bundle_artifact_id != '')
+    needs: [preflight, candidate, release-gates]
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
     outputs:
-      artifact_id: ${{ steps.upload.outputs.artifact-id }}
-      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
-      bundle_sha256: ${{ steps.seal.outputs.bundleSha256 }}
-      publication_ready: ${{ steps.seal.outputs.publicationReady }}
+      artifact_id: ${{ steps.upload.outputs.artifact-id || inputs.saved_bundle_artifact_id }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest || steps.saved.outputs.bundleArtifactDigest }}
+      source_run_id: ${{ inputs.saved_bundle_artifact_id != '' && inputs.saved_run_id || github.run_id }}
+      bundle_sha256: ${{ steps.seal.outputs.bundleSha256 || inputs.saved_bundle_sha256 }}
+      evidence_artifact_id: ${{ steps.evidence-upload.outputs.artifact-id || inputs.saved_evidence_artifact_id }}
+      evidence_artifact_digest: ${{ steps.evidence-upload.outputs.artifact-digest || steps.saved.outputs.evidenceArtifactDigest }}
+      evidence_filename: ${{ steps.proof.outputs.evidenceFilename || steps.saved.outputs.evidenceFilename }}
+      evidence_sha256: ${{ steps.proof.outputs.evidenceSha256 || steps.saved.outputs.evidenceSha256 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ inputs.source_commit }}
           path: source
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '22'
-      - uses: actions/download-artifact@v4
+          node-version: '22.23.3'
+      - if: inputs.saved_bundle_artifact_id == ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           artifact-ids: ${{ needs.candidate.outputs.artifact_id }}
+          run-id: ${{ needs.candidate.outputs.artifact_run_id }}
+          github-token: ${{ github.token }}
           path: source/.test-data/candidate
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - if: inputs.saved_bundle_artifact_id == ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: release-gate-*-${{ github.run_id }}-*
           path: source/.test-data/evidence
-      - name: Verify completed native gates, generate T-60, and seal the immutable review bundle
+      - if: inputs.saved_bundle_artifact_id == ''
         id: seal
+        name: Re-evaluate every underlying native report then seal the immutable bundle
         run: |
           node scripts/release-bundle.mjs seal --candidate-dir .test-data/candidate \
-            --evidence-dir .test-data/evidence --output-dir .test-data/release-bundle \
-            --run-id "$GITHUB_RUN_ID"
-      - uses: actions/upload-artifact@v4
-        id: upload
+            --evidence-dir .test-data/evidence --output-dir .test-data/release-bundle --run-id "$GITHUB_RUN_ID"
+      - if: inputs.saved_bundle_artifact_id == ''
+        id: proof
+        env:
+          EXPECTED_BUNDLE_SHA256: ${{ steps.seal.outputs.bundleSha256 }}
+        run: node scripts/release-bundle.mjs evidence --directory .test-data/release-bundle --output-dir .test-data/prepublication
+      - if: inputs.saved_bundle_artifact_id == ''
+        id: attest
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
         with:
-          name: release-bundle-${{ needs.candidate.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          subject-path: source/.test-data/prepublication/release-prepublication-*.tar.gz
+      - if: inputs.saved_bundle_artifact_id == ''
+        name: Retain signed trust material separately without a hash cycle
+        env:
+          SIGNED_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+          EVIDENCE_FILENAME: ${{ steps.proof.outputs.evidenceFilename }}
+          EVIDENCE_SHA256: ${{ steps.proof.outputs.evidenceSha256 }}
+        run: |
+          node scripts/release-retention.mjs retain-trust --archive ".test-data/prepublication/$EVIDENCE_FILENAME" \
+            --attestation-bundle "$SIGNED_BUNDLE" --expected-archive-sha256 "$EVIDENCE_SHA256" \
+            --expected-source-commit "$EXPECTED_SOURCE_COMMIT" --release-intent-id "$RELEASE_INTENT_ID" \
+            --output-dir .test-data/prepublication
+      - if: inputs.saved_bundle_artifact_id == ''
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-bundle-${{ inputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: source/.test-data/release-bundle/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 90
           compression-level: 0
-      - name: Save acceptance handoff
-        env:
-          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
-          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
-          BUNDLE_SHA256: ${{ steps.seal.outputs.bundleSha256 }}
-          SOURCE_COMMIT: ${{ needs.candidate.outputs.source_commit }}
-          PUBLICATION_READY: ${{ steps.seal.outputs.publicationReady }}
-        run: |
-          printf '## Immutable release handoff\nRun: `%s`\nArtifact ID: `%s`\nArtifact ZIP digest: `%s`\nBundle manifest SHA-256: `%s`\nSource commit: `%s`\n' \
-            "$GITHUB_RUN_ID" "$ARTIFACT_ID" "$ARTIFACT_DIGEST" "$BUNDLE_SHA256" "$SOURCE_COMMIT" >> "$GITHUB_STEP_SUMMARY"
-          printf 'Publication ready: `%s`. Pending T-60 completeness blocks all publisher/acceptance entrypoints.\n' \
-            "$PUBLICATION_READY" >> "$GITHUB_STEP_SUMMARY"
-
-  draft-assets:
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_draft
-    needs: [candidate, release-bundle]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    environment: release
-    permissions:
-      contents: write
-    env:
-      EXPECTED_BUNDLE_SHA256: ${{ needs.release-bundle.outputs.bundle_sha256 }}
-      EXPECTED_SOURCE_COMMIT: ${{ needs.candidate.outputs.source_commit }}
-    steps:
-      - uses: actions/checkout@v4
+      - if: inputs.saved_bundle_artifact_id == ''
+        id: evidence-upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          path: source
-          persist-credentials: false
-      - uses: actions/setup-node@v4
+          name: release-prepublication-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/.test-data/prepublication/
+          if-no-files-found: error
+          retention-days: 90
+      - if: inputs.saved_bundle_artifact_id != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          node-version: '22'
-      - uses: actions/download-artifact@v4
-        with:
-          artifact-ids: ${{ needs.release-bundle.outputs.artifact_id }}
+          artifact-ids: ${{ inputs.saved_bundle_artifact_id }}
+          run-id: ${{ inputs.saved_run_id }}
+          github-token: ${{ github.token }}
           path: source/.test-data/release-bundle
           merge-multiple: true
-      - name: Resume matching draft; compare existing bytes, never clobber or create tags
+      - if: inputs.saved_bundle_artifact_id != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ inputs.saved_evidence_artifact_id }}
+          run-id: ${{ inputs.saved_run_id }}
+          github-token: ${{ github.token }}
+          path: source/.test-data/prepublication
+          merge-multiple: true
+      - if: inputs.saved_bundle_artifact_id != ''
+        id: saved
+        name: Reconcile exact saved bundle and original physical R-PRE origins without repacking
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_ASSETS_TOKEN || github.token }}
+          EXPECTED_BUNDLE_SHA256: ${{ inputs.saved_bundle_sha256 }}
+          SAVED_RUN_ID: ${{ inputs.saved_run_id }}
+          SAVED_BUNDLE_ARTIFACT_ID: ${{ inputs.saved_bundle_artifact_id }}
+          SAVED_EVIDENCE_ARTIFACT_ID: ${{ inputs.saved_evidence_artifact_id }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          node scripts/publish-release.mjs draft --directory .test-data/release-bundle \
-            --repository "$RELEASE_REPOSITORY"
+          node scripts/release-bundle.mjs reuse --directory .test-data/release-bundle \
+            --evidence-dir .test-data/prepublication --run-id "$SAVED_RUN_ID" \
+            --bundle-artifact-id "$SAVED_BUNDLE_ARTIFACT_ID" --evidence-artifact-id "$SAVED_EVIDENCE_ARTIFACT_ID"
+
+  draft-assets:
+    needs: release-bundle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    env:
+      EXPECTED_BUNDLE_SHA256: ${{ needs.release-bundle.outputs.bundle_sha256 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.source_commit }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.3'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.release-bundle.outputs.artifact_id }}
+          run-id: ${{ needs.release-bundle.outputs.source_run_id }}
+          github-token: ${{ github.token }}
+          path: source/.test-data/release-bundle
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.release-bundle.outputs.evidence_artifact_id }}
+          run-id: ${{ needs.release-bundle.outputs.source_run_id }}
+          github-token: ${{ github.token }}
+          path: source/.test-data/prepublication
+          merge-multiple: true
+      - name: Reconcile exact tag/release/assets; never move, overwrite or unpublish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_FILENAME: ${{ needs.release-bundle.outputs.evidence_filename }}
+        run: |
+          node scripts/publish-release.mjs draft --directory .test-data/release-bundle --repository "$RELEASE_REPOSITORY" \
+            --output-file .test-data/draft-publication-result.json
+          node scripts/publish-release.mjs evidence --directory .test-data/release-bundle --repository "$RELEASE_REPOSITORY" \
+            --artifact ".test-data/prepublication/$EVIDENCE_FILENAME" --output-file .test-data/prepublication-upload.json
+          for file in .test-data/prepublication/release-attestation-*.jsonl .test-data/prepublication/release-trust-*.json; do
+            test -f "$file"
+            node scripts/publish-release.mjs evidence --directory .test-data/release-bundle --repository "$RELEASE_REPOSITORY" --artifact "$file"
+          done
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: github-draft-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            source/.test-data/draft-publication-result.json
+            source/.test-data/draft-publication-result.json.journal.jsonl
+            source/.test-data/prepublication-upload.json
+          if-no-files-found: error
+          retention-days: 90
 
   npm-readiness:
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_npm
-    needs: [candidate, release-bundle]
+    needs: [release-bundle, draft-assets]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
+      actions: read
     outputs:
       handoff: ${{ steps.handoff.outputs.handoff }}
+      history_artifact_id: ${{ steps.history-upload.outputs.artifact-id }}
     env:
       EXPECTED_BUNDLE_SHA256: ${{ needs.release-bundle.outputs.bundle_sha256 }}
-      EXPECTED_SOURCE_COMMIT: ${{ needs.candidate.outputs.source_commit }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ inputs.source_commit }}
           path: source
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '24'
-      - uses: actions/download-artifact@v4
+          node-version: '22.23.3'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           artifact-ids: ${{ needs.release-bundle.outputs.artifact_id }}
+          run-id: ${{ needs.release-bundle.outputs.source_run_id }}
+          github-token: ${{ github.token }}
           path: source/.test-data/release-bundle
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.release-bundle.outputs.evidence_artifact_id }}
+          run-id: ${{ needs.release-bundle.outputs.source_run_id }}
+          github-token: ${{ github.token }}
+          path: source/.test-data/prepublication
           merge-multiple: true
       - name: Validate readiness and prepare npm identity data without OIDC permission
         id: handoff
         env:
-          SOURCE_REPOSITORY: ${{ github.repository }}
+          BUNDLE_ARTIFACT_ID: ${{ needs.release-bundle.outputs.artifact_id }}
+          BUNDLE_ARTIFACT_DIGEST: ${{ needs.release-bundle.outputs.artifact_digest }}
+          SOURCE_RUN_ID: ${{ needs.release-bundle.outputs.source_run_id }}
+          EVIDENCE_ARTIFACT_ID: ${{ needs.release-bundle.outputs.evidence_artifact_id }}
+          EVIDENCE_ARTIFACT_DIGEST: ${{ needs.release-bundle.outputs.evidence_artifact_digest }}
         run: |
-          node scripts/npm-handoff.mjs --directory .test-data/release-bundle \
-            --source-repository "$SOURCE_REPOSITORY"
+          node scripts/npm-handoff.mjs --directory .test-data/release-bundle --source-repository "$GITHUB_REPOSITORY" \
+            --bundle-artifact-id "$BUNDLE_ARTIFACT_ID" --bundle-artifact-digest "$BUNDLE_ARTIFACT_DIGEST" \
+            --source-run-id "$SOURCE_RUN_ID" --evidence-artifact-id "$EVIDENCE_ARTIFACT_ID" \
+            --evidence-artifact-digest "$EVIDENCE_ARTIFACT_DIGEST" --readiness-file .test-data/prepublication/readiness.json \
+            --publication-history-dir .test-data/publication-history
+      - name: Retain independently acquired original publication diagnostics before CI expiry
+        if: always()
+        id: history-upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: publication-history-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/.test-data/publication-history/
+          if-no-files-found: warn
+          retention-days: 90
 
   npm-handoff:
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_npm
-    needs: [candidate, release-bundle, npm-readiness]
-    # npm validates this actual caller filename: release.yml, not npm-publish.yml.
-    # Both caller and called publishing jobs must permit OIDC; signing permissions stay separate.
-    # Primary publication is token-free: no auth secret injection or secrets inheritance, and no fallback path.
+    needs: [release-bundle, npm-readiness]
     permissions:
       contents: read
+      actions: read
       id-token: write
     uses: ./.github/workflows/npm-publish.yml
     with:
       bundle_artifact_id: ${{ needs.release-bundle.outputs.artifact_id }}
       bundle_sha256: ${{ needs.release-bundle.outputs.bundle_sha256 }}
-      source_commit: ${{ needs.candidate.outputs.source_commit }}
+      source_commit: ${{ inputs.source_commit }}
       npm_handoff: ${{ needs.npm-readiness.outputs.handoff }}
+      source_run_id: ${{ needs.release-bundle.outputs.source_run_id }}
+      evidence_artifact_id: ${{ needs.release-bundle.outputs.evidence_artifact_id }}
+
+  promote:
+    needs: [release-bundle, npm-handoff]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      acceptance_handoff: ${{ steps.acceptance.outputs.handoff }}
+      publication_artifact_id: ${{ steps.publication.outputs.artifact-id }}
+    permissions:
+      contents: write
+      actions: read
+    env:
+      EXPECTED_BUNDLE_SHA256: ${{ needs.release-bundle.outputs.bundle_sha256 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.source_commit }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.3'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.release-bundle.outputs.artifact_id }}
+          run-id: ${{ needs.release-bundle.outputs.source_run_id }}
+          github-token: ${{ github.token }}
+          path: source/.test-data/release-bundle
+          merge-multiple: true
+      - name: Confirm exact npm effect, promote matching draft and read back exact public identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/publish-release.mjs promote --directory .test-data/release-bundle \
+            --repository "$RELEASE_REPOSITORY" --output-file .test-data/publication-result.json
+      - name: Prepare the exact automatic acceptance invocation from confirmed publication
+        id: acceptance
+        env:
+          BUNDLE_ARTIFACT_ID: ${{ needs.release-bundle.outputs.artifact_id }}
+          SOURCE_RUN_ID: ${{ needs.release-bundle.outputs.source_run_id }}
+          EVIDENCE_FILENAME: ${{ needs.release-bundle.outputs.evidence_filename }}
+          EVIDENCE_SHA256: ${{ needs.release-bundle.outputs.evidence_sha256 }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/release-orchestration.mjs prepare --directory .test-data/release-bundle \
+            --publication-file .test-data/publication-result.json --bundle-artifact-id "$BUNDLE_ARTIFACT_ID" \
+            --source-run-id "$SOURCE_RUN_ID" --evidence-filename "$EVIDENCE_FILENAME" --evidence-sha256 "$EVIDENCE_SHA256" \
+            --previous-version "$SUPPORTED_PREVIOUS_VERSION" --previous-descriptor-sha256 "$SUPPORTED_PREVIOUS_DESCRIPTOR_SHA256" \
+            --previous-checksums-sha256 "$SUPPORTED_PREVIOUS_CHECKSUMS_SHA256"
+      - if: always()
+        id: publication
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: github-publication-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/.test-data/publication-result.json
+          if-no-files-found: error
+          retention-days: 90
+
+  acceptance:
+    needs: [release-bundle, promote]
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/release-acceptance.yml
+    with:
+      acceptance_handoff: ${{ needs.promote.outputs.acceptance_handoff }}
+
+  completion:
+    if: always() && needs.release-bundle.result == 'success'
+    needs: [release-bundle, npm-readiness, npm-handoff, promote, acceptance]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+      attestations: write
+      id-token: write
+    env:
+      EXPECTED_BUNDLE_SHA256: ${{ needs.release-bundle.outputs.bundle_sha256 }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.source_commit }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.3'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.release-bundle.outputs.artifact_id }}
+          run-id: ${{ needs.release-bundle.outputs.source_run_id }}
+          github-token: ${{ github.token }}
+          path: source/.test-data/release-bundle
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        continue-on-error: true
+        with:
+          pattern: release-acceptance-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/.test-data/consumers
+          merge-multiple: true
+      - if: needs.npm-readiness.outputs.history_artifact_id != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        continue-on-error: true
+        with:
+          artifact-ids: ${{ needs.npm-readiness.outputs.history_artifact_id }}
+          path: source/.test-data/publication-history
+          merge-multiple: true
+      - if: needs.npm-handoff.outputs.result_artifact_id != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        continue-on-error: true
+        with:
+          artifact-ids: ${{ needs.npm-handoff.outputs.result_artifact_id }}
+          path: source/.test-data/npm-result
+          merge-multiple: true
+      - if: needs.npm-handoff.outputs.result_artifact_id == ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        continue-on-error: true
+        with:
+          pattern: npm-oidc-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/.test-data/npm-result
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        continue-on-error: true
+        with:
+          pattern: github-draft-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/.test-data/draft-result
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        continue-on-error: true
+        with:
+          pattern: github-publication-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/.test-data/github-result
+          merge-multiple: true
+      - id: result
+        name: Re-evaluate all seven R-POST cases and preserve partial channel outcomes
+        continue-on-error: true
+        env:
+          PREPUBLICATION_EVIDENCE_SHA256: ${{ needs.release-bundle.outputs.evidence_sha256 }}
+          PREPUBLICATION_EVIDENCE_FILENAME: ${{ needs.release-bundle.outputs.evidence_filename }}
+        run: |
+          node scripts/accept-release.mjs complete --directory .test-data/release-bundle \
+            --evidence-dir .test-data/consumers --npm-result-file .test-data/npm-result/npm-publication-result.json \
+            --github-result-file .test-data/github-result/publication-result.json \
+            --draft-result-file .test-data/draft-result/draft-publication-result.json \
+            --publication-history-dir .test-data/publication-history \
+            --prepublication-evidence-sha256 "$PREPUBLICATION_EVIDENCE_SHA256" \
+            --prepublication-evidence-filename "$PREPUBLICATION_EVIDENCE_FILENAME" --output-dir .test-data/completion
+      - id: attest
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
+        with:
+          subject-path: source/.test-data/completion/release-completion-*.tar.gz
+      - name: Retain completion signature and independent historical verification material
+        env:
+          SIGNED_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+          EVIDENCE_FILENAME: ${{ steps.result.outputs.evidenceFilename }}
+          EVIDENCE_SHA256: ${{ steps.result.outputs.evidenceSha256 }}
+        run: |
+          node scripts/release-retention.mjs retain-trust --archive ".test-data/completion/$EVIDENCE_FILENAME" \
+            --attestation-bundle "$SIGNED_BUNDLE" --expected-archive-sha256 "$EVIDENCE_SHA256" \
+            --expected-source-commit "$EXPECTED_SOURCE_COMMIT" --release-intent-id "$RELEASE_INTENT_ID" \
+            --output-dir .test-data/completion
+      - name: Append separately named completion evidence, never modify frozen distribution assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_FILENAME: ${{ steps.result.outputs.evidenceFilename }}
+        run: |
+          node scripts/publish-release.mjs evidence --directory .test-data/release-bundle --repository "$RELEASE_REPOSITORY" \
+            --artifact ".test-data/completion/$EVIDENCE_FILENAME"
+          for file in .test-data/completion/release-attestation-*.jsonl .test-data/completion/release-trust-*.json; do
+            test -f "$file"
+            node scripts/publish-release.mjs evidence --directory .test-data/release-bundle --repository "$RELEASE_REPOSITORY" --artifact "$file"
+          done
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-completion-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/.test-data/completion/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Overall completion requires every publication and native-consumer result
+        env:
+          COMPLETION_STATUS: ${{ steps.result.outputs.status }}
+        run: test "$COMPLETION_STATUS" = Passed

@@ -7,6 +7,7 @@ import { hasImmutableArtifactIdentity } from './current-evidence.mjs';
 import { validateArtifactResultIdentity } from './external-results.mjs';
 import { validateObjectReference } from './validation-catalog.mjs';
 import { validateResetBarrier } from './validation-evidence.mjs';
+import { PR_DESCRIPTION_FIELDS, validatePrDescriptionBinding } from './pr-description.mjs';
 
 const FIELDS = {
   event: ['schemaVersion', 'sequence', 'kind', 'effect', 'sourceReceiptId', 'sourceReceiptDigest', 'inputDigest', 'sessionId', 'repositoryIds', 'snapshots', 'occurredAt', 'digest'],
@@ -26,7 +27,8 @@ const FIELDS = {
     'testCatalogRef', 'testOutcomeRef', 'resultBarriers'],
   'test-evidence': ['sequence', 'cycleId', 'testId', 'testSpecDigest', 'candidateDigest', 'environment', 'implementation',
     'status', 'observedAt', 'activity', 'evidenceRef', 'runId', 'artifactId', 'deploymentId', 'operationId', 'expectedMet', 'owner', 'host', 'eventId',
-    'configDigest', 'executionSources', 'executionSourceDigest', 'retainedPayloadRef', 'operationDigest', 'operationState'],
+    'configDigest', 'executionSources', 'executionSourceDigest', 'retainedPayloadRef', 'operationDigest', 'operationState',
+    'sourceObservedAt', 'sourceSequence', 'executionProducerKey', 'sourceStartedAt', 'sourceCompletedAt', 'sourceExpiresAt'],
   artifact: ['sequence', 'selectedAt', 'cycleId', 'artifactId', 'environment', 'sourceDigest', 'configDigest', 'buildRunId', 'name', 'artifactType', 'evidenceRef', 'status',
     'repositoryId', 'localRepositoryPath', 'remoteRepositoryURL',
     'provider', 'connection', 'repositoryRef',
@@ -39,7 +41,9 @@ const FIELDS = {
   'audit-reference': ['eventId', 'eventDigest', 'repositoryId', 'commit'],
   'pr-intent': ['provider', 'connection', 'repositoryId', 'sourceRef', 'targetRef', 'sourceRevision', 'targetRevision',
     'draft', 'scope', 'status', 'createdAt', 'prRecordId',
-    'localRepositoryPath', 'remoteRepositoryURL', 'sourceRepositoryURL', 'target'],
+    'localRepositoryPath', 'remoteRepositoryURL', 'sourceRepositoryURL', 'target',
+    'class', 'prId', 'descriptionDigest', 'coverageDigest',
+    'previousDescriptionDigest', 'descriptionVersion', 'operationId'],
   pr: ['provider', 'connection', 'repositoryId', 'sourceRef', 'targetRef', 'sourceRevision', 'targetRevision',
     'draft', 'prId', 'url', 'state', 'evidenceRef', 'autoMerge', 'scope', 'mergeRevision'],
   'pr-facts': ['prRecordId', 'policyVersion', 'sourceRevision', 'targetRevision', 'requiredChecks', 'checks',
@@ -56,6 +60,16 @@ export function validateRecord(record) {
   requireThat(FIELDS[record?.type], 'SCHEMA', 'Unknown local record type');
   object(record, ['type', 'id', 'workItemId', ...FIELDS[record.type]], ['type', 'id', 'workItemId']);
   id(record.id); id(record.workItemId);
+  if (record.type === 'pr-intent' &&
+      PR_DESCRIPTION_FIELDS.some(field => record[field] !== undefined)) {
+    validatePrDescriptionBinding(Object.fromEntries(PR_DESCRIPTION_FIELDS
+      .filter(field => record[field] !== undefined).map(field => [field, record[field]])),
+    record.class);
+    requireThat(/^[a-f0-9]{40,64}$/u.test(record.sourceRevision) &&
+      (record.class === 'pr-update' ? typeof record.prId === 'string' &&
+        record.prId.length > 0 : record.prId === undefined),
+    'SCHEMA', 'Description intent must bind its exact PR action and source');
+  }
   if (record.type === 'repository-observation' || record.type === 'pr-observation') {
     id(record.repositoryId, 'repository ID');
     const { type, id: recordId, workItemId, repositoryId, ...observation } = record;
@@ -244,6 +258,22 @@ export function validateRecord(record) {
   if (record.type === 'test-evidence') {
     choice(record.status, ['NotRun', 'Passed', 'Failed'], 'test outcome');
     if (record.retainedPayloadRef !== undefined) validateObjectReference(record.retainedPayloadRef);
+    const sourceFields = ['sourceObservedAt', 'sourceSequence', 'executionProducerKey',
+      'sourceStartedAt', 'sourceCompletedAt', 'sourceExpiresAt'];
+    if (sourceFields.some(field => record[field] !== undefined)) {
+      requireThat(sourceFields.every(field => record[field] !== undefined) &&
+        record.retainedPayloadRef && record.executionSources &&
+        Number.isSafeInteger(record.sourceSequence) && record.sourceSequence > 0 &&
+        /^[a-f0-9]{64}$/u.test(record.executionProducerKey) &&
+        Number.isFinite(Date.parse(record.sourceObservedAt)) &&
+        Number.isFinite(Date.parse(record.sourceStartedAt)) &&
+        Date.parse(record.sourceStartedAt) <= Date.parse(record.sourceObservedAt) &&
+        (record.sourceCompletedAt === null ||
+          Number.isFinite(Date.parse(record.sourceCompletedAt)) &&
+            Date.parse(record.sourceCompletedAt) >= Date.parse(record.sourceStartedAt)) &&
+        (record.sourceExpiresAt === null || Number.isFinite(Date.parse(record.sourceExpiresAt))),
+      'EVIDENCE', 'Normalized evidence must preserve its complete original execution identity');
+    }
     if (record.executionSources !== undefined) {
       requireThat(Array.isArray(record.executionSources) &&
         record.executionSourceDigest === digest(record.executionSources) &&

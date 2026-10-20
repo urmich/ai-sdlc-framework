@@ -1,3 +1,12 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "variants": [
+    {"expression": "`artifact verification rejects a ${changed} changed while the adapter was awaited`", "domains": {"changed": ["commit", "hosted URL"]}},
+    {"expression": "`gate rejects classified ${field} differing from the selected immutable artifact`", "domains": {"field": ["artifactImmutableVersion", "artifactRetrievalContext"]}},
+    {"expression": "`${archived ? 'archived' : 'active'} proof distinguishes full execution scope and connection when run IDs collide`", "domains": {"archived ? 'archived' : 'active'": ["active", "archived"]}},
+    {"expression": "`${archived ? 'archived' : 'active'} hosted tests use full execution identity for result reuse`", "domains": {"archived ? 'archived' : 'active'": ["active", "archived"]}}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';

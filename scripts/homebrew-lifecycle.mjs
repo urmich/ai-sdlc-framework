@@ -4,12 +4,16 @@ import { parseArgs } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import assert from 'node:assert/strict';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { generateHomebrewFormula } from '../packaging/homebrew/generate-formula.mjs';
 import { homebrewFormulaEvidence } from '../packaging/homebrew/evidence.mjs';
 import { assertNativeMacHost, runHomebrewCommand, switchFromHomebrew, switchToHomebrew, verifyCopiedHomebrewInstallation } from './homebrew-switch.mjs';
+import { assertConsumerUpdate, assertConsumerUninstall, installedConsumerSnapshot,
+  seedConsumerPreservation } from './consumer-lifecycle.mjs';
+import { verifyReleaseChecksums } from './verify-platform-package.mjs';
 
 const execute = runHomebrewCommand;
+const ROOT = fileURLToPath(new URL('../', import.meta.url));
 
 async function snapshot(root, prefix = '') {
   const inventory = [];
@@ -25,21 +29,33 @@ async function snapshot(root, prefix = '') {
   return inventory;
 }
 
-export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgradeDirectory, root } = {}) {
+export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgradeDirectory, root,
+  targetArch = process.arch, mode = 'stable', expectedNodeVersion, expectedPreviousIdentity,
+  expectedCurrentIdentity, environment: selectedEnvironment = process.env } = {}) {
   assert.equal(process.platform, 'darwin', 'Homebrew lifecycle requires native macOS');
   assert.ok(['arm64', 'x64'].includes(process.arch), 'Unsupported native architecture');
+  assert.equal(process.arch, targetArch, 'Homebrew lifecycle must execute on its declared native architecture');
+  assert.ok(['candidate', 'stable', 'public'].includes(mode), 'Unknown Homebrew lifecycle mode');
   assert.ok(brew && candidateDirectory, 'Provide the isolated brew executable and candidate directory');
   const { uname: host, translated } = await assertNativeMacHost();
-  const work = path.resolve(root ?? path.join('.test-data', `homebrew-lifecycle-${randomUUID()}`));
-  const relative = path.relative(path.resolve('.test-data'), work);
+  const scratchRoot = path.join(ROOT, '.test-data');
+  const work = path.resolve(root ?? path.join(scratchRoot, `homebrew-lifecycle-${randomUUID()}`));
+  const relative = path.relative(scratchRoot, work);
   assert.ok(relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative),
     'Lifecycle output must be a new child of this checkout’s .test-data');
+  let parent = scratchRoot;
+  for (const part of ['', ...path.relative(scratchRoot, path.dirname(work)).split(path.sep).filter(Boolean)]) {
+    if (part) parent = path.join(parent, part);
+    const stat = await fs.lstat(parent);
+    assert.ok(stat.isDirectory() && !stat.isSymbolicLink(), 'Homebrew lifecycle ancestors must be literal owned directories');
+  }
   await fs.mkdir(work, { recursive: false });
   const evidence = { schemaVersion: 1, platform: process.platform, architecture: process.arch,
     node: process.version, uname: host, sysctlProcTranslated: translated,
     candidateDirectory: path.resolve(candidateDirectory), commands: [], formulas: {}, passed: false,
-    publicAcceptance: 'NotRun', upgradeKind: upgradeDirectory ? 'version' : 'formula-revision' };
-  const environment = { ...process.env,
+    publicAcceptance: 'NotRun', upgradeKind: upgradeDirectory ? 'version' : 'formula-revision', mode };
+  const environment = { ...Object.fromEntries(Object.entries(selectedEnvironment).filter(([key]) =>
+    !/token|credential|password|secret|auth|^npm_|^node_options$|^node_path$|^rubyopt$|^gem_|^bundle_/iu.test(key))),
     HOME: path.join(work, 'home'), COPILOT_HOME: path.join(work, 'copilot home'),
     HOMEBREW_NO_AUTO_UPDATE: '1', HOMEBREW_NO_ANALYTICS: '1', HOMEBREW_DEVELOPER: '1',
     HOMEBREW_NO_INSTALL_CLEANUP: '1', HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: '1',
@@ -71,12 +87,16 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
           entry.formula = { ...currentFormula };
         }
       }
-      const channelOnly = command === brew && ['install', 'upgrade', 'uninstall', 'autoremove', 'tab'].includes(args[0]);
+      const channelOnly = command === brew && ['install', 'upgrade', 'uninstall', 'autoremove', 'tab', 'link', 'unlink'].includes(args[0]);
       const before = channelOnly ? await snapshot(environment.COPILOT_HOME) : undefined;
       const output = await execute(command, args,
         { maxBuffer: 16 * 1024 * 1024, ...options, env: options.env ?? environment });
-      if (before) assert.deepEqual(await snapshot(environment.COPILOT_HOME), before,
-        `brew ${args[0]} changed COPILOT_HOME`);
+      if (before) {
+        const after = await snapshot(environment.COPILOT_HOME);
+        entry.homeBeforeSha256 = createHash('sha256').update(JSON.stringify(before)).digest('hex');
+        entry.homeAfterSha256 = createHash('sha256').update(JSON.stringify(after)).digest('hex');
+        assert.deepEqual(after, before, `brew ${args[0]} changed COPILOT_HOME`);
+      }
       Object.assign(entry, { success: true, ...output });
       return output;
     } catch (error) {
@@ -93,30 +113,55 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
   const installed = new Set();
   try {
     const prefix = await fs.realpath((await runBrew(['--prefix'])).stdout.trim());
-    const relativePrefix = path.relative(path.resolve('.test-data'), prefix);
+    const relativePrefix = path.relative(await fs.realpath(scratchRoot), prefix);
     assert.ok(relativePrefix && !relativePrefix.startsWith('..') && !path.isAbsolute(relativePrefix),
       'Refusing to mutate a system Homebrew prefix; supply an isolated checkout under .test-data');
     environment.PATH = `${prefix}/bin:${environment.PATH}`;
     const repository = (await runBrew(['--repository'])).stdout.trim();
+    const relativeRepository = path.relative(await fs.realpath(scratchRoot), await fs.realpath(repository));
+    assert.ok(relativeRepository && !relativeRepository.startsWith('..') && !path.isAbsolute(relativeRepository),
+      'Refusing to mutate a system Homebrew repository');
     evidence.brewVersion = (await runBrew(['--version'])).stdout.trim();
     const node = path.join((await runBrew(['--prefix', 'node@22'])).stdout.trim(), 'bin', 'node');
     const runtime = await json(node, ['-p', 'JSON.stringify({platform:process.platform,arch:process.arch,major:Number(process.versions.node.split(".")[0])})']);
     assert.deepEqual(runtime, { platform: 'darwin', arch: process.arch, major: 22 },
       'Install the real Homebrew node@22 dependency before this test');
     evidence.homebrewRuntime = runtime;
+    evidence.homebrewNodeVersion = (await run(node, ['--version'])).stdout.trim().replace(/^v/u, '');
+    if (expectedNodeVersion) assert.equal(evidence.homebrewNodeVersion, expectedNodeVersion,
+      'Homebrew must use the selected native Node baseline');
     const candidate = JSON.parse(await fs.readFile(path.join(candidateDirectory, 'release-descriptor.json'), 'utf8'));
     const upgrade = upgradeDirectory
       ? JSON.parse(await fs.readFile(path.join(upgradeDirectory, 'release-descriptor.json'), 'utf8')) : candidate;
+    if (mode === 'public' || expectedPreviousIdentity || expectedCurrentIdentity) {
+      await verifyHomebrewUpgradeInputs({ candidateDirectory, upgradeDirectory,
+        previous: expectedPreviousIdentity, current: expectedCurrentIdentity });
+      evidence.previousIdentity = expectedPreviousIdentity;
+      evidence.currentIdentity = expectedCurrentIdentity;
+    }
+    if (upgradeDirectory) assert.notEqual(candidate.version, upgrade.version,
+      'A same-version formula revision cannot satisfy prior-version upgrade');
+    const archiveName = descriptor => {
+      const shared = `ai-sdlc-framework-${descriptor.version}-macos.tar.gz`;
+      return descriptor.files.some(file => file.filename === shared) ? shared :
+        `ai-sdlc-framework-${descriptor.version}-macos-${process.arch}.tar.gz`;
+    };
     const served = new Map();
     for (const [descriptor, directory] of [[candidate, candidateDirectory], [upgrade, upgradeDirectory ?? candidateDirectory]]) {
-      await generateHomebrewFormula({ descriptor, artifactDirectory: directory, mode: 'candidate',
+      if (mode !== 'public') await generateHomebrewFormula({ descriptor, artifactDirectory: directory, mode: 'candidate',
         candidateBaseUrl: 'http://127.0.0.1:1/', architectures: [process.arch] });
-      const filename = `ai-sdlc-framework-${descriptor.version}-macos-${process.arch}.tar.gz`;
+      const filename = archiveName(descriptor);
       const bytes = await fs.readFile(path.join(directory, filename));
+      const record = descriptor.files.find(file => file.filename === filename);
+      assert.equal(createHash('sha256').update(bytes).digest('hex'), record.sha256);
+      evidence.archiveInputs ??= [];
+      evidence.archiveInputs.push({ filename, sha256: record.sha256, size: bytes.length });
       if (served.has(filename)) assert.deepEqual(served.get(filename), bytes);
       served.set(filename, bytes);
     }
-    server = createServer((request, response) => {
+    let candidateBaseUrl;
+    if (mode !== 'public') {
+      server = createServer((request, response) => {
       const bytes = served.get(request.url?.slice(1));
       if (!bytes) { response.writeHead(404).end(); return; }
       response.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': bytes.length });
@@ -126,8 +171,9 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
       server.once('error', reject);
       server.listen(0, '127.0.0.1', resolve);
     });
-    const candidateBaseUrl = `http://127.0.0.1:${server.address().port}/`;
-    assert.equal((await fetch(`${candidateBaseUrl}ai-sdlc-framework-${candidate.version}-macos-${process.arch}.tar.gz`)).status, 200);
+      candidateBaseUrl = `http://127.0.0.1:${server.address().port}/`;
+      assert.equal((await fetch(`${candidateBaseUrl}${archiveName(candidate)}`)).status, 200);
+    }
     tap = `local/sdlc-${randomUUID().replaceAll('-', '')}`;
     tapRoot = path.join(repository, 'Library', 'Taps', 'local', `homebrew-${tap.split('/')[1]}`);
     await fs.mkdir(path.join(tapRoot, 'Formula'), { recursive: true });
@@ -138,7 +184,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     const generate = (descriptor, artifactDirectory, mode = 'candidate') =>
       generateHomebrewFormula({ descriptor, artifactDirectory, mode,
         ...(mode === 'candidate' ? { candidateBaseUrl, architectures: [process.arch] } : {}) });
-    if (!candidate.version.includes('-')) {
+    if (mode === 'stable' && !candidate.version.includes('-')) {
       const stable = await generate(candidate, candidateDirectory, 'stable');
       const repeated = await generateHomebrewFormula({ descriptor: candidate,
         artifactDirectory: candidateDirectory, architectures: ['x64', 'arm64'] });
@@ -153,17 +199,22 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
       await runBrew(['audit', '--strict', '--formula', formulaName]);
       evidence.stableMetadataAudit = 'passed';
     } else {
-      evidence.stableMetadataAudit = 'not-applicable-prerelease';
-      evidence.publicAcceptance = 'not-applicable-prerelease';
+      evidence.stableMetadataAudit = mode === 'public' ? 'exact-published-formula' :
+        mode === 'candidate' ? 'NotRun-unpublished-candidate' : 'not-applicable-prerelease';
+      evidence.publicAcceptance = mode === 'candidate' ? 'NotRun' : 'not-applicable-prerelease';
     }
-    const local = await generate(candidate, candidateDirectory);
+    const local = mode === 'public' ? await publicHomebrewFormula(candidateDirectory, candidate) :
+      await generate(candidate, candidateDirectory);
     await fs.writeFile(formulaFile, local.contents);
     await fs.writeFile(path.join(work, 'Formula', 'ai-sdlc-framework.rb'), local.contents);
-    currentFormula = evidence.formulas.candidate = await homebrewFormulaEvidence(work, 'candidate');
+    currentFormula = evidence.formulas.candidate = mode === 'public' ? {
+      filename: local.filename, sha256: local.sha256, size: local.size, source: 'exact-published-bytes',
+    } : await homebrewFormulaEvidence(work, 'candidate');
     await runBrew(['style', formulaFile]);
     await runBrew(['audit', '--strict', '--formula', formulaName]);
     const home = environment.COPILOT_HOME;
     await fs.writeFile(path.join(home, 'copilot-instructions.md'), 'Unrelated user instructions.\n');
+    const preserveUserContent = await seedConsumerPreservation(home);
     await fs.mkdir(path.join(home, 'sdlc', 'runtime'), { recursive: true });
     await fs.writeFile(path.join(home, 'sdlc', 'runtime', 'keep.json'), '{"retained":true}\n');
     const initialHome = await snapshot(home);
@@ -174,6 +225,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     const switched = await switchToHomebrew({ brew, formula: formulaName, home, environment, run });
     assert.equal(switched.linked, true);
     assert.equal(switched.postSwitchVerified, true);
+    await preserveUserContent();
     const launcher = switched.launcher;
     assert.equal((await json(launcher, ['doctor'])).frameworkVersion, candidate.version);
     const installedHome = await snapshot(home);
@@ -202,6 +254,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     } finally {
       await fs.unlink(destination);
     }
+    if (mode !== 'public') {
     const previousName = `${tap}/ai-sdlc-framework-previous`;
     await fs.writeFile(path.join(tapRoot, 'Formula', 'ai-sdlc-framework-previous.rb'),
       local.contents.replace('class AiSdlcFramework <', 'class AiSdlcFrameworkPrevious <'));
@@ -215,6 +268,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     assert.equal(switchedOwned.previousRetained, true);
     assert.equal(switchedOwned.postSwitchVerified, true);
     assert.equal(switchedOwned.oldPackageCleanupAllowed, true);
+    await preserveUserContent();
     await fs.access(path.join(oldKeg, 'bin', 'sdlc'));
     const beforeOldRemoval = await snapshot(home);
     await runBrew(['uninstall', '--formula', previousName]);
@@ -222,16 +276,20 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     assert.deepEqual(await snapshot(home), beforeOldRemoval, 'Removing old channel changed replacement');
     await verifyCopiedHomebrewInstallation({ home, node, frameworkVersion: candidate.version,
       forbiddenKegs: [oldKeg], run, environment });
+    }
 
-    const next = await generate(upgrade, upgradeDirectory ?? candidateDirectory);
+    const next = mode === 'public' ? await publicHomebrewFormula(upgradeDirectory, upgrade) :
+      await generate(upgrade, upgradeDirectory ?? candidateDirectory);
     const upgradedFormula = upgradeDirectory ? next.contents :
       next.contents.replace('  license "MIT"\n', '  license "MIT"\n  revision 1\n');
     await fs.writeFile(formulaFile, upgradedFormula);
     await fs.writeFile(path.join(work, 'upgraded-ai-sdlc-framework.rb'), upgradedFormula);
-    currentFormula = evidence.formulas.upgrade = await homebrewFormulaEvidence(work, 'upgrade');
+    currentFormula = evidence.formulas.upgrade = mode === 'public' ? {
+      filename: next.filename, sha256: next.sha256, size: next.size, source: 'exact-published-bytes',
+    } : await homebrewFormulaEvidence(work, 'upgrade');
     let failedPromotionState;
     await assert.rejects(switchToHomebrew({
-      brew, formula: formulaName, home, environment,
+      brew, formula: formulaName, home, environment, upgradePackage: true,
       run: async (command, args, options) => {
         if (command === brew && args[0] === 'link' && args[1] === formulaName) {
           assert.equal(options.env.HOMEBREW_NO_INSTALL_CLEANUP, '1');
@@ -250,11 +308,13 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
       return true;
     });
     const failedState = JSON.parse(await fs.readFile(failedPromotionState, 'utf8'));
+    await preserveUserContent();
     const priorKeg = path.dirname(path.dirname(launcher));
     assert.equal(await fs.realpath((await runBrew(['--prefix', formulaName])).stdout.trim()), priorKeg);
     await fs.access(path.join(failedState.requestedCandidate.keg, 'INSTALL_RECEIPT.json'));
-    const upgraded = await switchToHomebrew({ brew, formula: formulaName, home, environment, run });
+    const upgraded = await switchToHomebrew({ brew, formula: formulaName, home, environment, run, upgradePackage: true });
     const rollbackState = JSON.parse(await fs.readFile(upgraded.stateFile, 'utf8'));
+    await preserveUserContent();
     assert.equal(upgraded.postSwitchVerified, true);
     assert.equal(rollbackState.retentionVerifiedBeforePromotion, true);
     assert.equal(rollbackState.oldPackageCleanupAllowed, true);
@@ -268,7 +328,24 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     const upgradedKeg = await fs.realpath((await runBrew(['--prefix', formulaName])).stdout.trim());
     assert.notEqual(upgradedKeg, path.dirname(path.dirname(launcher)), 'Homebrew did not replace the keg');
     const upgradedLauncher = path.join(upgradedKeg, 'bin', 'sdlc');
-    await json(upgradedLauncher, ['update']);
+    if (mode === 'public') {
+      assert.equal((await json(upgradedLauncher, ['doctor'])).frameworkVersion, upgrade.version);
+      await fs.rm(priorKeg, { recursive: true });
+      await assert.rejects(fs.access(priorKeg), { code: 'ENOENT' });
+      await verifyCopiedHomebrewInstallation({ home, node, frameworkVersion: upgrade.version,
+        forbiddenKegs: [priorKeg], run, environment });
+    }
+    await runBrew(['style', formulaFile]);
+    await runBrew(['audit', '--strict', '--formula', formulaName]);
+    await runBrew(['test', formulaName]);
+    const preserve = async () => {
+      await preserveUserContent();
+      assert.equal(await fs.readFile(path.join(home, 'sdlc', 'runtime', 'keep.json'), 'utf8'), '{"retained":true}\n');
+      assert.match(await fs.readFile(path.join(home, 'copilot-instructions.md'), 'utf8'), /^Unrelated user instructions\.\n/u);
+      await fs.access(node);
+    };
+    evidence.idempotentUpdate = await assertConsumerUpdate({ home, version: upgrade.version,
+      invoke: args => run(upgradedLauncher, args), preserve });
     assert.equal((await json(upgradedLauncher, ['doctor'])).frameworkVersion, upgrade.version);
     assert.equal(await fs.readFile(path.join(home, 'sdlc', 'runtime', 'keep.json'), 'utf8'), '{"retained":true}\n');
 
@@ -281,19 +358,29 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     installed.delete(formulaName);
     assert.equal(removed.oldPackageRemoved, true);
     assert.equal(removed.postSwitchVerified, true);
+    await preserveUserContent();
     await runBrew(['autoremove']);
     await verifyCopiedHomebrewInstallation({ home, node: removed.node, frameworkVersion: upgrade.version,
       forbiddenKegs: [upgradedKeg], run, environment });
     const entry = path.join(extracted, 'bin', 'sdlc.mjs');
-    await json(node, [entry, 'uninstall']);
+    evidence.ordinaryUninstall = await assertConsumerUninstall({ home,
+      invoke: args => run(node, [entry, ...args]), preserve });
     assert.equal(await fs.readFile(path.join(home, 'sdlc', 'runtime', 'keep.json'), 'utf8'), '{"retained":true}\n');
     await json(node, [entry, 'install', '--purge-existing']);
     await assert.rejects(fs.access(path.join(home, 'sdlc', 'runtime', 'keep.json')), { code: 'ENOENT' });
     assert.equal((await json(node, [entry, 'doctor'])).findings.length, 0);
-    await json(node, [entry, 'uninstall', '--purge']);
+    await installedConsumerSnapshot(home, upgrade.version);
+    await preserveUserContent();
+    evidence.purge = await assertConsumerUninstall({ home, purge: true,
+      invoke: args => run(node, [entry, ...args]), preserve: async () => {
+        await preserveUserContent();
+        assert.match(await fs.readFile(path.join(home, 'copilot-instructions.md'), 'utf8'), /^Unrelated user instructions\.\n+$/u);
+        await fs.access(removed.node);
+      } });
     assert.match(await fs.readFile(path.join(home, 'copilot-instructions.md'), 'utf8'),
       /^Unrelated user instructions\.\n+$/u);
     evidence.passed = true;
+    if (mode === 'public') evidence.publicAcceptance = 'Passed';
     return evidence;
   } catch (error) {
     evidence.error = error.message;
@@ -309,6 +396,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
           } catch (error) {
             evidence.diagnosticError = error.message;
           }
+
         }
         await runBrew(['uninstall', '--force', '--formula', formula]);
         installed.delete(formula);
@@ -321,14 +409,80 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
   }
 }
 
+export async function verifyHomebrewUpgradeInputs({ candidateDirectory, upgradeDirectory, previous, current }) {
+  if (!candidateDirectory || !upgradeDirectory || ![previous, current].every(identity =>
+    identity && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(identity.version ?? '') &&
+    /^[a-f0-9]{40}$/u.test(identity.sourceCommit ?? '') &&
+    ['descriptorSha256', 'checksumsSha256', 'payloadSha256'].every(key => /^[a-f0-9]{64}$/u.test(identity[key] ?? '')))) {
+    throw Object.assign(new Error('Authentic supported-previous pins and exact frozen current pins are required'),
+      { code: 'RELEASE_INTEGRATION_BLOCKED' });
+  }
+  const versions = [previous.version, current.version].map(version => {
+    assert.match(version ?? '', /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u);
+    return version.split(/[.-]/u).slice(0, 3).map(BigInt);
+  });
+  const difference = versions[1].findIndex((value, index) => value !== versions[0][index]);
+  assert.ok(difference >= 0 && versions[1][difference] > versions[0][difference],
+    'Upgrade requires a genuinely newer current release, not a formula revision or downgrade');
+  for (const [directory, identity] of [[candidateDirectory, previous], [upgradeDirectory, current]]) {
+    const { descriptor } = await verifyReleaseChecksums({ outputDir: directory, selectedFiles: [],
+      expectedDescriptorSha256: identity.descriptorSha256, expectedChecksumsSha256: identity.checksumsSha256 });
+    assert.equal(descriptor.version, identity.version);
+    assert.equal(descriptor.sourceCommit, identity.sourceCommit);
+    assert.equal(descriptor.payload.sha256, identity.payloadSha256);
+  }
+  return { previous, current, upgradeKind: 'version' };
+}
+
+export async function publicHomebrewFormula(directory, descriptor) {
+  const records = descriptor.files.filter(file => file.kind === 'homebrew');
+  assert.equal(records.length, 1, 'Public lifecycle requires one exact published formula');
+  const [record] = records;
+  assert.equal(record.filename, 'ai-sdlc-framework.rb');
+  const file = path.join(directory, record.filename);
+  const stat = await fs.lstat(file);
+  assert.ok(stat.isFile() && !stat.isSymbolicLink(), 'Published formula must be a literal file');
+  const bytes = await fs.readFile(file);
+  assert.equal(bytes.length, record.size);
+  assert.equal(createHash('sha256').update(bytes).digest('hex'), record.sha256,
+    'Published formula bytes differ from the verified public descriptor');
+  const contents = bytes.toString('utf8');
+  const urls = [...contents.matchAll(/^\s*url\s+"([^"]+)"\s*$/gmu)].map(match => match[1]);
+  assert.ok(urls.length > 0 && urls.every(url => descriptor.files.some(archive =>
+    archive.kind === 'archive' && archive.filename.includes('-macos') &&
+    url === `https://github.com/urmich/ai-sdlc-framework/releases/download/v${descriptor.version}/${archive.filename}`)),
+  'Published formula must execute its exact public archive URLs, never a regenerated loopback candidate');
+  return { ...record, contents };
+}
+
+async function identityFromPins(directory, descriptorSha256, checksumsSha256) {
+  if (!directory || !/^[a-f0-9]{64}$/u.test(descriptorSha256 ?? '') ||
+      !/^[a-f0-9]{64}$/u.test(checksumsSha256 ?? '')) {
+    throw Object.assign(new Error('Independent prior/current descriptor and checksum pins are required for a version-upgrade procedure'),
+      { code: 'RELEASE_INTEGRATION_BLOCKED' });
+  }
+  const { descriptor } = await verifyReleaseChecksums({ outputDir: directory, selectedFiles: [],
+    expectedDescriptorSha256: descriptorSha256, expectedChecksumsSha256: checksumsSha256 });
+  return { version: descriptor.version, sourceCommit: descriptor.sourceCommit,
+    payloadSha256: descriptor.payload.sha256, descriptorSha256, checksumsSha256 };
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const { values } = parseArgs({ options: {
     brew: { type: 'string' }, 'candidate-dir': { type: 'string' },
-    'upgrade-dir': { type: 'string' }, root: { type: 'string' },
+    'upgrade-dir': { type: 'string' }, root: { type: 'string' }, mode: { type: 'string', default: 'stable' },
+    'previous-descriptor-sha256': { type: 'string' }, 'previous-checksums-sha256': { type: 'string' },
+    'current-descriptor-sha256': { type: 'string' }, 'current-checksums-sha256': { type: 'string' },
   } });
+  const versionUpgrade = ['candidate', 'public'].includes(values.mode);
+  const expectedPreviousIdentity = versionUpgrade ? await identityFromPins(values['candidate-dir'],
+    values['previous-descriptor-sha256'], values['previous-checksums-sha256']) : undefined;
+  const expectedCurrentIdentity = versionUpgrade ? await identityFromPins(values['upgrade-dir'],
+    values['current-descriptor-sha256'], values['current-checksums-sha256']) : undefined;
   const evidence = await verifyHomebrewLifecycle({ brew: values.brew,
     candidateDirectory: values['candidate-dir'], upgradeDirectory: values['upgrade-dir'],
-    root: values.root });
+    root: values.root, mode: values.mode, expectedNodeVersion: '22.23.3',
+    expectedPreviousIdentity, expectedCurrentIdentity });
   process.stdout.write(`${JSON.stringify({ passed: evidence.passed,
     architecture: evidence.architecture, upgradeKind: evidence.upgradeKind,
     publicAcceptance: evidence.publicAcceptance })}\n`);

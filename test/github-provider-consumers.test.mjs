@@ -1,3 +1,35 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "variants": [
+    {"expression": "id", "names": [
+      "T-GH-36-ADO01-N", "T-GH-36-ADO01-G", "T-GH-36-ADO01-D", "T-GH-36-ADO01-P",
+      "T-GH-36-ADO02-N", "T-GH-36-ADO02-G", "T-GH-36-ADO02-D", "T-GH-36-ADO02-P",
+      "T-GH-36-ADO03-N", "T-GH-36-ADO03-G", "T-GH-36-ADO03-D", "T-GH-36-ADO03-P",
+      "T-GH-36-ADO04-N", "T-GH-36-ADO04-G", "T-GH-36-ADO04-D", "T-GH-36-ADO04-P",
+      "T-GH-36-ADO05-N", "T-GH-36-ADO05-G", "T-GH-36-ADO05-D", "T-GH-36-ADO05-P",
+      "T-GH-36-ADO06-N", "T-GH-36-ADO06-G", "T-GH-36-ADO06-D", "T-GH-36-ADO06-P",
+      "T-GH-36-ADO07-N", "T-GH-36-ADO07-G", "T-GH-36-ADO07-D", "T-GH-36-ADO07-P",
+      "T-GH-36-ADO08-N", "T-GH-36-ADO08-G", "T-GH-36-ADO08-D", "T-GH-36-ADO08-P",
+      "T-GH-36-ADO09-N", "T-GH-36-ADO09-G", "T-GH-36-ADO09-D", "T-GH-36-ADO09-P",
+      "T-GH-36-ADO10-N", "T-GH-36-ADO10-G", "T-GH-36-ADO10-D", "T-GH-36-ADO10-P",
+      "T-GH-36-ADO11-N", "T-GH-36-ADO11-G", "T-GH-36-ADO11-D", "T-GH-36-ADO11-P",
+      "T-GH-36-ADO12-N", "T-GH-36-ADO12-G", "T-GH-36-ADO12-D", "T-GH-36-ADO12-P",
+      "T-GH-36-ADO13-N", "T-GH-36-ADO13-G", "T-GH-36-ADO13-D", "T-GH-36-ADO13-P",
+      "T-GH-36-ADO14-N", "T-GH-36-ADO14-G", "T-GH-36-ADO14-D", "T-GH-36-ADO14-P",
+      "T-GH-36-ADO15-N", "T-GH-36-ADO15-G", "T-GH-36-ADO15-D", "T-GH-36-ADO15-P",
+      "T-GH-36-ADO16-N", "T-GH-36-ADO16-G", "T-GH-36-ADO16-D", "T-GH-36-ADO16-P",
+      "T-GH-36-ADO17-N", "T-GH-36-ADO17-G", "T-GH-36-ADO17-D", "T-GH-36-ADO17-P",
+      "T-GH-36-ADO18-N", "T-GH-36-ADO18-G", "T-GH-36-ADO18-D", "T-GH-36-ADO18-P",
+      "T-GH-36-ADO19-N", "T-GH-36-ADO19-G", "T-GH-36-ADO19-D", "T-GH-36-ADO19-P",
+      "T-GH-36-ADO20-N", "T-GH-36-ADO20-G", "T-GH-36-ADO20-D", "T-GH-36-ADO20-P",
+      "T-GH-36-ADO21-N", "T-GH-36-ADO21-G", "T-GH-36-ADO21-D", "T-GH-36-ADO21-P",
+      "T-GH-36-ADO22-N", "T-GH-36-ADO22-G", "T-GH-36-ADO22-D", "T-GH-36-ADO22-P",
+      "T-GH-36-ADO23-N", "T-GH-36-ADO23-G", "T-GH-36-ADO23-D", "T-GH-36-ADO23-P",
+      "T-GH-36-ADO24-N", "T-GH-36-ADO24-G", "T-GH-36-ADO24-D", "T-GH-36-ADO24-P"
+    ]},
+    {"expression": "name", "names": ["wrong original producer", "same name from another App", "API head without actual executed checkout", "missing original selected-test source"]}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';

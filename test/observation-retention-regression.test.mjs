@@ -1,166 +1,23 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "direct", "paths": ["src/observation-retention.mjs", "src/repository-observations.mjs", "src/pr.mjs"]}],
+  "variants": [
+    {"expression": "`FR-063 sole ${status} action retains its source observation until released`", "domains": {"status": ["prepared", "uncertain"]}},
+    {"expression": "`FR-063 sole ${consumer} retains superseded PR observations and facts`", "domains": {"consumer": ["facts-reference", "audit-reference", "recovery"]}},
+    {"expression": "`FR-063 sole ${consumer} association retains its PR and facts`", "domains": {"consumer": ["current-check", "terminal-notice", "running-check", "uncertain-action-reference"]}},
+    {"expression": "`FR-064 archival retries after ${interruption} without changing historical bytes`", "domains": {"interruption": ["archive:repository-observation", "record:repository-observation", "checkpoint", "remove:repository-observation:"]}}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import * as fs from 'node:fs/promises';
-import childProcess from 'node:child_process';
-import { syncBuiltinESMExports } from 'node:module';
-import { promisify } from 'node:util';
 import { LIMITS, canonical, digest } from '../src/core.mjs';
-
-// Cache only immutable fixture Git reads; all transactions, archival and
-// filesystem I/O are real. Mutating Git commands invalidate the cached reads.
-const execute = childProcess.execFile;
-const gitReads = new Map();
-childProcess.execFile = (file, args, options, callback) => {
-  const command = args.filter(argument => !['--no-pager',
-    '--no-optional-locks'].includes(argument))[0];
-  const cacheable = file === 'git' && (['rev-parse', 'symbolic-ref'].includes(command) ||
-    command === 'remote' && (!args.includes('add') && !args.includes('set-url')));
-  if (file === 'git' && !cacheable) gitReads.clear();
-  const key = canonical([options.cwd, args]);
-  if (cacheable && gitReads.has(key)) {
-    const { stdout, stderr } = gitReads.get(key);
-    queueMicrotask(() => callback(null, stdout, stderr));
-    return undefined;
-  }
-  return execute(file, args, options, (error, stdout, stderr) => {
-    if (!error && cacheable) gitReads.set(key, { stdout, stderr });
-    callback(error, stdout, stderr);
-  });
-};
-const cachedGit = childProcess.execFile;
-cachedGit[promisify.custom] = (file, args, options) => new Promise((resolve, reject) => {
-  cachedGit(file, args, options, (error, stdout, stderr) => {
-    if (error) reject(error);
-    else resolve({ stdout, stderr });
-  });
-});
-syncBuiltinESMExports();
-const { fixture, observeFixtureRepository } = await import('./helpers.mjs');
-const { pruneWork } = await import('../src/operations.mjs');
-const { adoptPr, evaluateReadiness, updatePrFacts } = await import('../src/pr.mjs');
-const { archiveSupersededObservations, withObservationRetention } =
-  await import('../src/observation-retention.mjs');
-const { currentArtifact, currentDeployment } = await import('../src/current-evidence.mjs');
-const { deriveIntendedOutcome } = await import('../src/external-results.mjs');
-const { attachMonitor, monitorAssociationKey, withMonitorLocks } =
-  await import('../src/monitors.mjs');
-const { immutableJson, readJson, withLock, writeJson } = await import('../src/files.mjs');
-childProcess.execFile = execute;
-syncBuiltinESMExports();
-
-async function retentionFixture(t) {
-  const f = await fixture(t);
-  await f.runGit('commit', '--allow-empty', '-qm', 'Retention fixture baseline');
-  f.store.verifyPullRequest = ({ adapterObservation: observation }) => ({
-    canonicalLocalRepositoryPath: observation.localRepositoryPath,
-    verifiedRemoteRepositoryURL: observation.remoteRepositoryURL,
-    verifiedProvider: observation.provider,
-    verifiedConnection: observation.connection,
-    verifiedRepositoryRef: observation.repositoryRef,
-    verifiedPullRequestRef: observation.pullRequestRef,
-    verifiedSourceBranchRef: observation.sourceBranchRef,
-    verifiedTargetBranchRef: observation.targetBranchRef,
-    verifiedSourceRevision: observation.sourceRevision,
-    verifiedTargetRevision: observation.targetRevision,
-    verifiedState: observation.state,
-    verifiedObservedAt: observation.observedAt,
-    verifiedEvidenceRef: observation.evidenceRef,
-  });
-  return f;
-}
-
-async function refreshPr(f, repository, predecessor, overrides = {}) {
-  f.clock.advance(1);
-  const observation = {
-    repositoryId: repository.repositoryId,
-    localRepositoryPath: repository.localRepositoryPath,
-    remoteRepositoryURL: repository.remoteRepositoryURL,
-    provider: repository.provider, connection: repository.connection,
-    repositoryRef: repository.repositoryRef, pullRequestRef: 'retention-pr',
-    sourceBranchRef: 'refs/heads/feature/fixture',
-    targetBranchRef: 'refs/heads/main',
-    sourceRevision: repository.revision, targetRevision: 'b'.repeat(40),
-    state: 'active', observedAt: new Date(f.clock.now()).toISOString(),
-    evidenceRef: `fixture:pr:${f.clock.now()}`, ...overrides,
-  };
-  return (await adoptPr(f.store, {
-    workItemId: f.workItemId, observation, adapterObservation: observation,
-    ...(predecessor ? { previousObservationKey: predecessor.id } : {}),
-  })).observation;
-}
-
-const factsInput = (f, pr) => ({
-  workItemId: f.workItemId, prRecordId: pr.id, policyVersion: 'policy-1',
-  sourceRevision: pr.sourceRevision, targetRevision: pr.targetRevision,
-  requiredChecks: [], checks: [], reviewsSatisfied: true,
-  providerEvidenceRef: 'fixture:policy',
-});
-
-async function archivedBytes(f, recordId) {
-  return fs.readFile(path.join(f.store.workPath(f.workItemId),
-    'evidence', `${recordId}.json`));
-}
-
-test('FR-063/064 real refresh and prune archive superseded observations/facts before exhaustion', async t => {
-  const f = await retentionFixture(t);
-  const first = await observeFixtureRepository(f);
-  const firstBytes = await fs.readFile(f.store.recordPath(f.workItemId, first.id));
-  let pr = await refreshPr(f, first);
-  const firstPr = pr;
-  const prBytes = await fs.readFile(f.store.recordPath(f.workItemId, pr.id));
-  const firstFacts = await updatePrFacts(f.store, factsInput(f, pr));
-  const factsBytes = await fs.readFile(f.store.recordPath(f.workItemId, firstFacts.id));
-  f.clock.advance(1);
-  let repository = await observeFixtureRepository(f);
-  pr = await refreshPr(f, repository, pr);
-  await pruneWork(f.store, f.workItemId);
-  const active = await f.store.records(f.workItemId);
-  assert.equal(active.some(record => record.id === first.id), false,
-    'superseded repository observation must leave the active working set after refresh/prune');
-  assert.equal(active.some(record => record.id === firstPr.id), false,
-    'superseded PR observation must leave the active working set');
-  assert.equal(active.some(record => record.id === firstFacts.id), false,
-    'superseded PR facts must leave the active working set');
-  assert.deepEqual(await archivedBytes(f, first.id), firstBytes);
-  assert.deepEqual(await archivedBytes(f, firstPr.id), prBytes);
-  assert.deepEqual(await archivedBytes(f, firstFacts.id), factsBytes);
-
-  for (let index = 0; index < 550; index++) {
-    f.clock.advance(1);
-    repository = await observeFixtureRepository(f);
-    if (index % 2 === 0) {
-      pr = await refreshPr(f, repository, pr);
-      await updatePrFacts(f.store, factsInput(f, pr));
-    }
-    if (index % 50 === 0) await pruneWork(f.store, f.workItemId);
-    const records = await f.store.records(f.workItemId);
-    assert.ok(Buffer.byteLength(canonical(records)) < LIMITS.workingSet,
-      `refresh ${index} must be admitted below the unchanged working-set budget`);
-    assert.ok(records.filter(record => ['repository-observation',
-      'pr-observation', 'pr-facts'].includes(record.type)).length <= 6,
-    `refresh ${index} must keep superseded history bounded, not wait for capacity failure`);
-  }
-  const records = await f.store.records(f.workItemId);
-  const history = await fs.readdir(path.join(f.store.workPath(f.workItemId), 'evidence'));
-  assert.ok(history.filter(name => name.startsWith('repository-observation-')).length >= 550);
-  assert.ok(history.filter(name => name.startsWith('pr-observation-')).length >= 275);
-  assert.ok(records.some(record => record.id === repository.id));
-  assert.ok(records.some(record => record.id === pr.id));
-  assert.equal((await f.store.currentRepositoryObservation(f.workItemId,
-    'primary')).observation.id, repository.id);
-  const oldReadiness = evaluateReadiness(records, {
-    environment: 'PROD', prRecordId: firstPr.id,
-    localRepositoryPath: first.localRepositoryPath,
-    remoteRepositoryURL: first.remoteRepositoryURL,
-    prId: firstPr.pullRequestRef, sourceRevision: firstPr.sourceRevision,
-    targetRevision: firstPr.targetRevision, policyVersion: 'policy-1',
-  }, { clock: f.clock });
-  assert.equal(oldReadiness.ready, false);
-  assert.ok(oldReadiness.gaps.includes('qualifying-pr-missing'));
-  await assert.rejects(updatePrFacts(f.store, factsInput(f, firstPr)),
-    { code: 'INPUT' });
-});
+import { fixture, observeFixtureRepository, pruneWork, adoptPr, evaluateReadiness, updatePrFacts,
+  archiveSupersededObservations, withObservationRetention, currentArtifact, currentDeployment,
+  deriveIntendedOutcome, attachMonitor, monitorAssociationKey, withMonitorLocks,
+  immutableJson, readJson, withLock, writeJson, retentionFixture, refreshPr,
+  factsInput, archivedBytes } from './observation-retention-fixture.mjs';
 
 const pruneObservations = f => withObservationRetention(f.store, f.workItemId,
   (tx, monitorDependencies) =>

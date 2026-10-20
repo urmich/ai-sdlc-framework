@@ -1,3 +1,12 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "applicability": [
+    {"options": "{skip:!enabled}", "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "All native validation jobs provision the pinned real Go compiler; missing SDLC_GO is not an allowed required-job skip.", "prerequisites": ["Go 1.27.1", "SDLC_GO selects the native compiler", "GOTOOLCHAIN=local", "Owned Go caches"]}
+  ],
+  "surfaces": [
+    {"coverage": "process", "paths": ["packaging/winget/build-launcher.mjs", "cmd/sdlc-launcher/main.go", "cmd/sdlc-launcher/integrity.go"]}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';

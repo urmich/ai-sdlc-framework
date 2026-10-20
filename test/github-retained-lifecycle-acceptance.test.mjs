@@ -1,3 +1,9 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "variants": [
+    {"expression": "name", "names": ["wrong ref", "wrong revision", "force", "delete", "auto-merge", "policy-bypass"]}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';

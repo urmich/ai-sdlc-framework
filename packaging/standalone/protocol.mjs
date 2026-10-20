@@ -4,10 +4,17 @@ import { canonical, comparePath, inventory, readTarGzip, safePath, sha256 } from
 
 export const TARGETS = Object.freeze({
   'windows-x64': { platform: 'win32', arch: 'x64', extension: 'zip' },
+  macos: { platform: 'darwin', architectures: Object.freeze(['arm64', 'x64']), extension: 'tar.gz' },
   'macos-x64': { platform: 'darwin', arch: 'x64', extension: 'tar.gz' },
   'macos-arm64': { platform: 'darwin', arch: 'arm64', extension: 'tar.gz' },
   'linux-x64': { platform: 'linux', arch: 'x64', extension: 'tar.gz' },
 });
+export const ARCHIVE_TARGETS = Object.freeze(['macos', 'windows-x64']);
+export const EXECUTION_PLATFORMS = Object.freeze(['linux-x64', 'windows-x64', 'macos-arm64', 'macos-x64']);
+export function archiveTarget(target) {
+  if (!TARGETS[target]) throw new Error(`Unsupported platform: ${target}`);
+  return target.startsWith('macos-') ? 'macos' : target;
+}
 export const DIGEST = /^[a-f0-9]{64}$/u;
 
 export function isPrerelease(version) {
@@ -30,6 +37,10 @@ export function parseCanonical(bytes, label) {
 
 export function payloadIdentity(bytes) {
   const entries = readTarGzip(bytes);
+  return { entries, manifest: payloadManifest(entries, sha256(bytes)) };
+}
+
+function payloadManifest(entries, payloadSha256) {
   const files = inventory(entries, 'package/');
   const metadata = entries.find(entry => entry.path === 'package/package.json');
   if (!metadata) throw new Error('Payload is missing package.json');
@@ -45,9 +56,9 @@ export function payloadIdentity(bytes) {
     if (!files.some(file => file.path === required)) throw new Error(`Payload is missing ${required}`);
   }
   const manifest = { schemaVersion: 1, name: pkg.name, version: pkg.version,
-    payload: { filename: `${pkg.name}-${pkg.version}.tgz`, sha256: sha256(bytes) },
+    payload: { filename: `${pkg.name}-${pkg.version}.tgz`, sha256: payloadSha256 },
     inventoryDigest: sha256(canonical(files)), inventory: files };
-  return { entries, manifest };
+  return manifest;
 }
 
 export function validateWindowsLauncher(bytes) {
@@ -65,12 +76,24 @@ export function platformEntries(payloadBytes, target, windowsLauncher) {
   const spec = TARGETS[target];
   if (!spec) throw new Error(`Unsupported platform: ${target}`);
   const { entries, manifest } = payloadIdentity(payloadBytes);
+  return wrapEntries(entries, manifest, spec, payloadBytes, windowsLauncher);
+}
+
+function wrapEntries(entries, manifest, spec, payloadBytes, windowsLauncher) {
+  if (spec.architectures && entries.some(entry => {
+    const name = entry.path.split('/').at(-1);
+    const magic = entry.data.subarray(0, 4).toString('hex');
+    return /^(?:node|node\.exe)$/iu.test(name) || /\.(?:tgz|tar\.gz|zip)$/iu.test(name) ||
+      ['cffaedfe', 'cefaedfe', 'feedfacf', 'feedface', 'cafebabe', 'bebafeca', '7f454c46'].includes(magic) ||
+      entry.data.subarray(0, 2).toString('ascii') === 'MZ';
+  })) throw new Error('Shared Mac payload cannot contain nested archives or bundled native executables');
   const fromPayload = relative => entries.find(entry => entry.path === `package/${relative}`).data;
   const textFromPayload = relative => fromPayload(relative).toString('utf8').replace(/\r\n?/gu, '\n');
   const wrapper = (name, data, mode = 0o644) => ({ path: name,
     data: Buffer.isBuffer(data) ? data : Buffer.from(data), mode });
-  const platform = { schemaVersion: 1, name: manifest.name, version: manifest.version,
-    platform: spec.platform, arch: spec.arch, payloadSha256: manifest.payload.sha256,
+  const platform = { schemaVersion: spec.architectures ? 2 : 1, name: manifest.name, version: manifest.version,
+    platform: spec.platform, ...(spec.architectures ? { architectures: spec.architectures } : { arch: spec.arch }),
+    payloadSha256: manifest.payload.sha256,
     inventoryDigest: manifest.inventoryDigest, payloadManifest: 'payload-manifest.json',
     checksumReference: 'SHA256SUMS' };
   const launchers = [];
@@ -84,7 +107,7 @@ export function platformEntries(payloadBytes, target, windowsLauncher) {
       wrapper('install.sh', textFromPayload('packaging/standalone/install.sh'), 0o755));
   }
   return { manifest, platform, entries: [...entries, ...launchers,
-    wrapper(manifest.payload.filename, payloadBytes),
+    ...(spec.architectures ? [] : [wrapper(manifest.payload.filename, payloadBytes)]),
     wrapper('payload-manifest.json', canonical(manifest)),
     wrapper('platform.json', canonical(platform)), wrapper('LICENSE', fromPayload('LICENSE'))] };
 }
@@ -100,12 +123,19 @@ export function verifyEntries(entries, { expectedPlatform, expectedArch } = {}) 
       !DIGEST.test(manifest.inventoryDigest ?? '')) throw new Error('Malformed payload manifest');
   safePath(manifest.payload.filename);
   const platform = parseCanonical(get('platform.json'), 'platform metadata');
-  const target = Object.keys(TARGETS).find(key =>
-    TARGETS[key].platform === platform.platform && TARGETS[key].arch === platform.arch);
+  const shared = platform.schemaVersion === 2 && platform.platform === 'darwin';
+  const target = shared ? 'macos' : platform.schemaVersion === 1 && Object.keys(TARGETS).find(key =>
+    TARGETS[key].platform === platform.platform && TARGETS[key].arch === platform.arch && platform.arch);
   if (!target || expectedPlatform && expectedPlatform !== platform.platform ||
-      expectedArch && expectedArch !== platform.arch) throw new Error('Wrong platform or architecture');
-  const expected = platformEntries(get(manifest.payload.filename), target,
-    platform.platform === 'win32' ? get('bin/sdlc.exe') : undefined);
+      shared && canonical(platform.architectures) !== canonical(TARGETS.macos.architectures) ||
+      expectedArch && (shared ? !TARGETS.macos.architectures.includes(expectedArch) : expectedArch !== platform.arch)) {
+    throw new Error('Wrong platform or architecture');
+  }
+  const payload = shared ? entries.filter(entry => entry.path.startsWith('package/')) : undefined;
+  const expected = shared ?
+    wrapEntries(payload, payloadManifest(payload, manifest.payload.sha256), TARGETS.macos) :
+    platformEntries(get(manifest.payload.filename), target,
+      platform.platform === 'win32' ? get('bin/sdlc.exe') : undefined);
   if (canonical(expected.manifest) !== canonical(manifest) ||
       canonical(expected.platform) !== canonical(platform) ||
       canonical(inventory(entries)) !== canonical(inventory(expected.entries))) {
@@ -131,7 +161,7 @@ export async function treeEntries(root, prefix = '') {
       const current = await fs.lstat(path.join(root, relative));
       if (!current.isFile() || current.isSymbolicLink()) throw new Error('Distribution entry changed type');
       entries.push({ path: relative, data: await fs.readFile(path.join(root, relative)),
-        mode: process.platform === 'win32' ? relative === 'package/bin/sdlc.mjs' ? 0o755 : 0o644 :
+        mode: process.platform === 'win32' ? ['package/bin/sdlc.mjs', 'bin/sdlc', 'install.sh'].includes(relative) ? 0o755 : 0o644 :
           current.mode & 0o777 });
     } else throw new Error(`Unsupported distribution entry: ${relative}`);
   }

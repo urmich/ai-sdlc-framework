@@ -1,3 +1,16 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "variants": [
+    {"expression": "`T-125 existing ${bytes}-byte terminal observation retains multibyte proof and a 512-character delivery reference`", "domains": {"bytes": ["4095", "4096"]}},
+    {"expression": "`T-125 ${bytes ?? 'small'}-byte acknowledgment is exactly replayable and concurrent duplicates do not issue another notice`", "domains": {"bytes ?? 'small'": ["small", "4096"]}},
+    {"expression": "`T-125 delivery write failure at ${stage} leaves proof intact and retry reconciles only durable acknowledgment`", "domains": {"stage": ["written", "replaced"]}},
+    {"expression": "`T-125 a delivery receipt with ${damage} remains an explicit gap and cannot permit archival`", "domains": {"damage": ["wrong identity", "wrong notice", "invalid JSON", "missing evidence"]}},
+    {"expression": "`T-126 a genuinely referenced ${status} action retains its monitor even when its checkout is retired`", "domains": {"status": ["succeeded", "uncertain"]}},
+    {"expression": "`T-126 ${damage} in durable dependency state cannot be treated as an absent consumer`", "domains": {"damage": ["missing checkpoint", "corrupt checkpoint", "missing binding", "corrupt binding", "missing records", "corrupt record", "missing referenced record", "recovery"]}},
+    {"expression": "`T-126 association ${damage} cannot hide a possible monitor dependency`", "domains": {"damage": ["invalid JSON", "missing identities"]}},
+    {"expression": "`T-126 recovery marker presence (${label}) controls public prune regardless of parsed truthiness`", "domains": {"label": ["null", "false", "0", "empty object", "corrupt JSON", "missing"]}}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';

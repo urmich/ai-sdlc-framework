@@ -151,7 +151,7 @@ export async function activateChannel({ sourceRoot, channelRoot = defaultRoot(),
   // All bytes and the exact runtime are checked before creating even the channel root.
   const verified = await verifyTree(sourceRoot, { expectedPlatform: process.platform, expectedArch: process.arch });
   const selectedNode = await runtimePreflight({ node,
-    platform: verified.platform.platform, arch: verified.platform.arch });
+    platform: verified.platform.platform, arch: verified.platform.arch ?? process.arch });
   const root = path.resolve(channelRoot);
   const layout = await validateChannelHome({ channelRoot, home });
   const source = await canonicalPath(sourceRoot);

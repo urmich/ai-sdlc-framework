@@ -1,3 +1,7 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "process", "paths": ["bin/sdlc.mjs", "src/cli.mjs", "src/install.mjs", "src/hooks.mjs", "src/checks.mjs"]}]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -6,6 +10,7 @@ import os from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { randomUUID } from 'node:crypto';
 import { fixture, artifact, coding, cli, grant, orient } from './helpers.mjs';
 import { cleanInstall, install, uninstall, doctor, BLOCK_START, canonicalInstalledText } from '../src/install.mjs';
 import { registerArtifact } from '../src/artifacts.mjs';
@@ -115,6 +120,66 @@ test('T-23 partial installation rolls back only its own unchanged writes', async
   assert.equal(await fs.readFile(instructions, 'utf8'), 'Keep user instructions');
   assert.match(await fs.readFile(path.join(f.home, 'sdlc/bin/sdlc.mjs'), 'utf8'), /concurrent user edit/u);
 });
+
+test('T-PRD023 competing installs and interrupted rollback preserve unowned content, runtime and the other fixture', async t => {
+  const first = await fixture(t);
+  const second = await fixture(t);
+  const outside = path.join(os.tmpdir(), `sdlc-unowned-${randomUUID()}.json`);
+  await fs.writeFile(outside, '{"outside":"preserved"}\n', { flag: 'wx' });
+  t.after(() => fs.unlink(outside));
+  const settings = await Promise.all([first, second].map(async f => {
+    const file = path.join(f.home, 'user-settings.json');
+    await fs.writeFile(file, '{"user":"preserved"}\n', { flag: 'wx' });
+    const runtime = path.join(f.home, 'sdlc', 'runtime', 'user-sentinel.json');
+    await fs.writeFile(runtime, '{"runtime":"preserved"}\n', { flag: 'wx' });
+    return { file, runtime };
+  }));
+  const entered = [Promise.withResolvers(), Promise.withResolvers()];
+  const secondCompleted = Promise.withResolvers();
+  const wait = async promise => {
+    const timeout = new AbortController();
+    try {
+      return await Promise.race([promise, delay(20000, null, { signal: timeout.signal, ref: false })
+        .then(() => { throw new Error('Independent installer did not reach its owned-resource barrier'); })]);
+    } finally { timeout.abort(); }
+  };
+  let injected = false;
+  const failed = install(first.store, { fault: async relative => {
+    if (relative !== 'sdlc/bin/sdlc.mjs') return;
+    entered[0].resolve();
+    await wait(entered[1].promise);
+    await wait(secondCompleted.promise);
+    await fs.appendFile(path.join(first.home, relative), '\n// preserved concurrent user modification\n');
+    injected = true;
+    throw new Error('Interrupted owned installation');
+  } });
+  const failedOutcome = failed.then(() => null, error => error);
+  try {
+    const success = await install(second.store, { fault: async relative => {
+      if (relative !== 'sdlc/bin/sdlc.mjs') return;
+      entered[1].resolve();
+      await wait(entered[0].promise);
+    } });
+    assert.equal(success.installed, true);
+  } finally {
+    entered[0].resolve();
+    entered[1].resolve();
+    secondCompleted.resolve();
+    await failedOutcome;
+  }
+  const failure = await failedOutcome;
+  assert.equal(failure?.code, 'INSTALL_FAILED');
+  assert.equal(injected, true);
+  assert.match(await fs.readFile(path.join(first.home, 'sdlc/bin/sdlc.mjs'), 'utf8'),
+    /preserved concurrent user modification/u);
+  await uninstall(second.store);
+  for (const { file, runtime } of settings) {
+    assert.equal(await fs.readFile(file, 'utf8'), '{"user":"preserved"}\n');
+    assert.equal(await fs.readFile(runtime, 'utf8'), '{"runtime":"preserved"}\n');
+  }
+  assert.equal(await fs.readFile(outside, 'utf8'), '{"outside":"preserved"}\n');
+});
+
 test('T-46 explicit purge removes all framework traces but preserves unrelated Copilot content', async t => {
   const f = await fixture(t, { initialize: false });
   const instructions = path.join(f.home, 'copilot-instructions.md');
@@ -184,7 +249,8 @@ test('T-46 clean install purges the previous framework and installs the new pack
   assert.equal(await fs.readFile(oldRuntime, 'utf8'), '{"old":true}\n');
   const incompleteSource = path.join(f.root, 'incomplete-package');
   for (const directory of ['bin', 'src', 'assets/skills',
-    'assets/templates', 'assets/instructions', 'assets/hooks', 'docs']) {
+    'assets/templates', 'assets/instructions', 'assets/hooks',
+    'docs/reference', 'docs/integrations']) {
     await fs.mkdir(path.join(incompleteSource, directory), { recursive: true });
   }
   await fs.writeFile(path.join(incompleteSource, 'assets/hooks/sdlc.json'),
@@ -192,9 +258,13 @@ test('T-46 clean install purges the previous framework and installs the new pack
   await fs.writeFile(path.join(incompleteSource, 'assets/instructions.md'), '');
   await fs.writeFile(path.join(incompleteSource,
     'assets/lifecycle-intent.md'), '');
-  await fs.writeFile(path.join(incompleteSource, 'docs/cli.md'), '');
+  for (const name of ['README.md', 'CONTRIBUTING.md', 'SUPPORT.md', 'SECURITY.md',
+    'CODE_OF_CONDUCT.md', 'OWNERSHIP.md', 'RELEASING.md', 'CHANGELOG.md', 'LICENSE']) {
+    await fs.writeFile(path.join(incompleteSource, name), '');
+  }
+  await fs.writeFile(path.join(incompleteSource, 'docs/reference/cli.md'), '');
   await fs.writeFile(path.join(incompleteSource,
-    'docs/provider-adapters.md'), '');
+    'docs/integrations/provider-adapters.md'), '');
   await fs.writeFile(path.join(incompleteSource, 'package.json'), JSON.stringify({
     name: 'ai-sdlc-framework',
     version: '9.9.9',
@@ -202,7 +272,7 @@ test('T-46 clean install purges the previous framework and installs the new pack
   }));
   await assert.rejects(cleanInstall(f.store, {
     sourceRoot: incompleteSource,
-  }), { code: 'INSTALL' });
+  }), { code: 'INSTALL', message: /missing docs\/integrations\/github-adapters\.md/u });
   assert.equal(await fs.readFile(oldRuntime, 'utf8'), '{"old":true}\n');
   await assert.rejects(execute(process.execPath, [
     path.join(f.home, 'sdlc/bin/sdlc.mjs'),
