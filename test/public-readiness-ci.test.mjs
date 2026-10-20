@@ -1282,7 +1282,18 @@ test('T-PRD020 actual CI schedules four independent native lanes after source-on
   assert.deepEqual(ci.jobs.native.needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs.native.strategy.matrix.include.map(lane => lane.target),
     ['linux-x64', 'windows-x64', 'macos-arm64', 'macos-x64']);
-  assert.deepEqual(ci.jobs['producer-summary'].needs, ['intent', 'source', 'native']);
+  assert.equal(ci.jobs['minimum-node'].needs, 'intent');
+  assert.equal(ci.jobs['minimum-node'].if, ci.jobs.native.if);
+  assert.deepEqual(ci.jobs['producer-summary'].needs, ['intent', 'minimum-node', 'source', 'native']);
+  const nativeSteps = ci.jobs.native.steps;
+  const bootstrapIndex = nativeSteps.findIndex(step => step.name === 'Provision isolated native toolchain');
+  const retainedIndex = nativeSteps.findIndex(step => step.name === 'Retain native bootstrap diagnostics');
+  const executionIndex = nativeSteps.findIndex(step => step.name === 'Execute native validation');
+  assert.ok(bootstrapIndex >= 0 && bootstrapIndex < retainedIndex && retainedIndex < executionIndex,
+    'Original provisioning evidence must be observable before the full native suite');
+  const cleanup = nativeSteps.find(step => step.name === 'Retain native cleanup diagnostics');
+  assert.notEqual(cleanup.with.name, nativeSteps[retainedIndex].with.name,
+    'Later cleanup cannot overwrite immutable provisioning evidence');
   const freeze = ci.jobs.source.steps.find(step => step.name === 'Freeze exact source candidate');
   assert.match(freeze.run, /--phase candidate/u);
   const pr = { number: 1, head: { sha: sourceA }, base: { sha: 'b'.repeat(40) },

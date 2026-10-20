@@ -605,7 +605,8 @@ test('Node metadata and audit prerequisites are checked before lifecycle or targ
     targetArch: 'x64', outputDir: path.join(f.directory, 'missing-tool'), brew: '' }),
   { code: 'RELEASE_INTEGRATION_BLOCKED' });
   await assert.rejects(verifyNativeHomebrew({ candidate: f.candidate, candidateDir: f.candidateDir,
-    scratch: f.directory, brew: f.brew, verifyLifecycle: async () => assert.fail('Lifecycle must not run after failed metadata audit'),
+    scratch: f.directory, brew: f.brew, previous: previousFixture,
+    verifyLifecycle: async () => assert.fail('Lifecycle must not run after failed metadata audit'),
     verifyQuality: async args => ({ ...await mockQuality(args), audit: { status: 'NotRun' } }) }),
   /audit\/style\/Node dependency evidence/u);
 });
