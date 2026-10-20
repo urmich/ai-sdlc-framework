@@ -124,6 +124,36 @@ function matching(tokens, from) {
   }
   throw new Error('Unbalanced JavaScript validation declaration');
 }
+function constantImportSpecifier(tokens, from) {
+  const prefixes = [];
+  let value = '';
+  let expectingLiteral = true;
+  for (let index = from; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (expectingLiteral) {
+      if (token.kind === 'punctuation' && token.value === '(') {
+        prefixes.push(value);
+        value = '';
+        continue;
+      }
+      if (token.kind === 'string') value += token.value;
+      else if (token.kind === 'template') {
+        for (let offset = 1; offset < token.value.length - 1; offset++) {
+          if (token.value[offset] === '\\') offset++;
+          else if (token.value.startsWith('${', offset)) return null;
+        }
+        value += decodeString(token.value);
+      } else return null;
+      expectingLiteral = false;
+    } else if (token.kind === 'punctuation' && token.value === '+') expectingLiteral = true;
+    else if (token.kind === 'punctuation' && token.value === ')' && prefixes.length) {
+      value = prefixes.pop() + value;
+    } else if (token.kind === 'punctuation' && !prefixes.length &&
+        [')', ','].includes(token.value)) return value;
+    else return null;
+  }
+  return null;
+}
 function declarations(source, tokens, file) {
   const starts = tokens.flatMap((token, index) =>
     token.value === 'export' && tokens[index + 1]?.value === 'const' &&
@@ -185,7 +215,10 @@ function testBindings(tokens) {
   for (let index = 0; index < tokens.length; index++) {
     if (tokens[index].value === 'import') {
       if (tokens[index + 1]?.value === '(') {
-        if (tokens[index + 2]?.value === 'node:test') unsupported.push({
+        const specifier = constantImportSpecifier(tokens, index + 2);
+        // Keep prior literal-led unsupported expressions fail-closed without evaluating them.
+        if (specifier === 'node:test' || specifier === null &&
+            tokens[index + 2]?.kind === 'string' && tokens[index + 2]?.value === 'node:test') unsupported.push({
           line: tokens[index].line, code: 'UNSUPPORTED_DYNAMIC_TEST_IMPORT_BINDING',
         });
         continue;

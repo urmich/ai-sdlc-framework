@@ -426,19 +426,53 @@ function criticalSequence(stdout) {
 
 test('T-PRD002 full rejects a hidden failing dynamic node:test registration beside a known passing root', async t => {
   const f = await runnerFixture(t);
+  for (const name of await fs.readdir(path.join(f.root, 'test'))) {
+    if (name.endsWith('.test.mjs')) await fs.unlink(path.join(f.root, 'test', name));
+  }
   const file = path.join(f.root, 'test', 'dynamic-registration.test.mjs');
   const marker = path.join(f.root, 'known-root-started');
-  await fs.writeFile(file, `import test from 'node:test';
+  for (const operand of [
+    "'node:test'", '"node:test"', '`node:test`', "('node:test')",
+    '((/* around literal */ "node:test" /* after */))',
+    '( // outer wrapper\n ( /* inner */ `node:test` ) )',
+    "'node\\u003atest'", '`node\\x3atest`', "'node\\u{3a}test'",
+    "'node:\\\ntest'", `${'('.repeat(128)}\`node:test\`${')'.repeat(128)}`,
+    "( /* outer */ ('node\\x3atest') /* done */ )",
+    "'node:' + 'test'", "('node:' + (`te` + 'st'))", "`node:test` + ''",
+    "'node:test' + ('' || '')",
+  ]) {
+    await fs.writeFile(file, `import test from 'node:test';
 import assert from 'node:assert/strict';import {writeFile} from 'node:fs/promises';
 test('known passing root',()=>writeFile(${JSON.stringify(marker)},'started'));
-const {it:extra}=await import('node:test');
+const {it:extra}=await import(${operand});
 extra('hidden failing dynamic root',()=>assert.fail('owned dynamic registration failure'));
 `);
-  const result = await f.invoke(['full']);
-  assert.notEqual(result.exitCode, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /UNSUPPORTED_DYNAMIC_TEST_IMPORT_BINDING/u);
-  await assert.rejects(fs.stat(marker), { code: 'ENOENT' },
-    'Reject the incomplete source denominator before any exact root filter can omit the failure');
+    const result = await f.invoke(['full']);
+    assert.notEqual(result.exitCode, 0, `${operand}: ${result.stdout}${result.stderr}`);
+    assert.match(result.stderr, /UNSUPPORTED_DYNAMIC_TEST_IMPORT_BINDING/u);
+    await assert.rejects(fs.stat(marker), { code: 'ENOENT' },
+      'Reject the incomplete source denominator before any exact root filter can omit the failure');
+  }
+  for (const operand of [
+    "'node:fs/promises'", '`node:fs/promises`',
+    '( /* wrappers */ ( `node:\\u0066s/promises` ) )',
+    "'node:test/reporters'", "(( 'node:\\\nfs/promises' ))",
+    "'node:test' + '/reporters'", "('node:' + (`fs` + '/promises'))",
+    "( ('node:' /* split */ + 'test/reporters') )",
+  ]) {
+    await fs.writeFile(file, `import test from 'node:test';
+import assert from 'node:assert/strict';import {writeFile} from 'node:fs/promises';
+const dependency=await import(${operand});
+test('known passing root',async()=>{
+  assert.ok(Object.keys(dependency).length>0);
+  await writeFile(${JSON.stringify(marker)},'started');
+});
+`);
+    const result = await f.invoke(['full']);
+    assert.equal(result.exitCode, 0, `${operand}: ${result.stdout}${result.stderr}`);
+    assert.equal(await fs.readFile(marker, 'utf8'), 'started');
+    await fs.unlink(marker);
+  }
 });
 
 test('T-PRD010 impossible four-level resident lineage rejects before yielding and restores every owned lease', async () => {

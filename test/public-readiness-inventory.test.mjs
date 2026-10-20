@@ -221,6 +221,37 @@ test('T-PRD002 ESM and CommonJS registration aliases cannot escape the nonexecut
     assert.equal(compiled.complete, false);
     assert.ok(compiled.nodeUnresolved.some(item => item.code === 'UNSUPPORTED_DYNAMIC_TEST_IMPORT_BINDING'));
   }
+  for (const operand of [
+    "'node:test'", '"node:test"', '`node:test`', "('node:test')",
+    '((/* around literal */ "node:test" /* after */))',
+    '( // outer wrapper\n ( /* inner */ `node:test` ) )',
+    "'node\\u003atest'", '`node\\x3atest`', "'node\\u{3a}test'",
+    "'node:\\\ntest'", `${'('.repeat(128)}\`node:test\`${')'.repeat(128)}`,
+    "( /* outer */ ('node\\x3atest') /* done */ )",
+    "'node:' + 'test'", "('node:' + (`te` + 'st'))", "`node:test` + ''",
+    "'node:test' + ('' || '')",
+  ]) {
+    for (const dynamic of [
+      `const {it:dynamicCase}=await import(${operand});dynamicCase('omitted failure',()=>{});`,
+      `const dynamicRunner=await import(${operand});dynamicRunner.test('omitted failure',()=>{});`,
+      `import(${operand}).then(({test:dynamicCase})=>dynamicCase('omitted failure',()=>{}));`,
+    ]) {
+      const compiled = compileValidationSourceInventory({
+        files: [{ file: 'test/nested/aliases.test.js', contents: source + dynamic }],
+        surfacePaths: [],
+      });
+      assert.equal(compiled.complete, false, `Dynamic node:test operand must not escape: ${operand}`);
+      assert.ok(compiled.nodeUnresolved.some(item => item.code === 'UNSUPPORTED_DYNAMIC_TEST_IMPORT_BINDING'));
+    }
+  }
+  for (const operand of [
+    "'node:fs/promises'", '`node:fs/promises`',
+    '( /* wrappers */ ( `node:\\u0066s/promises` ) )',
+    "'node:test/reporters'", "(( 'node:\\\nfs/promises' ))",
+    "'node:test' + '/reporters'", "('node:' + (`fs` + '/promises'))",
+    "( ('node:' /* split */ + 'test/reporters') )",
+  ]) assert.deepEqual(discoverDeclarations(source + `const dependency=await import(${operand});`,
+    'test/nested/aliases.test.js').unresolved, [], 'Unrelated dynamic modules remain valid');
 });
 
 test('T-PRD002 native skip dispositions require an owner, actual platforms and declared prerequisites', () => {
