@@ -343,8 +343,34 @@ test('passing sibling after diagnostic rejection',async()=>{
       assert.ok(!text.includes(privateValue), 'Rejected failure text must not escape through artifacts or the reporter');
     }
     sanitizeExecutionPayload(Buffer.from(JSON.stringify({ stdout: observed.stdout, stderr: observed.stderr })));
-    assert.equal(preserved.resources.budget.activeWorkers, 0);
-    assert.equal(preserved.resources.budget.residentWorkers, 0);
+    const budget = preserved.resources.budget;
+    assert.ok(budget.activeWorkers <= budget.capacity && budget.peakActiveWorkers <= budget.capacity);
+    assert.ok(budget.residentWorkers <= budget.residentLimit &&
+      budget.peakResidentWorkers <= budget.residentLimit &&
+      budget.peakPotentialResidentWorkers <= budget.residentLimit);
+    assert.ok(budget.producers <= budget.producerLimit && budget.peakProducers <= budget.producerLimit &&
+      budget.controls <= budget.controlLimit && budget.peakControls <= budget.controlLimit);
+    const owned = preserved.groupExecution.groups;
+    assert.equal(owned.length, 2);
+    assert.equal(new Set(owned.flatMap(group => group.processIds)).size, 2);
+    for (const group of owned) {
+      assert.equal(group.processes.length, 1);
+      const lease = group.processes[0];
+      assert.deepEqual(group.processIds, [lease.pid]);
+      assert.ok(Number.isFinite(Date.parse(lease.startedAt)) && Number.isFinite(Date.parse(lease.finishedAt)) &&
+        Date.parse(lease.finishedAt) >= Date.parse(lease.startedAt), 'Every owned worker lease must be closed');
+      assert.equal(group.finishedAt, lease.finishedAt);
+      assert.throws(() => process.kill(lease.pid, 0), error => error.code === 'ESRCH',
+        'No owned file process may survive the nested command');
+    }
+    if (process.env.SDLC_TEST_BUDGET) {
+      assert.equal(budget.id, (await readTestBudget()).id,
+        'Nested validation must share its real ancestor allocation, not create a replacement budget');
+    } else {
+      assert.equal(budget.activeWorkers, 0);
+      assert.equal(budget.residentWorkers, 0);
+      assert.equal(budget.pendingParentRestorations, 0);
+    }
 
     const opaque = path.join(directory, 'opaque-diagnostic.test.mjs');
     await fs.writeFile(opaque, "import test from 'node:test';" +
