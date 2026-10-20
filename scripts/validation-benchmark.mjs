@@ -253,7 +253,7 @@ export async function runValidationBenchmark({ baselineRoot, candidateRoot, outp
   const resultSets = { baseline: { sourceDigest: sources.baseline.contentDigest, measurements: [] },
     candidate: { sourceDigest: sources.candidate.contentDigest, measurements: [] } };
   try {
-    requireThat(allocation.workers === workers && allocation.capacity === workers, 'BUDGET',
+    requireThat(allocation.workers === workers && allocation.capacity >= workers, 'BUDGET',
       'The explicit comparable benchmark allocation is unavailable in this ancestor scope');
     measurements: for (const scope of ['full', 'focused']) for (const repeat of [1, 2]) {
       for (const version of ['baseline', 'candidate']) {

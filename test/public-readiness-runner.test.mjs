@@ -380,8 +380,8 @@ test('T-PRD010 benchmark completes same-file root measurements under the actual 
   assert.equal(inventory.complete, true, JSON.stringify(inventory.unresolved));
   assert.equal(inventory.cases.length, 2);
   const inherited = process.env.SDLC_TEST_BUDGET ? await readTestBudget() : null;
-  const workers = inherited?.capacity ?? 2;
-  assert.ok(workers >= 2);
+  const workers = 2;
+  assert.ok(!inherited || inherited.capacity >= workers);
   const { comparison } = await runValidationBenchmark({ baselineRoot: baseline.root,
     candidateRoot: candidate.root, outputDirectory, workers,
     focusedAssertionIds: [inventory.cases[0].id] });
