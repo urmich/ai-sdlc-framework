@@ -78,14 +78,14 @@ function* definitionLines(contents, label) {
   let fence;
   for (const [index, line] of contents.split(/\r?\n/u).entries()) {
     if (fence) {
-      const closing = /^ {0,3}(`{3,}|~{3,})[ \t]*$/u.exec(line);
+      const closing = /^\s*(`{3,}|~{3,})[ \t]*$/u.exec(line);
       if (closing && closing[1][0] === fence.marker && closing[1].length >= fence.length) {
         fence = undefined;
       }
       yield [index, ''];
       continue;
     }
-    const opening = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
+    const opening = /^\s*(`{3,}|~{3,})(.*)$/u.exec(line);
     if (opening && (opening[1][0] === '~' || !opening[2].includes('`'))) {
       fence = { marker: opening[1][0], length: opening[1].length };
       yield [index, ''];

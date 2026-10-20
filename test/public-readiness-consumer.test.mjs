@@ -231,12 +231,13 @@ test('T-PRD083 fenced examples cannot define requirements or satisfy real covera
     ['~~~markdown', '~~~', '\t'],
   ]) {
     const example = contents => {
-      const body = opening ? `${opening}\n\`\`\`\n${contents}\n\`\`\`\n${closing}` : contents;
+      const inner = opening === '```markdown' ? '~~~' : '```';
+      const body = opening ? `${opening}\n${inner}\n${contents}\n${inner}\n${closing}` : contents;
       return `\n${body.split('\n').map(line => indentation + line).join('\n')}\n`;
     };
     const sources = {
       repositoryId: 'consumer',
-      requirements: [{ path: requirementPath, contents: requirements + (indentation ? '' : example(
+      requirements: [{ path: requirementPath, contents: requirements + (!opening ? '' : example(
         '### FR-802: Example only\n**Definition of Done**\n- AC-802.1: Not a real requirement.')) }],
       testPlans: [{ path: planPath,
         contents: plan.replace('FR-801; AC-801.1; AC-801.2', 'FR-801; AC-801.1') +
