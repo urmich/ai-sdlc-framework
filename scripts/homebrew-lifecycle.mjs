@@ -15,7 +15,7 @@ import { nativeToolchain, homebrewToolchain } from './toolchain-baseline.mjs';
 import { verifyHomebrewPrefixOwnership } from './native-homebrew-prefix.mjs';
 
 const execute = runHomebrewCommand;
-const ROOT = fileURLToPath(new URL('../', import.meta.url));
+const ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 
 async function snapshot(root, prefix = '') {
   const inventory = [];

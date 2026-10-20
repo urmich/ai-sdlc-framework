@@ -33,6 +33,7 @@ import { assertConsumerUpdate, assertConsumerUninstall, npmPublicCommand } from 
 import { publicHomebrewFormula, verifyHomebrewUpgradeInputs } from '../scripts/homebrew-lifecycle.mjs';
 import { verifyHomebrewHooks, runHomebrewCommand } from '../scripts/homebrew-switch.mjs';
 import { verifyRetainedNpmAttestation } from '../scripts/verify-npm-attestation.mjs';
+import { nativeToolchain } from '../scripts/toolchain-baseline.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const plan = await fs.readFile(path.join(ROOT, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
@@ -42,8 +43,8 @@ const bundle = { identity: { version: '1.2.3', sourceCommit: 'a'.repeat(40), pay
   descriptorSha256: '2'.repeat(64), checksumsSha256: '3'.repeat(64) },
   releaseIntentId: 'controlled-consumer-fixture',
   descriptor: { files: [{ filename: 'ai-sdlc-framework-1.2.3.tgz', sha256: '1'.repeat(64) }] } };
-const native = { kind: 'native', platform: 'win32', architecture: 'x64', node: '24.20.0', image: 'win22/20261019.1',
-  bootstrap: { platform: 'win32', architecture: 'x64', node: '24.20.0', imageOS: 'win22',
+const native = { kind: 'native', platform: 'win32', architecture: 'x64', node: nativeToolchain.node, image: 'win22/20261019.1',
+  bootstrap: { platform: 'win32', architecture: 'x64', node: nativeToolchain.node, imageOS: 'win22',
     imageVersion: '20261019.1', os: 'fixture-OS-build', machine: 'AMD64' } };
 const specification = consumerSpecification(plan, 'windows-x64');
 const context = expectedConsumerContext({ bundle, specification, plan, tree: 'b'.repeat(40),
@@ -116,10 +117,30 @@ function successfulConsumer() {
 
 test('T-PRD041 consumer context derives source, specification, configuration, artifacts and producer independently', () => {
   assert.equal(credit(execution()).status, 'Passed', 'Controlled fixture baseline, not native execution proof');
+  assert.equal(context.native.toolchain.node, '24.20.0');
+  assert.equal(context.native.toolchain.bootstrap.node, '24.20.0');
+  assert.equal(context.configDigest, digest({ profile: specification.profile, node: '24.20.0', npm: '11.16.0',
+    procedures: specification.cases.map(test => test.assertions), releaseIntentId: bundle.releaseIntentId }));
+  const historicalConfigDigest = digest({ profile: specification.profile, node: '22.23.3', npm: '11.16.0',
+    procedures: specification.cases.map(test => test.assertions), releaseIntentId: bundle.releaseIntentId });
+  assert.notEqual(context.configDigest, historicalConfigDigest);
+  for (const [node, bootstrapNode] of [
+    ['22.23.3', '24.20.0'], ['24.20.0', '22.23.3'], ['22.23.3', '22.23.3'],
+    ['24.20.1', '24.20.1'], ['24.22.0', '24.22.0'],
+  ]) {
+    const wrongBaseline = structuredClone(native);
+    wrongBaseline.node = node;
+    wrongBaseline.bootstrap.node = bootstrapNode;
+    const retained = canonical(wrongBaseline);
+    assert.throws(() => expectedConsumerContext({ bundle, specification, plan, tree: 'b'.repeat(40),
+      target: 'windows-x64', native: wrongBaseline, scope }), /exact native baseline/u);
+    assert.equal(canonical(wrongBaseline), retained, 'Reject old or mismatched facts without rewriting their identity');
+  }
   const mutations = [
     value => { value.candidateDigest = 'c'.repeat(64); },
     value => { value.testSpecDigest = 'c'.repeat(64); },
     value => { value.configDigest = 'c'.repeat(64); },
+    value => { value.configDigest = historicalConfigDigest; },
     value => { value.inventoryDigest = 'c'.repeat(64); },
     value => { value.sources[0].repositoryId = 'repository-999'; },
     value => { value.sources[0].revision = 'c'.repeat(40); },

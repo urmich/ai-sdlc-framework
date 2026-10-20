@@ -29,6 +29,7 @@ export const coverageArtifacts = Object.freeze([{
 const writerPaths = ['.github/workflows/pr-readiness.yml', '.github/workflows/coverage-metadata.yml'];
 const reporterPaths = [
   '.github/workflows/ci.yml', 'scripts/native-validation.mjs', 'scripts/native-toolchain.mjs',
+  'scripts/toolchain-baseline.mjs', 'scripts/native-homebrew-prefix.mjs',
   'scripts/validation-tools.mjs',
   'scripts/pr-capabilities.mjs', 'scripts/pr-calculator.mjs', 'scripts/pr-calculator-reporter.mjs',
   'scripts/verify-npm-attestation.mjs', 'scripts/accept-release.mjs', 'scripts/native-components.mjs',

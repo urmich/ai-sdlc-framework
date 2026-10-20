@@ -39,6 +39,7 @@ const locations = { 'linux-x64': 'github-linux-x64', 'windows-x64': 'github-wind
 const suffixes = { 'linux-x64': 'LX', 'windows-x64': 'WX', 'macos-arm64': 'MA', 'macos-x64': 'MI' };
 const reporterPaths = [
   '.github/workflows/ci.yml', 'scripts/native-validation.mjs', 'scripts/native-toolchain.mjs',
+  'scripts/toolchain-baseline.mjs', 'scripts/native-homebrew-prefix.mjs',
   'scripts/validation-tools.mjs', 'scripts/test-runner.mjs', 'scripts/test-worker.mjs',
   'scripts/pr-capabilities.mjs', 'scripts/pr-calculator.mjs', 'scripts/pr-calculator-reporter.mjs',
   'scripts/verify-npm-attestation.mjs', 'scripts/accept-release.mjs', 'scripts/native-components.mjs',
@@ -120,7 +121,7 @@ function fixturePlan(names, additionalTests = []) {
 }
 
 function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = false, docsOnly = false,
-  narrowedRequiredScope = false, additionalTests = [] } = {}) {
+  narrowedRequiredScope = false, additionalTests = [], producerChange } = {}) {
   const names = [
     ...unitFiles.map((file, index) => ({ file, stage: 'unit', id: `T-FIX-CANONICAL-${index + 1}`,
       name: `T-FIX-CANONICAL-${index + 1} controlled canonical assertion` })),
@@ -141,6 +142,9 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
   ];
   const files = new Map(reporterPaths.map(file => [file,
     file.endsWith('.yml') ? ci : 'throw new Error("candidate reporter must never execute in the observer");\n']));
+  files.set('scripts/toolchain-baseline.mjs',
+    `${files.get('scripts/toolchain-baseline.mjs')}export const nativeToolchain = ${JSON.stringify(nativeToolchain)};\n` +
+    `export const homebrewToolchain = ${JSON.stringify(homebrewToolchain)};\n`);
   files.set('.github/workflows/pr-readiness.yml', writerDefinition());
   files.set('.github/workflows/coverage-metadata.yml', writerDefinition());
   for (const { file, contents } of calculatorSources) files.set(file, contents);
@@ -162,6 +166,15 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
   }
   if (unadoptedReporter) files.set('scripts/test-worker.mjs',
     `${files.get('scripts/test-worker.mjs')}// unadopted producer modification\n`);
+  if (producerChange === 'prefix-helper') {
+    files.set('scripts/native-homebrew-prefix.mjs',
+      `${files.get('scripts/native-homebrew-prefix.mjs')}// changed ownership enforcement\n`);
+  } else if (producerChange === 'core-pin') {
+    const original = files.get('scripts/toolchain-baseline.mjs');
+    const changed = original.replace(homebrewToolchain.coreCommit, 'f'.repeat(40));
+    assert.notEqual(changed, original);
+    files.set('scripts/toolchain-baseline.mjs', changed);
+  } else assert.equal(producerChange, undefined);
   const requirements = '# Requirements\n\n### FR-203: Complete native provider evidence\n\n' +
     (narrowedRequiredScope ? 'Classification: out-of-scope\n\n' : '') +
     '**Definition of Done**\n\n- AC-203.4: Admit only the complete current controlled provider inventory.\n';

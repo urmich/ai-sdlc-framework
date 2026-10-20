@@ -385,6 +385,27 @@ test('T-PRD021 native admission rejects aggregate-only groups altered source clo
   f.assertReadOnly();
 });
 
+test('T-PRD021 helper-only and core-pin-only producer changes require adoption before native evidence acquisition', async t => {
+  const baseline = await observerApiFixture(t);
+  assert.equal(verdict(await baseline.connect().host.snapshot()).status, 'Passed');
+  const config = nativeConfigurationDigest({ inventory: baseline.source.inventory, profile: 'pr' });
+  for (const [producerChange, file] of [
+    ['prefix-helper', 'scripts/native-homebrew-prefix.mjs'],
+    ['core-pin', 'scripts/toolchain-baseline.mjs'],
+  ]) {
+    const f = await observerApiFixture(t, { producerChange });
+    assert.deepEqual(f.changedFiles, [file], 'The counterexample changes only the selected producer dependency');
+    assert.equal(f.source.inventory.digest, baseline.source.inventory.digest);
+    assert.equal(nativeConfigurationDigest({ inventory: f.source.inventory, profile: 'pr' }), config);
+    const result = verdict(await f.connect().host.snapshot());
+    assert.equal(result.status, 'NotRun', producerChange);
+    assert.ok(result.blockers.some(message => message.includes('Producer definitions have not been maintainer-adopted')));
+    assert.ok(!f.calls.some(call => /\/actions\/artifacts\/\d+\/zip$/u.test(new URL(call.url).pathname)));
+    f.assertReadOnly();
+  }
+  baseline.assertReadOnly();
+});
+
 test('T-PRD021 API-acquired reporter changes cannot self-adopt complete passing fixture evidence', async t => {
   const f = await observerApiFixture(t, { unadoptedReporter: true });
   const result = verdict(await f.connect().host.snapshot());

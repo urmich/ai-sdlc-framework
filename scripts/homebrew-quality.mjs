@@ -60,7 +60,7 @@ export async function verifyHomebrewQuality({ candidate, formulaPath, mode, cand
       throw blocked('Homebrew audit/style cannot use a system or external Homebrew prefix');
     }
     const verified = await verifyHomebrewPrefixOwnership({
-      bootstrapDirectory: environment.SDLC_HOMEBREW_PREFIX_PROOF, repositoryRoot: ROOT,
+      bootstrapDirectory: environment.SDLC_HOMEBREW_PREFIX_PROOF, repositoryRoot: path.resolve(ROOT),
       target: `macos-${process.arch}`, environment,
     });
     ownedPrefix = verified.prefix;

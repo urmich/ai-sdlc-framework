@@ -6,6 +6,7 @@ import { choice, digest, object, requireThat, text } from '../src/core.mjs';
 import { parseTestPlan, testSpecificationDigest } from '../src/artifacts.mjs';
 import { validateRetainedPayload } from '../src/validation-evidence.mjs';
 import { immutablePublicationBinding } from './release-history.mjs';
+import { nativeToolchain } from './toolchain-baseline.mjs';
 import { normalizeExecutionReport, evaluateReadiness, sanitizeExecutionPayload,
   validationInventoryDigest } from 'ai-sdlc-framework/evidence';
 
@@ -39,9 +40,9 @@ export function expectedConsumerContext({ bundle, specification, plan, tree, tar
   const architecture = target === 'macos-arm64' ? 'arm64' : 'x64';
   const bootstrap = native?.bootstrap;
   assert.ok(runners[target] && native?.kind === 'native' && native.platform === platform &&
-    native.architecture === architecture && native.node === '22.23.3' &&
+    native.architecture === architecture && native.node === nativeToolchain.node &&
     bootstrap?.platform === platform && bootstrap.architecture === architecture &&
-    bootstrap.node === '22.23.3' && bootstrap.os && bootstrap.machine &&
+    bootstrap.node === nativeToolchain.node && bootstrap.os && bootstrap.machine &&
     bootstrap.imageOS && bootstrap.imageVersion &&
     native.image === `${bootstrap.imageOS}/${bootstrap.imageVersion}`,
   'Independent consumer host/bootstrap facts do not satisfy the exact native baseline');
@@ -50,7 +51,7 @@ export function expectedConsumerContext({ bundle, specification, plan, tree, tar
   return {
     candidateDigest: digest({ revision: bundle.identity.sourceCommit, tree }),
     testSpecDigest: testSpecificationDigest(plan),
-    configDigest: digest({ profile: specification.profile, node: '22.23.3', npm: '11.16.0',
+    configDigest: digest({ profile: specification.profile, node: nativeToolchain.node, npm: '11.16.0',
       procedures: specification.cases.map(test => test.assertions), releaseIntentId: bundle.releaseIntentId }),
     inventoryDigest: validationInventoryDigest(specification), profile: specification.profile,
     sources: [{ repositoryId: `repository-${scope.repositoryId}`,
