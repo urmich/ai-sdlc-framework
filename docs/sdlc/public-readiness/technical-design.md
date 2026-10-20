@@ -992,6 +992,15 @@ with current dependencies. Registry metadata/HEAD checks establish availability
 only; real installation verifies hashes, poured receipts, relocation and native
 execution. Historical dependency-tab version skews are not assumed ABI passes.
 
+Retain the actual native Mac bottle tag, macOS version, relocation-policy state
+and unfiltered bottle candidate before evaluating compatibility. Homebrew's
+`formula.bottle` filters incompatible candidates out; a missing return value
+alone must not be reported as proof that the archive does not exist. Keep the
+installer's own eligibility warnings and refuse installation when either
+compatibility or pourability fails. Upload immutable bootstrap diagnostics as
+soon as provisioning finishes, before the full suite; retain later cleanup in
+a separate artifact so observation never requires interrupting healthy tests.
+
 Fixed-cellar Node/OpenSSL bottles require the genuinely owned short prefix
 allocated by `native-homebrew-prefix.mjs`, not the long checkout path or an
 existing global installation. Bind its literal filesystem identity and marker

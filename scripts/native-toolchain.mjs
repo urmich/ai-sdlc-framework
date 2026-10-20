@@ -24,18 +24,22 @@ require "json"
 require "rbconfig"
 root = Formulary.factory(${JSON.stringify(homebrewToolchain.formula)})
 installer = FormulaInstaller.new(root, force_bottle: false)
+native_tag = Utils::Bottles.tag
 formulae = [root]
-formulae.concat(installer.compute_dependencies.map(&:to_formula)) if installer.pour_bottle?
+formulae.concat(installer.compute_dependencies.map(&:to_formula)) if installer.pour_bottle?(output_warning: true)
 entries = formulae.uniq(&:full_name).map do |formula|
-  bottle = formula.bottle
+  bottle = formula.bottle_for_tag(native_tag)
   { name: formula.name, version: formula.version.to_s, pkgVersion: formula.pkg_version.to_s,
     prefix: formula.prefix.to_s, bottleTag: bottle&.tag&.to_s,
+    bottleAvailable: !bottle.nil?, builtCellar: bottle&.built_cellar&.to_s,
     sha256: bottle&.resource&.checksum&.hexdigest,
     compatible: bottle ? bottle.compatible_locations? : false,
-    pourable: FormulaInstaller.new(formula, force_bottle: false).pour_bottle? }
+    pourable: FormulaInstaller.new(formula, force_bottle: false).pour_bottle?(output_warning: true) }
 end
 protocol_output.puts JSON.generate({ schemaVersion: 1, kind: "native-homebrew-bottle-plan",
   prefix: HOMEBREW_PREFIX.to_s, cellar: HOMEBREW_CELLAR.to_s,
+  nativeTag: native_tag.to_s, macosVersion: MacOS.version.to_s,
+  relocationEnabled: !Homebrew::EnvConfig.no_relocate_build_prefix?,
   architecture: RbConfig::CONFIG.fetch("host_cpu"), rubyPlatform: RUBY_PLATFORM, rubyVersion: RUBY_VERSION,
   entries: entries })
 `;
@@ -113,6 +117,8 @@ export function requireHomebrewBottlePlan(plan, { prefix, target }) {
   requireThat(['macos-arm64', 'macos-x64'].includes(target) && plan?.schemaVersion === 1 &&
     plan.kind === 'native-homebrew-bottle-plan' && plan.prefix === prefix &&
     plan.cellar === path.join(prefix, 'Cellar') && architecture.includes(plan.architecture) &&
+    plan.nativeTag === (target === 'macos-arm64' ? 'arm64_sequoia' : 'sequoia') &&
+    /^15(?:\.\d+)*$/u.test(plan.macosVersion ?? '') && typeof plan.relocationEnabled === 'boolean' &&
     typeof plan.rubyPlatform === 'string' && /darwin/u.test(plan.rubyPlatform) &&
     plan.rubyVersion === homebrewToolchain.ruby && Array.isArray(plan.entries) &&
     plan.entries.length > 0 && plan.entries.length <= 128 &&
@@ -123,12 +129,15 @@ export function requireHomebrewBottlePlan(plan, { prefix, target }) {
       typeof entry.version === 'string' && entry.version.length > 0 && entry.version.length <= 128 &&
       typeof entry.pkgVersion === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9+_.-]{0,127}$/u.test(entry.pkgVersion) &&
       entry.prefix === path.join(prefix, 'Cellar', entry.name, entry.pkgVersion) &&
+      typeof entry.bottleAvailable === 'boolean' &&
       typeof entry.compatible === 'boolean' && typeof entry.pourable === 'boolean'),
-  'HOST', 'Pinned Homebrew bottle eligibility needs the exact owned prefix, native architecture and complete installer plan');
+  'HOST', 'Pinned Homebrew bottle eligibility needs the exact owned prefix, native macOS 15 tag, architecture and complete installer plan',
+  { nativeTag: plan?.nativeTag ?? null, macosVersion: plan?.macosVersion ?? null,
+    relocationEnabled: plan?.relocationEnabled ?? null });
   const root = plan.entries.find(entry => entry.name === homebrewToolchain.formula);
   requireThat(root?.version === homebrewToolchain.node, 'HOST',
     `Homebrew Node must remain exactly ${homebrewToolchain.node}; no latest/system runtime substitute is allowed`);
-  const unavailable = plan.entries.filter(entry => !entry.compatible || !entry.pourable ||
+  const unavailable = plan.entries.filter(entry => !entry.bottleAvailable || !entry.compatible || !entry.pourable ||
     !/^[a-f0-9]{64}$/u.test(entry.sha256 ?? '') ||
     typeof entry.bottleTag !== 'string' || !/^[a-z][a-z0-9_]+$/u.test(entry.bottleTag) ||
     (entry.bottleTag !== 'all' && (target === 'macos-arm64' ?
@@ -136,7 +145,9 @@ export function requireHomebrewBottlePlan(plan, { prefix, target }) {
     entry.name === homebrewToolchain.formula && entry.bottleTag === 'all');
   requireThat(!unavailable.length, 'HOST',
     `Required native Homebrew bottles unavailable or non-relocatable at owned prefix ${prefix}: ` +
-    unavailable.map(entry => `${entry.name} (${entry.pkgVersion}) [${entry.bottleTag ?? 'no native bottle eligible at this prefix'}]`).join(', ') +
+    unavailable.map(entry => `${entry.name} (${entry.pkgVersion}) [` +
+      `${entry.bottleTag ?? 'no matching native bottle'}; available=${entry.bottleAvailable}; ` +
+      `compatible=${entry.compatible}; pourable=${entry.pourable}; builtCellar=${entry.builtCellar ?? 'unavailable'}]`).join(', ') +
     '. Source compilation is not permitted. An explicitly approved compatible bottle/dependency snapshot is required; ' +
     'no force-bottle, global prefix or source-build fallback was attempted.');
   return plan;

@@ -477,11 +477,13 @@ test('T-PRD015 Homebrew bottle preflight rejects absent native or non-relocatabl
   const prefix = path.join(repositoryRoot, '.test-data', 'virtual-owned-homebrew');
   const entry = (name, version, sha) => ({
     name, version, pkgVersion: version, prefix: path.join(prefix, 'Cellar', name, version),
-    bottleTag: 'sequoia', sha256: sha.repeat(64), compatible: true, pourable: true,
+    bottleTag: 'sequoia', bottleAvailable: true, builtCellar: '/usr/local/Cellar',
+    sha256: sha.repeat(64), compatible: true, pourable: true,
   });
   const plan = { schemaVersion: 1, kind: 'native-homebrew-bottle-plan', prefix,
     cellar: path.join(prefix, 'Cellar'), architecture: 'x86_64', rubyPlatform: 'x86_64-darwin24',
-    rubyVersion: homebrewToolchain.ruby, entries: [
+    rubyVersion: homebrewToolchain.ruby, nativeTag: 'sequoia', macosVersion: '15.7.1',
+    relocationEnabled: true, entries: [
       entry(homebrewToolchain.formula, homebrewToolchain.node, 'a'), entry('openssl@3', '3.5.9', 'b'),
     ] };
   assert.equal(requireHomebrewBottlePlan(plan, { prefix, target: 'macos-x64' }), plan);
@@ -492,6 +494,10 @@ test('T-PRD015 Homebrew bottle preflight rejects absent native or non-relocatabl
     selected => { selected.entries[0].version = '22.99.0'; },
     selected => { selected.entries[0].prefix = path.join(path.parse(prefix).root, 'unowned', 'node'); },
     selected => { selected.architecture = 'arm64'; },
+    selected => { selected.nativeTag = 'arm64_sequoia'; },
+    selected => { selected.macosVersion = '26.0'; },
+    selected => { selected.entries[0].bottleAvailable = false; },
+    selected => { selected.relocationEnabled = 'false'; },
     selected => { selected.entries[1].sha256 = 'not-an-integrity-digest'; },
   ]) {
     const changed = structuredClone(plan);
@@ -500,9 +506,14 @@ test('T-PRD015 Homebrew bottle preflight rejects absent native or non-relocatabl
   }
   const missing = structuredClone(plan);
   missing.entries[0].bottleTag = null;
+  missing.entries[0].bottleAvailable = false;
   missing.entries[0].pourable = false;
   assert.throws(() => requireHomebrewBottlePlan(missing, { prefix, target: 'macos-x64' }),
-    new RegExp(`${homebrewToolchain.formula}.*no native bottle.*Source compilation is not permitted`, 'u'));
+    new RegExp(`${homebrewToolchain.formula}.*no matching native bottle.*available=false.*Source compilation is not permitted`, 'u'));
+  const incompatible = structuredClone(plan);
+  incompatible.entries[0].compatible = false;
+  assert.throws(() => requireHomebrewBottlePlan(incompatible, { prefix, target: 'macos-x64' }),
+    /available=true; compatible=false.*builtCellar=\/usr\/local\/Cellar.*Source compilation is not permitted/u);
   const receipts = plan.entries.map(selected => ({
     name: selected.name, pkgVersion: selected.pkgVersion, prefix: selected.prefix,
     receipt: { poured_from_bottle: true, source: { versions: { stable: selected.version } } } }));
