@@ -336,6 +336,10 @@ async function broker(capacity) {
               producers.size + controls.size + pendingRestorations +
                 queue.filter(item => item.kind === 'producer').length < capacity * 4 + 2,
             'BUDGET', 'Producer exceeds its aggregate host allocation');
+            const resident = Math.min(limit, input.fileCount);
+            requireThat(input.control || ancestors(parent).reduce((count, node) =>
+              count + (node.resident ?? 0), 0) + resident <= capacity * 3,
+            'BUDGET', 'Nested producer lineage cannot fit the aggregate resident limit');
             const ownId = randomUUID();
             yieldParent(input.slot, ownId, parent);
             if (input.control) {
@@ -343,7 +347,7 @@ async function broker(capacity) {
               socket.controlId = ownId;
               reply(request, { id, capacity, workers: limit, control: ownId });
             } else queue.push({ ...request, kind: 'producer', id: ownId, parent,
-              slot: input.slot, limit, resident: Math.min(limit, input.fileCount) });
+              slot: input.slot, limit, resident });
             drain();
           } else if (input.op === 'worker') {
             const producer = producers.get(input.producer);

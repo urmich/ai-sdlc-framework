@@ -1,6 +1,7 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
   "applicability": [
+    {"names": ["T-PRD054 producer consumer originals preserve typed provenance through completion admission"], "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "release-consumer", "reason": "PR-only producer serialization and completion-admission regression; owned filesystem and controlled provider observations, no network/native/public acceptance or critical-profile growth.", "prerequisites": ["Node >=22", "Owned repository-local fixture with isolated cleanup"]},
     {"names": ["T-PRD041 retained signed fixtures use the actual verifier for payload signature certificate and transparency failures"], "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "consumer-crypto-fixture", "reason": "Every native PR job provisions public authentic verification material; missing capability fails rather than skips. Optional local reproduction never supplies PR credit.", "prerequisites": ["SHA-pinned recorded public Sigstore bundle and public trust root", "Integrity-pinned npm 11.16.0 with its actual bundled verifier", "Exact recorded certificate identity and issuer; offline verification without network fallback"]}
   ],
   "surfaces": [
@@ -23,7 +24,8 @@ import { canonical, sha256 } from '../packaging/standalone/archive.mjs';
 import { digest } from '../src/core.mjs';
 import { normalizeExecutionReport, evaluateReadiness, createEvidenceBundle,
   renderReadinessReport, sanitizeExecutionPayload } from 'ai-sdlc-framework/evidence';
-import { consumerSpecification, acceptPublicHomebrew, consumerLifecyclePassed } from '../scripts/accept-release.mjs';
+import { consumerSpecification, acceptPublicHomebrew, consumerLifecyclePassed,
+  retainConsumerResult } from '../scripts/accept-release.mjs';
 import { expectedConsumerContext, evaluateConsumerOriginal, acquireConsumerOrigin, retainConsumerOriginals,
   sanitizeConsumerResultPayload, consumerOriginalInventory, consumerEvidenceMarker,
   consumerEvidenceSuffixes } from '../scripts/consumer-evidence.mjs';
@@ -80,6 +82,36 @@ function credit(report) {
   return evaluateReadiness(specification, [normalized], { profile: specification.profile,
     executions: [{ id: 'consumer-windows-x64', context }], now: new Date().toISOString(),
     policy: { maxAgeMs: 86_400_000, revisionPolicy: 'exact', verifierIds: ['published-consumer-host'] } });
+}
+
+function successfulConsumer() {
+  const maintenance = () => ({ idempotentUpdate: { status: 'Passed' }, ordinaryUninstall: { status: 'Passed' },
+    purge: { status: 'Passed' }, installedEvents: 8 });
+  const signature = channel => ({ required: true, status: 'Passed',
+    policy: channel === 'npm' ? 'sigstore DSSE signature' : 'gh attestation verify',
+    verifier: channel === 'npm' ? { id: 'npm-bundled-sigstore', version: '4.1.0', npmVersion: '11.16.0' } :
+      { id: 'gh-attestation-verify', version: 'gh version 2.83.0 (controlled fixture)' } });
+  const mechanisms = channel => ({ signature: signature(channel),
+    certificate: { required: true, status: 'Passed', policy: 'Controlled certificate identity fixture' },
+    transparency: { required: true, status: 'Passed', policy: 'Controlled witnessed-proof fixture' } });
+  const evidenceSha256 = 'd'.repeat(64);
+  const consumer = { schemaVersion: 1, profile: 'r-post', target: 'windows-x64', identity: bundle.identity,
+    releaseIntentId: bundle.releaseIntentId, native, run: { id: scope.runId, attempt: scope.attempt }, status: 'Passed',
+    publicAssets: { status: 'Passed' }, fixtureOnly: true,
+    standalone: { status: 'Passed', upgradeKind: 'version', previousVersion: '1.2.2', version: bundle.identity.version,
+      shells: ['cmd', 'powershell'].map(shell => ({ shell, status: 'Passed', upgradeKind: 'version',
+        previousVersion: '1.2.2', version: bundle.identity.version, ...maintenance() })) },
+    npm: { status: 'Passed', upgradeKind: 'version', previousVersion: '1.2.2', version: bundle.identity.version,
+      command: 'npm-generated-sdlc.cmd', ...maintenance() },
+    provenance: { status: 'Passed',
+      npm: { cryptographicSignatureVerification: 'Passed',
+        verifier: { id: 'npm-bundled-sigstore', version: '4.1.0', npmVersion: '11.16.0' },
+        mechanisms: { ...mechanisms('npm'), registrySignature: { required: true, status: 'Passed',
+          verifier: { id: 'npm-audit-signatures', version: '11.16.0' } } } },
+      github: { cryptographicSignatureVerification: 'Passed', subjectSha256: evidenceSha256,
+        verifier: { id: 'gh-attestation-verify', version: 'gh version 2.83.0 (controlled fixture)' },
+        mechanisms: mechanisms('github') } } };
+  return { consumer, evidenceSha256 };
 }
 
 test('T-PRD041 consumer context derives source, specification, configuration, artifacts and producer independently', () => {
@@ -208,32 +240,7 @@ test('T-PRD054 rejected and failed consumer originals retain sanitized bytes, di
     'Later recovery must preserve the original failed physical attempt and outcome');
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(recovered, 'windows-x64.json'))), passed);
 
-  const maintenance = () => ({ idempotentUpdate: { status: 'Passed' }, ordinaryUninstall: { status: 'Passed' },
-    purge: { status: 'Passed' }, installedEvents: 8 });
-  const signature = channel => ({ required: true, status: 'Passed',
-    policy: channel === 'npm' ? 'sigstore DSSE signature' : 'gh attestation verify',
-    verifier: channel === 'npm' ? { id: 'npm-bundled-sigstore', version: '4.1.0', npmVersion: '11.16.0' } :
-      { id: 'gh-attestation-verify', version: 'gh version 2.83.0 (controlled fixture)' } });
-  const mechanisms = channel => ({ signature: signature(channel),
-    certificate: { required: true, status: 'Passed', policy: 'Controlled certificate identity fixture' },
-    transparency: { required: true, status: 'Passed', policy: 'Controlled witnessed-proof fixture' } });
-  const evidenceSha256 = 'd'.repeat(64);
-  const consumer = { schemaVersion: 1, profile: 'r-post', target: 'windows-x64', identity: bundle.identity,
-    releaseIntentId: bundle.releaseIntentId, native, run: { id: scope.runId, attempt: scope.attempt }, status: 'Passed',
-    publicAssets: { status: 'Passed' }, fixtureOnly: true,
-    standalone: { status: 'Passed', upgradeKind: 'version', previousVersion: '1.2.2', version: bundle.identity.version,
-      shells: ['cmd', 'powershell'].map(shell => ({ shell, status: 'Passed', upgradeKind: 'version',
-        previousVersion: '1.2.2', version: bundle.identity.version, ...maintenance() })) },
-    npm: { status: 'Passed', upgradeKind: 'version', previousVersion: '1.2.2', version: bundle.identity.version,
-      command: 'npm-generated-sdlc.cmd', ...maintenance() },
-    provenance: { status: 'Passed',
-      npm: { cryptographicSignatureVerification: 'Passed',
-        verifier: { id: 'npm-bundled-sigstore', version: '4.1.0', npmVersion: '11.16.0' },
-        mechanisms: { ...mechanisms('npm'), registrySignature: { required: true, status: 'Passed',
-          verifier: { id: 'npm-audit-signatures', version: '11.16.0' } } } },
-      github: { cryptographicSignatureVerification: 'Passed', subjectSha256: evidenceSha256,
-        verifier: { id: 'gh-attestation-verify', version: 'gh version 2.83.0 (controlled fixture)' },
-        mechanisms: mechanisms('github') } } };
+  const { consumer, evidenceSha256 } = successfulConsumer();
   const lifecycle = value => consumerLifecyclePassed(value, 'windows-x64', '1.2.2', bundle.identity.version, evidenceSha256);
   const proofBytes = Buffer.from(canonical(consumer));
   assert.equal(lifecycle(consumer), true, 'Otherwise-valid controlled facts, not actual native/cryptographic proof');
@@ -334,6 +341,68 @@ test('T-PRD054 rejected and failed consumer originals retain sanitized bytes, di
   await assert.rejects(fs.lstat(path.join(rejectedOutput, 'windows-x64.json')), { code: 'ENOENT' });
   assert.deepEqual(await fs.readFile(path.join(proofOutput, proofRef.filename)), proofRetainedBytes,
     'Rejected replacement cannot alter the retained original proof bytes');
+});
+
+test('T-PRD054 producer consumer originals preserve typed provenance through completion admission', async t => {
+  const root = await fixture(t);
+  const file = path.join(root, 'windows-x64.json');
+  const commandFile = path.join(root, 'commands.jsonl');
+  const { consumer, evidenceSha256 } = successfulConsumer();
+  const report = execution();
+  Object.assign(consumer, { startedAt: report.startedAt, finishedAt: report.finishedAt,
+    signature: 'arbitrary-signature-secret', detail: 'MY_API_TOKEN=arbitrary-result-secret' });
+  await write(`${file}.execution.json`, report);
+  await write(`${file}.readiness-bundle.json`, createEvidenceBundle(credit(report)));
+  await write(`${file}.readiness.md`, renderReadinessReport(credit(report)));
+  await write(commandFile, '{"exitCode":0,"stderr":"already sanitized fixture command"}\n');
+  let producerOutput = '';
+  const stdout = t.mock.method(process.stdout, 'write', value => { producerOutput += value; return true; });
+  try {
+    await retainConsumerResult({ result: consumer, bundle, outputFile: file, commandFile, scope,
+      toolchain: { schemaVersion: 1, status: 'Passed', target: 'windows-x64', native: native.bootstrap } });
+  } finally {
+    stdout.mock.restore();
+  }
+  const originalBytes = await fs.readFile(file);
+  const result = JSON.parse(originalBytes);
+  for (const channel of ['npm', 'github']) {
+    assert.deepEqual(result.provenance[channel].mechanisms.signature,
+      consumer.provenance[channel].mechanisms.signature, `${channel} producer must preserve typed public metadata`);
+  }
+  assert.equal(originalBytes.includes('arbitrary-signature-secret'), false);
+  assert.equal(originalBytes.includes('arbitrary-result-secret'), false);
+  const marker = JSON.parse(producerOutput.slice(consumerEvidenceMarker.length));
+  assert.equal(marker.files.find(record => record.filename === 'windows-x64.json').sha256, sha256(originalBytes),
+    'Producer origin must bind the final sanitized bytes, not the unsanitized result');
+  const job = { id: 789, name: 'consumer-windows-x64', head_sha: bundle.identity.sourceCommit,
+    conclusion: 'success', status: 'completed',
+    started_at: new Date(Date.parse(report.startedAt) - 60_000).toISOString(), completed_at: report.finishedAt,
+    labels: ['windows-2022'], steps: [{
+      name: 'Anonymous exact public downloads, real prior-version upgrades and cryptographic provenance', conclusion: 'success',
+    }] };
+  const api = async route => ({ status: 200, value: route.endsWith('/logs') ? Buffer.from(producerOutput) :
+    route.includes('/jobs?') ? { total_count: 1, jobs: [job] } : {
+      id: 456, run_attempt: 2, repository: { id: 123, full_name: scope.repository },
+      head_sha: bundle.identity.sourceCommit, path: '.github/workflows/release.yml',
+      event: 'workflow_dispatch', head_branch: 'main',
+    } });
+  const origin = await acquireConsumerOrigin({ bundle, target: 'windows-x64', file, api, scope });
+  const replay = evaluateConsumerOriginal({ bundle, plan, tree: 'b'.repeat(40), target: 'windows-x64', result, report,
+    now: report.observedAt, verifyOrigin: ({ resultSha256, reportSha256 }) => {
+      assert.equal(resultSha256, origin.origin.files.find(record => record.filename === 'windows-x64.json').sha256);
+      assert.equal(reportSha256,
+        origin.origin.files.find(record => record.filename === 'windows-x64.json.execution.json').sha256);
+      return origin;
+    } });
+  assert.equal(replay.evaluation.status, 'Passed', 'Controlled producer facts must remain admissible at completion');
+  assert.equal(consumerLifecyclePassed(result, 'windows-x64', '1.2.2', bundle.identity.version, evidenceSha256), true,
+    'Persisted producer result must satisfy the unchanged completion lifecycle/provenance postconditions');
+  const outputDir = path.join(root, 'retained');
+  await fs.mkdir(outputDir);
+  const retained = await retainConsumerOriginals({ file, outputDir });
+  assert.deepEqual(retained.diagnostics, []);
+  assert.deepEqual(await fs.readFile(path.join(outputDir, 'windows-x64.json')), originalBytes);
+  assert.deepEqual(await fs.readFile(file), originalBytes, 'Completion retention cannot rewrite producer originals');
 });
 
 test('T-PRD054 provider-acquired native original bindings reject foreign runs, changed bytes and unsuccessful steps', async t => {

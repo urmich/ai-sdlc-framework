@@ -74,15 +74,33 @@ function links(value, patterns, label) {
   unique(values, label);
   return values;
 }
+function* definitionLines(contents, label) {
+  let fence;
+  for (const [index, line] of contents.split(/\r?\n/u).entries()) {
+    if (fence) {
+      const closing = /^ {0,3}(`{3,}|~{3,})[ \t]*$/u.exec(line);
+      if (closing && closing[1][0] === fence.marker && closing[1].length >= fence.length) {
+        fence = undefined;
+      }
+      yield [index, ''];
+      continue;
+    }
+    const opening = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
+    if (opening && (opening[1][0] === '~' || !opening[2].includes('`'))) {
+      fence = { marker: opening[1][0], length: opening[1].length };
+      yield [index, ''];
+      continue;
+    }
+    yield [index, line];
+  }
+  requireThat(!fence, 'COVERAGE', `Unclosed fenced example in ${label}`);
+}
 function requirementsFrom(contents) {
   const result = [];
   let current;
   let requirementDepth = 0;
   let definitionOfDone = false;
-  let fenced = false;
-  for (const [index, line] of contents.split(/\r?\n/u).entries()) {
-    if (/^\s*```/u.test(line)) { fenced = !fenced; continue; }
-    if (fenced) continue;
+  for (const [index, line] of definitionLines(contents, 'Requirements')) {
     const heading = /^#{2,6}\s+(FR-\d+)\s*[-\u2013:]\s*\S.*$/u.exec(line);
     if (/^#{2,6}\s+FR-/u.test(line)) {
       requireThat(heading, 'COVERAGE',
@@ -117,7 +135,6 @@ function requirementsFrom(contents) {
       current.conditions.push(condition[1]);
     }
   }
-  requireThat(!fenced, 'COVERAGE', 'Unclosed fenced example in Requirements');
   requireThat(result.length > 0, 'COVERAGE', 'Requirements contain no definitions');
   unique(result.map(item => item.id), 'requirement ID');
   for (const item of result) {
@@ -161,10 +178,7 @@ function testsFrom(contents) {
   }
   const result = [];
   let headings;
-  let fenced = false;
-  for (const [index, line] of contents.split(/\r?\n/u).entries()) {
-    if (/^\s*```/u.test(line)) { fenced = !fenced; headings = undefined; continue; }
-    if (fenced) continue;
+  for (const [index, line] of definitionLines(contents, 'Test Plan')) {
     if (!line.trim().startsWith('|')) { headings = undefined; continue; }
     requireThat(line.trim().endsWith('|'), 'COVERAGE',
       `Unclosed Test Plan row at line ${index + 1}`);
@@ -204,7 +218,6 @@ function testsFrom(contents) {
       outOfScope: fields.classification === 'out-of-scope',
     }));
   }
-  requireThat(!fenced, 'COVERAGE', 'Unclosed fenced example in Test Plan');
   requireThat(result.length > 0, 'COVERAGE', 'Test Plan contains no definitions');
   return result;
 }

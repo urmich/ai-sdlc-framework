@@ -49,7 +49,7 @@ import { digest, SdlcError } from '../src/core.mjs';
 import { captureBenchmarkCache, compareValidationBenchmarks, runValidationBenchmark } from '../scripts/validation-benchmark.mjs';
 import { hostedValidationSelection, scheduleValidationFiles, validationExecutionGroups,
   runValidationReadyPool, validationSchedulingPolicyDigest } from '../scripts/test-scheduling.mjs';
-import { enterTestBudget, readTestBudget } from '../scripts/test-budget.mjs';
+import { acquireTestWorker, enterTestBudget, readTestBudget } from '../scripts/test-budget.mjs';
 import { readEvidenceBundle } from '../src/evidence.mjs';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -376,6 +376,8 @@ test('T-PRD010 benchmark completes same-file root measurements under the actual 
   for (const root of [baseline.root, candidate.root]) {
     await fs.writeFile(path.join(root, 'test', 'benchmark-fixture.test.mjs'), harnessDeclaration + fixtureSource);
   }
+  await fs.appendFile(path.join(candidate.root, 'test', 'benchmark-fixture.test.mjs'),
+    "\ntest('candidate-only independent benchmark root',()=>assert.fail('not an original measurement'));\n");
   inventory = await compileValidationInventory(baseline.root);
   assert.equal(inventory.complete, true, JSON.stringify(inventory.unresolved));
   assert.equal(inventory.cases.length, 2);
@@ -388,6 +390,10 @@ test('T-PRD010 benchmark completes same-file root measurements under the actual 
   assert.equal(comparison.status, 'Passed', JSON.stringify({ blockers: comparison.blockers,
     measurements: comparison.baseline.measurements.map(measurement => measurement.completion) }));
   assert.equal(comparison.comparisons.length, 4);
+  const candidateInventory = await compileValidationInventory(candidate.root);
+  assert.deepEqual(comparison.addedAssertionIds, candidateInventory.cases
+    .filter(test => test.name === 'candidate-only independent benchmark root').map(test => test.id));
+  assert.equal(comparison.addedAssertionIds.length, 1);
   for (const version of ['baseline', 'candidate']) {
     assert.equal(comparison[version].measurements.length, 4);
     for (const measurement of comparison[version].measurements) {
@@ -399,7 +405,15 @@ test('T-PRD010 benchmark completes same-file root measurements under the actual 
       assert.equal(typeof measurement.resources.protocolVersion, 'number');
       assert.equal(measurement.resources.policy, report.resources.budget.allocationPolicy);
       assert.equal(measurement.resources.protocolVersion, report.resources.budget.version);
+      assert.equal(measurement.groupSelectionDigest, report.groupExecution.selectionDigest);
     }
+  }
+  for (let index = 0; index < comparison.baseline.measurements.length; index++) {
+    const baselineMeasurement = comparison.baseline.measurements[index];
+    const candidateMeasurement = comparison.candidate.measurements[index];
+    assert.notEqual(baselineMeasurement.sourceDigest, candidateMeasurement.sourceDigest);
+    assert.notEqual(baselineMeasurement.groupSelectionDigest, candidateMeasurement.groupSelectionDigest);
+    assert.equal(baselineMeasurement.configurationDigest, candidateMeasurement.configurationDigest);
   }
 });
 
@@ -409,6 +423,135 @@ function criticalSequence(stdout) {
   assert.ok(line, stdout);
   return JSON.parse(line.slice(prefix.length));
 }
+
+test('T-PRD002 full rejects a hidden failing dynamic node:test registration beside a known passing root', async t => {
+  const f = await runnerFixture(t);
+  const file = path.join(f.root, 'test', 'dynamic-registration.test.mjs');
+  const marker = path.join(f.root, 'known-root-started');
+  await fs.writeFile(file, `import test from 'node:test';
+import assert from 'node:assert/strict';import {writeFile} from 'node:fs/promises';
+test('known passing root',()=>writeFile(${JSON.stringify(marker)},'started'));
+const {it:extra}=await import('node:test');
+extra('hidden failing dynamic root',()=>assert.fail('owned dynamic registration failure'));
+`);
+  const result = await f.invoke(['full']);
+  assert.notEqual(result.exitCode, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /UNSUPPORTED_DYNAMIC_TEST_IMPORT_BINDING/u);
+  await assert.rejects(fs.stat(marker), { code: 'ENOENT' },
+    'Reject the incomplete source denominator before any exact root filter can omit the failure');
+});
+
+test('T-PRD010 impossible four-level resident lineage rejects before yielding and restores every owned lease', async () => {
+  const keys = ['SDLC_TEST_BUDGET', 'SDLC_TEST_BUDGET_PRODUCER', 'SDLC_TEST_BUDGET_PARENT', 'SDLC_TEST_BUDGET_SLOT'];
+  const original = new Map(keys.map(key => [key, process.env[key]]));
+  const owner = await enterTestBudget({
+    workers: 2, fileCount: 2, control: true, inherited: null, parent: null, slot: null,
+  });
+  const owned = [];
+  let pending;
+  const observeAdmission = async request => {
+    pending = request.then(lease => {
+      owned.push({ kind: 'producer', lease });
+      return { status: 'admitted' };
+    }, error => ({ status: 'rejected', code: error.code, message: error.message }));
+    let timer;
+    try {
+      return await Promise.race([pending, new Promise(resolve => {
+        timer = setTimeout(() => resolve({ status: 'stalled' }), 1500);
+      })]);
+    } finally { clearTimeout(timer); }
+  };
+  try {
+    let parent = owner.parent;
+    let slot = null;
+    for (let level = 0; level < 3; level++) {
+      const producer = await enterTestBudget({ workers: 2, fileCount: 2,
+        inherited: owner.inherited, parent, slot });
+      owned.push({ kind: 'producer', lease: producer });
+      Object.assign(process.env, producer.environment);
+      const worker = await acquireTestWorker(2);
+      owned.push({ kind: 'worker', lease: worker });
+      parent = worker.slot;
+      slot = worker.slot;
+    }
+    const before = await owner.snapshot();
+    assert.deepEqual([before.capacity, before.producers, before.potentialResidentWorkers,
+      before.residentWorkers, before.activeWorkers, before.pendingParentRestorations], [2, 3, 6, 3, 1, 0]);
+    const result = await observeAdmission(enterTestBudget({
+      workers: 2, fileCount: 2, inherited: owner.inherited, parent, slot,
+    }));
+    assert.equal(result.status, 'rejected', 'An impossible waiting ancestor lineage must terminate explicitly');
+    assert.equal(result.code, 'BUDGET');
+    assert.match(result.message, /lineage.*resident limit/u);
+    const rejected = await owner.snapshot();
+    assert.deepEqual([rejected.producers, rejected.potentialResidentWorkers, rejected.residentWorkers,
+      rejected.activeWorkers, rejected.pendingParentRestorations], [3, 6, 3, 1, 0],
+    'Rejected admission must not yield the current parent token or create a pending restoration');
+    const control = await enterTestBudget({ workers: 2, fileCount: 2, control: true,
+      inherited: owner.inherited, parent, slot });
+    owned.push({ kind: 'control', lease: control });
+    const controlled = await observeAdmission(enterTestBudget({ workers: 2, fileCount: 2,
+      inherited: owner.inherited, parent: control.parent, slot: null }));
+    assert.equal(controlled.status, 'rejected');
+    assert.equal(controlled.code, 'BUDGET');
+    assert.match(controlled.message, /lineage.*resident limit/u);
+    await control.close();
+    owned.pop();
+    const restored = await owner.snapshot();
+    assert.deepEqual([restored.controls, restored.activeWorkers, restored.pendingParentRestorations], [1, 1, 0],
+      'A controller must restore its original parent after rejected descendant admission');
+  } finally {
+    try {
+      for (const { lease } of owned.reverse()) await lease.close();
+      if (pending) await pending;
+      const closed = await owner.snapshot();
+      assert.deepEqual([closed.producers, closed.potentialResidentWorkers, closed.residentWorkers,
+        closed.activeWorkers, closed.pendingParentRestorations], [0, 0, 0, 0, 0]);
+    } finally {
+      await owner.close();
+      for (const [key, value] of original) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  }
+});
+
+test('T-PRD005 affected planned units without a unit suffix keep their root closure before all integration work', async t => {
+  const f = await runnerFixture(t);
+  const file = path.join(f.root, 'test', 'affected-classifier.test.mjs');
+  const integration = path.join(f.root, 'integration-started');
+  const sibling = path.join(f.root, 'ordered-unit-child');
+  await fs.writeFile(file, `export const validationDeclarations=${JSON.stringify({
+    schemaVersion: 1, plannedCases: [{ id: 'T-PRD002', selectors: [
+      { name: 'unprefixed failing unit child', parents: ['unprefixed causal unit root'] },
+    ] }],
+  })};
+import test from 'node:test';import assert from 'node:assert/strict';import {writeFile} from 'node:fs/promises';
+test('T-PRD002 prefixed affected unit',()=>assert.fail('owned prefixed unit failure'));
+test('unprefixed causal unit root',async t=>{
+  await t.test('unprefixed failing unit child',()=>assert.fail('owned bound unit failure'));
+  await t.test('ordered unit child',()=>writeFile(${JSON.stringify(sibling)},'finished'));
+});
+test('integration after affected units',()=>writeFile(${JSON.stringify(integration)},'started'));
+`);
+  const result = await f.invoke(['critical', '--affected', file, '--affected-name',
+    'T-PRD002 prefixed affected unit|unprefixed failing unit child|integration after affected units']);
+  assert.equal(result.exitCode, 1, result.stdout + result.stderr);
+  const sequence = criticalSequence(result.stdout);
+  assert.ok(sequence.stages.some(stage => stage.stage === 'affected-units' && stage.exitCode === 1));
+  assert.ok(!sequence.stages.some(stage => ['integration', 'affected'].includes(stage.stage)));
+  const names = (await fs.readFile(f.log, 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.deepEqual(new Set(names), new Set(f.unitNames));
+  assert.equal(await fs.readFile(sibling, 'utf8'), 'finished');
+  await assert.rejects(fs.stat(integration), { code: 'ENOENT' });
+  const units = sequence.stages.find(stage => stage.stage === 'affected-units');
+  const report = JSON.parse(await fs.readFile(units.reportPath, 'utf8'));
+  assert.deepEqual(new Set(report.executions.map(row => row.name)), new Set([
+    'T-PRD002 prefixed affected unit', 'unprefixed causal unit root',
+    'unprefixed failing unit child', 'ordered unit child',
+  ]));
+});
 
 test('T-PRD005 public critical command executes canonical units before risk-based cases and keeps targeted/full available', async t => {
   const f = await runnerFixture(t);

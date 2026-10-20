@@ -14,7 +14,7 @@ async function loadDocuments(root, values) {
     const relative = validateCoverageSourcePath(reference.path);
     const bytes = await readBytes(await safePath(root, relative), LIMITS.artifact);
     let contents;
-    try { contents = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+    try { contents = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); }
     catch (error) {
       if (!(error instanceof TypeError)) throw error;
       requireThat(false, 'COVERAGE', 'Specification must contain valid UTF-8');
@@ -36,11 +36,9 @@ async function sourceDocument(root, sourceRevision, role, item) {
   const objectId = await git(root, ['rev-parse', '--verify', '-q', reference],
     { optional: true });
   if (!objectId) return { document: item, matches: false };
-  const [committed, checkout] = await Promise.all([
-    git(root, ['show', reference], { trim: false }),
-    git(root, ['cat-file', '--filters', reference], { trim: false }),
-  ]);
-  const matches = sameDefinition(role, checkout, item.contents);
+  const committed = await git(root, ['cat-file', 'blob', objectId], { trim: false });
+  const matches = sameDefinition(role, committed.replaceAll('\r\n', '\n'),
+    item.contents.replaceAll('\r\n', '\n'));
   return { document: matches ? { ...item, contents: committed } : item, matches };
 }
 async function registeredReferences(store, cwd, flags, input) {

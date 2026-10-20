@@ -274,6 +274,12 @@ export async function runValidationBenchmark({ baselineRoot, candidateRoot, outp
           [exactPattern(extra.map(test => [...test.parents, test.name].join(' ')))] : [];
         const groups = validationExecutionGroups(adoptedInventories[version],
           { files, pattern: plan.name, preserveOrder: true });
+        const groupRootIds = new Map(groups.map(group => [group.id, group.rootId]));
+        const groupConfiguration = groups.map(group => ({
+          rootId: group.rootId, assertionIds: group.assertionIds,
+          minimumSlots: group.minimumSlots, exclusiveResources: group.exclusiveResources,
+          dependsOn: group.dependsOn.map(id => groupRootIds.get(id)),
+        }));
         plan.executionBudget = { inherited: allocation.inherited, parent: allocation.parent, slot: null };
         plan.environment = {
           HOME: path.join(cacheRoot, 'home'), USERPROFILE: path.join(cacheRoot, 'home'),
@@ -333,7 +339,8 @@ export async function runValidationBenchmark({ baselineRoot, candidateRoot, outp
           scope, repeat, cache, sourceDigest: sources[version].contentDigest,
           reportDigest: bytes ? digest(bytes) : null, testSpecDigest: digest(signature(cases)),
           configurationDigest: digest({ scope, repeat, originalIds: [...expected].sort(),
-            policy: validationSchedulingPolicyDigest(), groupSelectionDigest: digest(groups) }),
+            policy: validationSchedulingPolicyDigest(), groups: groupConfiguration }),
+          groupSelectionDigest: digest(groups),
           inventoryDigest: digest(signature(cases)), assertions: observations,
           assertionsDigest: digest(observations), complete: Object.values(completion).every(Boolean), completion,
           exitCode, wallMs, startedAt, finishedAt,

@@ -209,14 +209,11 @@ export async function runValidationReadyPool(groups, { concurrency, capacity = c
   return { completed, notRun: [...pending.values()] };
 }
 
-export function hostedValidationSelection({ inventory, tests, canonicalFiles }) {
-  requireThat(inventory.complete && Array.isArray(tests) && Array.isArray(canonicalFiles) &&
-    new Set(inventory.cases.map(test => test.id)).size === inventory.cases.length &&
-    inventory.cases.every(test => inventory.files.some(source => source.file === test.file)),
-  'INVENTORY', 'Hosted selection requires the complete unique adopted inventory');
+export function validationUnitAssertionIds({ cases, tests, canonicalFiles = [] }) {
+  requireThat(Array.isArray(cases) && Array.isArray(tests) && Array.isArray(canonicalFiles),
+    'INVENTORY', 'Classify units from declared source cases and canonical Plan definitions');
   const plan = new Map(tests.filter(test => !test.outOfScope && test.mode === 'automated')
     .map(test => [test.id, test]));
-  const cases = inventory.cases;
   const bySelector = new Map(cases.map(test => [JSON.stringify([test.file, test.parents, test.name]), test]));
   const isUnit = test => /\.unit\.test\.(?:mjs|cjs|js)$/u.test(test.file) ||
     [...test.parents, test.name].some(name => plan.get(name.split(' ')[0])?.level === 'unit') ||
@@ -225,10 +222,19 @@ export function hostedValidationSelection({ inventory, tests, canonicalFiles }) 
       .some(parent => parent?.plannedCases?.some(id => plan.get(id)?.level === 'unit'));
   const unitRoots = new Set(cases.filter(isUnit)
     .map(test => JSON.stringify([test.file, test.parents[0] ?? test.name])));
+  return new Set(cases.filter(test => canonicalFiles.includes(test.file) ||
+    unitRoots.has(JSON.stringify([test.file, test.parents[0] ?? test.name]))).map(test => test.id));
+}
+
+export function hostedValidationSelection({ inventory, tests, canonicalFiles }) {
+  requireThat(inventory.complete && Array.isArray(tests) && Array.isArray(canonicalFiles) &&
+    new Set(inventory.cases.map(test => test.id)).size === inventory.cases.length &&
+    inventory.cases.every(test => inventory.files.some(source => source.file === test.file)),
+  'INVENTORY', 'Hosted selection requires the complete unique adopted inventory');
+  const cases = inventory.cases;
+  const unitIds = validationUnitAssertionIds({ cases, tests, canonicalFiles });
   const canonical = cases.filter(test => canonicalFiles.includes(test.file));
-  const units = cases.filter(test => !canonicalFiles.includes(test.file) &&
-    unitRoots.has(JSON.stringify([test.file, test.parents[0] ?? test.name])));
-  const unitIds = new Set([...canonical, ...units].map(test => test.id));
+  const units = cases.filter(test => !canonicalFiles.includes(test.file) && unitIds.has(test.id));
   const regression = cases.filter(test => !unitIds.has(test.id));
   const fullName = test => [...test.parents, test.name].join(' ');
   const select = (selected, stage) => {

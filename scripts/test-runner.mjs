@@ -7,7 +7,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { canonicalUnitFiles, criticalSelection, readCriticalRiskSelectors, testTimingGuidance } from './test-profiles.mjs';
 import { compileValidationInventory, discoverDeclarations, isValidationTestPath, matchesNodeSelection,
   reconcileNodeExecution, requiredFileWorkers } from './validation-inventory.mjs';
-import { resolveValidationWorkers, scheduleValidationFiles, validationExecutionGroups } from './test-scheduling.mjs';
+import { resolveValidationWorkers, scheduleValidationFiles, validationExecutionGroups,
+  validationUnitAssertionIds } from './test-scheduling.mjs';
 import { enterTestBudget } from './test-budget.mjs';
 import { captureLocalExecution, recordLocalExecution, finalizeLocalExecution,
   localEvidenceFailureDiagnostic } from './test-local-evidence.mjs';
@@ -187,10 +188,17 @@ async function runCritical(plan, reportPath) {
     requireThat(requestedFiles.every(file => plan.inventory.files.some(source => source.file === file)),
       'INVENTORY', 'Independent fixture projects keep their separate command/disposition, not framework checkpoint credit');
     const pattern = plan.affectedName ? new RegExp(plan.affectedName) : null;
-    const remaining = plan.inventory.cases.filter(test => requestedFiles.includes(test.file) && !covered.has(test.id) &&
-      (!pattern || matchesNodeSelection(test, pattern)));
+    const rootKey = test => JSON.stringify([test.file, test.parents[0] ?? test.name]);
+    const requestedRoots = new Set(plan.inventory.cases.filter(test => requestedFiles.includes(test.file) &&
+      (!pattern || matchesNodeSelection(test, pattern))).map(rootKey));
+    const remaining = plan.inventory.cases.filter(test =>
+      requestedRoots.has(rootKey(test)) && !covered.has(test.id));
+    const unitIds = validationUnitAssertionIds({
+      cases: plan.inventory.cases, canonicalFiles: unitFiles,
+      tests: parseTestPlan(await readFile(path.join(plan.root, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8')),
+    });
     for (const [stage, isUnit] of [['units', true], ['integration', false]]) {
-      const cases = remaining.filter(test => /\.unit\.test\.(?:mjs|cjs|js)$/u.test(test.file) === isUnit);
+      const cases = remaining.filter(test => unitIds.has(test.id) === isUnit);
       const files = requestedFiles.filter(file => cases.some(test => test.file === file));
       affected[stage] = { cases, files, bindings: [], blockers: [],
         name: cases.length ? exactPattern(cases.map(test => [...test.parents, test.name].join(' '))) : '(?!)' };

@@ -1,6 +1,6 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
-  "surfaces": [{"coverage": "direct", "paths": ["src/coverage-cli.mjs", "src/evidence.mjs"]}]
+  "surfaces": [{"coverage": "direct", "paths": ["src/coverage.mjs", "src/coverage-cli.mjs", "src/evidence.mjs"]}]
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
-import { prepareCoverage, readCoverageSection, normalizeExecutionReport,
+import { prepareCoverage, renderCoverageSection, inspectCoverage, readCoverageSection, normalizeExecutionReport,
   evaluateReadiness, validationInventoryDigest, createEvidenceBundle,
   readEvidenceBundle } from 'ai-sdlc-framework/evidence';
 import { candidateSnapshot, candidateContentDigest } from '../src/validation.mjs';
@@ -58,7 +58,7 @@ async function files(directory, prefix = '') {
   }
   return result.sort();
 }
-async function consumer(t, { crlf = false, canonical = false } = {}) {
+async function consumer(t, { crlf = false, bom = false, canonical = false } = {}) {
   await fs.mkdir(path.resolve('.test-data'), { recursive: true });
   const root = await fs.mkdtemp(path.resolve('.test-data', 'coverage-consumer-'));
   t.after(async () => {
@@ -73,7 +73,7 @@ async function consumer(t, { crlf = false, canonical = false } = {}) {
   } : { requirements: requirementPath, plan: planPath };
   await fs.mkdir(path.dirname(path.join(repo, documentPaths.requirements)), { recursive: true });
   await fs.mkdir(path.join(repo, '.github', 'workflows'), { recursive: true });
-  const newline = value => crlf ? value.replaceAll('\n', '\r\n') : value;
+  const newline = value => (bom ? '\uFEFF' : '') + (crlf ? value.replaceAll('\n', '\r\n') : value);
   await fs.writeFile(path.join(repo, documentPaths.requirements), newline(requirements));
   await fs.writeFile(path.join(repo, documentPaths.plan), newline(plan));
   await fs.writeFile(path.join(repo, '.github', 'workflows', 'existing.yml'),
@@ -194,30 +194,81 @@ test('T-PRD084 shipped instructions and installed public interfaces prepare inde
 });
 
 test('T-PRD084 Git canonical source survives CRLF checkouts and exposes uncommitted definitions', async t => {
-  const fixture = await consumer(t, { crlf: true });
+  for (const bom of [false, true]) {
+    const fixture = await consumer(t, { crlf: true, bom });
+    const prepared = await cli(fixture, sourceEntry, ['coverage', 'prepare'], references());
+    assert.equal(prepared.complete, true, JSON.stringify({ bom, diagnostics: prepared.diagnostics }));
+    assert.equal(prepared.sourceMatches, true);
+    assert.equal(prepared.metadata.requirements[0].sha256,
+      digest(await fixture.runGit('show', `HEAD:${requirementPath}`)));
+    const source = await fs.readFile(path.join(fixture.repo, requirementPath), 'utf8');
+    await fs.writeFile(path.join(fixture.repo, requirementPath), source.replace(
+      '- AC-801.2:', '- AC-801.3: Require another observable result.\r\n- AC-801.2:'));
+    const changed = await cli(fixture, sourceEntry, ['coverage', 'prepare'], references());
+    assert.equal(changed.complete, false);
+    assert.equal(changed.sourceMatches, false);
+    assert.deepEqual(changed.uncovered, ['AC-801.3']);
+    assert.ok(changed.diagnostics.some(item => item.code === 'UNCOMMITTED_SPECIFICATION'));
+    await fs.writeFile(path.join(fixture.repo, requirementPath), source);
+    const newPlanPath = 'docs/orders/new-test-plan.md';
+    await fs.writeFile(path.join(fixture.repo, newPlanPath), plan);
+    const input = references();
+    input.testPlans[0].path = newPlanPath;
+    const untracked = await cli(fixture, sourceEntry, ['coverage', 'prepare'], input);
+    assert.equal(untracked.complete, false);
+    assert.equal(untracked.sourceMatches, false);
+    assert.deepEqual(untracked.diagnostics.at(-1).paths, [newPlanPath]);
+    await fs.rm(path.join(fixture.repo, newPlanPath));
+    await preserved(fixture);
+  }
+});
+
+test('T-PRD083 fenced examples cannot define requirements or satisfy real coverage obligations', () => {
+  for (const [opening, closing] of [
+    ['~~~markdown', '~~~'], ['````markdown', '````'], ['~~~~markdown', '~~~~~'],
+  ]) {
+    const example = contents => `\n${opening}\n\`\`\`\n${contents}\n\`\`\`\n${closing}\n`;
+    const sources = {
+      repositoryId: 'consumer',
+      requirements: [{ path: requirementPath, contents: requirements + example(
+        '### FR-802: Example only\n**Definition of Done**\n- AC-802.1: Not a real requirement.') }],
+      testPlans: [{ path: planPath,
+        contents: plan.replace('FR-801; AC-801.1; AC-801.2', 'FR-801; AC-801.1') +
+          example(plan.replace('T-BALANCE', 'T-EXAMPLE')
+            .replace('FR-801; AC-801.1; AC-801.2', 'FR-801; AC-801.2')) }],
+    };
+    const compiled = compileCoverage(sources);
+    assert.deepEqual(compiled.definitions.map(item => item.id), ['FR-801']);
+    assert.deepEqual(compiled.tests.map(item => item.id), ['T-BALANCE']);
+    const input = { ...sources, sourceRevision: 'a'.repeat(40) };
+    const inspected = inspectCoverage({ ...input,
+      body: renderCoverageSection(prepareCoverage(input)) });
+    assert.equal(inspected.complete, false);
+    assert.deepEqual(inspected.uncovered, ['AC-801.2']);
+  }
+});
+
+test('T-PRD084 offline coverage prepare and inspect never execute configured Git filters', async t => {
+  const fixture = await consumer(t);
+  const marker = path.join(fixture.root, 'filter-executed');
+  const probe = path.join(fixture.root, 'smudge-probe.mjs');
+  await fs.writeFile(probe,
+    "import {appendFileSync} from 'node:fs';\n" +
+    "appendFileSync(process.argv[2],'executed\\n');\nprocess.stdin.pipe(process.stdout);\n");
+  const quoted = value => `"${value.replaceAll('\\', '/')}"`;
+  await fixture.runGit('config', 'filter.coverage-probe.smudge',
+    [process.execPath, probe, marker].map(quoted).join(' '));
+  await fs.writeFile(path.join(fixture.repo, '.gitattributes'),
+    'docs/orders/*.md filter=coverage-probe\n');
+  await fixture.runGit('add', '.gitattributes');
+  await fixture.runGit('commit', '-qm', 'Configure an owned offline filter probe');
+  fixture.initialFiles = await files(fixture.repo);
   const prepared = await cli(fixture, sourceEntry, ['coverage', 'prepare'], references());
   assert.equal(prepared.complete, true);
-  assert.equal(prepared.sourceMatches, true);
-  assert.equal(prepared.metadata.requirements[0].sha256,
-    digest(await fixture.runGit('show', `HEAD:${requirementPath}`)));
-  const source = await fs.readFile(path.join(fixture.repo, requirementPath), 'utf8');
-  await fs.writeFile(path.join(fixture.repo, requirementPath), source.replace(
-    '- AC-801.2:', '- AC-801.3: Require another observable result.\r\n- AC-801.2:'));
-  const changed = await cli(fixture, sourceEntry, ['coverage', 'prepare'], references());
-  assert.equal(changed.complete, false);
-  assert.equal(changed.sourceMatches, false);
-  assert.deepEqual(changed.uncovered, ['AC-801.3']);
-  assert.ok(changed.diagnostics.some(item => item.code === 'UNCOMMITTED_SPECIFICATION'));
-  await fs.writeFile(path.join(fixture.repo, requirementPath), source);
-  const newPlanPath = 'docs/orders/new-test-plan.md';
-  await fs.writeFile(path.join(fixture.repo, newPlanPath), plan);
-  const input = references();
-  input.testPlans[0].path = newPlanPath;
-  const untracked = await cli(fixture, sourceEntry, ['coverage', 'prepare'], input);
-  assert.equal(untracked.complete, false);
-  assert.equal(untracked.sourceMatches, false);
-  assert.deepEqual(untracked.diagnostics.at(-1).paths, [newPlanPath]);
-  await fs.rm(path.join(fixture.repo, newPlanPath));
+  const inspected = await cli(fixture, sourceEntry, ['coverage', 'inspect'],
+    references(prepared.section));
+  assert.equal(inspected.complete, true);
+  await assert.rejects(fs.stat(marker), { code: 'ENOENT' });
   await preserved(fixture);
 });
 

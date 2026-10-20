@@ -206,6 +206,21 @@ test('T-PRD002 ESM and CommonJS registration aliases cannot escape the nonexecut
     "test['test']('hidden',()=>{});",
   ]) assert.ok(discoverDeclarations(source + extra, 'test/nested/aliases.test.js')
     .unresolved.some(item => item.code === 'UNSUPPORTED_TEST_REGISTRATION_ALIAS'));
+  for (const dynamic of [
+    "const {it:extra}=await import('node:test');extra('omitted failure',()=>{throw Error('hidden failure');});",
+    "const runner=await import('node:test');runner.test('omitted failure',()=>{});",
+    "import('node:test').then(({test:extra})=>extra('omitted failure',()=>{}));",
+  ]) {
+    const declaration = discoverDeclarations(source + dynamic, 'test/nested/aliases.test.js');
+    assert.ok(declaration.unresolved.some(item => item.code === 'UNSUPPORTED_DYNAMIC_TEST_IMPORT_BINDING'),
+      'A known passing registration must not hide an unsupported dynamic registration source');
+    const compiled = compileValidationSourceInventory({
+      files: [{ file: 'test/nested/aliases.test.js', contents: source + dynamic }],
+      surfacePaths: [],
+    });
+    assert.equal(compiled.complete, false);
+    assert.ok(compiled.nodeUnresolved.some(item => item.code === 'UNSUPPORTED_DYNAMIC_TEST_IMPORT_BINDING'));
+  }
 });
 
 test('T-PRD002 native skip dispositions require an owner, actual platforms and declared prerequisites', () => {

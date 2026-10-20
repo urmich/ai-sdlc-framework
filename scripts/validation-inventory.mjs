@@ -184,6 +184,12 @@ function testBindings(tokens) {
   };
   for (let index = 0; index < tokens.length; index++) {
     if (tokens[index].value === 'import') {
+      if (tokens[index + 1]?.value === '(') {
+        if (tokens[index + 2]?.value === 'node:test') unsupported.push({
+          line: tokens[index].line, code: 'UNSUPPORTED_DYNAMIC_TEST_IMPORT_BINDING',
+        });
+        continue;
+      }
       let end = index + 1;
       for (; end < tokens.length && tokens[end].value !== ';' &&
         !(tokens[end].value === 'from' && tokens[end + 1]?.kind === 'string'); end++);

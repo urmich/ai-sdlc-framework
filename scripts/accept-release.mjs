@@ -17,7 +17,7 @@ import { assertConsumerUpdate, assertConsumerUninstall, installedConsumerSnapsho
   seedConsumerPreservation } from './consumer-lifecycle.mjs';
 import { consumerSpecification, consumerTargetSuffixes, evaluateConsumerOriginal,
   expectedConsumerContext, acquireConsumerOrigin, retainConsumerOriginals, retainPublicationHistoryOriginals,
-  consumerOriginalInventory, consumerEvidenceMarker } from './consumer-evidence.mjs';
+  sanitizeConsumerResultPayload, consumerOriginalInventory, consumerEvidenceMarker } from './consumer-evidence.mjs';
 export { consumerSpecification } from './consumer-evidence.mjs';
 import { parseTestPlan, testSpecificationDigest } from '../src/artifacts.mjs';
 import { digest } from '../src/core.mjs';
@@ -540,6 +540,22 @@ async function retainConsumerExecution({ result, bundle, outputFile }) {
   if (evaluation.status !== 'Passed' && result.status === 'Passed') throw new Error('Complete consumer readiness did not pass');
 }
 
+export async function retainConsumerResult({ result, bundle, outputFile, commandFile, toolchain,
+  scope = consumerScope() }) {
+  await writeJson(outputFile, sanitizeConsumerResultPayload(Buffer.from(JSON.stringify(result))));
+  await fs.copyFile(commandFile, `${outputFile}.commands.jsonl`).catch(error => {
+    if (error.code !== 'ENOENT') throw error;
+  });
+  if (toolchain) await writeJson(`${outputFile}.toolchain.json`,
+    sanitizeExecutionPayload(Buffer.from(JSON.stringify(toolchain))));
+  if (result.native) {
+    const binding = { target: result.target, sourceCommit: bundle.identity.sourceCommit,
+      releaseIntentId: bundle.releaseIntentId, scope, native: result.native,
+      files: await consumerOriginalInventory(outputFile) };
+    process.stdout.write(`${consumerEvidenceMarker}${canonical(binding)}\n`);
+  }
+}
+
 export async function acceptRelease({ directory, outputFile, target, previousVersion,
   previousDescriptorSha256, previousChecksumsSha256, evidenceFilename, evidenceSha256, ...expected }) {
   const bundle = await verifyBundle({ directory, ...expected });
@@ -666,17 +682,8 @@ export async function acceptRelease({ directory, outputFile, target, previousVer
       if (result.status === 'Passed') result.status = 'NotRun';
       result.readinessDiagnostic = error.message;
     }
-    await writeJson(outputFile, sanitizeExecutionPayload(Buffer.from(JSON.stringify(result))));
-    await fs.copyFile(path.join(root, 'commands.jsonl'), `${outputFile}.commands.jsonl`).catch(error => {
-      if (error.code !== 'ENOENT') throw error;
-    });
-    if (toolchain) await writeJson(`${outputFile}.toolchain.json`,
-      sanitizeExecutionPayload(Buffer.from(JSON.stringify(toolchain))));
-    if (result.native) {
-      const binding = { target, sourceCommit: bundle.identity.sourceCommit, releaseIntentId: bundle.releaseIntentId,
-        scope: consumerScope(), native: result.native, files: await consumerOriginalInventory(outputFile) };
-      process.stdout.write(`${consumerEvidenceMarker}${canonical(binding)}\n`);
-    }
+    await retainConsumerResult({ result, bundle, outputFile,
+      commandFile: path.join(root, 'commands.jsonl'), toolchain });
     await fs.rm(root, { recursive: true, force: true });
     if (readinessError) throw readinessError;
   }
