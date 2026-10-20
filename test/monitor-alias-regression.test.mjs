@@ -127,9 +127,16 @@ for (const order of ['historical-first', 'current-first']) {
 
 test('FR-059 concurrent non-Azure alias attaches and competing claims admit one poll owner', async t => {
   const store = await fixture(t);
-  const [historical, current] = await Promise.all([
+  const attached = await Promise.allSettled([
     attach(store, identity()), attach(store, currentIdentity()),
   ]);
+  assert.ok(attached.some(result => result.status === 'fulfilled'));
+  for (const result of attached.filter(result => result.status === 'rejected')) {
+    assert.equal(result.reason.code, 'LOCK_BUSY');
+  }
+  const identities = [identity(), currentIdentity()];
+  const [historical, current] = await Promise.all(attached.map((result, index) =>
+    result.status === 'fulfilled' ? result.value : attach(store, identities[index])));
   assert.equal(historical.key, current.key);
   const claims = await Promise.allSettled([
     claimMonitor(store, { runKey: historical.key, workerId: 'historical-worker' }),
@@ -143,7 +150,11 @@ test('FR-059 concurrent non-Azure alias attaches and competing claims admit one 
     beginPoll(store, worker(claimed[0].value)),
   ]);
   assert.equal(polls.filter(result => result.status === 'fulfilled').length, 1);
-  assert.equal(polls.find(result => result.status === 'rejected').reason.code, 'MONITOR');
+  const duplicate = polls.find(result => result.status === 'rejected');
+  assert.ok(['MONITOR', 'LOCK_BUSY'].includes(duplicate.reason.code));
+  if (duplicate.reason.code === 'LOCK_BUSY') {
+    await assert.rejects(beginPoll(store, worker(claimed[0].value)), { code: 'MONITOR' });
+  }
   assert.deepEqual((await dueMonitors(store)).map(record => ({
     key: record.runKey, workerId: record.workerId, inFlight: record.inFlight,
   })), [{ key: historical.key, workerId: claimed[0].value.workerId, inFlight: true }]);

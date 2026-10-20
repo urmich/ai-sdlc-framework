@@ -64,6 +64,28 @@ async function fixture(t) {
   return root;
 }
 
+test('T-PRD054 consumer subprocess input failures await the real child outcome without uncaught pipe errors', async () => {
+  const input = Buffer.alloc(2 * 1024 * 1024, 'x');
+  await assert.rejects(runHomebrewCommand(process.execPath, ['--eval',
+    'process.stdin.destroy();process.stderr.write("Owned child refused stdin\\n");process.exit(7);'],
+  { input, encoding: 'utf8' }), error => {
+    assert.equal(error.code, 7);
+    assert.match(error.stderr, /Owned child refused stdin/u);
+    return true;
+  });
+  await assert.rejects(runHomebrewCommand(process.execPath, ['--eval',
+    'process.stdin.destroy();process.exit(0);'], { input, encoding: 'utf8' }),
+  error => ['EPIPE', 'EOF', 'ECONNRESET', 'ERR_STREAM_DESTROYED', 'ERR_STREAM_PREMATURE_CLOSE'].includes(error.code));
+  const output = await runHomebrewCommand(process.execPath, ['--eval',
+    'let count=0;process.stdin.on("data",chunk=>{count+=chunk.length});process.stdin.on("end",()=>console.log(count));'],
+  { input, encoding: 'utf8' });
+  assert.equal(output.stdout.trim(), String(input.length));
+  await assert.rejects(runHomebrewCommand(path.join(ROOT, '.test-data', `missing-command-${randomUUID()}`), []),
+    { code: 'ENOENT' });
+  const empty = await runHomebrewCommand(process.execPath, ['--eval', 'process.exit(0);'], { encoding: 'utf8' });
+  assert.equal(empty.stdout, '');
+});
+
 function execution() {
   const observedAt = new Date().toISOString();
   return { schemaVersion: 1, kind: 'test-execution', context: structuredClone(context),

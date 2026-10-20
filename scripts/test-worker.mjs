@@ -466,9 +466,13 @@ try {
         }
         const error = event.type === 'test:fail' && event.data?.details?.error;
         const diagnostic = error && failureDiagnostic(error);
-        if (!diagnostic?.changed) { callback(null, event); return; }
-        const safeError = new Error(diagnostic.diagnostic.message);
-        safeError.stack = `Error: ${diagnostic.diagnostic.message}`;
+        if (!diagnostic) { callback(null, event); return; }
+        // Spec inspects enumerable error metadata as JavaScript, not retained JSON.
+        const printableError = new Error(diagnostic.diagnostic.message);
+        printableError.stack = `Error: ${diagnostic.diagnostic.message}`;
+        const safeError = diagnostic.diagnostic.code === 'ERR_TEST_FAILURE' ?
+          new Error(diagnostic.diagnostic.message, { cause: printableError }) : printableError;
+        safeError.stack = printableError.stack;
         for (const key of ['code', 'failureType']) {
           const value = diagnostic.diagnostic[key];
           if (typeof value === 'string' && /^[A-Za-z0-9_]{1,80}$/u.test(value)) {

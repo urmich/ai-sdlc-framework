@@ -59,6 +59,7 @@ import { nativeStageSelections, validateNativeGroupReport } from '../scripts/nat
 import { readTestBudget } from '../scripts/test-budget.mjs';
 import { digest } from '../src/core.mjs';
 import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
+import { executeValidationCommand } from '../scripts/validation-tools.mjs';
 
 const canonicalNames = [
   'T-101 selected fetch remote requires exactly one credential-free URL',
@@ -318,6 +319,39 @@ test('T-130 public runner preserves a real failing child and still executes the 
   assert.match(result.stdout + result.stderr, /runner failure diagnostic/u);
   assert.equal(await fs.readFile(marker, 'utf8'), 'passed');
   assert.equal(summary(result.stdout, 'end').exitCode, 1);
+});
+
+test('T-PRD018 coded failures preserve safe command output and do not interrupt sibling roots', async t => {
+  const directory = await scratch(t);
+  const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'runner-coded-failure-'));
+  t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+  const fail = path.join(directory, 'coded-failure.test.mjs');
+  const pass = path.join(directory, 'sibling.test.mjs');
+  const marker = path.join(directory, 'sibling-finished');
+  await fs.writeFile(fail, "import test from 'node:test';test('owned coded failure',()=>{" +
+    "throw Object.assign(new Error('Owned lock contention'),{code:'LOCK_BUSY',details:{lock:'owned-lock'}});});\n");
+  await fs.writeFile(pass, "import test from 'node:test';import {writeFile} from 'node:fs/promises';" +
+    `test('passing independent root',()=>writeFile(${JSON.stringify(marker)},'finished'));\n`);
+  const reportPath = path.join(evidence, 'runner.json');
+  const environment = { ...process.env, NO_COLOR: '1', SDLC_TEST_REPORT_FILE: reportPath };
+  delete environment.FORCE_COLOR;
+  const result = await executeValidationCommand({
+    name: 'coded-failure', command: process.execPath,
+    args: ['scripts/test-runner.mjs', 'targeted', '--workers', '1', fail, pass],
+    cwd: repositoryRoot, outputDir: evidence, signal: t.signal,
+    environment,
+  });
+  assert.equal(result.complete, true, result.diagnostic);
+  assert.equal(result.exitCode, 1, 'The genuine failed assertion remains non-passing');
+  assert.deepEqual(result.causes, []);
+  assert.match(result.stdout, /Owned lock contention/u);
+  assert.equal(await fs.readFile(marker, 'utf8'), 'finished');
+  const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+  assert.equal(report.complete, true);
+  assert.deepEqual([report.summary.counts.failed, report.summary.counts.passed,
+    report.summary.counts.cancelled], [1, 1, 0]);
+  assert.equal(report.executions.find(row => row.name === 'owned coded failure').diagnostic.message,
+    'Owned lock contention');
 });
 
 test('T-GHB24 native execution evidence distinguishes passing, failing and skipped assertions without overwriting reports', async t => {

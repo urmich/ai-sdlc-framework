@@ -1,8 +1,6 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 import { canonical, readTarGzip, readZip, sha256, tarGzip } from '../packaging/standalone/archive.mjs';
@@ -11,7 +9,8 @@ import { runtimePreflight } from '../packaging/standalone/runtime.mjs';
 import { verifyReleaseChecksums, verifyRelease } from './verify-platform-package.mjs';
 import { npmInvocation } from './package.mjs';
 import { boundedReadback, githubRequest, registryPackage, verifyRegistryPayload } from './publish-release.mjs';
-import { assertNativeMacHost, verifyCopiedHomebrewInstallation } from './homebrew-switch.mjs';
+import { assertNativeMacHost, verifyCopiedHomebrewInstallation,
+  runHomebrewCommand as execute } from './homebrew-switch.mjs';
 import { verifyHomebrewLifecycle, verifyHomebrewUpgradeInputs } from './homebrew-lifecycle.mjs';
 import { nativeToolchain } from './toolchain-baseline.mjs';
 import { assertConsumerUpdate, assertConsumerUninstall, installedConsumerSnapshot, npmPublicCommand,
@@ -27,12 +26,6 @@ import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
 import { ROOT, RELEASE_TARGETS, archiveRecord, emptyDirectory, options,
   releaseRepository, requirePublicationReady, trustedEnvironment, verifyBundle, writeJson } from './release-bundle.mjs';
 
-const executeFile = promisify(execFile);
-function execute(command, args, { input = '', ...options } = {}) {
-  const pending = executeFile(command, args, options);
-  pending.child.stdin?.end(input);
-  return pending;
-}
 const suffixes = consumerTargetSuffixes;
 const NPM_TOOL_INTEGRITY = 'sha512-A74XL8OxmcegZDMWPkWb5bEQppg8HdYwW3rBD2sPoS4UQHVajfaxBkqyzLeJ3wR0kZ+5xoTjItxXaF7eIXUsyw==';
 const blocked = reason => Object.assign(new Error(reason), { code: 'RELEASE_INTEGRATION_BLOCKED' });

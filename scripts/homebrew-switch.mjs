@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { finished } from 'node:stream/promises';
 import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
@@ -14,8 +15,14 @@ import {
 const execute = promisify(execFile);
 export function runHomebrewCommand(command, args, { input = '', ...options } = {}) {
   const pending = execute(command, args, options);
-  pending.child.stdin?.end(input);
-  return pending;
+  const inputStream = pending.child.stdin;
+  const written = inputStream ? finished(inputStream, { readable: false, cleanup: true }) : Promise.resolve();
+  inputStream?.end(input?.length === 0 ? undefined : input);
+  return Promise.allSettled([pending, written]).then(([result, stdin]) => {
+    if (result.status === 'rejected') throw result.reason;
+    if (stdin.status === 'rejected') throw stdin.reason;
+    return result.value;
+  });
 }
 const formulaName = value => typeof value === 'string' &&
   /^(?:[a-zA-Z0-9][a-zA-Z0-9_-]*\/[a-zA-Z0-9][a-zA-Z0-9_-]*\/)?[a-zA-Z0-9][a-zA-Z0-9@+_.-]*$/u.test(value);

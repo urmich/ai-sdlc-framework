@@ -298,6 +298,24 @@ Checkpoint retention rejection preserves a bounded invalid-partial record with
 the actual cause and original snapshot identity, not passing observation rows.
 It remains incomplete/nonzero and does not raise existing output bounds.
 
+Project every failed assertion's already-sanitized message and scalar failure
+classification into plain reporter errors, including the safe cause expected
+by Node's `ERR_TEST_FAILURE` wrapper. Do not forward enumerable exception
+metadata to the Spec reporter: its JavaScript inspection output is not JSON.
+Keep the original structured failed outcome; ordinary failures must not abort
+independent roots through a secondary transcript-format rejection.
+
+Consumer subprocess execution awaits both stdin completion and the real child
+outcome before cleanup. Preserve a failed child's exit and diagnostics; a
+successful exit cannot hide incomplete input. Close absent input without an
+empty write, and report spawn or pipe failures instead of uncaught stream errors.
+
+Concurrent monitor regressions preserve bounded lock acquisition. A documented
+`LOCK_BUSY` attach may reconcile once after the original contenders settle;
+canonical alias identity, exactly one poll owner and the later in-flight fence
+remain mandatory. Do not increase lock deadlines or steal a live lock to make
+the fixture pass.
+
 The original schema-1 producer report and single ordered NDJSON journal retain
 their assertion identities. Additive `groupExecution` version 1 uses
 `isolated-root-ready-pool-v1`; each group ID binds protocol, root ID and source
