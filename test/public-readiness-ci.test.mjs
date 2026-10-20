@@ -29,7 +29,8 @@ import { createPrReadinessHost, inspectWorkflowTrust, readTrustedJobContext,
   readTrustedValidationIntent, renderObserverSummary, statusConcurrencyGroup } from '../scripts/pr-observer.mjs';
 import { prepareCoverage, renderCoverageSection } from '../src/coverage.mjs';
 import { inspectWorkflowPolicy, readWorkflowPolicySources } from '../scripts/workflow-policy.mjs';
-import { nativeBootstrapEnvironment } from '../scripts/native-toolchain.mjs';
+import { nativeBootstrapEnvironment, portableRubyBootstrapEnvironment,
+  schemaPipInstallArguments, nativeBootstrapExports } from '../scripts/native-toolchain.mjs';
 
 const sourceA = 'a'.repeat(40);
 const now = Date.parse('2026-10-18T10:00:00.000Z');
@@ -130,6 +131,91 @@ test('T-PRD015 isolated Homebrew bootstrap preserves complete plain transcripts 
   assert.equal(captured.stdout, plain.repeat(count));
   assert.equal(captured.originalOutput.stdout.sha256, fixtureSHA(Buffer.from(plain.repeat(count))));
   await assert.rejects(fs.stat(directory), { code: 'ENOENT' });
+});
+
+test('T-PRD015 pre-Ruby Homebrew child avoids Actions forced colour while retaining real host context and raw fingerprints', async t => {
+  const f = await fixture(t);
+  const base = nativeBootstrapEnvironment(path.join(f.root, 'bootstrap'),
+    { ...f.environment, GITHUB_ACTIONS: 'true', CI: 'true' });
+  const selected = portableRubyBootstrapEnvironment(base);
+  assert.equal(base.GITHUB_ACTIONS, 'true');
+  assert.equal(selected.GITHUB_ACTIONS, undefined);
+  assert.equal(selected.CI, 'true');
+  assert.equal(selected.HOME, base.HOME);
+  assert.equal(selected.SDLC_TEST_REPORT_CONTEXT, base.SDLC_TEST_REPORT_CONTEXT);
+  assert.equal(nativeBootstrapExports(base).NO_COLOR, '1');
+  assert.equal(Object.hasOwn(nativeBootstrapExports(base), 'GITHUB_ACTIONS'), false);
+  const records = [
+    ['arm64', 'e0088dff5614b39387300136ec7a5f95bf1e07589547245c919524fc9e8b4197',
+      'dfbd10d59a3257d69d599383df2090d53ec2dd1a37b891d1bd9536019ad020b0'],
+    ['x64', '57bebadc864405cbd39743e32eef741f4b75c0ba121f5cd9296ab84994b9f83b',
+      'd82c0f08d38fa0117ae2796a1b034beaa5f470eba024f9a708615a90dd3b6a94'],
+  ];
+  for (const [arch, pin, observedHash] of records) {
+    const message = `Downloading https://ghcr.io/v2/homebrew/core/portable-ruby/blobs/sha256:${pin}`;
+    const plain = `==> ${message}\n`;
+    const colored = `\u001b[34m==>\u001b[0m \u001b[1m${message}\u001b[0m\n`;
+    const source = "if(process.env.GITHUB_ACTIONS)process.env.HOMEBREW_COLOR='1';" +
+      `process.stderr.write(process.env.HOMEBREW_COLOR?${JSON.stringify(colored)}:${JSON.stringify(plain)});`;
+    const rejected = await f.run(`ruby-actions-${arch}`, process.execPath, ['--eval', source],
+      { environment: base });
+    assert.equal(rejected.complete, false);
+    assert.ok(rejected.causes.some(cause => cause.type === 'output' && cause.code === 'UNSAFE'));
+    assert.equal(rejected.originalOutput.stderr.bytes, 158);
+    assert.equal(rejected.originalOutput.stderr.sha256, observedHash);
+    const captured = await f.run(`ruby-plain-${arch}`, process.execPath, ['--eval', source],
+      { environment: selected });
+    assert.equal(captured.complete, true, captured.diagnostic);
+    assert.equal(captured.exitCode, 0);
+    assert.equal(captured.stderr, plain);
+    assert.equal(captured.originalOutput.stderr.sha256, fixtureSHA(Buffer.from(plain)));
+  }
+});
+
+test('T-PRD015 schema pip cache and runtime paths override relative ambient locations without installing dependencies', async t => {
+  const f = await fixture(t);
+  const inherited = { ...f.environment, PIP_CACHE_DIR: 'pip', PIP_BUILD_TRACKER: 'pip',
+    PIP_SRC: 'pip-source', PYTHONPYCACHEPREFIX: 'pip-bytecode',
+    APPDATA: 'relative-app-data', LOCALAPPDATA: 'relative-local-app-data' };
+  const directory = path.join(f.root, 'owned bootstrap');
+  const selected = nativeBootstrapEnvironment(directory, inherited);
+  for (const key of ['PIP_CACHE_DIR', 'PIP_BUILD_TRACKER', 'PIP_SRC', 'PYTHONPYCACHEPREFIX',
+    'PYTHONUSERBASE', 'APPDATA', 'LOCALAPPDATA', 'XDG_CACHE_HOME', 'TMPDIR', 'TMP', 'TEMP']) {
+    assert.ok(path.isAbsolute(selected[key]), key);
+    const relative = path.relative(directory, selected[key]);
+    assert.ok(relative && !relative.startsWith('..') && !path.isAbsolute(relative), key);
+  }
+  assert.equal(inherited.PIP_CACHE_DIR, 'pip');
+  const exported = nativeBootstrapExports(selected);
+  assert.equal(exported.PIP_CACHE_DIR, selected.PIP_CACHE_DIR);
+  assert.equal(exported.PIP_BUILD_TRACKER, selected.PIP_BUILD_TRACKER);
+  assert.equal(exported.APPDATA, selected.APPDATA);
+  assert.equal(exported.LOCALAPPDATA, selected.LOCALAPPDATA);
+  const python = process.env.SDLC_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+  const relative = await f.run('pip-relative-cache-probe', python,
+    ['-m', 'pip', '--disable-pip-version-check', 'cache', 'dir'],
+    { cwd: f.root, environment: inherited });
+  assert.equal(relative.complete, true, relative.diagnostic);
+  assert.equal(relative.exitCode, 0, relative.stderr);
+  assert.equal(path.relative(path.join(f.root, 'pip'), path.resolve(f.root, relative.stdout.trim())), '');
+  const owned = await f.run('pip-owned-cache-probe', python,
+    ['-m', 'pip', '--disable-pip-version-check', 'cache', 'dir'],
+    { cwd: f.root, environment: selected });
+  assert.equal(owned.complete, true, owned.diagnostic);
+  assert.equal(owned.exitCode, 0, owned.stderr);
+  assert.equal(path.relative(selected.PIP_CACHE_DIR, path.resolve(owned.stdout.trim())), '');
+  const args = schemaPipInstallArguments(selected);
+  const cacheOption = args.indexOf('--cache-dir');
+  assert.ok(cacheOption >= 0);
+  assert.equal(args[cacheOption + 1], selected.PIP_CACHE_DIR);
+  const explicit = await f.run('pip-explicit-cache-probe', python,
+    ['-m', 'pip', '--disable-pip-version-check', '--cache-dir', selected.PIP_CACHE_DIR, 'cache', 'dir'],
+    { cwd: f.root, environment: { ...selected, PIP_CACHE_DIR: 'pip' } });
+  assert.equal(explicit.complete, true, explicit.diagnostic);
+  assert.equal(explicit.exitCode, 0, explicit.stderr);
+  assert.equal(path.relative(selected.PIP_CACHE_DIR, path.resolve(explicit.stdout.trim())), '');
+  assert.throws(() => schemaPipInstallArguments({ PIP_CACHE_DIR: 'pip' }), { code: 'INPUT' });
+  await assert.rejects(fs.stat(path.join(f.root, 'pip')), { code: 'ENOENT' });
 });
 
 test('T-PRD015 actual pinned Go, Python schema and static validators execute valid and invalid owned inputs', async t => {

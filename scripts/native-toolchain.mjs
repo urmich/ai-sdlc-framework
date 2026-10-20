@@ -33,11 +33,18 @@ export function nativeBootstrapEnvironment(directory, inherited = process.env) {
     .filter(([name]) => !/^HOMEBREW_|^RUBYOPT$|^GEM_|^BUNDLE_/iu.test(name))),
     GOTOOLCHAIN: 'local', CGO_ENABLED: '0',
     HOME: path.join(directory, 'home'), USERPROFILE: path.join(directory, 'home'),
+    APPDATA: path.join(directory, 'app-data'), LOCALAPPDATA: path.join(directory, 'local-app-data'),
     COPILOT_HOME: path.join(directory, 'copilot-home'),
     NODE_OPTIONS: '', NODE_PATH: '',
     TMPDIR: path.join(directory, 'scratch'), TMP: path.join(directory, 'scratch'), TEMP: path.join(directory, 'scratch'),
     GOCACHE: path.join(directory, 'go-cache'), GOPATH: path.join(directory, 'go-path'),
     PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1',
+    PYTHONUSERBASE: path.join(directory, 'python-user'),
+    PYTHONPYCACHEPREFIX: path.join(directory, 'python-bytecode'),
+    PIP_CACHE_DIR: path.join(directory, 'pip-cache'),
+    PIP_BUILD_TRACKER: path.join(directory, 'pip-build-tracker'),
+    PIP_SRC: path.join(directory, 'pip-source'),
+    XDG_CACHE_HOME: path.join(directory, 'cache'),
     HOMEBREW_NO_AUTO_UPDATE: '1', HOMEBREW_NO_ANALYTICS: '1',
     HOMEBREW_NO_COLOR: '1', NO_COLOR: '1',
     HOMEBREW_NO_INSTALL_CLEANUP: '1', HOMEBREW_DEVELOPER: '1',
@@ -47,6 +54,30 @@ export function nativeBootstrapEnvironment(directory, inherited = process.env) {
   for (const key of ['NODE_AUTH_TOKEN', 'NPM_TOKEN', 'GITHUB_TOKEN', 'GH_TOKEN',
     'FORCE_COLOR', 'CLICOLOR_FORCE']) delete environment[key];
   return environment;
+}
+
+export function portableRubyBootstrapEnvironment(environment) {
+  const selected = { ...environment };
+  // The pinned pre-Ruby shell forces colour for Actions and ignores NO_COLOR.
+  delete selected.GITHUB_ACTIONS;
+  delete selected.HOMEBREW_COLOR;
+  return selected;
+}
+
+export function schemaPipInstallArguments(environment) {
+  requireThat(typeof environment.PIP_CACHE_DIR === 'string' && path.isAbsolute(environment.PIP_CACHE_DIR),
+    'INPUT', 'Schema dependency installation requires its explicit owned absolute pip cache');
+  return ['-m', 'pip', 'install', '--disable-pip-version-check',
+    '--cache-dir', environment.PIP_CACHE_DIR, '--requirement', '.github/release-requirements.txt'];
+}
+
+export function nativeBootstrapExports(environment) {
+  const keys = ['HOME', 'USERPROFILE', 'COPILOT_HOME', 'GOCACHE', 'GOPATH', 'APPDATA', 'LOCALAPPDATA',
+    'PYTHONUSERBASE', 'PYTHONPYCACHEPREFIX', 'PIP_CACHE_DIR', 'PIP_BUILD_TRACKER', 'PIP_SRC',
+    'XDG_CACHE_HOME', 'NO_COLOR'];
+  requireThat(keys.every(key => typeof environment[key] === 'string' && environment[key].length > 0),
+    'INPUT', 'Selected native tool environment must retain all owned cache and home paths');
+  return Object.fromEntries(keys.map(key => [key, environment[key]]));
 }
 
 export async function bootstrapNativeToolchain(options) {
@@ -60,7 +91,9 @@ export async function bootstrapNativeToolchain(options) {
   }
   requireThat(!(await fs.readdir(directory)).length, 'HOST', 'Bootstrap owns a new empty directory, never an installed prefix');
   const environment = nativeBootstrapEnvironment(directory);
-  for (const key of ['HOME', 'COPILOT_HOME', 'TMPDIR', 'GOCACHE', 'GOPATH', 'HOMEBREW_CACHE', 'HOMEBREW_LOGS']) {
+  for (const key of ['HOME', 'COPILOT_HOME', 'TMPDIR', 'GOCACHE', 'GOPATH', 'HOMEBREW_CACHE', 'HOMEBREW_LOGS',
+    'APPDATA', 'LOCALAPPDATA', 'PYTHONUSERBASE', 'PYTHONPYCACHEPREFIX', 'PIP_CACHE_DIR', 'PIP_BUILD_TRACKER',
+    'PIP_SRC', 'XDG_CACHE_HOME']) {
     await fs.mkdir(environment[key]);
   }
   const reports = [];
@@ -68,8 +101,8 @@ export async function bootstrapNativeToolchain(options) {
   const interrupt = () => cancellation.abort();
   process.on('SIGINT', interrupt);
   process.on('SIGTERM', interrupt);
-  const run = async (name, command, args, cwd = repositoryRoot) => {
-    const result = await executeValidationCommand({ name, command, args, cwd, environment,
+  const run = async (name, command, args, cwd = repositoryRoot, commandEnvironment = environment) => {
+    const result = await executeValidationCommand({ name, command, args, cwd, environment: commandEnvironment,
       signal: cancellation.signal, outputDir: directory });
     reports.push({ name, complete: result.complete, exitCode: result.exitCode });
     requireThat(result.complete && result.exitCode === 0, 'HOST',
@@ -108,7 +141,7 @@ export async function bootstrapNativeToolchain(options) {
     reports.push({ name: 'schema-dependency-probe', complete: dependencyProbe.complete, exitCode: dependencyProbe.exitCode });
     if (!dependencyProbe.complete || dependencyProbe.exitCode !== 0) {
       await run('schema-dependencies-install', selected.SDLC_PYTHON,
-        ['-m', 'pip', 'install', '--disable-pip-version-check', '--requirement', '.github/release-requirements.txt']);
+        schemaPipInstallArguments(environment));
     }
     const packages = JSON.parse(await run('schema-dependencies-verify', selected.SDLC_PYTHON, probe));
     requireThat(requirements.every(([name, version]) => packages[name] === version),
@@ -149,7 +182,8 @@ export async function bootstrapNativeToolchain(options) {
       requireThat(await fs.realpath(await run('brew-prefix', brew, ['--prefix'])) === await fs.realpath(brewRoot) &&
         await fs.realpath(await run('brew-repository', brew, ['--repository'])) === await fs.realpath(brewRoot),
       'HOST', 'Homebrew must use only the isolated owned prefix and repository');
-      await run('brew-portable-ruby', brew, ['vendor-install', 'ruby']);
+      await run('brew-portable-ruby', brew, ['vendor-install', 'ruby'], repositoryRoot,
+        portableRubyBootstrapEnvironment(environment));
       const ruby = await run('brew-ruby-identity', brew, ['ruby', '-e', 'puts RUBY_VERSION']);
       requireThat(ruby === homebrewToolchain.ruby, 'HOST', 'The integrity-pinned Homebrew portable Ruby is unavailable');
       const rubyExecutable = await run('brew-ruby-path', brew, ['ruby', '-rrbconfig', '-e', 'puts RbConfig.ruby']);
@@ -176,11 +210,7 @@ export async function bootstrapNativeToolchain(options) {
     retained.native.cryptoFixture = { bundleSha256: prCryptoFixture.bundle.sha256,
       trustSha256: prCryptoFixture.trust.sha256, offline: true, verifier: 'npm-11.16.0-bundled-sigstore' };
     selected.CGO_ENABLED = '0';
-    selected.HOME = environment.HOME;
-    selected.USERPROFILE = environment.USERPROFILE;
-    selected.COPILOT_HOME = environment.COPILOT_HOME;
-    selected.GOCACHE = environment.GOCACHE;
-    selected.GOPATH = environment.GOPATH;
+    Object.assign(selected, nativeBootstrapExports(environment));
     selected.SDLC_NATIVE_TOOLCHAIN_REPORT = path.join(directory, 'toolchain.json');
     if (process.env.GITHUB_ENV) {
       for (const [name, value] of Object.entries(selected)) {

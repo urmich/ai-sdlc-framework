@@ -37,32 +37,85 @@ let interruption;
 const declaredCases = [];
 const observedStarts = [];
 
-function retainEvent(kind, data) {
+function rejectionCause(error) {
+  const message = String(error.message);
+  let safe;
+  try { safe = sanitizeExecutionPayload(Buffer.from(JSON.stringify({ message }))).message; }
+  catch { safe = 'The sanitizer cause could not be safely retained.'; }
+  return { code: error.code, message: safe.slice(0, 1000),
+    original: { sha256: digest(message), bytes: Buffer.byteLength(message) } };
+}
+
+function failureDiagnostic(error) {
+  const original = { message: String(error.message), code: error.code ?? null,
+    failureType: error.failureType ?? null };
+  try {
+    if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(original.message)) {
+      throw new SdlcError('UNSAFE', 'Opaque failure diagnostic cannot be retained safely.');
+    }
+    const { message } = sanitizeExecutionPayload(Buffer.from(JSON.stringify({ message: original.message })));
+    return { original, diagnostic: { ...original, message }, changed: message !== original.message };
+  } catch (problem) {
+    if (!(problem instanceof SdlcError) || problem.code !== 'UNSAFE') return { original, diagnostic: original };
+    const identity = { sha256: digest(original.message), bytes: Buffer.byteLength(original.message) };
+    return { original, changed: true, rejection: rejectionCause(problem),
+      diagnostic: { ...original,
+        message: 'Failure diagnostic text was rejected; its original identity is preserved.',
+        originalMessage: identity, retention: { status: 'Rejected', ...rejectionCause(problem) } } };
+  }
+}
+
+function retainEvent(kind, data, rejectedDiagnostic) {
   let value;
   let rejected = false;
+  let diagnosticNotice;
+  let abortReason;
+  const envelope = { sequence: ++sequence, observedAt: new Date().toISOString(), kind, ...data };
+  const originalBytes = Buffer.from(JSON.stringify(rejectedDiagnostic ?
+    { ...envelope, diagnostic: rejectedDiagnostic.original } : envelope));
+  const rejection = (error, cause = rejectionCause(error)) => ({
+    code: error.code, message: 'Test evidence could not be safely retained; the execution is incomplete.',
+    cause,
+    original: { sha256: digest(originalBytes), bytes: originalBytes.length },
+    ...(typeof data.groupId === 'string' && /^[a-f0-9]{64}$/u.test(data.groupId) ? { groupId: data.groupId } : {}),
+    ...(typeof data.file === 'string' ? { fileDigest: digest(data.file) } : {}),
+    ...(typeof data.name === 'string' ? { nameDigest: digest(data.name) } : {}),
+  });
   try {
-    value = sanitizeExecutionPayload(Buffer.from(JSON.stringify({
-      sequence: ++sequence, observedAt: new Date().toISOString(), kind, ...data,
-    })));
+    if (kind === 'diagnostic' && typeof data.message === 'string' &&
+        /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(data.message)) {
+      throw new SdlcError('UNSAFE', 'Opaque diagnostic event cannot be retained safely.');
+    }
+    value = sanitizeExecutionPayload(Buffer.from(JSON.stringify(envelope)));
+    if (rejectedDiagnostic?.rejection) {
+      const detail = { ...rejection(rejectedDiagnostic.rejection, rejectedDiagnostic.rejection),
+        event: kind, scope: 'failure-diagnostic', fatal: false };
+      evidenceError ??= detail;
+      diagnosticNotice = { sequence: ++sequence, observedAt: new Date().toISOString(),
+        kind: 'evidence-rejected', event: kind, scope: 'failure-diagnostic', fatal: false, ...detail };
+      process.exitCode ||= 2;
+    }
   } catch (error) {
     if (!(error instanceof SdlcError) || !['UNSAFE', 'CAPACITY', 'JSON'].includes(error.code)) throw error;
     rejected = true;
-    evidenceError ??= { code: error.code,
-      message: 'Test evidence could not be safely retained; the execution is incomplete.' };
+    const detail = { ...rejection(error), event: kind, scope: 'event', fatal: true };
+    evidenceError ??= detail;
     value = { sequence, observedAt: new Date().toISOString(), kind: 'evidence-rejected',
-      event: kind, ...evidenceError };
+      event: kind, fatal: true, ...detail };
     process.exitCode ||= 2;
     console.error(`[test-worker:error] ${evidenceError.message} (${error.code})`);
-    cancellation.abort(new Error(evidenceError.message));
+    abortReason = new Error(evidenceError.message);
   }
   journal = journal.then(async () => {
     await journalFile.write(`${JSON.stringify(value)}\n`);
+    if (diagnosticNotice) await journalFile.write(`${JSON.stringify(diagnosticNotice)}\n`);
     await journalFile.sync();
   }).catch(error => {
     journalError ??= error;
     process.exitCode ||= 1;
     cancellation.abort(error);
   });
+  if (abortReason) cancellation.abort(abortReason);
   return rejected ? null : value;
 }
 
@@ -230,6 +283,12 @@ try {
       for (const [event, status] of [['test:pass', 'Passed'], ['test:fail', 'Failed']]) {
         tests.on(event, data => {
           const file = data.file && path.relative(options.cwd, data.file).split(path.sep).join('/');
+          const actualStatus = data.skip ? 'Skipped' : data.todo ? 'Todo' :
+            (['cancelledByParent', 'testAborted'].includes(data.details?.error?.failureType) ||
+              cancellation.signal.aborted && data.details?.error?.failureType === 'subtestsFailed') ?
+              'Cancelled' : status;
+          const diagnostic = data.details?.error && actualStatus === 'Failed' ?
+            failureDiagnostic(data.details.error) : null;
           const outcome = retainEvent('completion', {
             groupId: group.id,
             file, name: data.name === data.file || data.name === file ? file : data.name,
@@ -237,20 +296,17 @@ try {
             parents: (reportingPaths.get(data.file) ?? []).slice(0, data.nesting),
             parentDigests: (reportingPaths.get(data.file) ?? []).slice(0, data.nesting).map(name => digest(name)),
             nesting: data.nesting, line: data.line, column: data.column,
-            status: data.skip ? 'Skipped' : data.todo ? 'Todo' :
-              (['cancelledByParent', 'testAborted'].includes(data.details?.error?.failureType) ||
-                cancellation.signal.aborted && data.details?.error?.failureType === 'subtestsFailed') ?
-                'Cancelled' : status,
+            status: actualStatus,
             skipReason: typeof data.skip === 'string' ? data.skip : null,
             todoReason: typeof data.todo === 'string' ? data.todo : null,
             durationMs: data.details?.duration_ms,
             type: data.details?.type ?? 'test',
-            ...(data.details?.error ? { diagnostic: {
+            ...(diagnostic ? { diagnostic: diagnostic.diagnostic } : data.details?.error ? { diagnostic: {
               message: String(data.details.error.message),
               code: data.details.error.code ?? null,
               failureType: data.details.error.failureType ?? null,
             } } : {}),
-          });
+          }, diagnostic?.rejection ? diagnostic : undefined);
           if (!outcome) return;
           const { kind, ...execution } = outcome;
           report.executions.push(execution);
@@ -271,7 +327,31 @@ try {
     const output = new Writable({
       write(chunk, encoding, callback) { process.stdout.write(chunk, encoding, callback); },
     });
-    await pipeline(tests, new spec(), durableOutput, output);
+    const reporterView = new Transform({
+      objectMode: true,
+      transform(event, encoding, callback) {
+        if (event.type === 'test:diagnostic') {
+          const diagnostic = failureDiagnostic({ message: event.data.message });
+          callback(null, diagnostic.changed ?
+            { ...event, data: { ...event.data, message: diagnostic.diagnostic.message } } : event);
+          return;
+        }
+        const error = event.type === 'test:fail' && event.data?.details?.error;
+        const diagnostic = error && failureDiagnostic(error);
+        if (!diagnostic?.changed) { callback(null, event); return; }
+        const safeError = new Error(diagnostic.diagnostic.message);
+        safeError.stack = `Error: ${diagnostic.diagnostic.message}`;
+        for (const key of ['code', 'failureType']) {
+          const value = diagnostic.diagnostic[key];
+          if (typeof value === 'string' && /^[A-Za-z0-9_]{1,80}$/u.test(value)) {
+            Object.defineProperty(safeError, key, { value, enumerable: false });
+          }
+        }
+        callback(null, { ...event, data: { ...event.data,
+          details: { ...event.data.details, error: safeError } } });
+      },
+    });
+    await pipeline(tests, reporterView, new spec(), durableOutput, output);
     await observeStart();
     if (options.coverage) {
       requireThat(coverageSummary?.files?.length > 0, 'EVIDENCE',
@@ -372,7 +452,7 @@ try {
             if (!process.exitCode || process.exitCode < 128) process.exitCode = 2;
             console.error('[test-worker:error] The selected execution produced no test assertions.');
           }
-          report.complete = finished && !cancellation.signal.aborted && report.summary !== null &&
+          report.complete = finished && !evidenceError && !cancellation.signal.aborted && report.summary !== null &&
             report.summary.counts.cancelled === 0 && selectedCases.length > 0 &&
             report.groupExecution.groups.every(group =>
               group.startedAt && group.finishedAt && group.summary !== null);

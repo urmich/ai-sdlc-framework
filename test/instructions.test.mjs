@@ -288,8 +288,11 @@ test('T-50 STAGING guidance is policy-driven across every instruction surface', 
 
 test('T-PRD009 repository critical/affected guidance does not replace a consumer local checkpoint', async t => {
   const guide = await fs.readFile('docs/contributing/README.md', 'utf8');
-  assert.match(guide, /Local critical plus affected/u);
-  assert.match(guide, /opt-in local exhaustive runs/u);
+  assert.match(guide, /## Small default local gate/u);
+  assert.match(guide, /npm run test:critical\s+npm run check/u);
+  assert.match(guide,
+    /developer choice, \*\*not the default gate\*\* or an automatic impact guess/u);
+  assert.match(guide, /opt-in local\s+exhaustive runs/u);
   assert.match(guide, /Every PR[\s\S]*complete applicable hosted validation/u);
   const f = await fixture(t);
   const config = { schemaVersion: 1, commands: [{

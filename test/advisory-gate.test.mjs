@@ -946,32 +946,40 @@ test('T-42 intact 1.2.0 installation updates while conflicts preserve owned cont
 
 test('T-42 README documents cross-platform npm migration and complete maintenance procedures', async () => {
   const readme = await fs.readFile('README.md', 'utf8');
-  const migrationStart = readme.indexOf('### Clean migration from the private or an earlier installation');
+  assert.match(readme, /\[installation\]\(docs\/installation\/README\.md\)/u);
+  const installation = await fs.readFile('docs/installation/README.md', 'utf8');
+  const migrationStart = installation.indexOf('### Clean migration from the private or an earlier installation');
   assert.ok(migrationStart >= 0);
-  const migrationEnd = readme.indexOf('For a repository on a UNC share', migrationStart);
-  const migration = readme.slice(migrationStart, migrationEnd);
-  assert.equal((migration.match(/sdlc install --purge-existing/gu) ?? []).length, 1);
+  const migrationEnd = installation.indexOf('For a repository on a UNC share', migrationStart);
+  assert.ok(migrationEnd > migrationStart);
+  const migration = installation.slice(migrationStart, migrationEnd);
+  const commands = section => [...section.matchAll(
+    /^```(?:sh|powershell|bat)\r?\n([\s\S]*?)^```/gmu)]
+    .map(match => match[1]).join('\n');
+  assert.equal((commands(migration).match(/sdlc install --purge-existing/gu) ?? []).length, 1);
   assert.match(migration, /single cross-platform command/iu);
   assert.match(migration, /Close every Copilot CLI process first/iu);
   assert.match(migration, /preserves unrelated[\s\S]*Copilot files/iu);
-  const updateStart = readme.indexOf('## Update the framework');
-  const uninstallStart = readme.indexOf('## Uninstall the framework');
-  const nextStart = readme.indexOf('## What gets installed');
+  const updateStart = installation.indexOf('## Update the framework');
+  const uninstallStart = installation.indexOf('## Uninstall the framework');
+  const nextStart = installation.indexOf('## What gets installed');
   assert.ok(updateStart >= 0 && uninstallStart > updateStart && nextStart > uninstallStart);
-  const update = readme.slice(updateStart, uninstallStart);
-  const uninstall = readme.slice(uninstallStart, nextStart);
+  const update = installation.slice(updateStart, uninstallStart);
+  const uninstall = installation.slice(uninstallStart, nextStart);
+  const updateCommands = commands(update);
+  const uninstallCommands = commands(uninstall);
   for (const platform of ['macOS or Linux', 'Windows PowerShell', 'Windows Command Prompt']) {
     assert.ok(update.includes(`### Update on ${platform}`), platform);
     assert.ok(uninstall.includes(`### Uninstall on ${platform}`), platform);
   }
-  assert.equal((update.match(/\bupdate --home\b/gu) ?? []).length, 3);
-  assert.equal((update.match(/\bdoctor --home\b/gu) ?? []).length, 3);
-  assert.equal((update.match(/--clobber/gu) ?? []).length, 3);
-  assert.ok(update.includes('node "$COPILOT_HOME/sdlc/bin/sdlc.mjs"'));
-  assert.ok(update.includes('Join-Path $CopilotHome "sdlc\\bin\\sdlc.mjs"'));
-  assert.ok(update.includes('node "%FRAMEWORK_HOME%\\sdlc\\bin\\sdlc.mjs" update'));
-  assert.doesNotMatch(update, /\buninstall --home\b/u);
-  assert.equal((uninstall.match(/\buninstall --home\b/gu) ?? []).length, 3);
-  assert.doesNotMatch(uninstall, /\bupdate --home\b/u);
+  assert.equal((updateCommands.match(/\bupdate --home\b/gu) ?? []).length, 3);
+  assert.equal((updateCommands.match(/\bdoctor --home\b/gu) ?? []).length, 3);
+  assert.equal((updateCommands.match(/--clobber/gu) ?? []).length, 3);
+  assert.ok(updateCommands.includes('node "$COPILOT_HOME/sdlc/bin/sdlc.mjs"'));
+  assert.ok(updateCommands.includes('Join-Path $CopilotHome "sdlc\\bin\\sdlc.mjs"'));
+  assert.ok(updateCommands.includes('node "%FRAMEWORK_HOME%\\sdlc\\bin\\sdlc.mjs" update'));
+  assert.doesNotMatch(updateCommands, /\buninstall --home\b/u);
+  assert.equal((uninstallCommands.match(/\buninstall --home\b/gu) ?? []).length, 3);
+  assert.doesNotMatch(uninstallCommands, /\bupdate --home\b/u);
   assert.match(uninstall, /always retains[\s\S]*sdlc\/runtime/iu);
 });

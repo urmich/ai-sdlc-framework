@@ -43,18 +43,181 @@ Restart Copilot after install/update, then perform the
 Doctor is not proof that live hooks, built-in `/review`, every platform or tests
 passed. Record the actual Copilot/Node/OS versions for an observed walkthrough.
 
-## Update and remove
+### Clean migration from the private or an earlier installation
 
-Close active Copilot processes before maintenance. Running `sdlc install` from
-the selected package is an idempotent update preserving workflow state and
-unrelated files. `sdlc uninstall` removes managed framework files while preserving
-runtime/unrelated content. Removing a package-manager channel is not the same
-as uninstalling its explicit Copilot-home installation.
+Close every Copilot CLI process first. After backing up and reconciling any
+required history, this single cross-platform command performs an **explicit,
+irreversible clean migration** into your deliberately selected home:
 
-`sdlc install --purge-existing` is an **explicit destructive clean migration**:
-it removes owned runtime, decisions and evidence as well as owned installation
-files. Back up/reconcile required history first; it is never a default update
-or a suggested remedy for a failed test. See [complete CLI contracts](../reference/cli.md).
+```sh
+npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@0.4.0 sdlc install --purge-existing --home "<owned-copilot-home>"
+```
+
+It removes modified framework-owned files and owned runtime work items,
+decisions, evidence, manifests and locks. It preserves unrelated Copilot files
+and unrelated content in `copilot-instructions.md`. The new package source must
+remain outside the destination home. Clean migration is never the default
+update or a suggested remedy for a failed test. Run doctor through the installed
+entry afterward, then restart Copilot.
+
+For a repository on a UNC share, use PowerShell or a direct argument-array tool.
+An unavailable cmd adapter does not prove execution in the requested directory.
+
+## Update the framework
+
+Close active Copilot processes and development work first. Ordinary update
+preserves runtime workflow state and unrelated files. Restart Copilot afterward:
+an active process retains the old hooks and instructions.
+
+The following examples select the actual published **0.4.0** npm archive, not
+unreleased source or a future shared Mac asset. Use version-specific download
+and package directories outside the selected Copilot home. `--clobber` replaces
+the named downloaded assets only; it is not permission to purge an installation.
+Before proceeding from download to installation, verify the archive's SHA-256
+against `SHA256SUMS` and its version/source against `release-descriptor.json`
+using the [release verification guidance](../releases/README.md).
+Stop on a mismatch or failed command; never substitute another registry/channel
+to bypass a download or OS-policy restriction.
+
+If an active legacy hook blocks maintenance, run the applicable commands in a
+normal host terminal outside that Copilot session, then restart Copilot.
+The installed entry performs maintenance using the separately selected package
+source; see the [complete CLI contracts](../reference/cli.md).
+
+### Update on macOS or Linux
+
+```sh
+VERSION="0.4.0"
+DOWNLOAD_DIR="$HOME/Downloads/ai-sdlc-framework-$VERSION"
+PACKAGE_ROOT="$HOME/.local/share/ai-sdlc-framework/$VERSION"
+COPILOT_HOME="${COPILOT_HOME:-$HOME/.copilot}"
+PACKAGE="$DOWNLOAD_DIR/ai-sdlc-framework-$VERSION.tgz"
+
+mkdir -p "$DOWNLOAD_DIR" "$PACKAGE_ROOT"
+gh release download "v$VERSION" \
+  --repo urmich/ai-sdlc-framework \
+  --pattern "ai-sdlc-framework-$VERSION.tgz" \
+  --pattern SHA256SUMS --pattern release-descriptor.json \
+  --clobber --dir "$DOWNLOAD_DIR"
+```
+
+Verify the downloaded release before continuing in the same shell.
+
+```sh
+npm install --ignore-scripts --no-audit --no-fund --bin-links=false \
+  --prefix "$PACKAGE_ROOT" "$PACKAGE"
+SOURCE_ROOT="$PACKAGE_ROOT/node_modules/ai-sdlc-framework"
+
+node "$COPILOT_HOME/sdlc/bin/sdlc.mjs" \
+  update --home "$COPILOT_HOME" --source-root "$SOURCE_ROOT"
+node "$COPILOT_HOME/sdlc/bin/sdlc.mjs" \
+  doctor --home "$COPILOT_HOME"
+```
+
+### Update on Windows PowerShell
+
+```powershell
+$Version = "0.4.0"
+$DownloadDir = Join-Path $HOME "Downloads\ai-sdlc-framework-$Version"
+$PackageRoot = Join-Path $env:LOCALAPPDATA "ai-sdlc-framework\$Version"
+$CopilotHome = if ($env:COPILOT_HOME) {
+  $env:COPILOT_HOME
+} else {
+  Join-Path $HOME ".copilot"
+}
+$Package = Join-Path $DownloadDir "ai-sdlc-framework-$Version.tgz"
+$SourceRoot = Join-Path $PackageRoot "node_modules\ai-sdlc-framework"
+
+New-Item -ItemType Directory -Force -Path $DownloadDir, $PackageRoot | Out-Null
+gh release download "v$Version" `
+  --repo urmich/ai-sdlc-framework `
+  --pattern "ai-sdlc-framework-$Version.tgz" `
+  --pattern SHA256SUMS --pattern release-descriptor.json `
+  --clobber --dir "$DownloadDir"
+```
+
+Verify the downloaded release before continuing in the same PowerShell session.
+
+```powershell
+npm install --ignore-scripts --no-audit --no-fund --bin-links=false `
+  --prefix "$PackageRoot" "$Package"
+
+node (Join-Path $CopilotHome "sdlc\bin\sdlc.mjs") `
+  update --home "$CopilotHome" --source-root "$SourceRoot"
+node (Join-Path $CopilotHome "sdlc\bin\sdlc.mjs") `
+  doctor --home "$CopilotHome"
+```
+
+### Update on Windows Command Prompt
+
+```bat
+set "VERSION=0.4.0"
+set "DOWNLOAD_DIR=%USERPROFILE%\Downloads\ai-sdlc-framework-%VERSION%"
+set "PACKAGE_ROOT=%LOCALAPPDATA%\ai-sdlc-framework\%VERSION%"
+if defined COPILOT_HOME (set "FRAMEWORK_HOME=%COPILOT_HOME%") else (set "FRAMEWORK_HOME=%USERPROFILE%\.copilot")
+set "PACKAGE=%DOWNLOAD_DIR%\ai-sdlc-framework-%VERSION%.tgz"
+set "SOURCE_ROOT=%PACKAGE_ROOT%\node_modules\ai-sdlc-framework"
+
+if not exist "%DOWNLOAD_DIR%" mkdir "%DOWNLOAD_DIR%"
+if not exist "%PACKAGE_ROOT%" mkdir "%PACKAGE_ROOT%"
+gh release download "v%VERSION%" --repo urmich/ai-sdlc-framework --pattern "ai-sdlc-framework-%VERSION%.tgz" --pattern SHA256SUMS --pattern release-descriptor.json --clobber --dir "%DOWNLOAD_DIR%"
+```
+
+Verify the downloaded release before continuing in the same Command Prompt.
+
+```bat
+npm install --ignore-scripts --no-audit --no-fund --bin-links=false --prefix "%PACKAGE_ROOT%" "%PACKAGE%"
+node "%FRAMEWORK_HOME%\sdlc\bin\sdlc.mjs" update --home "%FRAMEWORK_HOME%" --source-root "%SOURCE_ROOT%"
+node "%FRAMEWORK_HOME%\sdlc\bin\sdlc.mjs" doctor --home "%FRAMEWORK_HOME%"
+```
+
+## Uninstall the framework
+
+Uninstall removes unchanged framework-owned instructions, skills, hooks and CLI
+files. It preserves modified/unowned content and always retains
+`<COPILOT_HOME>/sdlc/runtime/` so workflow evidence remains recoverable.
+Removing a package-manager channel is not the same as uninstalling its explicit
+Copilot-home installation. The separately selected package directory is not
+removed by these commands.
+
+### Uninstall on macOS or Linux
+
+```sh
+COPILOT_HOME="${COPILOT_HOME:-$HOME/.copilot}"
+node "$COPILOT_HOME/sdlc/bin/sdlc.mjs" \
+  uninstall --home "$COPILOT_HOME"
+```
+
+### Uninstall on Windows PowerShell
+
+```powershell
+$CopilotHome = if ($env:COPILOT_HOME) {
+  $env:COPILOT_HOME
+} else {
+  Join-Path $HOME ".copilot"
+}
+node (Join-Path $CopilotHome "sdlc\bin\sdlc.mjs") `
+  uninstall --home "$CopilotHome"
+```
+
+### Uninstall on Windows Command Prompt
+
+```bat
+if defined COPILOT_HOME (set "FRAMEWORK_HOME=%COPILOT_HOME%") else (set "FRAMEWORK_HOME=%USERPROFILE%\.copilot")
+node "%FRAMEWORK_HOME%\sdlc\bin\sdlc.mjs" uninstall --home "%FRAMEWORK_HOME%"
+```
+
+Inspect the result. `"uninstalled": true` means unchanged owned content was
+removed; a nonempty `preserved` array identifies modified files intentionally
+left in place. Do not delete runtime state merely to make a check pass.
+
+## What gets installed
+
+The selected home contains the managed instruction block, `hooks/sdlc.json`,
+the five `skills/sdlc*` phase skills, and `sdlc/` with the CLI, source, focused
+engineering instructions, templates and installation manifest.
+`sdlc/runtime/` holds local state and evidence references, not disposable package
+files. See [installation ownership and CLI details](../reference/cli.md).
 
 ## Offline and native channels
 

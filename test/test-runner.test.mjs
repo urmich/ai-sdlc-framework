@@ -54,6 +54,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createPlan, parseOptions, repositoryRoot, unitFiles } from '../scripts/test-runner.mjs';
 import { readTestBudget } from '../scripts/test-budget.mjs';
+import { digest } from '../src/core.mjs';
+import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
 
 const canonicalNames = [
   'T-101 selected fetch remote requires exactly one credential-free URL',
@@ -282,8 +284,80 @@ test('T-PRD018 unsafe failure diagnostics terminate without hanging or manufactu
     assert.ok(!report.executions.some(row => row.status === 'Passed'));
     const rows = (await fs.readFile(`${reportPath}.journal.ndjson`, 'utf8')).trim().split('\n').map(JSON.parse);
     assert.ok(rows.some(row => row.kind === 'evidence-rejected' && row.code === 'UNSAFE'));
+    assert.ok(rows.some(row => row.kind === 'evidence-rejected' && row.cause?.message &&
+      /^[a-f0-9]{64}$/u.test(row.original?.sha256) && row.original.bytes > 0));
+    assert.equal(report.executions.find(row => row.name === 'unsupported diagnostic fixture').status, 'Failed');
     assert.equal(rows.at(-1).kind, 'execution-end');
     assert.equal(rows.at(-1).complete, false);
+
+    const legitimate = path.join(directory, 'markdown-failure.test.mjs');
+    const identityFile = path.join(directory, 'message-identity.json');
+    const siblingMarker = path.join(directory, 'sibling-finished');
+    const privateValue = 'fixture-worker-private-value';
+    const guide = `# Current installation\n\n\`\`\`js\nconst config = { authorization: '${privateValue}' };\n\`\`\`\n`;
+    await fs.writeFile(legitimate, `import test from 'node:test';import assert from 'node:assert/strict';
+import {writeFileSync} from 'node:fs';import {createHash} from 'node:crypto';
+import {setTimeout as delay} from 'node:timers/promises';
+test('legitimate Markdown assertion failure',()=>{
+  try{assert.match(${JSON.stringify(guide)},/Old local title/u);}
+  catch(error){writeFileSync(${JSON.stringify(identityFile)},JSON.stringify({
+    sha256:createHash('sha256').update(error.message).digest('hex'),bytes:Buffer.byteLength(error.message)
+  }));throw error;}
+});
+test('passing sibling after diagnostic rejection',async()=>{
+  await delay(75);writeFileSync(${JSON.stringify(siblingMarker)},'finished');
+});
+`);
+    const legitimateReportPath = path.join(evidence, 'markdown-failure.json');
+    const observed = await invoke(['targeted', '--workers', '1', legitimate], {
+      SDLC_TEST_REPORT_FILE: legitimateReportPath,
+    }).done;
+    assert.equal(observed.code, 1, 'Keep the genuine failed assertion non-passing');
+    const preserved = JSON.parse(await fs.readFile(legitimateReportPath, 'utf8'));
+    assert.equal(preserved.complete, false, 'Rejected diagnostic text must not manufacture complete evidence');
+    assert.equal(preserved.evidenceError.scope, 'failure-diagnostic');
+    assert.equal(preserved.evidenceError.fatal, false);
+    assert.deepEqual([preserved.summary.counts.failed, preserved.summary.counts.passed,
+      preserved.summary.counts.cancelled], [1, 1, 0]);
+    const failed = preserved.executions.find(row => row.name === 'legitimate Markdown assertion failure');
+    assert.equal(failed.status, 'Failed');
+    assert.equal(failed.diagnostic.retention.status, 'Rejected');
+    assert.deepEqual(failed.diagnostic.originalMessage, JSON.parse(await fs.readFile(identityFile, 'utf8')));
+    assert.equal(await fs.readFile(siblingMarker, 'utf8'), 'finished');
+    const journalText = await fs.readFile(`${legitimateReportPath}.journal.ndjson`, 'utf8');
+    const notices = journalText.trim().split('\n').map(JSON.parse);
+    const rejected = notices.find(row => row.kind === 'evidence-rejected');
+    assert.equal(rejected.scope, 'failure-diagnostic');
+    assert.equal(rejected.nameDigest, digest(failed.name));
+    assert.equal(rejected.groupId, failed.groupId);
+    assert.ok(rejected.original.bytes > failed.diagnostic.originalMessage.bytes);
+    assert.deepEqual(rejected.original, preserved.evidenceError.original);
+    const { status, ...cause } = failed.diagnostic.retention;
+    assert.equal(status, 'Rejected');
+    assert.deepEqual(rejected.cause, cause, 'Retain the actual sanitizer cause identity, not a manufactured exception');
+    assert.match(rejected.cause.message, /structured log fragment/u);
+    assert.deepEqual(notices.filter(row => row.kind === 'completion').map(({ kind, ...row }) => row),
+      preserved.executions);
+    assert.ok(notices.every((row, index) => row.sequence === index + 1));
+    for (const text of [journalText, JSON.stringify(preserved), observed.stdout, observed.stderr]) {
+      assert.ok(!text.includes(privateValue), 'Rejected failure text must not escape through artifacts or the reporter');
+    }
+    sanitizeExecutionPayload(Buffer.from(JSON.stringify({ stdout: observed.stdout, stderr: observed.stderr })));
+    assert.equal(preserved.resources.budget.activeWorkers, 0);
+    assert.equal(preserved.resources.budget.residentWorkers, 0);
+
+    const opaque = path.join(directory, 'opaque-diagnostic.test.mjs');
+    await fs.writeFile(opaque, "import test from 'node:test';" +
+      "test('opaque non-failure diagnostic',t=>t.diagnostic('opaque \\u001b[31m payload'));");
+    const opaquePath = path.join(evidence, 'opaque-diagnostic.json');
+    const denied = await invoke(['targeted', opaque], { SDLC_TEST_REPORT_FILE: opaquePath }).done;
+    assert.notEqual(denied.code, 0);
+    const incomplete = JSON.parse(await fs.readFile(opaquePath, 'utf8'));
+    assert.equal(incomplete.complete, false);
+    assert.equal(incomplete.evidenceError.scope, 'event');
+    assert.equal(incomplete.evidenceError.fatal, true);
+    assert.equal(incomplete.evidenceError.cause.code, 'UNSAFE');
+    assert.ok(!denied.stdout.includes('\u001b'));
   });
 
 test('T-PRD018 nested concurrent results retain exact ancestry and safe original selector identities', async t => {
