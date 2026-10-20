@@ -186,7 +186,7 @@ async function recoverDeadLockGuarded(file) {
   let current;
   try { current = await readJson(file, { optional: true, limit: 2048 }); }
   catch (error) {
-    if (!competingWindowsLockRead(error)) throw error;
+    if (error.code !== 'STALE' && !competingWindowsLockRead(error)) throw error;
     return false;
   }
   if (!confirmedDead(current)) return false;

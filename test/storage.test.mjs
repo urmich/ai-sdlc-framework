@@ -163,6 +163,37 @@ test('T-16 a changing recovery-guard owner remains contention without stealing o
   }
   assert.equal(await withLock(lock, () => 'guard available'), 'guard available');
 });
+test('T-16 a changing lock owner during inspection remains contention without removing its replacement', async t => {
+  const f = await fixture(t);
+  const lock = path.join(f.root, 'changing-lock-owner.lock');
+  const owner = { token: 'original', host: os.hostname(), pid: process.pid };
+  await writeJson(lock, owner);
+  const lstat = fsPromises.lstat;
+  let changed = false;
+  let actionRan = false;
+  const mocked = t.mock.method(fsPromises, 'lstat', async (file, options) => {
+    const stat = await lstat(file, options);
+    if (file === lock && options?.bigint && !changed) {
+      await writeJson(lock, { ...owner, token: 'replacement' });
+      changed = true;
+    }
+    return stat;
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(withLock(lock, () => { actionRan = true; },
+      { waitMs: 0 }), { code: 'LOCK_BUSY' });
+    assert.equal(changed, true);
+    assert.equal(actionRan, false);
+    assert.equal((await readJson(lock)).token, 'replacement');
+    await assert.rejects(fs.stat(`${lock}.recovery-guard`), { code: 'ENOENT' });
+  } finally {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+  }
+  await fs.unlink(lock);
+  assert.equal(await withLock(lock, () => 'lock available'), 'lock available');
+});
 test('T-48 batch work-item locks are acquired before any invalidation action', async t => {
   const f = await fixture(t);
   const secondWorkItem = 'wi-z-second-lock';
