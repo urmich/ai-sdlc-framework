@@ -24,6 +24,10 @@ not installed framework instructions or a policy for framework consumers.
 - Report exact commands and missing prerequisites truthfully. A narrow local
   pass does not satisfy the full PR matrix, native or release acceptance.
   Freeze the candidate before final validation and built-in Copilot `/review`.
+- On protected hosts where npm is blocked, follow the
+  [Node-only local gate](docs/contributing/README.md#protected-hosts-without-npm).
+  Keep npm-dependent integration work on capable GitHub PR runners; never
+  substitute another npm entry point or bypass machine protections.
 
 This file and `.github/testing-policy.md` must remain outside npm exports,
 package contents, installer selections and generic `assets/` guidance.

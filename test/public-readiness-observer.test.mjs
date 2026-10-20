@@ -177,8 +177,10 @@ test('T-PRD016 API-only native admission restores a complete original four-lane 
   for (const stage of stages) {
     assert.ok(original.has(`${stage.name}.json`) && original.has(`${stage.name}-command.json`),
       `Original reports must use the stable ${stage.name} protocol ID`);
-    assert.ok(stage.name === 'unit' || stage.selectorName === stage.args[2],
-      'Targeted selector names must remain separate from producer report stage IDs');
+    assert.ok(stage.name === 'unit' || stage.args[1] === '--selection-file' &&
+      stage.args[2] === stage.selection.path &&
+      stage.selection.path.endsWith(`/${stage.selection.sha256}.json`) && stage.args.join(' ').length < 200,
+    'Targeted transport must bind its exact source-derived selection without embedding it in argv');
     assert.deepEqual(original.get(`${stage.name}.json`).selection.namePatterns,
       stage.name === 'unit' ? [] : [stage.selectorName]);
   }

@@ -673,10 +673,10 @@ test('T-PRD041 retained signed fixtures use the actual verifier for payload sign
     assert.equal(baseline.bundleSha256, sha256(original));
     assert.deepEqual(Object.values(baseline.mechanisms).map(item => item.status), ['Passed', 'Passed', 'Passed']);
     assert.equal(baseline.statementSha256, sha256(Buffer.from(saved.dsseEnvelope.payload, 'base64')));
-    const tamper = value => {
+    const tamper = (value, offset = 0) => {
       const bytes = Buffer.from(value, 'base64');
-      assert.ok(bytes.length);
-      bytes[0] ^= 1;
+      assert.ok(offset >= 0 && offset < bytes.length);
+      bytes[offset] ^= 1;
       return bytes.toString('base64');
     };
     const badSignature = structuredClone(saved);
@@ -705,7 +705,13 @@ test('T-PRD041 retained signed fixtures use the actual verifier for payload sign
       entry.inclusionPromise.signedEntryTimestamp = tamper(entry.inclusionPromise.signedEntryTimestamp);
     }
     if (entry.inclusionProof?.checkpoint?.envelope) {
-      entry.inclusionProof.checkpoint.envelope = entry.inclusionProof.checkpoint.envelope.replace(/.$/u, '!');
+      const envelope = entry.inclusionProof.checkpoint.envelope;
+      entry.inclusionProof.checkpoint.envelope = envelope.replace(
+        /^(\u2014 \S+ )([A-Za-z0-9+/]+={0,2})$/gmu,
+        (_match, prefix, signature) =>
+          `${prefix}${tamper(signature, Buffer.from(signature, 'base64').length - 1)}`);
+      assert.notEqual(entry.inclusionProof.checkpoint.envelope, envelope,
+        'The retained checkpoint signature must actually change');
     }
     assert.ok(entry.inclusionPromise?.signedEntryTimestamp || entry.inclusionProof?.checkpoint?.envelope,
       'Retained fixture has no supported verifiable transparency proof');

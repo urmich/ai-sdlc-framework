@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
-import { requireThat } from '../src/core.mjs';
+import { digest, requireThat } from '../src/core.mjs';
 import { sanitizeExecutionPayload } from 'ai-sdlc-framework/evidence';
 import { repositoryRoot } from './test-runner.mjs';
 import { executeValidationCommand } from './validation-tools.mjs';
@@ -12,6 +12,30 @@ import { provisionPrCryptoFixture, prCryptoFixture } from './pr-capabilities.mjs
 export const homebrewToolchain = Object.freeze({
   commit: '99fd9a8eed4ff942c448da0c1f11156302441e4a', ruby: '4.0.7', node: '22.23.3',
 });
+export const homebrewBottlePlanSource = `
+require "formula"
+require "formulary"
+require "formula_installer"
+require "json"
+require "rbconfig"
+root = Formulary.factory("node@22")
+installer = FormulaInstaller.new(root, force_bottle: false)
+formulae = [root]
+formulae.concat(installer.compute_dependencies.map(&:to_formula)) if installer.pour_bottle?
+entries = formulae.uniq(&:full_name).map do |formula|
+  bottle = formula.bottle
+  { name: formula.name, version: formula.version.to_s, pkgVersion: formula.pkg_version.to_s,
+    prefix: formula.prefix.to_s, bottleTag: bottle&.tag&.to_s,
+    sha256: bottle&.resource&.checksum&.hexdigest,
+    compatible: bottle ? bottle.compatible_locations? : false,
+    pourable: FormulaInstaller.new(formula, force_bottle: false).pour_bottle? }
+end
+puts JSON.generate({ schemaVersion: 1, kind: "native-homebrew-bottle-plan",
+  prefix: HOMEBREW_PREFIX.to_s, cellar: HOMEBREW_CELLAR.to_s,
+  architecture: RbConfig::CONFIG.fetch("host_cpu"), rubyPlatform: RUBY_PLATFORM, rubyVersion: RUBY_VERSION,
+  entries: entries })
+`;
+export const homebrewSetupLimits = Object.freeze({ preflightMs: 120_000, installMs: 180_000 });
 const targets = { 'linux-x64': ['linux', 'x64'], 'windows-x64': ['win32', 'x64'],
   'macos-arm64': ['darwin', 'arm64'], 'macos-x64': ['darwin', 'x64'] };
 
@@ -80,6 +104,52 @@ export function nativeBootstrapExports(environment) {
   return Object.fromEntries(keys.map(key => [key, environment[key]]));
 }
 
+export function requireHomebrewBottlePlan(plan, { prefix, target }) {
+  const architecture = target === 'macos-arm64' ? ['arm64', 'aarch64'] : ['x86_64'];
+  requireThat(['macos-arm64', 'macos-x64'].includes(target) && plan?.schemaVersion === 1 &&
+    plan.kind === 'native-homebrew-bottle-plan' && plan.prefix === prefix &&
+    plan.cellar === path.join(prefix, 'Cellar') && architecture.includes(plan.architecture) &&
+    typeof plan.rubyPlatform === 'string' && /darwin/u.test(plan.rubyPlatform) &&
+    plan.rubyVersion === homebrewToolchain.ruby && Array.isArray(plan.entries) &&
+    plan.entries.length > 0 && plan.entries.length <= 128 &&
+    plan.entries.every(entry => entry && Object.getPrototypeOf(entry) === Object.prototype) &&
+    new Set(plan.entries.map(entry => entry.name)).size === plan.entries.length &&
+    plan.entries.every(entry => typeof entry.name === 'string' &&
+      /^[a-z0-9][a-z0-9@+_.-]*$/u.test(entry.name) &&
+      typeof entry.version === 'string' && entry.version.length > 0 && entry.version.length <= 128 &&
+      typeof entry.pkgVersion === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9+_.-]{0,127}$/u.test(entry.pkgVersion) &&
+      entry.prefix === path.join(prefix, 'Cellar', entry.name, entry.pkgVersion) &&
+      typeof entry.compatible === 'boolean' && typeof entry.pourable === 'boolean'),
+  'HOST', 'Pinned Homebrew bottle eligibility needs the exact owned prefix, native architecture and complete installer plan');
+  const root = plan.entries.find(entry => entry.name === 'node@22');
+  requireThat(root?.version === homebrewToolchain.node, 'HOST',
+    `Homebrew Node must remain exactly ${homebrewToolchain.node}; no latest/system runtime substitute is allowed`);
+  const unavailable = plan.entries.filter(entry => !entry.compatible || !entry.pourable ||
+    !/^[a-f0-9]{64}$/u.test(entry.sha256 ?? '') ||
+    typeof entry.bottleTag !== 'string' || !/^[a-z][a-z0-9_]+$/u.test(entry.bottleTag) ||
+    (entry.bottleTag !== 'all' && (target === 'macos-arm64' ?
+      !/^arm64_(?!linux)/u.test(entry.bottleTag) : /arm64|linux/u.test(entry.bottleTag))) ||
+    entry.name === 'node@22' && entry.bottleTag === 'all');
+  requireThat(!unavailable.length, 'HOST',
+    `Required native Homebrew bottles unavailable or non-relocatable at owned prefix ${prefix}: ` +
+    unavailable.map(entry => `${entry.name} (${entry.pkgVersion}) [${entry.bottleTag ?? 'no native bottle'}]`).join(', ') +
+    '. Source compilation is not permitted. An explicitly approved compatible bottle/dependency snapshot is required; ' +
+    'no force-bottle, global prefix or source-build fallback was attempted.');
+  return plan;
+}
+
+export function requireHomebrewBottleReceipts(plan, receipts) {
+  requireThat(Array.isArray(receipts) && receipts.length === plan.entries.length &&
+    receipts.every(entry => entry && Object.getPrototypeOf(entry) === Object.prototype) &&
+    new Set(receipts.map(entry => entry.name)).size === receipts.length &&
+    plan.entries.every(entry => receipts.filter(actual => actual.name === entry.name &&
+      actual.pkgVersion === entry.pkgVersion && actual.prefix === entry.prefix &&
+      actual.receipt?.poured_from_bottle === true &&
+      actual.receipt.source?.versions?.stable === entry.version).length === 1),
+  'HOST', 'Homebrew installation must retain every actual poured-bottle receipt; source-built or missing prerequisites cannot pass');
+  return receipts;
+}
+
 export async function bootstrapNativeToolchain(options) {
   const directory = validateBootstrapRequest(options);
   let current = repositoryRoot;
@@ -101,12 +171,15 @@ export async function bootstrapNativeToolchain(options) {
   const interrupt = () => cancellation.abort();
   process.on('SIGINT', interrupt);
   process.on('SIGTERM', interrupt);
-  const run = async (name, command, args, cwd = repositoryRoot, commandEnvironment = environment) => {
+  const run = async (name, command, args, cwd = repositoryRoot, commandEnvironment = environment, timeoutMs) => {
+    const signal = timeoutMs === undefined ? cancellation.signal :
+      AbortSignal.any([cancellation.signal, AbortSignal.timeout(timeoutMs)]);
     const result = await executeValidationCommand({ name, command, args, cwd, environment: commandEnvironment,
-      signal: cancellation.signal, outputDir: directory });
+      signal, outputDir: directory });
     reports.push({ name, complete: result.complete, exitCode: result.exitCode });
     requireThat(result.complete && result.exitCode === 0, 'HOST',
-      `Pinned native prerequisite ${name} is unavailable; retained diagnostics identify the blocker`);
+      `Pinned native prerequisite ${name} is unavailable; retained diagnostics identify the blocker` +
+      (timeoutMs === undefined ? '' : ` (setup phase limit ${timeoutMs} ms; interruption is not passing evidence)`));
     return result.stdout.trim();
   };
   const retained = { schemaVersion: 1, status: 'NotRun', target: options.target,
@@ -189,7 +262,42 @@ export async function bootstrapNativeToolchain(options) {
       const rubyExecutable = await run('brew-ruby-path', brew, ['ruby', '-rrbconfig', '-e', 'puts RbConfig.ruby']);
       requireThat(path.relative(brewRoot, await fs.realpath(rubyExecutable)).split(path.sep)[0] !== '..',
         'HOST', 'System Ruby cannot substitute for the isolated portable runtime');
-      await run('brew-node-install', brew, ['install', '--formula', 'node@22']);
+      console.log(`Checking native Homebrew bottle eligibility for ${options.target} ` +
+        `(limit ${homebrewSetupLimits.preflightMs / 1000}s); source compilation is not permitted.`);
+      const bottlePlan = JSON.parse(await run('brew-node-bottle-plan', brew, ['ruby', '-e', homebrewBottlePlanSource],
+        repositoryRoot, environment, homebrewSetupLimits.preflightMs));
+      const retainedBottlePlan = sanitizeExecutionPayload(Buffer.from(JSON.stringify(bottlePlan)));
+      requireThat(digest(retainedBottlePlan) === digest(bottlePlan), 'UNSAFE',
+        'Bottle eligibility identities cannot be rewritten while retaining setup evidence');
+      await fs.writeFile(path.join(directory, 'homebrew-bottle-plan.json'),
+        `${JSON.stringify(retainedBottlePlan)}\n`, { flag: 'wx' });
+      requireHomebrewBottlePlan(bottlePlan, { prefix: brewRoot, target: options.target });
+      console.log(`Verified ${bottlePlan.entries.length} compatible native bottle prerequisites; ` +
+        `installation limit ${homebrewSetupLimits.installMs / 1000}s; actual receipt/runtime verification remains required.`);
+      await run('brew-node-install', brew, ['install', '--formula', 'node@22'],
+        repositoryRoot, environment, homebrewSetupLimits.installMs);
+      const bottleReceipts = [];
+      for (const rack of await fs.readdir(bottlePlan.cellar, { withFileTypes: true })) {
+        requireThat(rack.isDirectory() && !rack.isSymbolicLink(), 'HOST',
+          'Owned Homebrew Cellar cannot substitute linked or unknown prerequisite racks');
+        for (const version of await fs.readdir(path.join(bottlePlan.cellar, rack.name), { withFileTypes: true })) {
+          requireThat(version.isDirectory() && !version.isSymbolicLink() && bottleReceipts.length < 128,
+            'HOST', 'Owned Homebrew prerequisites must be bounded real installed kegs');
+          const installed = path.join(bottlePlan.cellar, rack.name, version.name);
+          requireThat(await fs.realpath(installed) === installed, 'HOST',
+            'Homebrew cannot substitute a global or different installed keg');
+          const receiptBytes = await fs.readFile(path.join(installed, 'INSTALL_RECEIPT.json'));
+          bottleReceipts.push({ name: rack.name, pkgVersion: version.name, prefix: installed,
+            originalBytes: receiptBytes.length, originalSHA256: digest(receiptBytes),
+            receipt: JSON.parse(receiptBytes) });
+        }
+      }
+      requireHomebrewBottleReceipts(bottlePlan, bottleReceipts);
+      const retainedBottleReceipts = sanitizeExecutionPayload(Buffer.from(JSON.stringify(bottleReceipts)));
+      requireThat(digest(retainedBottleReceipts) === digest(bottleReceipts), 'UNSAFE',
+        'Actual installed bottle receipts cannot be rewritten while retaining setup evidence');
+      await fs.writeFile(path.join(directory, 'homebrew-bottle-receipts.json'),
+        `${JSON.stringify(retainedBottleReceipts)}\n`, { flag: 'wx' });
       const nodePrefix = await run('brew-node-prefix', brew, ['--prefix', 'node@22']);
       requireThat(!(path.relative(brewRoot, await fs.realpath(nodePrefix))).startsWith('..'),
         'HOST', 'Homebrew dependency must remain inside the owned prefix');
@@ -197,7 +305,8 @@ export async function bootstrapNativeToolchain(options) {
         ['-p', 'JSON.stringify({version:process.versions.node,platform:process.platform,arch:process.arch})']));
       requireThat(node.version === homebrewToolchain.node && node.platform === 'darwin' && node.arch === process.arch,
         'HOST', 'The native Homebrew Node dependency pin is unavailable; latest/system/Rosetta cannot substitute');
-      retained.native.homebrew = { commit: actualCommit, ruby, rubyExecutable, node, nodePrefix,
+      retained.native.homebrew = { commit: actualCommit, ruby, rubyExecutable, node, nodePrefix, bottlePlan,
+        bottleReceiptsDigest: digest(bottleReceipts),
         uname, translation: translated.exitCode === 0 ? '0' : 'unavailable on native Intel' };
     }
     selected.GOTOOLCHAIN = 'local';

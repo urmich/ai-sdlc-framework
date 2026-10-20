@@ -13,7 +13,8 @@ import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
 import { compileValidationInventory, compileValidationSourceInventory, reconcileNodeExecution,
   validationPlatforms, validationSourcePaths, isValidationTestPath } from './validation-inventory.mjs';
 import { discoverGoDeclarations, executeValidationCommand, reconcileGoExecution } from './validation-tools.mjs';
-import { repositoryRoot, unitFiles } from './test-runner.mjs';
+import { repositoryRoot, unitFiles, validationSelectionDescriptor, validationSelectionProtocol,
+  writeValidationSelection } from './test-runner.mjs';
 import { verifyCandidate, archiveRecord } from './release-bundle.mjs';
 import { readZip, canonical as releaseCanonical } from '../packaging/standalone/archive.mjs';
 import { runtimePreflight } from '../packaging/standalone/runtime.mjs';
@@ -72,6 +73,7 @@ export function nativeConfigurationDigest({ inventory, profile, configuredWorker
   'INVENTORY', 'Native calculator capability must preserve its complete independently selected files and assertion count');
   return digest({ nativeToolchain, inventory: inventory.digest, profile,
     schedulingPolicy: validationSchedulingPolicyDigest(), selectedWorkersRequest: requested,
+    selectionTransport: validationSelectionProtocol,
     requiredCapabilities: { crypto: prCryptoFixture, calculator } });
 }
 
@@ -393,10 +395,18 @@ export function nativeStageSelections(inventory, plan) {
     { ...selected.regression, name: 'regression', selectorName: selected.regression.name },
   ];
   requireThat(stages.every(stage => stage.cases.length > 0), 'INVENTORY', 'Native validation cannot use an empty stage');
-  return stages;
+  return stages.map(stage => {
+    if (stage.name === 'unit') return stage;
+    const { payload, ...selection } = validationSelectionDescriptor({ files: stage.files, name: stage.selectorName });
+    return { ...stage, args: ['targeted', '--selection-file', selection.path], selection };
+  });
 }
 
 export function validateNativeGroupReport({ inventory, stage, report, journal, target }) {
+  requireThat(Array.isArray(report.selection?.namePatterns) &&
+    digest(report.selection.namePatterns) === digest(stage.name === 'unit' ? [] : [stage.selectorName]) &&
+    digest(report.selection?.skipPatterns ?? []) === digest([]) && report.selection?.coverage !== true,
+  'EVIDENCE', 'Original native selection patterns must match the complete independently derived stage');
   const files = stage.files;
   const groups = validationExecutionGroups(inventory, {
     files, pattern: stage.name === 'unit' ? undefined : stage.selectorName, preserveOrder: true,
@@ -1171,6 +1181,11 @@ export async function runNativeValidation(options) {
       ...(profile === 'r-pre' ? { intentId: process.env.RELEASE_INTENT_ID } : {}),
     });
     const stage = async selected => {
+      if (selected.selection) {
+        const reference = await writeValidationSelection({ files: selected.files, name: selected.selectorName });
+        requireThat(digest(reference) === digest(selected.selection), 'EVIDENCE',
+          'Native selection transport differs from its independently derived stage identity');
+      }
       const command = await runTool({ name: `${selected.name}-command`, command: process.execPath,
         args: ['scripts/test-runner.mjs', ...selected.args],
         environment: { ...environment, SDLC_TEST_REPORT_FILE: path.join(directory, `${selected.name}.json`) } });

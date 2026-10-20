@@ -31,6 +31,27 @@ The critical command includes the canonical three-file/16-case unit stage once.
 Standalone `npm run test:unit` remains available for unit-only work;
 do not prepend it to the default critical sequence and repeat those assertions.
 
+### Protected hosts without npm
+
+If npm is blocked on the development machine, do not run npm/npx, download
+replacement tooling or invoke npm's CLI through Node or another entry point.
+Do not change TLS, registry, proxy or machine protections to work around it.
+The same finite Node-only sanity and static gates are available directly:
+
+```sh
+node scripts/test-runner.mjs critical
+node scripts/check.mjs
+```
+
+These project entry points are not a way to invoke blocked npm functionality.
+Keep npm-dependent integration checks, package-manager operations and authentic
+npm-verifier provisioning on the required capable GitHub PR runners, in their
+owned isolated directories. Do not run an affected/full local selection that
+includes those operations. Missing local npm capability remains **NotRun**;
+it neither waives hosted coverage nor becomes a skipped or passing acceptance
+result. Ordinary contributors with npm available may still use the commands
+above this section.
+
 ### Optional targeted debugging
 
 For an isolated iteration, use an existing file and, optionally, an exact name:

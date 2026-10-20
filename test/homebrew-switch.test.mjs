@@ -3,16 +3,102 @@ export const validationDeclarations = {
   "applicability": [
     {"options": "nativeMac", "platforms": ["macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Mac filesystem/runtime switching contracts execute independently on both native architectures.", "prerequisites": ["Native Mac Node", "Owned Homebrew/channel fixtures"]}
   ],
-  "surfaces": [{"coverage": "direct", "paths": ["packaging/homebrew/switch-state.mjs"]}]
+  "surfaces": [{"coverage": "direct", "paths": ["packaging/homebrew/switch-state.mjs", "scripts/homebrew-switch.mjs"]}]
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { switchFromHomebrew, switchToHomebrew } from '../scripts/homebrew-switch.mjs';
+import { switchFromHomebrew, switchToHomebrew, verifyHomebrewHooks,
+  verifyCopiedHomebrewInstallation } from '../scripts/homebrew-switch.mjs';
 
 const nativeMac = { skip: process.platform !== 'darwin' };
+const copiedHookEvents = ['sessionStart', 'userPromptSubmitted', 'preToolUse', 'postToolUse',
+  'postToolUseFailure', 'preCompact', 'agentStop', 'sessionEnd'];
+
+function copiedHookFixture(home, node) {
+  return { hooks: Object.fromEntries(copiedHookEvents.map(event => [event, [{
+    exec: node, args: [path.join(home, 'sdlc', 'bin', 'sdlc.mjs'),
+      ...(event === 'preToolUse' ? ['gate'] : ['hook', event]), '--home', home],
+  }]])) };
+}
+
+function copiedCliArguments(args) {
+  if (args[0] !== '--input-type=module') return args;
+  assert.equal(args[1], '--eval');
+  assert.match(args[2], /const \{runCli\}/u);
+  return args.slice(3);
+}
+
+async function copiedHookResponse(home, args, input) {
+  const invocation = copiedCliArguments(args);
+  assert.equal(invocation[0], path.join(home, 'sdlc', 'bin', 'sdlc.mjs'));
+  assert.deepEqual(invocation.slice(-2), ['--home', home]);
+  const event = invocation[1] === 'gate' ? 'preToolUse' : invocation[2];
+  assert.ok(copiedHookEvents.includes(event));
+  const payload = JSON.parse(input);
+  assert.equal(typeof payload.sessionId, 'string');
+  const sessions = path.join(home, 'sdlc', 'runtime', 'sessions');
+  if (['sessionStart', 'preCompact', 'sessionEnd'].includes(event)) {
+    const file = path.join(sessions, `${payload.sessionId}.json`);
+    const previous = await fs.readFile(file, 'utf8').then(JSON.parse, error => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    });
+    await fs.mkdir(sessions, { recursive: true });
+    await fs.writeFile(file, JSON.stringify({ sessionId: payload.sessionId,
+      orientationGeneration: (previous?.orientationGeneration ?? 0) + 1,
+      orientationReason: event, acknowledgedToken: null }));
+  } else if (event === 'userPromptSubmitted') {
+    const receipts = path.join(sessions, payload.sessionId, 'receipts');
+    await fs.mkdir(receipts, { recursive: true });
+    await fs.writeFile(path.join(receipts, 'owned-fixture.json'),
+      JSON.stringify({ sessionId: payload.sessionId, source: event }), { flag: 'wx' });
+  }
+  return event === 'sessionStart' ? {
+    additionalContext: 'AI SDLC lifecycle stages are advisory. Owned copied-hook fixture.',
+  } : {};
+}
+
+test('T-51 copied Homebrew fixture satisfies the complete installed hook routing contract without invoking Homebrew', async t => {
+  const root = path.resolve('.test-data', `homebrew-hook-contract-${randomUUID()}`);
+  const home = path.join(root, 'owned home');
+  const node = path.join(root, 'retained-node');
+  await fs.mkdir(path.join(home, 'hooks'), { recursive: true });
+  await fs.writeFile(node, 'owned runtime marker');
+  t.after(() => fs.rm(root, { recursive: true }));
+  const hooksFile = path.join(home, 'hooks', 'sdlc.json');
+  const hooks = copiedHookFixture(home, node);
+  const doctor = { installed: true, findings: [], home, frameworkVersion: '0.4.0' };
+  const selectedNode = await fs.realpath(node);
+  const legacy = { hooks: { sessionStart: hooks.hooks.sessionStart } };
+  await fs.writeFile(hooksFile, JSON.stringify(legacy));
+  await assert.rejects(verifyHomebrewHooks({ doctor, node: selectedNode }), error => {
+    assert.equal(error.code, 'ERR_ASSERTION');
+    assert.deepEqual(error.actual, ['sessionStart']);
+    assert.equal(error.expected.length, 8);
+    return true;
+  });
+  await fs.writeFile(hooksFile, JSON.stringify(hooks));
+  const calls = [];
+  const run = async (command, args, options = {}) => {
+    calls.push({ command, args });
+    assert.equal(command, node, 'The contract fixture must never invoke Homebrew or another executable');
+    if (args[0] === '-p') return { stdout: JSON.stringify({
+      execPath: selectedNode, major: 22, platform: process.platform, arch: process.arch,
+    }) };
+    if (copiedCliArguments(args)[1] === 'doctor') return { stdout: JSON.stringify(doctor) };
+    return { stdout: JSON.stringify(await copiedHookResponse(home, args, options.input)) };
+  };
+  await verifyCopiedHomebrewInstallation({ home, node, frameworkVersion: '0.4.0', run });
+  assert.equal(calls.filter(call => call.args[0] === '--input-type=module').length, 8);
+  const wrongRoute = structuredClone(hooks);
+  wrongRoute.hooks.preToolUse[0].args = [path.join(home, 'sdlc', 'bin', 'sdlc.mjs'),
+    'hook', 'preToolUse', '--home', home];
+  await fs.writeFile(hooksFile, JSON.stringify(wrongRoute));
+  await assert.rejects(verifyHomebrewHooks({ doctor, node: selectedNode }), /wrong handler\/home/u);
+});
 
 async function setup(t, behavior = {}) {
   const root = path.resolve('.test-data', `homebrew-switch-${randomUUID()}`);
@@ -93,11 +179,7 @@ async function setup(t, behavior = {}) {
   let captured;
   const json = value => ({ stdout: JSON.stringify(value), stderr: '' });
   async function writeHooks() {
-    await fs.writeFile(path.join(home, 'hooks', 'sdlc.json'), JSON.stringify({
-      hooks: { sessionStart: [{
-        exec: node, args: [path.join(home, 'sdlc', 'bin', 'sdlc.mjs'), 'hook', 'sessionStart'],
-      }] },
-    }));
+    await fs.writeFile(path.join(home, 'hooks', 'sdlc.json'), JSON.stringify(copiedHookFixture(home, node)));
   }
   const run = async (command, args, options = {}) => {
     calls.push({ command, args, noInstallCleanup: options.env?.HOMEBREW_NO_INSTALL_CLEANUP });
@@ -169,11 +251,11 @@ async function setup(t, behavior = {}) {
         execPath: node, major: Object.hasOwn(behavior, 'nodeMajor') ? behavior.nodeMajor : 22,
         platform: process.platform, arch: process.arch,
       });
-      const action = args[1];
-      if (action === 'hook') {
+      const action = copiedCliArguments(args)[1];
+      if (action === 'hook' || action === 'gate') {
         if (removed && behavior.failPostRemovalHook) throw new Error('hook failed after channel removal');
         if (promoted && behavior.failPostPromotionHook) throw new Error('hook failed after link promotion');
-        return json({});
+        return json(await copiedHookResponse(home, args, options.input));
       }
       if (action === 'install') { await writeHooks(); return json({ installed: true }); }
       if (action === 'doctor') return json({

@@ -52,7 +52,10 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
-import { createPlan, parseOptions, repositoryRoot, unitFiles } from '../scripts/test-runner.mjs';
+import { createPlan, parseOptions, repositoryRoot, unitFiles, validationSelectionDescriptor,
+  validationSelectionProtocol, writeValidationSelection } from '../scripts/test-runner.mjs';
+import { discoverDeclarations } from '../scripts/validation-inventory.mjs';
+import { nativeStageSelections, validateNativeGroupReport } from '../scripts/native-validation.mjs';
 import { readTestBudget } from '../scripts/test-budget.mjs';
 import { digest } from '../src/core.mjs';
 import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
@@ -160,6 +163,118 @@ test('T-130 targeted selection rejects missing, escaping, non-test and duplicate
   ]) {
     await assert.rejects(createPlan(parseOptions(['targeted', ...files], {})));
   }
+});
+
+test('T-PRD017 owned selection files preserve a complete large native stage without Windows-sized argv', async t => {
+  const directory = await scratch(t);
+  const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'selection-transport-'));
+  t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+  const marker = path.join(directory, 'executed');
+  const file = path.join(directory, 'large.unit.test.mjs');
+  const relative = path.relative(repositoryRoot, file).split(path.sep).join('/');
+  const names = [0, 1].map(index => `large selected unit ${index} ${'x'.repeat(22000)}`);
+  const source = "import test from 'node:test';import {appendFile} from 'node:fs/promises';" +
+    names.map((name, index) =>
+      `test(${JSON.stringify(name)},()=>appendFile(${JSON.stringify(marker)},'${index}\\n'));`).join('\n');
+  await fs.writeFile(file, source);
+  const declarations = [
+    ...unitFiles.map((unit, index) => discoverDeclarations(
+      `import test from 'node:test';test('canonical fixture ${index}',()=>{});`, unit)),
+    discoverDeclarations(source, relative),
+    discoverDeclarations("import test from 'node:test';test('remaining regression fixture',()=>{});",
+      'test/transport-remainder.test.mjs'),
+  ];
+  const inventory = { complete: true, unresolved: [], nodeUnresolved: [],
+    files: declarations.map(({ file, sourceDigest }) => ({ file, sourceDigest })),
+    cases: declarations.flatMap(declaration => declaration.cases) };
+  const stages = nativeStageSelections(inventory, JSON.stringify({ tests: [] }));
+  const stage = stages.find(stage => stage.name === 'required-units');
+  assert.deepEqual(stages.map(stage => stage.name), ['unit', 'required-units', 'regression']);
+  assert.deepEqual(stages[0].args, ['unit']);
+  assert.ok(stage.selectorName.length > 32767);
+  assert.deepEqual(stage.cases.map(test => test.name), names);
+  assert.deepEqual(stage.args, ['targeted', '--selection-file', stage.selection.path]);
+  assert.ok(stage.args.join(' ').length < 200);
+  const legacyArgs = ['--eval', 'process.exit(0)', '--', 'scripts/test-runner.mjs',
+    'targeted', '--name', stage.selectorName, ...stage.files];
+  let launch;
+  try {
+    const child = spawn(process.execPath, legacyArgs, { cwd: repositoryRoot, stdio: 'ignore', shell: false });
+    launch = await new Promise(resolve => {
+      child.once('error', error => resolve({ error: error.code, pid: child.pid }));
+      child.once('close', code => resolve({ code, pid: child.pid }));
+    });
+  } catch (error) { launch = { error: error.code }; }
+  if (process.platform === 'win32') {
+    assert.equal(launch.error, 'ENAMETOOLONG');
+    assert.equal(launch.pid, undefined);
+  } else assert.equal(launch.code, 0, 'The inert compatibility probe must never execute fixture tests');
+  const reference = await writeValidationSelection({ files: stage.files, name: stage.selectorName });
+  t.after(() => fs.unlink(path.join(repositoryRoot, reference.path)));
+  assert.deepEqual(reference, stage.selection);
+  assert.deepEqual(await writeValidationSelection({ files: stage.files, name: stage.selectorName }), reference);
+  const selected = await createPlan(parseOptions([...stage.args, '--workers', '1'], {}));
+  assert.deepEqual(selected.testOptions.testNamePatterns, [stage.selectorName]);
+  assert.deepEqual(selected.groups.flatMap(group => group.assertionIds).sort(),
+    stage.cases.map(test => test.id).sort());
+  const reportPath = path.join(evidence, 'large-stage.json');
+  const result = await invoke([...stage.args, '--workers', '1'], { SDLC_TEST_REPORT_FILE: reportPath }).done;
+  assert.equal(result.code, 0, 'The bounded public command must execute every large-selected fixture root');
+  assert.deepEqual((await fs.readFile(marker, 'utf8')).trim().split('\n'), ['0', '1']);
+  const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+  assert.equal(report.complete, true);
+  assert.deepEqual(report.selection.namePatterns, [stage.selectorName]);
+  assert.deepEqual(report.executions.map(test => test.name), names);
+  assert.equal(report.summary.counts.passed, 2);
+  assert.deepEqual(report.command.slice(2), [...stage.args, '--workers', '1']);
+  const journal = await fs.readFile(`${reportPath}.journal.ndjson`, 'utf8');
+  const target = `${{ win32: 'windows', darwin: 'macos', linux: 'linux' }[process.platform]}-${process.arch}`;
+  assert.equal(validateNativeGroupReport({ inventory, stage, report, journal, target }).length, 2);
+  const changed = structuredClone(report);
+  changed.selection.namePatterns = ['different selector'];
+  assert.throws(() => validateNativeGroupReport({ inventory, stage, report: changed, journal, target }),
+    /selection patterns/u);
+
+  const malformed = [
+    { ...validationSelectionDescriptor({ files: [relative] }).payload, workers: 32 },
+    { schemaVersion: 2, protocol: validationSelectionProtocol, files: [relative] },
+    { schemaVersion: 1, protocol: 'unknown', files: [relative] },
+    { schemaVersion: 1, protocol: validationSelectionProtocol, files: [relative, relative] },
+    { schemaVersion: 1, protocol: validationSelectionProtocol, files: ['test/../outside.test.mjs'] },
+    { schemaVersion: 1, protocol: validationSelectionProtocol, files: ['src/outside.test.mjs'] },
+    { schemaVersion: 1, protocol: validationSelectionProtocol, files: [relative], name: '[' },
+  ];
+  const inputs = malformed.map(value => Buffer.from(JSON.stringify(value)));
+  inputs.push(Buffer.from('{'), Buffer.from([255]), Buffer.from(
+    `{"schemaVersion":1,"protocol":${JSON.stringify(validationSelectionProtocol)},"files":[${JSON.stringify(relative)}],"files":[${JSON.stringify(relative)}]}`));
+  await fs.unlink(marker);
+  for (const bytes of inputs) {
+    const ref = `.test-data/test-selections/${digest(bytes)}.json`;
+    const absolute = path.join(repositoryRoot, ref);
+    try {
+      await fs.writeFile(absolute, bytes, { flag: 'wx' });
+      t.after(() => fs.unlink(absolute));
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      assert.deepEqual(await fs.readFile(absolute), bytes);
+    }
+    const denied = await invoke(['targeted', '--selection-file', ref]).done;
+    assert.notEqual(denied.code, 0, 'Malformed, unknown or escaping input cannot reach a callback');
+    await assert.rejects(fs.stat(marker), { code: 'ENOENT' });
+  }
+  const tampered = `.test-data/test-selections/${digest(`mismatched-${relative}`)}.json`;
+  await fs.writeFile(path.join(repositoryRoot, tampered),
+    JSON.stringify(validationSelectionDescriptor({ files: [relative] }).payload), { flag: 'wx' });
+  t.after(() => fs.unlink(path.join(repositoryRoot, tampered)));
+  assert.notEqual((await invoke(['targeted', '--selection-file', tampered]).done).code, 0);
+  await assert.rejects(fs.stat(marker), { code: 'ENOENT' });
+  for (const args of [
+    ['unit', '--selection-file', reference.path],
+    ['targeted', '--selection-file', reference.path, relative],
+    ['targeted', '--selection-file', reference.path, '--name', 'inline override'],
+    ['targeted', '--selection-file', '../outside.json'],
+    ['targeted', '--selection-file', path.join(evidence, 'outside.json')],
+  ]) assert.throws(() => parseOptions(args, {}));
 });
 
 test('T-130 public targeted runner supports filenames with spaces and exact name filtering', async t => {

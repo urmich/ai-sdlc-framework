@@ -85,6 +85,8 @@ test('T-PRD018 streamed validation output preserves typed assertion failures and
   const reporterFixture = path.join(directory, 'actual-reporter.test.mjs');
   await fs.writeFile(reporterFixture, "import test from 'node:test';import assert from 'node:assert/strict';" +
     "test('owned real assertion failure',()=>assert.ok(false));" +
+    "test('owned missing regexp rejection',async()=>assert.rejects(Promise.resolve(),/transparency|checkpoint|signature|log|timestamp/iu));" +
+    "test('owned missing predicate rejection',async()=>assert.rejects(Promise.resolve(),error=>error.code==='EXPECTED'));" +
     "test('owned passing sibling',()=>assert.ok(true));");
   const reporter = await executeValidationCommand({ name: 'actual-node-spec', command: process.execPath,
     args: ['--test', '--test-reporter=spec', reporterFixture], outputDir: directory, environment, signal: t.signal });
@@ -92,9 +94,14 @@ test('T-PRD018 streamed validation output preserves typed assertion failures and
   assert.equal(reporter.exitCode, 1);
   assert.equal(reporter.cleanup.requested, false);
   assert.match(reporter.stdout, /owned real assertion failure/u);
+  assert.match(reporter.stdout, /owned missing regexp rejection/u);
+  assert.match(reporter.stdout, /owned missing predicate rejection/u);
+  assert.match(reporter.stdout, /Missing expected rejection/u);
   assert.match(reporter.stdout, /owned passing sibling/u);
-  assert.ok((await fs.readFile(path.join(directory, 'actual-node-spec.journal.ndjson'), 'utf8'))
-    .trim().split('\n').map(JSON.parse).some(event => event.normalization === 'node-assertion-metadata-json'));
+  const reporterEvents = (await fs.readFile(path.join(directory, 'actual-node-spec.journal.ndjson'), 'utf8'))
+    .trim().split('\n').map(JSON.parse);
+  assert.equal(reporterEvents.reduce((count, event) => count + (event.normalizedRecords ?? 0), 0), 3);
+  assert.ok(!reporterEvents.some(event => event.kind === 'output-rejected'));
   for (const fragmented of [false, true]) {
     const name = fragmented ? 'fragmented-assertion' : 'whole-assertion';
     const identityFile = path.join(directory, `${name}-identity.json`);
@@ -105,7 +112,8 @@ import {createHash} from 'node:crypto';import {setTimeout as delay} from 'node:t
 let failure;try{assert.ok(false);}catch(error){failure=error;}
 const originalInspection=inspect(failure,{colors:false,depth:8});
 failure.actual={authorization:${JSON.stringify(secrets[0])},
-  nested:[{clientSecret:${JSON.stringify(secrets[4])}}],nil:undefined,invalid:NaN,negativeZero:-0};
+  nested:[{clientSecret:${JSON.stringify(secrets[4])}}],literalArray:['Object'],
+  nil:undefined,invalid:NaN,negativeZero:-0};
 failure.expected={authorization:'expected fixture value'};
 const details={generatedMessage:failure.generatedMessage,code:failure.code,actual:failure.actual,
   expected:failure.expected,operator:failure.operator};
@@ -138,6 +146,7 @@ process.exitCode=1;
     assert.match(report.stdout, /"code":"ERR_ASSERTION"/u);
     assert.match(report.stdout, /\[redacted:[a-f0-9]{64}\]/u);
     assert.match(report.stdout, /plain UTF-8 ✔🔐/u);
+    assert.match(report.stdout, /"literalArray":\["Object"\]/u);
     assert.match(report.stdout, /ordinary tail/u);
     const journal = await fs.readFile(path.join(directory, `${name}.journal.ndjson`), 'utf8');
     const stored = await fs.readFile(path.join(directory, `${name}.json`), 'utf8');
@@ -169,6 +178,7 @@ test('T-PRD018 validation output keeps opaque malformed and over-budget streams 
   const fixtures = [
     ['untyped-object', "Buffer.from(\"{authorization:'fixture-unsafe-object'}\\n\")", 'UNSAFE'],
     ['unknown-assertion-field', "Buffer.from(\"{generatedMessage:false,code:'ERR_ASSERTION',actual:false,expected:true,operator:'==',authorization:'fixture-unsafe-object'}\\n\")", 'UNSAFE'],
+    ['function-source-is-not-data', "Buffer.from(\"{generatedMessage:false,code:'ERR_ASSERTION',actual:false,expected:function(){throw Error('fixture-unsafe-object')},operator:'rejects'}\\n\")", 'UNSAFE'],
     ['oversized-inspection', 'Buffer.from("{generatedMessage:false,code:\\\'ERR_ASSERTION\\\',actual:\\\'"+"x".repeat(65536)+"\\\',expected:true,operator:\\\'==\\\'}\\n")', 'UNSAFE'],
     ['opaque-control', 'Buffer.from([27,91,51,49,109,10])', 'UNSAFE'],
     ['invalid-utf8', 'Buffer.from([195,40,10])', 'UNSAFE'],

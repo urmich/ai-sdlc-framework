@@ -30,7 +30,8 @@ import { createPrReadinessHost, inspectWorkflowTrust, readTrustedJobContext,
 import { prepareCoverage, renderCoverageSection } from '../src/coverage.mjs';
 import { inspectWorkflowPolicy, readWorkflowPolicySources } from '../scripts/workflow-policy.mjs';
 import { nativeBootstrapEnvironment, portableRubyBootstrapEnvironment,
-  schemaPipInstallArguments, nativeBootstrapExports } from '../scripts/native-toolchain.mjs';
+  schemaPipInstallArguments, nativeBootstrapExports, homebrewToolchain,
+  requireHomebrewBottlePlan, requireHomebrewBottleReceipts } from '../scripts/native-toolchain.mjs';
 
 const sourceA = 'a'.repeat(40);
 const now = Date.parse('2026-10-18T10:00:00.000Z');
@@ -216,6 +217,55 @@ test('T-PRD015 schema pip cache and runtime paths override relative ambient loca
   assert.equal(path.relative(selected.PIP_CACHE_DIR, path.resolve(explicit.stdout.trim())), '');
   assert.throws(() => schemaPipInstallArguments({ PIP_CACHE_DIR: 'pip' }), { code: 'INPUT' });
   await assert.rejects(fs.stat(path.join(f.root, 'pip')), { code: 'ENOENT' });
+});
+
+test('T-PRD015 Homebrew bottle preflight rejects absent native or non-relocatable prerequisites before source compilation', () => {
+  const prefix = path.join(repositoryRoot, '.test-data', 'virtual-owned-homebrew');
+  const entry = (name, version, sha) => ({
+    name, version, pkgVersion: version, prefix: path.join(prefix, 'Cellar', name, version),
+    bottleTag: 'sequoia', sha256: sha.repeat(64), compatible: true, pourable: true,
+  });
+  const plan = { schemaVersion: 1, kind: 'native-homebrew-bottle-plan', prefix,
+    cellar: path.join(prefix, 'Cellar'), architecture: 'x86_64', rubyPlatform: 'x86_64-darwin24',
+    rubyVersion: homebrewToolchain.ruby, entries: [
+      entry('node@22', homebrewToolchain.node, 'a'), entry('openssl@3', '3.5.9', 'b'),
+    ] };
+  assert.equal(requireHomebrewBottlePlan(plan, { prefix, target: 'macos-x64' }), plan);
+  for (const mutate of [
+    selected => { selected.entries[0].bottleTag = null; selected.entries[0].pourable = false; },
+    selected => { selected.entries[1].compatible = false; },
+    selected => { selected.entries[0].bottleTag = 'arm64_sequoia'; },
+    selected => { selected.entries[0].version = '22.99.0'; },
+    selected => { selected.entries[0].prefix = path.join(path.parse(prefix).root, 'unowned', 'node'); },
+    selected => { selected.architecture = 'arm64'; },
+    selected => { selected.entries[1].sha256 = 'not-an-integrity-digest'; },
+  ]) {
+    const changed = structuredClone(plan);
+    mutate(changed);
+    assert.throws(() => requireHomebrewBottlePlan(changed, { prefix, target: 'macos-x64' }), { code: 'HOST' });
+  }
+  const missing = structuredClone(plan);
+  missing.entries[0].bottleTag = null;
+  missing.entries[0].pourable = false;
+  assert.throws(() => requireHomebrewBottlePlan(missing, { prefix, target: 'macos-x64' }),
+    /node@22.*no native bottle.*Source compilation is not permitted/u);
+  const receipts = plan.entries.map(selected => ({
+    name: selected.name, pkgVersion: selected.pkgVersion, prefix: selected.prefix,
+    receipt: { poured_from_bottle: true, source: { versions: { stable: selected.version } } } }));
+  assert.equal(requireHomebrewBottleReceipts(plan, receipts), receipts);
+  for (const mutate of [
+    selected => { selected.pop(); },
+    selected => { selected[0].receipt.poured_from_bottle = false; },
+    selected => { selected[1].receipt.source.versions.stable = 'wrong-version'; },
+    selected => { selected[1].pkgVersion = 'wrong-revision'; },
+    selected => { selected[1].prefix = path.join(path.parse(prefix).root, 'global-prefix'); },
+    selected => { selected.push({ ...selected[0], name: 'unexpected-source-dependency' }); },
+    selected => { selected[1] = selected[0]; },
+  ]) {
+    const changed = structuredClone(receipts);
+    mutate(changed);
+    assert.throws(() => requireHomebrewBottleReceipts(plan, changed), { code: 'HOST' });
+  }
 });
 
 test('T-PRD015 actual pinned Go, Python schema and static validators execute valid and invalid owned inputs', async t => {
@@ -907,7 +957,7 @@ test('T-PRD085 disposable opaque authority has a fixed reduced budget without we
 test('T-PRD026 disposable policy driver retains a real failing child and passing sibling plus API merge-eligibility and capacity observations', async t => {
   const owned = await fixture(t);
   const f = disposableProviderFixture();
-  const directory = path.join(owned.root, 'disposable-originals');
+  const directory = owned.reportDir;
   const result = await runDisposablePolicyProbe({ client: f.client, request: f.request,
     authorize: () => true, evidenceDir: directory,
     execution: { runId: 202, attempt: 1, workflowRef: 'urmich/ai-sdlc-framework/.github/workflows/pr-policy-refresh.yml@refs/heads/main' },
@@ -915,6 +965,12 @@ test('T-PRD026 disposable policy driver retains a real failing child and passing
   assert.equal(result.status, 'Passed', JSON.stringify(result.blocker));
   assert.equal(result.nativeAcceptance, 'NotRun', 'Controlled fake-provider fixtures do not establish actual GitHub enforcement');
   assert.equal(result.fixtureCredit, 'NotRun');
+  const positive = JSON.parse(await fs.readFile(path.join(directory, 'fixture-positive.json'), 'utf8'));
+  assert.equal(positive.complete, true);
+  assert.equal(positive.exitCode, 0);
+  assert.match(positive.stdout, /^ok \d+ - controlled required failure$/mu);
+  assert.match(positive.stdout, /^ok \d+ - controlled required sibling$/mu);
+  assert.doesNotMatch(positive.stderr, /called recursively|skipping running files/u);
   const failed = JSON.parse(await fs.readFile(path.join(directory, 'fixture-failure.json'), 'utf8'));
   assert.equal(failed.complete, true);
   assert.notEqual(failed.exitCode, 0);
@@ -1127,7 +1183,11 @@ function observerFixture() {
   const files = new Map([
     ['docs/sdlc/public-readiness/requirements.md', requirements],
     ['docs/sdlc/public-readiness/test-plan.md', plan],
-    ['test/orders.test.mjs', "import test from 'node:test';throw new Error('candidate code must never execute');test('orders preserve state',()=>{});\n"],
+    ['test/orders.test.mjs', 'export const validationDeclarations=' + JSON.stringify({
+      schemaVersion: 1,
+      surfaces: [{ coverage: 'fixture-only', paths: ['scripts/native-components.mjs'] }],
+    }) + ";\nimport test from 'node:test';throw new Error('candidate code must never execute');test('orders preserve state',()=>{});\n"],
+    ['scripts/native-components.mjs', "throw new Error('candidate component adapter must never execute');\n"],
     ['.github/workflows/ci.yml', ciDefinition],
     ['.github/workflows/pr-readiness.yml', writerDefinition()],
     ['.github/workflows/coverage-metadata.yml', writerDefinition()],
@@ -1207,7 +1267,8 @@ function observerFixture() {
 test('T-PRD085 actual API-source coverage inspection rejects same-head edits and cannot execute candidate source or borrow test success', async () => {
   const f = observerFixture();
   const initial = await f.host.snapshot();
-  assert.equal(initial.prs[0].verdicts['framework/coverage'].status, 'Passed');
+  assert.equal(initial.prs[0].verdicts['framework/coverage'].status, 'Passed',
+    JSON.stringify(initial.prs[0].verdicts['framework/coverage']));
   assert.equal(initial.prs[0].verdicts['framework/approval'].status, 'Passed');
   assert.equal(initial.prs[0].verdicts['framework/validation'].status, 'NotRun');
   const originalDigest = initial.prs[0].verdicts['framework/coverage'].inputDigest;

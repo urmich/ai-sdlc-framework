@@ -31,10 +31,30 @@ function assertionInspectionJson(text) {
       if (depth > 32) throw new Error('Inspection nesting exceeds its bound');
       const token = tokens[cursor];
       if (!token) throw new Error('Incomplete inspection');
-      if (token.value === '[' && ['Object', 'Array'].includes(tokens[cursor + 1]?.value) &&
+      if (token.value === '[' && tokens[cursor + 1]?.kind === 'identifier' &&
+          ['Object', 'Array'].includes(tokens[cursor + 1]?.value) &&
           tokens[cursor + 2]?.value === ']') {
         cursor += 3;
         return { nodeInspectionType: tokens[cursor - 2].value, elided: true };
+      }
+      if (token.kind === 'regex') {
+        cursor++;
+        return { nodeInspectionType: 'RegExp',
+          original: { sha256: digest(token.value), bytes: Buffer.byteLength(token.value) } };
+      }
+      if (token.value === '[' && tokens[cursor + 1]?.kind === 'identifier' &&
+          ['Function', 'AsyncFunction', 'GeneratorFunction', 'AsyncGeneratorFunction']
+            .includes(tokens[cursor + 1]?.value)) {
+        let end = cursor + 2;
+        if (tokens[end]?.value === '(' && tokens[end + 1]?.value === 'anonymous' &&
+            tokens[end + 2]?.value === ')') end += 3;
+        else if (tokens[end]?.value === ':' && tokens[end + 1]?.kind === 'identifier') end += 2;
+        if (tokens[end]?.value !== ']') throw new Error('Unsupported inspected function marker');
+        const literal = text.slice(token.start, tokens[end].end);
+        const type = tokens[cursor + 1].value;
+        cursor = end + 1;
+        return { nodeInspectionType: type,
+          original: { sha256: digest(literal), bytes: Buffer.byteLength(literal) } };
       }
       if (token.value === '{' || token.value === '[') {
         const object = token.value === '{';
@@ -87,14 +107,16 @@ function assertionInspectionJson(text) {
       return Object.is(Number(number[0]), -0) ? { nodeInspectionType: 'number', value: '-0' } : Number(number[0]);
     };
     const value = parse(0);
+    const omittedExpected = value && !Object.hasOwn(value, 'expected') &&
+      ['rejects', 'throws'].includes(value.operator);
     // Only Node's typed assertion metadata is adapted; arbitrary inspected objects remain unsupported.
     if (cursor !== tokens.length || !value || Array.isArray(value) ||
         Object.keys(value).some(key => !['generatedMessage', 'code', 'actual', 'expected', 'operator', 'diff'].includes(key)) ||
         typeof value.generatedMessage !== 'boolean' || value.code !== 'ERR_ASSERTION' ||
-        !Object.hasOwn(value, 'actual') || !Object.hasOwn(value, 'expected') ||
+        !Object.hasOwn(value, 'actual') || !Object.hasOwn(value, 'expected') && !omittedExpected ||
         typeof value.operator !== 'string' || !/^[A-Za-z!=<>]{1,64}$/u.test(value.operator) ||
         Object.hasOwn(value, 'diff') && value.diff !== 'simple') return null;
-    return JSON.stringify(value);
+    return JSON.stringify(omittedExpected ? { ...value, inspectionOmittedFields: ['expected'] } : value);
   } catch {
     return null;
   }

@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdir, open, readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { availableParallelism, constants, totalmem } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -13,12 +13,99 @@ import { enterTestBudget } from './test-budget.mjs';
 import { captureLocalExecution, recordLocalExecution, finalizeLocalExecution,
   localEvidenceFailureDiagnostic } from './test-local-evidence.mjs';
 import { parseTestPlan } from '../src/artifacts.mjs';
-import { digest, requireThat, SdlcError } from '../src/core.mjs';
+import { canonical, digest, LIMITS, requireThat, SdlcError } from '../src/core.mjs';
 import { exactPattern } from './test-profiles.mjs';
 
 export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const unitFiles = canonicalUnitFiles;
 const maxWorkers = 32;
+export const validationSelectionProtocol = 'content-addressed-test-selection-v1';
+const selectionDirectoryName = '.test-data/test-selections';
+const selectionPathPattern = /^\.test-data\/test-selections\/([a-f0-9]{64})\.json$/u;
+
+function selectionPayload(value) {
+  requireThat(value && Object.getPrototypeOf(value) === Object.prototype &&
+    Object.keys(value).every(key => ['schemaVersion', 'protocol', 'files', 'name'].includes(key)) &&
+    value.schemaVersion === 1 && value.protocol === validationSelectionProtocol &&
+    Array.isArray(value.files) && value.files.length > 0 && value.files.length <= 10000 &&
+    new Set(value.files).size === value.files.length &&
+    value.files.every(file => typeof file === 'string' && !/[:\\\u0000-\u001f]/u.test(file) &&
+      file.split('/').every(part => part && part !== '.' && part !== '..') &&
+      isValidationTestPath(file, { generated: true })) &&
+    (value.name === undefined || typeof value.name === 'string' && value.name.length > 0),
+  'INPUT', 'Selection handoff needs only an explicit protocol, unique repository test files and optional exact name pattern');
+  if (value.name !== undefined) {
+    try { new RegExp(value.name); }
+    catch { throw new Error('Selection handoff needs a supported regular-expression pattern'); }
+  }
+  return value;
+}
+
+export function validationSelectionDescriptor({ files, name }) {
+  const payload = selectionPayload({ schemaVersion: 1, protocol: validationSelectionProtocol,
+    files: Array.isArray(files) ? [...files] : files, ...(name === undefined ? {} : { name }) });
+  const bytes = Buffer.from(canonical(payload));
+  requireThat(bytes.length <= LIMITS.input, 'CAPACITY', 'Selection handoff exceeds the existing input byte budget');
+  const sha256 = digest(bytes);
+  return { path: `${selectionDirectoryName}/${sha256}.json`, sha256, bytes: bytes.length, payload };
+}
+
+async function selectionDirectory(root, create = false) {
+  const actualRoot = await realpath(root);
+  let directory = actualRoot;
+  for (const part of selectionDirectoryName.split('/')) {
+    directory = path.join(directory, part);
+    if (create) {
+      try { await mkdir(directory); }
+      catch (error) { if (error.code !== 'EEXIST') throw error; }
+    }
+    const info = await lstat(directory);
+    requireThat(info.isDirectory() && !info.isSymbolicLink(), 'INPUT',
+      'Selection handoffs require literal owned evidence directories');
+    directory = await realpath(directory);
+    requireThat(within(actualRoot, directory), 'INPUT', 'Selection handoffs must remain inside their repository');
+  }
+  return directory;
+}
+
+async function readSelectionFile(file, root) {
+  const selected = selectionPathPattern.exec(file);
+  requireThat(selected, 'INPUT', 'Selection handoff path must be its owned content-addressed repository reference');
+  const directory = await selectionDirectory(root);
+  const absolute = path.join(directory, `${selected[1]}.json`);
+  const info = await lstat(absolute);
+  requireThat(info.isFile() && !info.isSymbolicLink() && info.size > 0 && info.size <= LIMITS.input,
+    'INPUT', 'Selection handoff must be a bounded literal JSON file');
+  requireThat(path.dirname(await realpath(absolute)) === directory, 'INPUT',
+    'Selection handoff must not resolve outside its owned directory');
+  const bytes = await readFile(absolute);
+  requireThat(bytes.length <= LIMITS.input && digest(bytes) === selected[1], 'INPUT',
+    'Selection handoff bytes differ from their content-addressed identity');
+  let payload;
+  try { payload = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
+  catch { throw new Error('Selection handoff must contain supported canonical JSON'); }
+  selectionPayload(payload);
+  requireThat(Buffer.from(canonical(payload)).equals(bytes), 'INPUT',
+    'Selection handoff must use canonical JSON without duplicate or ambiguous fields');
+  return payload;
+}
+
+export async function writeValidationSelection(value, { root = repositoryRoot } = {}) {
+  const descriptor = validationSelectionDescriptor(value);
+  const directory = await selectionDirectory(root, true);
+  let handle;
+  try { handle = await open(path.join(directory, `${descriptor.sha256}.json`), 'wx'); }
+  catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    await readSelectionFile(descriptor.path, root);
+  }
+  if (handle) {
+    try { await handle.writeFile(canonical(descriptor.payload)); await handle.sync(); }
+    finally { await handle.close(); }
+  }
+  const { payload, ...reference } = descriptor;
+  return reference;
+}
 
 export function parseOptions(argv, env = process.env) {
   const [profile, ...args] = argv;
@@ -38,12 +125,14 @@ export function parseOptions(argv, env = process.env) {
         throw new Error('Explicit --affected test files require the critical profile.');
       }
       (options.affectedFiles ??= []).push(args[++index]);
-    } else if (arg === '--workers' || arg === '--name' || arg === '--affected-name') {
+    } else if (['--workers', '--name', '--affected-name', '--selection-file'].includes(arg)) {
       if (seen.has(arg) || !args[index + 1] || args[index + 1].startsWith('--')) {
         throw new Error(`Expected exactly one value for ${arg}.`);
       }
       seen.add(arg);
-      options[arg === '--workers' ? 'workers' : arg === '--name' ? 'name' : 'affectedName'] = args[++index];
+      const key = { '--workers': 'workers', '--name': 'name',
+        '--affected-name': 'affectedName', '--selection-file': 'selectionFile' }[arg];
+      options[key] = args[++index];
     } else if (arg.startsWith('-')) {
       throw new Error(`Unknown option: ${arg}`);
     } else {
@@ -53,7 +142,12 @@ export function parseOptions(argv, env = process.env) {
   if (profile !== 'targeted' && (options.files.length || options.name !== undefined)) {
     throw new Error('Explicit files and --name require the targeted profile.');
   }
-  if (profile === 'targeted' && !options.files.length) {
+  if (options.selectionFile !== undefined &&
+      (profile !== 'targeted' || options.files.length || options.name !== undefined ||
+        !selectionPathPattern.test(options.selectionFile))) {
+    throw new Error('Selection files require a targeted profile, their owned digest reference and no inline selection.');
+  }
+  if (profile === 'targeted' && !options.files.length && options.selectionFile === undefined) {
     throw new Error('The targeted profile requires at least one test file.');
   }
   if (options.name !== undefined) new RegExp(options.name);
@@ -79,6 +173,12 @@ function within(directory, file) {
 }
 
 export async function createPlan(options, root = repositoryRoot) {
+  if (options.selectionFile !== undefined) {
+    requireThat(options.profile === 'targeted' && !options.files.length && options.name === undefined,
+      'INPUT', 'Selection file and inline selections cannot be combined');
+    const selected = await readSelectionFile(options.selectionFile, root);
+    options = { ...options, files: selected.files, ...(selected.name === undefined ? {} : { name: selected.name }) };
+  }
   const testRoot = await realpath(path.join(root, 'test'));
   let selected;
   let critical;

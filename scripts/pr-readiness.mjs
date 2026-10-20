@@ -323,6 +323,8 @@ async function probeFixture(directory, scope, execution) {
     kind: 'disposable-policy-fixture-source', sha256: digest(source), contents: source,
   }), { flag: 'wx' });
   const environment = { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' };
+  // This is a separate test invocation, not the parent file worker's recursive run.
+  delete environment.NODE_TEST_CONTEXT;
   for (const name of ['GITHUB_TOKEN', 'GH_TOKEN', 'NPM_TOKEN', 'NODE_AUTH_TOKEN']) delete environment[name];
   let positive;
   let failure;

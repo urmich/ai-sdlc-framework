@@ -182,6 +182,18 @@ is not proof of execution or a substitute for download integrity validation.
 If a pin is unavailable, incompatible or fails required security policy, record a
 blocked prerequisite and revise the plan explicitly; do not silently take latest.
 
+The current Intel Homebrew prerequisite is **blocked**: the observed
+[core snapshot](https://github.com/Homebrew/homebrew-core/blob/d02b8762f4a29859c47a635a0d2683223fea9812/Formula/n/node%4022.rb)
+has no Intel macOS Node 22.23.3 bottle; the original same-version snapshot also
+lacks one. The retained cancelled attempt demonstrates lengthy dependency
+source builds, not native test completion. Bounded eligibility/install guards
+prevent another silent hour-long bootstrap but do not supply that capability.
+A compatible provisioning strategy must be selected before T-PRD014-MI or
+T-PRD079-MI can pass; a proposed GitHub-only source build with verified toolchain
+reuse has not been approved or implemented. Keep these native results NotRun
+rather than substituting system Node, forcing incompatible bottles or skipping
+the required lane.
+
 GitHub's standard labels select an OS image family, not an immutable VM image
 release. This plan does not pretend `macos-15` pins a selectable `ImageVersion`.
 At execution, retain exact `ImageOS`/`ImageVersion`, OS build, architecture, Git,
@@ -637,6 +649,14 @@ fixture evidence through the actual API-only observer boundary.
 | T-PRD089 | local | acceptance | post-review | semi-automated | agent | provider-policy | FR-210; FR-215; AC-210.5; AC-210.6; AC-215.1; AC-215.2; AC-215.3; AC-215.4 | D/P: validate the five-reference primary-source/adoption procedure in section 10 against immutable inspected revisions, original project-specific choices and actual implementation/evidence. Walk the exact published colleague-facing revision and current CI/protection/security/channel routes; report incomplete controls or unexecuted checks without endorsing unpublished changes. No new publication or setting authority is inferred. | procedure: section-10-documents and primary-source comparison in requirements.md | NotRun | |
 
 ## 6. Comparable benchmark procedure
+
+The current delivery goal is an advisory **10-minute wall-clock target for the
+complete required PR test phase**, with two minutes a stretch goal, not a
+promise or timeout. Measure the parallel matrix's actual test-phase span and
+report queueing, toolchain provisioning and total workflow duration separately.
+Stability, complete native coverage and honest failure reporting take precedence:
+do not drop assertions, weaken checks or hide retries to meet the target.
+An incomplete or failed attempt is not a successful full-suite benchmark.
 
 Use independent owned baseline and candidate workspaces on the **same host**
 with the same Node/tool versions, worker/resource limits and environment policy.
