@@ -34,6 +34,7 @@ import { discoverDeclarations, compileValidationInventory,
   reconcileNodeExecution, nodeStartDefinition, cancelledNodeStarts } from '../scripts/validation-inventory.mjs';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
+import { executeValidationCommand } from '../scripts/validation-tools.mjs';
 import { compileCoverage, prepareCoverage, renderCoverageSection, readCoverageSection,
   replaceCoverageSection, inspectCoverage } from '../src/coverage.mjs';
 
@@ -71,6 +72,128 @@ The prose mentions AC-901.99 and FR-999; neither is a definition.
     }],
   };
 }
+
+test('T-PRD018 streamed validation output preserves typed assertion failures and redacts complete records', async t => {
+  const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'output-records-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const environment = { ...process.env, NO_COLOR: '1', NODE_DISABLE_COLORS: '1', NODE_OPTIONS: '', NODE_PATH: '' };
+  delete environment.NODE_TEST_CONTEXT;
+  delete environment.SDLC_TEST_REPORT_CONTEXT;
+  delete environment.FORCE_COLOR;
+  const secrets = ['fixture-inspected-authorization', 'fixture-json-password', 'fixture-header-token',
+    'fixture-folded-token', 'fixture-array-client-secret'];
+  const reporterFixture = path.join(directory, 'actual-reporter.test.mjs');
+  await fs.writeFile(reporterFixture, "import test from 'node:test';import assert from 'node:assert/strict';" +
+    "test('owned real assertion failure',()=>assert.ok(false));" +
+    "test('owned passing sibling',()=>assert.ok(true));");
+  const reporter = await executeValidationCommand({ name: 'actual-node-spec', command: process.execPath,
+    args: ['--test', '--test-reporter=spec', reporterFixture], outputDir: directory, environment, signal: t.signal });
+  assert.equal(reporter.complete, true, reporter.diagnostic);
+  assert.equal(reporter.exitCode, 1);
+  assert.equal(reporter.cleanup.requested, false);
+  assert.match(reporter.stdout, /owned real assertion failure/u);
+  assert.match(reporter.stdout, /owned passing sibling/u);
+  assert.ok((await fs.readFile(path.join(directory, 'actual-node-spec.journal.ndjson'), 'utf8'))
+    .trim().split('\n').map(JSON.parse).some(event => event.normalization === 'node-assertion-metadata-json'));
+  for (const fragmented of [false, true]) {
+    const name = fragmented ? 'fragmented-assertion' : 'whole-assertion';
+    const identityFile = path.join(directory, `${name}-identity.json`);
+    const source = path.join(directory, `${name}.mjs`);
+    await fs.writeFile(source, `import assert from 'node:assert/strict';
+import {inspect} from 'node:util';import {writeFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';import {setTimeout as delay} from 'node:timers/promises';
+let failure;try{assert.ok(false);}catch(error){failure=error;}
+const originalInspection=inspect(failure,{colors:false,depth:8});
+failure.actual={authorization:${JSON.stringify(secrets[0])},
+  nested:[{clientSecret:${JSON.stringify(secrets[4])}}],nil:undefined,invalid:NaN,negativeZero:-0};
+failure.expected={authorization:'expected fixture value'};
+const details={generatedMessage:failure.generatedMessage,code:failure.code,actual:failure.actual,
+  expected:failure.expected,operator:failure.operator};
+let explicit;try{assert.fail('owned explicit failure');}catch(error){explicit=error;}
+const text='plain UTF-8 ✔🔐\\n'+originalInspection+'\\n'+inspect(failure,{colors:false,depth:8})+'\\n'+
+  inspect(details,{colors:false,depth:8})+'\\n'+
+  inspect(explicit,{colors:false,depth:8})+'\\n'+
+  JSON.stringify({nested:{password:${JSON.stringify(secrets[1])}}},null,2)+'\\n'+
+  'ordinary tail\\nAuthorization: Bearer ${secrets[2]}\\n  ${secrets[3]}\\n';
+const bytes=Buffer.from(text);
+await writeFile(${JSON.stringify(identityFile)},JSON.stringify({sha256:createHash('sha256').update(bytes).digest('hex'),bytes:bytes.length}));
+if(${fragmented}){for(let offset=0;offset<bytes.length;offset+=7){
+  await new Promise(resolve=>process.stdout.write(bytes.subarray(offset,offset+7),resolve));await delay(1);
+}}else await new Promise(resolve=>process.stdout.write(bytes,resolve));
+process.exitCode=1;
+`);
+    const report = await executeValidationCommand({ name, command: process.execPath, args: [source],
+      outputDir: directory, environment, signal: t.signal });
+    if (!report.complete) {
+      const events = (await fs.readFile(path.join(directory, `${name}.journal.ndjson`), 'utf8'))
+        .trim().split('\n').map(JSON.parse);
+      t.diagnostic(JSON.stringify({ name, rejected: events.filter(event => event.kind === 'output-rejected')
+        .map(event => ({ code: event.code, cause: event.cause, original: event.original })),
+      normalized: events.filter(event => event.normalization).length }));
+    }
+    assert.equal(report.complete, true, report.diagnostic);
+    assert.equal(report.exitCode, 1, 'The original assertion failure must remain a failure, not retention cancellation');
+    assert.equal(report.cleanup.requested, false);
+    assert.deepEqual(report.originalOutput.stdout, JSON.parse(await fs.readFile(identityFile, 'utf8')));
+    assert.match(report.stdout, /"code":"ERR_ASSERTION"/u);
+    assert.match(report.stdout, /\[redacted:[a-f0-9]{64}\]/u);
+    assert.match(report.stdout, /plain UTF-8 ✔🔐/u);
+    assert.match(report.stdout, /ordinary tail/u);
+    const journal = await fs.readFile(path.join(directory, `${name}.journal.ndjson`), 'utf8');
+    const stored = await fs.readFile(path.join(directory, `${name}.json`), 'utf8');
+    for (const secret of secrets) {
+      assert.ok(!report.stdout.includes(secret), 'The readable transcript must redact every labelled secret');
+      assert.ok(!journal.includes(secret), 'No partial output event may expose a secret split across records');
+      assert.ok(!stored.includes(secret));
+    }
+    assert.deepEqual(JSON.parse(stored), report);
+    const events = journal.trim().split('\n').map(JSON.parse);
+    const output = events.filter(event => event.kind === 'output' && event.channel === 'stdout');
+    assert.equal(output.map(event => event.text).join(''), report.stdout);
+    assert.equal(output.reduce((bytes, event) => bytes + event.original.bytes, 0),
+      report.originalOutput.stdout.bytes, 'Every original byte belongs to exactly one retained logical record');
+    assert.ok(events.some(event => event.kind === 'output' && event.normalization === 'node-assertion-metadata-json'));
+    assert.equal(events.reduce((count, event) => count + (event.normalizedRecords ?? 0), 0), 4);
+    assert.ok(!events.some(event => event.kind === 'output-rejected'));
+    assert.equal(events.at(-1).kind, 'command-end');
+    assert.equal(events.at(-1).complete, true);
+  }
+});
+
+test('T-PRD018 validation output keeps opaque malformed and over-budget streams explicitly incomplete', async t => {
+  const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'output-rejection-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const environment = { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' };
+  delete environment.NODE_TEST_CONTEXT;
+  delete environment.SDLC_TEST_REPORT_CONTEXT;
+  const fixtures = [
+    ['untyped-object', "Buffer.from(\"{authorization:'fixture-unsafe-object'}\\n\")", 'UNSAFE'],
+    ['unknown-assertion-field', "Buffer.from(\"{generatedMessage:false,code:'ERR_ASSERTION',actual:false,expected:true,operator:'==',authorization:'fixture-unsafe-object'}\\n\")", 'UNSAFE'],
+    ['oversized-inspection', 'Buffer.from("{generatedMessage:false,code:\\\'ERR_ASSERTION\\\',actual:\\\'"+"x".repeat(65536)+"\\\',expected:true,operator:\\\'==\\\'}\\n")', 'UNSAFE'],
+    ['opaque-control', 'Buffer.from([27,91,51,49,109,10])', 'UNSAFE'],
+    ['invalid-utf8', 'Buffer.from([195,40,10])', 'UNSAFE'],
+    ['output-budget', 'Buffer.alloc(4*1024*1024+1,120)', 'CAPACITY'],
+  ];
+  for (const [name, value, code] of fixtures) {
+    const identityFile = path.join(directory, `${name}-identity.json`);
+    const source = path.join(directory, `${name}.mjs`);
+    await fs.writeFile(source, `import {writeFile} from 'node:fs/promises';import {createHash} from 'node:crypto';
+const bytes=${value};await writeFile(${JSON.stringify(identityFile)},JSON.stringify({
+sha256:createHash('sha256').update(bytes).digest('hex'),bytes:bytes.length}));
+await new Promise(resolve=>process.stdout.write(bytes,resolve));
+`);
+    const report = await executeValidationCommand({ name, command: process.execPath, args: [source],
+      outputDir: directory, environment, signal: t.signal });
+    assert.equal(report.complete, false, name);
+    assert.ok(report.causes.some(cause => cause.type === 'output' && cause.code === code), name);
+    assert.deepEqual(report.originalOutput.stdout, JSON.parse(await fs.readFile(identityFile, 'utf8')));
+    const journal = await fs.readFile(path.join(directory, `${name}.journal.ndjson`), 'utf8');
+    assert.ok(!journal.includes('fixture-unsafe-object'));
+    const events = journal.trim().split('\n').map(JSON.parse);
+    assert.ok(events.some(event => event.kind === 'output-rejected' && event.original?.sha256));
+    assert.equal(events.at(-1).complete, false);
+  }
+});
 
 test('T-PRD002 literal and finite declarations identify exact selectors without executing candidate JavaScript', () => {
   const source = [

@@ -2,7 +2,7 @@ export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [
     {"coverage": "process", "paths": ["scripts/validation-tools.mjs", "scripts/check.mjs", "scripts/validate-winget-schema.py", "scripts/read-validation-artifact.py", "cmd/sdlc-launcher/main_test.go", "cmd/sdlc-launcher/integrity_test.go"]},
-    {"coverage": "direct", "paths": ["scripts/pr-readiness.mjs", "scripts/github-readiness-host.mjs", "scripts/pr-observer.mjs", "scripts/workflow-policy.mjs"]}
+    {"coverage": "direct", "paths": ["scripts/pr-readiness.mjs", "scripts/github-readiness-host.mjs", "scripts/pr-observer.mjs", "scripts/workflow-policy.mjs", "scripts/native-toolchain.mjs"]}
   ]
 };
 import test from 'node:test';
@@ -29,6 +29,7 @@ import { createPrReadinessHost, inspectWorkflowTrust, readTrustedJobContext,
   readTrustedValidationIntent, renderObserverSummary, statusConcurrencyGroup } from '../scripts/pr-observer.mjs';
 import { prepareCoverage, renderCoverageSection } from '../src/coverage.mjs';
 import { inspectWorkflowPolicy, readWorkflowPolicySources } from '../scripts/workflow-policy.mjs';
+import { nativeBootstrapEnvironment } from '../scripts/native-toolchain.mjs';
 
 const sourceA = 'a'.repeat(40);
 const now = Date.parse('2026-10-18T10:00:00.000Z');
@@ -93,6 +94,43 @@ async function fixture(t) {
       signal: t.signal, ...options });
   return { root, reportDir, environment, run };
 }
+
+test('T-PRD015 isolated Homebrew bootstrap preserves complete plain transcripts without changing host homes or pins', async t => {
+  const f = await fixture(t);
+  const inherited = { ...f.environment, HOMEBREW_COLOR: '1', FORCE_COLOR: '1', CLICOLOR_FORCE: '1' };
+  delete inherited.HOMEBREW_NO_COLOR;
+  delete inherited.NO_COLOR;
+  const before = { ...inherited };
+  const directory = path.join(f.root, 'bootstrap');
+  const selected = nativeBootstrapEnvironment(directory, inherited);
+  assert.deepEqual(inherited, before, 'Child log controls cannot mutate the host environment');
+  assert.equal(selected.HOMEBREW_NO_COLOR, '1');
+  assert.equal(selected.NO_COLOR, '1');
+  assert.equal(selected.HOMEBREW_COLOR, undefined);
+  assert.equal(selected.FORCE_COLOR, undefined);
+  assert.equal(selected.CLICOLOR_FORCE, undefined);
+  for (const key of ['HOME', 'USERPROFILE', 'COPILOT_HOME', 'HOMEBREW_CACHE', 'HOMEBREW_TEMP']) {
+    const relative = path.relative(directory, selected[key]);
+    assert.ok(relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+  }
+  const plain = '==> Downloading pinned Homebrew dependency\n';
+  const colored = '\u001b[34m==>\u001b[0m \u001b[1mDownloading pinned Homebrew dependency\u001b[0m\n';
+  const count = 24;
+  const source = `const plain=${JSON.stringify(plain)},colored=${JSON.stringify(colored)};` +
+    `process.stdout.write((process.env.HOMEBREW_NO_COLOR||process.env.NO_COLOR?plain:colored).repeat(${count}));`;
+  const rejected = await f.run('brew-colored-control', process.execPath, ['--eval', source],
+    { environment: inherited });
+  assert.equal(rejected.complete, false);
+  assert.ok(rejected.causes.some(cause => cause.type === 'output' && ['UNSAFE', 'CAPACITY'].includes(cause.code)));
+  assert.equal(rejected.originalOutput.stdout.sha256, fixtureSHA(Buffer.from(colored.repeat(count))));
+  const captured = await f.run('brew-plain-logs', process.execPath, ['--eval', source],
+    { environment: selected });
+  assert.equal(captured.complete, true, captured.diagnostic);
+  assert.equal(captured.exitCode, 0);
+  assert.equal(captured.stdout, plain.repeat(count));
+  assert.equal(captured.originalOutput.stdout.sha256, fixtureSHA(Buffer.from(plain.repeat(count))));
+  await assert.rejects(fs.stat(directory), { code: 'ENOENT' });
+});
 
 test('T-PRD015 actual pinned Go, Python schema and static validators execute valid and invalid owned inputs', async t => {
   const f = await fixture(t);

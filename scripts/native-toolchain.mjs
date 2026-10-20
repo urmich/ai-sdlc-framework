@@ -26,6 +26,29 @@ export function validateBootstrapRequest({ target, outputDir }) {
   return directory;
 }
 
+export function nativeBootstrapEnvironment(directory, inherited = process.env) {
+  requireThat(typeof directory === 'string' && path.isAbsolute(directory), 'INPUT',
+    'Bootstrap environment requires its explicit owned absolute directory');
+  const environment = { ...Object.fromEntries(Object.entries(inherited)
+    .filter(([name]) => !/^HOMEBREW_|^RUBYOPT$|^GEM_|^BUNDLE_/iu.test(name))),
+    GOTOOLCHAIN: 'local', CGO_ENABLED: '0',
+    HOME: path.join(directory, 'home'), USERPROFILE: path.join(directory, 'home'),
+    COPILOT_HOME: path.join(directory, 'copilot-home'),
+    NODE_OPTIONS: '', NODE_PATH: '',
+    TMPDIR: path.join(directory, 'scratch'), TMP: path.join(directory, 'scratch'), TEMP: path.join(directory, 'scratch'),
+    GOCACHE: path.join(directory, 'go-cache'), GOPATH: path.join(directory, 'go-path'),
+    PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1',
+    HOMEBREW_NO_AUTO_UPDATE: '1', HOMEBREW_NO_ANALYTICS: '1',
+    HOMEBREW_NO_COLOR: '1', NO_COLOR: '1',
+    HOMEBREW_NO_INSTALL_CLEANUP: '1', HOMEBREW_DEVELOPER: '1',
+    HOMEBREW_CACHE: path.join(directory, 'brew-cache'), HOMEBREW_LOGS: path.join(directory, 'brew-logs'),
+    HOMEBREW_TEMP: path.join(directory, 'scratch'),
+  };
+  for (const key of ['NODE_AUTH_TOKEN', 'NPM_TOKEN', 'GITHUB_TOKEN', 'GH_TOKEN',
+    'FORCE_COLOR', 'CLICOLOR_FORCE']) delete environment[key];
+  return environment;
+}
+
 export async function bootstrapNativeToolchain(options) {
   const directory = validateBootstrapRequest(options);
   let current = repositoryRoot;
@@ -36,21 +59,7 @@ export async function bootstrapNativeToolchain(options) {
     requireThat(stat.isDirectory() && !stat.isSymbolicLink(), 'HOST', 'Bootstrap cannot traverse linked or non-directory paths');
   }
   requireThat(!(await fs.readdir(directory)).length, 'HOST', 'Bootstrap owns a new empty directory, never an installed prefix');
-  const environment = { ...Object.fromEntries(Object.entries(process.env)
-    .filter(([name]) => !/^HOMEBREW_|^RUBYOPT$|^GEM_|^BUNDLE_/iu.test(name))),
-    GOTOOLCHAIN: 'local', CGO_ENABLED: '0',
-    HOME: path.join(directory, 'home'), USERPROFILE: path.join(directory, 'home'),
-    COPILOT_HOME: path.join(directory, 'copilot-home'),
-    NODE_OPTIONS: '', NODE_PATH: '',
-    TMPDIR: path.join(directory, 'scratch'), TMP: path.join(directory, 'scratch'), TEMP: path.join(directory, 'scratch'),
-    GOCACHE: path.join(directory, 'go-cache'), GOPATH: path.join(directory, 'go-path'),
-    PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1',
-    HOMEBREW_NO_AUTO_UPDATE: '1', HOMEBREW_NO_ANALYTICS: '1',
-    HOMEBREW_NO_INSTALL_CLEANUP: '1', HOMEBREW_DEVELOPER: '1',
-    HOMEBREW_CACHE: path.join(directory, 'brew-cache'), HOMEBREW_LOGS: path.join(directory, 'brew-logs'),
-    HOMEBREW_TEMP: path.join(directory, 'scratch'),
-  };
-  for (const key of ['NODE_AUTH_TOKEN', 'NPM_TOKEN', 'GITHUB_TOKEN', 'GH_TOKEN']) delete environment[key];
+  const environment = nativeBootstrapEnvironment(directory);
   for (const key of ['HOME', 'COPILOT_HOME', 'TMPDIR', 'GOCACHE', 'GOPATH', 'HOMEBREW_CACHE', 'HOMEBREW_LOGS']) {
     await fs.mkdir(environment[key]);
   }

@@ -848,8 +848,8 @@ test('T-PRD008 timing is observational and critical selection retains slow autho
   for (const [, name] of criticalSelectors) assert.ok(names.test(name), name);
   assert.ok(!plan.critical.cases.some(test => test.name.startsWith('T-PRD067 ')));
   assert.ok(!plan.critical.cases.some(test => test.name.startsWith('T-PRD052 ')));
-  assert.ok(plan.critical.deferredCases.length > 0);
-  assert.ok(plan.critical.deferredCases.every(test => test.status === 'NotRun'));
+  assert.deepEqual(plan.critical.deferredCases, [],
+    'Hosted exhaustive cases are not hidden prerequisites of the finite local sanity profile');
   assert.deepEqual(plan.critical.units.cases, []);
   assert.ok(plan.critical.units.cases.every(test => !names.test([...test.parents, test.name].join(' '))));
   assert.ok(!names.test('unrelated fast success'));
@@ -876,6 +876,10 @@ test('T-PRD008 timing is observational and critical selection retains slow autho
     { id: 'T-PRD005', level: 'integration', environment: 'local', checkpoint: 'pre-review',
       location: 'development-machine', mode: 'automated' },
   ]);
+  assert.deepEqual(selected.deferredCases.map(({ testId, status }) => ({ testId, status })), [
+    { testId: 'T-PRD008', status: 'NotRun' },
+    { testId: 'T-PRD005', status: 'NotRun' },
+  ], 'Explicit local exhaustive declarations remain deferred rather than credited by sanity');
   assert.ok(!new RegExp(selected.units.name).test('unit parent T-PRD008 slow unit'));
   assert.ok(!new RegExp(selected.units.name).test('unit parent'));
   assert.ok(!new RegExp(selected.name).test('unit parent T-PRD008 slow unit'));

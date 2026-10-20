@@ -1093,8 +1093,11 @@ export async function runNativeValidation(options) {
   'HOST', 'Native validation needs actual hosted image, repository, workflow, run and attempt identities');
   const git = args => execute('git', args, { cwd: repositoryRoot });
   const revision = (await git(['rev-parse', 'HEAD'])).stdout.trim();
+  const sourceStatus = (await git(['status', '--porcelain'])).stdout.trim();
   requireThat(revision === process.env.EXPECTED_SOURCE_COMMIT &&
-    !(await git(['status', '--porcelain'])).stdout.trim(), 'EVIDENCE', 'Native validation requires the exact clean expected source');
+    !sourceStatus, 'EVIDENCE', 'Native validation requires the exact clean expected source',
+  safe({ expectedSourceCommit: process.env.EXPECTED_SOURCE_COMMIT, actualSourceCommit: revision,
+    sourceStatus }));
   await literalDirectory(evidenceDir, { create: true, empty: true });
   const directory = evidenceDir;
   const startedAt = new Date().toISOString();

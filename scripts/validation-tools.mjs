@@ -1,14 +1,184 @@
 import { spawn } from 'node:child_process';
 import { open, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { StringDecoder } from 'node:string_decoder';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
 import { digest, SdlcError } from '../src/core.mjs';
+import { declarationTokens } from './validation-inventory.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const maxOutputBytes = 4 * 1024 * 1024;
+const maxInspectionBytes = 64 * 1024;
+
+function assertionInspectionJson(text) {
+  if (Buffer.byteLength(text) > maxInspectionBytes) return null;
+  try {
+    const tokens = declarationTokens(text);
+    if (tokens.length > 65536) return null;
+    let cursor = 0;
+    let edge = 0;
+    for (const token of tokens) {
+      if (text.slice(edge, token.start).trim()) return null;
+      edge = token.end;
+    }
+    if (text.slice(edge).trim()) return null;
+    const take = value => {
+      if (tokens[cursor]?.value !== value) throw new Error('Unsupported inspection syntax');
+      cursor++;
+    };
+    const parse = depth => {
+      if (depth > 32) throw new Error('Inspection nesting exceeds its bound');
+      const token = tokens[cursor];
+      if (!token) throw new Error('Incomplete inspection');
+      if (token.value === '[' && ['Object', 'Array'].includes(tokens[cursor + 1]?.value) &&
+          tokens[cursor + 2]?.value === ']') {
+        cursor += 3;
+        return { nodeInspectionType: tokens[cursor - 2].value, elided: true };
+      }
+      if (token.value === '{' || token.value === '[') {
+        const object = token.value === '{';
+        const result = object ? Object.create(null) : [];
+        const end = object ? '}' : ']';
+        cursor++;
+        while (tokens[cursor]?.value !== end) {
+          let key;
+          if (object) {
+            const property = tokens[cursor++];
+            if (!['identifier', 'string'].includes(property?.kind) || Object.hasOwn(result, property.value)) {
+              throw new Error('Unsupported or duplicate inspection property');
+            }
+            key = property.value;
+            take(':');
+          }
+          const value = parse(depth + 1);
+          if (object) result[key] = value;
+          else result.push(value);
+          if (tokens[cursor]?.value !== ',') break;
+          cursor++;
+        }
+        take(end);
+        return result;
+      }
+      if (token.kind === 'string') {
+        let value = token.value;
+        cursor++;
+        while (tokens[cursor]?.value === '+' && tokens[cursor + 1]?.kind === 'string') {
+          value += tokens[cursor + 1].value;
+          cursor += 2;
+        }
+        return value;
+      }
+      if (token.kind === 'identifier' && ['true', 'false', 'null'].includes(token.value)) {
+        cursor++;
+        return { true: true, false: false, null: null }[token.value];
+      }
+      if (token.kind === 'identifier' && ['undefined', 'NaN', 'Infinity'].includes(token.value)) {
+        cursor++;
+        return { nodeInspectionType: token.value };
+      }
+      const number = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/u.exec(text.slice(token.start));
+      if (!number || !Number.isFinite(Number(number[0]))) {
+        throw new Error('Unsupported inspection value');
+      }
+      const end = token.start + number[0].length;
+      while (tokens[cursor]?.end <= end) cursor++;
+      if (tokens[cursor - 1]?.end !== end) throw new Error('Incomplete inspection number');
+      return Object.is(Number(number[0]), -0) ? { nodeInspectionType: 'number', value: '-0' } : Number(number[0]);
+    };
+    const value = parse(0);
+    // Only Node's typed assertion metadata is adapted; arbitrary inspected objects remain unsupported.
+    if (cursor !== tokens.length || !value || Array.isArray(value) ||
+        Object.keys(value).some(key => !['generatedMessage', 'code', 'actual', 'expected', 'operator', 'diff'].includes(key)) ||
+        typeof value.generatedMessage !== 'boolean' || value.code !== 'ERR_ASSERTION' ||
+        !Object.hasOwn(value, 'actual') || !Object.hasOwn(value, 'expected') ||
+        typeof value.operator !== 'string' || !/^[A-Za-z!=<>]{1,64}$/u.test(value.operator) ||
+        Object.hasOwn(value, 'diff') && value.diff !== 'simple') return null;
+    return JSON.stringify(value);
+  } catch {
+    return null;
+  }
+}
+
+function outputRecord(state, text, final = false) {
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(text)) {
+    throw new SdlcError('UNSAFE', 'Opaque validation output cannot be retained safely.');
+  }
+  state.pending += text;
+  let boundary = 0;
+  for (; state.scanned < state.pending.length; state.scanned++) {
+    const index = state.scanned;
+    const character = state.pending[index];
+    if (state.quote) {
+      if (state.escaped) state.escaped = false;
+      else if (character === '\\') state.escaped = true;
+      else if (character === state.quote) state.quote = null;
+    } else if (['"', "'", '`'].includes(character) && (state.stack.length ||
+        /[A-Za-z_][A-Za-z0-9_.-]*[ \t]*=[ \t]*$/u.test(state.pending.slice(state.lineStart, index)))) {
+      state.quote = character;
+    } else if (character === '{' || character === '[') {
+      if (state.stack.length >= 32) throw new SdlcError('CAPACITY', 'Output structure exceeds its bounded depth.');
+      state.stack.push({ character, index });
+    } else if (character === '}' || character === ']') {
+      const opening = state.stack.pop();
+      if (opening?.character !== (character === '}' ? '{' : '[')) state.stack.length = 0;
+      else if (character === '}' &&
+          /^\{\s*generatedMessage\s*:/u.test(state.pending.slice(opening.index, index + 1))) {
+        state.inspections.push({ from: opening.index, to: index + 1 });
+      }
+    }
+    if (character === '\n') {
+      if (!state.stack.length && !state.quote) {
+        const line = state.pending.slice(state.lineStart, index + 1);
+        const header = /^[ \t]*(?:Authorization|Proxy-Authorization|Cookie|Set-Cookie|X-API-Key|X-Auth-Token|X-Amz-Security-Token)[ \t]*:/iu.test(line);
+        if (header) state.header = true;
+        else if (!state.header || !/^[ \t]/u.test(line)) {
+          state.header = false;
+          boundary = index + 1;
+        }
+      }
+      state.lineStart = index + 1;
+    }
+  }
+  if (final) {
+    if (state.quote) throw new SdlcError('UNSAFE', 'Incomplete quoted validation output cannot be retained safely.');
+    boundary = state.pending.length;
+  }
+  if (!boundary) return null;
+  const original = state.pending.slice(0, boundary);
+  let normalized = '';
+  let cursor = 0;
+  let count = 0;
+  const inspections = state.inspections.filter(item => item.to <= boundary)
+    .sort((left, right) => left.from - right.from || right.to - left.to);
+  for (const item of inspections) {
+    if (item.from < cursor) continue;
+    const json = assertionInspectionJson(original.slice(item.from, item.to));
+    if (json !== null) {
+      normalized += original.slice(cursor, item.from) + json;
+      cursor = item.to;
+      count++;
+    }
+  }
+  normalized += original.slice(cursor);
+  state.pending = state.pending.slice(boundary);
+  state.scanned -= boundary;
+  state.lineStart = Math.max(0, state.lineStart - boundary);
+  state.stack.forEach(item => { item.index -= boundary; });
+  state.inspections = state.inspections.filter(item => item.to > boundary)
+    .map(item => ({ from: item.from - boundary, to: item.to - boundary }));
+  return { text: normalized, original: { sha256: digest(original), bytes: Buffer.byteLength(original) },
+    ...(count ? { normalization: 'node-assertion-metadata-json', normalizedRecords: count } : {}) };
+}
+
+function outputDecoder() {
+  return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+}
+
+function resetOutputRecord(state) {
+  Object.assign(state, { decoder: outputDecoder(), pending: '', scanned: 0, lineStart: 0,
+    stack: [], inspections: [], quote: null, escaped: false, header: false });
+}
 
 function processDiagnostic(error) {
   const original = String(error?.message ?? error);
@@ -154,17 +324,20 @@ export async function executeValidationCommand({
     };
     retain('command-start', { command: actualCommand, cwd, context: report.context });
     const streams = new Map();
-    const retainOutput = (channel, text) => {
-      try { report[channel] += retain('output', { channel, text }).text; }
+    const rejectOutput = (channel, error, original) => {
+      const failure = processDiagnostic(error);
+      outputError ??= Object.assign(new Error(`Validation ${channel} could not be safely retained (${failure.code}).`),
+        { code: failure.code });
+      try {
+        retain('output-rejected', { channel, code: failure.code, original, cause: failure,
+          diagnostic: 'Unsafe or over-budget output was not retained; this execution is incomplete.' });
+      } catch (retentionError) { persistenceError ??= retentionError; }
+      stop();
+    };
+    const retainOutput = (channel, record) => {
+      try { report[channel] += retain('output', { channel, ...record }).text; }
       catch (error) {
-        const failure = processDiagnostic(error);
-        outputError ??= Object.assign(new Error(`Validation ${channel} could not be safely retained (${failure.code}).`),
-          { code: failure.code });
-        try {
-          retain('output-rejected', { channel, code: failure.code,
-            diagnostic: 'Unsafe or over-budget output was not retained; this execution is incomplete.' });
-        } catch (retentionError) { persistenceError ??= retentionError; }
-        stop();
+        rejectOutput(channel, error, record.original);
       }
     };
     const consume = (channel, bytes) => {
@@ -174,20 +347,30 @@ export async function executeValidationCommand({
       if (state.bytes > maxOutputBytes) {
         outputError ??= Object.assign(new Error(`Validation ${channel} exceeds the retained-output budget.`),
           { code: 'CAPACITY' });
+        try {
+          retain('output-rejected', { channel, code: 'CAPACITY',
+            original: { sha256: state.hash.copy().digest('hex'), bytes: state.bytes },
+            diagnostic: 'Output exceeds the unchanged retained-output budget.' });
+        } catch (retentionError) { persistenceError ??= retentionError; }
         stop();
         return;
       }
-      state.pending += state.decoder.write(bytes);
-      const newline = state.pending.lastIndexOf('\n');
-      if (newline >= 0) {
-        const text = state.pending.slice(0, newline + 1);
-        state.pending = state.pending.slice(newline + 1);
-        retainOutput(channel, text);
+      try {
+        let text;
+        try { text = state.decoder.decode(bytes, { stream: true }); }
+        catch { throw new SdlcError('UNSAFE', 'Validation output must be supported UTF-8 text.'); }
+        const record = outputRecord(state, text);
+        if (record) retainOutput(channel, record);
+      } catch (error) {
+        rejectOutput(channel, error, { sha256: digest(bytes), bytes: bytes.length });
+        resetOutputRecord(state);
       }
     };
-    for (const channel of ['stdout', 'stderr']) streams.set(channel, {
-      decoder: new StringDecoder('utf8'), pending: '', hash: createHash('sha256'), bytes: 0,
-    });
+    for (const channel of ['stdout', 'stderr']) {
+      const state = { hash: createHash('sha256'), bytes: 0 };
+      resetOutputRecord(state);
+      streams.set(channel, state);
+    }
     await persistCommandReport(reportFile, report);
     const abort = () => { interrupted = true; stop(); };
     signal?.addEventListener('abort', abort, { once: true });
@@ -222,8 +405,15 @@ export async function executeValidationCommand({
     }
     if (stopping) await stopping;
     for (const [channel, state] of streams) {
-      const text = state.pending + state.decoder.end();
-      if (text) retainOutput(channel, text);
+      try {
+        let tail;
+        try { tail = state.decoder.decode(); }
+        catch { throw new SdlcError('UNSAFE', 'Validation output ended with incomplete UTF-8 text.'); }
+        const record = outputRecord(state, tail, true);
+        if (record?.text) retainOutput(channel, record);
+      } catch (error) {
+        rejectOutput(channel, error, { sha256: digest(state.pending), bytes: Buffer.byteLength(state.pending) });
+      }
     }
     report.finishedAt = new Date().toISOString();
     report.exitCode = outcome.code;
