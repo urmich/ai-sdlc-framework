@@ -270,14 +270,33 @@ product-scale or hosted performance benchmark.
 ### 4.4 Producer output and cancellation
 
 The worker emits sanitized incremental records to a unique owned execution
-journal and a final immutable JSON report. Keep original registration/start/
-completion diagnostics and actual expected-result evaluation. A partial journal
-has `complete=false` and cannot pass readiness.
+journal and publishes an incomplete JSON checkpoint before callbacks begin.
+An exclusive output claim prevents another attempt from replacing that path.
+While the attempt is active, serialized atomic replacements update its partial
+checkpoint; the completed final report is immutable. Keep original registration/
+start/completion diagnostics and actual expected-result evaluation.
+
+Partial checkpoints retain `complete=false`, null finish/exit fields, the
+current phase, actual active/pending groups and a durable journal-prefix
+sequence, byte count and SHA-256. A journal may continue growing after that
+prefix. Refresh real lease/process observations before periodic snapshots,
+including silent roots; do not infer activity or completion from console output.
+The worker coalesces running snapshots at ten seconds; command capture retains
+its actual dispatched PID and coalesces output snapshots at one second.
+These intervals are diagnostics, not test deadlines or passing evidence.
 
 Use existing IPC/AbortController cancellation, wait for worker shutdown, and
-retain nonzero/interrupted outcome. Commit the final manifest only after all
-expected workers close and evidence flushes. Never overwrite a prior report;
-attempt/run identity and digest select a new output.
+retain nonzero/interrupted outcomes. Await journal flushes and staged-file
+fsync/close before atomic replacement. Commit the final manifest only after all
+expected workers close and evidence flushes. Never overwrite another attempt's
+report or an already completed final report; attempt/run identity and digest
+select a new output. Missing final output, interrupted snapshots and journal-only
+recovery cannot pass readiness. A kill before initial publication or an OS/
+filesystem failure may still prevent the first checkpoint.
+
+Checkpoint retention rejection preserves a bounded invalid-partial record with
+the actual cause and original snapshot identity, not passing observation rows.
+It remains incomplete/nonzero and does not raise existing output bounds.
 
 The original schema-1 producer report and single ordered NDJSON journal retain
 their assertion identities. Additive `groupExecution` version 1 uses

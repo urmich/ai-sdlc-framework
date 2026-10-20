@@ -1,6 +1,6 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
-  "surfaces": [{"coverage": "direct", "paths": ["src/coverage.mjs", "scripts/validation-inventory.mjs"]}],
+  "surfaces": [{"coverage": "direct", "paths": ["src/coverage.mjs", "scripts/validation-inventory.mjs", "scripts/validation-tools.mjs"]}],
   "projects": [{
     "root": "test/calculator",
     "files": ["test/calculator/test/calculator.test.js", "test/calculator/test/static-contract.test.js"],
@@ -34,6 +34,9 @@ import { discoverDeclarations, compileValidationInventory,
   reconcileNodeExecution, nodeStartDefinition, cancelledNodeStarts } from '../scripts/validation-inventory.mjs';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
+import { pathToFileURL } from 'node:url';
 import { executeValidationCommand } from '../scripts/validation-tools.mjs';
 import { compileCoverage, prepareCoverage, renderCoverageSection, readCoverageSection,
   replaceCoverageSection, inspectCoverage } from '../src/coverage.mjs';
@@ -72,6 +75,160 @@ The prose mentions AC-901.99 and FR-999; neither is a definition.
     }],
   };
 }
+
+test('T-PRD018 command capture durably retains dispatched identity and sanitized progress before cancellation or abrupt termination',
+  { timeout: 30000 }, async t => {
+    const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'command-checkpoint-'));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const environment = { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' };
+    delete environment.NODE_TEST_CONTEXT;
+    delete environment.SDLC_TEST_REPORT_CONTEXT;
+    const module = pathToFileURL(path.resolve('scripts', 'validation-tools.mjs')).href;
+    for (const abrupt of [false, true]) {
+      const name = abrupt ? 'abrupt-command' : 'cancelled-command';
+      const marker = path.join(directory, `${name}-entered.json`);
+      const release = path.join(directory, `${name}-release`);
+      const source = path.join(directory, `${name}.mjs`);
+      await fs.writeFile(source, `import * as fs from 'node:fs/promises';
+import {setTimeout as delay} from 'node:timers/promises';
+await fs.writeFile(${JSON.stringify(marker)},JSON.stringify({pid:process.pid,parentPid:process.ppid}));
+console.log(JSON.stringify({authorization:'fixture-checkpoint-private-value'}));
+const deadline=Date.now()+20000;
+while(!(await fs.stat(${JSON.stringify(release)}).catch(error=>{
+  if(error.code!=='ENOENT')throw error;return null;
+}))){
+  if(Date.now()>=deadline)throw Error('Owned capture fixture release timed out');await delay(20);
+}
+`);
+      const controllerSource = path.join(directory, `${name}-controller.mjs`);
+      await fs.writeFile(controllerSource, `import {executeValidationCommand} from ${JSON.stringify(module)};
+const cancellation=new AbortController();
+process.once('message',()=>cancellation.abort());
+await executeValidationCommand({name:${JSON.stringify(name)},command:process.execPath,
+  args:[${JSON.stringify(source)}],outputDir:${JSON.stringify(directory)},signal:cancellation.signal});
+if(process.connected)process.disconnect();
+`);
+      const controller = spawn(process.execPath, [controllerSource], {
+        cwd: process.cwd(), env: environment, shell: false, stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+      });
+      let stderr = '';
+      controller.stderr.on('data', data => { stderr += data; });
+      const done = new Promise((resolve, reject) => {
+        controller.once('error', reject);
+        controller.once('close', (code, signal) => resolve({ code, signal }));
+      });
+      let owned;
+      let report;
+      const reportPath = path.join(directory, `${name}.json`);
+      try {
+        const deadline = Date.now() + 7000;
+        while (Date.now() < deadline) {
+          try {
+            owned = JSON.parse(await fs.readFile(marker, 'utf8'));
+            report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+          } catch (error) { if (error.code !== 'ENOENT') throw error; }
+          if (report?.pid === owned?.pid && report?.stdout.includes('[redacted:')) break;
+          await delay(20);
+        }
+        assert.ok(owned?.pid, stderr);
+        assert.equal(report.pid, owned.pid, 'The durable report must identify the dispatched, still-running command');
+        assert.equal(report.complete, false);
+        assert.equal(report.finishedAt, null);
+        assert.equal(report.exitCode, null);
+        assert.match(report.stdout, /\[redacted:[a-f0-9]{64}\]/u);
+        assert.ok(!JSON.stringify(report).includes('fixture-checkpoint-private-value'));
+        const journalPath = path.join(directory, `${name}.journal.ndjson`);
+        const journal = await fs.readFile(journalPath);
+        const reference = report.checkpoint.originalJournalPrefix;
+        assert.equal(report.checkpoint.journalDurable, true);
+        assert.equal(digest(journal.subarray(0, reference.bytes)), reference.sha256);
+        const events = journal.subarray(0, reference.bytes).toString('utf8').trim().split('\n').map(JSON.parse);
+        assert.equal(events.at(-1).sequence, report.checkpoint.journalSequence);
+        assert.ok(events.some(row => row.kind === 'command-dispatched' && row.pid === owned.pid));
+        assert.ok(events.some(row => row.kind === 'output' && row.channel === 'stdout'));
+        const existingReport = await fs.readFile(reportPath);
+        const existingJournal = await fs.readFile(journalPath);
+        await assert.rejects(executeValidationCommand({ name, command: process.execPath,
+          args: [source], outputDir: directory, environment }), { code: 'EEXIST' });
+        assert.deepEqual(await fs.readFile(reportPath), existingReport);
+        assert.deepEqual(await fs.readFile(journalPath), existingJournal);
+        if (abrupt) {
+          controller.kill('SIGKILL');
+          await done;
+          const preserved = await fs.readFile(reportPath);
+          await fs.writeFile(release, '');
+          assert.deepEqual(await fs.readFile(reportPath), preserved);
+          assert.equal(JSON.parse(preserved).complete, false);
+        } else {
+          await new Promise((resolve, reject) => controller.send({ cancel: true },
+            error => error ? reject(error) : resolve()));
+          const result = await done;
+          assert.equal(result.code, 0, stderr);
+          const cancelled = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+          assert.equal(cancelled.complete, false);
+          assert.ok(cancelled.causes.some(cause => cause.type === 'cancellation'));
+          assert.equal(cancelled.cleanup.rootExitObserved, true);
+          assert.equal(cancelled.checkpoint.phase, 'finished');
+          const finalJournal = await fs.readFile(journalPath);
+          assert.equal(digest(finalJournal), cancelled.checkpoint.originalJournalPrefix.sha256);
+          assert.equal(finalJournal.length, cancelled.checkpoint.originalJournalPrefix.bytes);
+        }
+      } finally {
+        await fs.writeFile(release, '');
+        if (owned) {
+          try { process.kill(owned.pid, 'SIGKILL'); }
+          catch (error) { if (error.code !== 'ESRCH') throw error; }
+        }
+        if (controller.exitCode === null && controller.signalCode === null) controller.kill('SIGKILL');
+        await done;
+        const deadline = Date.now() + 5000;
+        while (owned) {
+          try { process.kill(owned.pid, 0); }
+          catch (error) { if (error.code === 'ESRCH') break; throw error; }
+          assert.ok(Date.now() < deadline, 'No owned capture process may survive cleanup');
+          await delay(20);
+        }
+      }
+    }
+  });
+
+test('T-PRD018 command checkpoint capacity retains safe original streams without manufacturing completion',
+  { timeout: 30000 }, async t => {
+    const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'command-checkpoint-bound-'));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const source = path.join(directory, 'bounded.mjs');
+    await fs.writeFile(source, "const bytes=Buffer.from('x'.repeat(2100000)+'\\n');" +
+      "await new Promise(resolve=>process.stdout.write(bytes,resolve));" +
+      "await new Promise(resolve=>process.stderr.write(bytes,resolve));");
+    const environment = { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' };
+    delete environment.NODE_TEST_CONTEXT;
+    delete environment.SDLC_TEST_REPORT_CONTEXT;
+    const report = await executeValidationCommand({
+      name: 'bounded-command', command: process.execPath, args: [source],
+      outputDir: directory, environment, signal: t.signal,
+    });
+    assert.equal(report.complete, false);
+    assert.ok(report.causes.some(cause => cause.type === 'persistence' && cause.code === 'CAPACITY'));
+    assert.equal(report.checkpoint.phase, 'retention-failed');
+    assert.ok(report.checkpoint.originalSnapshot.bytes > 4 * 1024 * 1024);
+    const journal = await fs.readFile(path.join(directory, 'bounded-command.journal.ndjson'));
+    assert.equal(digest(journal), report.checkpoint.originalJournalPrefix.sha256);
+    assert.equal(journal.length, report.checkpoint.originalJournalPrefix.bytes);
+    const events = journal.toString('utf8').trim().split('\n').map(JSON.parse);
+    const last = events.at(-1);
+    assert.equal(last.kind, 'report-retention-rejected');
+    assert.equal(last.complete, false);
+    assert.deepEqual(last.original, report.checkpoint.originalSnapshot);
+    for (const channel of ['stdout', 'stderr']) {
+      const original = Buffer.from(events.filter(row => row.kind === 'output' && row.channel === channel)
+        .map(row => row.text).join(''));
+      assert.equal(original.length, 2100001);
+      assert.deepEqual(report.originalOutput[channel], { sha256: digest(original), bytes: original.length });
+    }
+    const retained = await fs.readFile(path.join(directory, 'bounded-command.json'));
+    assert.ok(retained.length > 0 && retained.length <= 4 * 1024 * 1024);
+    assert.deepEqual(JSON.parse(retained), report);
+  });
 
 test('T-PRD018 streamed validation output preserves typed assertion failures and redacts complete records', async t => {
   const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'output-records-'));

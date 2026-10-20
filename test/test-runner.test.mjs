@@ -79,16 +79,16 @@ const canonicalNames = [
   'T-109 the gate rejects a prepared PR ID different from the actual tool argument',
 ];
 
-async function scratch(t) {
-  const directory = await fs.mkdtemp(path.join(repositoryRoot, 'test', '.runner-fixture-'));
+async function scratch(t, root = repositoryRoot) {
+  const directory = await fs.mkdtemp(path.join(root, 'test', '.runner-fixture-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   return directory;
 }
 
-function invoke(args, environment = {}) {
+function invoke(args, environment = {}, root = repositoryRoot) {
   const child = spawn(process.execPath, [
-    path.join(repositoryRoot, 'scripts', 'test-runner.mjs'), ...args,
-  ], { cwd: repositoryRoot, env: { ...process.env, SDLC_TEST_WORKERS: '2', ...environment }, shell: false });
+    path.join(root, 'scripts', 'test-runner.mjs'), ...args,
+  ], { cwd: root, env: { ...process.env, SDLC_TEST_WORKERS: '2', ...environment }, shell: false });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', data => { stdout += data; });
@@ -562,6 +562,223 @@ function processRunning(pid) {
   }
 }
 
+async function assertJournalCheckpoint(reportPath, report) {
+  const journal = await fs.readFile(`${reportPath}.journal.ndjson`);
+  const reference = report.checkpoint.originalJournalPrefix;
+  assert.equal(report.checkpoint.journalDurable, true);
+  assert.ok(journal.length >= reference.bytes);
+  const prefix = journal.subarray(0, reference.bytes);
+  assert.equal(digest(prefix), reference.sha256);
+  const rows = prefix.length ? prefix.toString('utf8').trim().split('\n').map(JSON.parse) : [];
+  assert.equal(rows.at(-1)?.sequence ?? 0, report.checkpoint.journalSequence);
+  assert.ok(rows.every((row, index) => row.sequence === index + 1));
+  return rows;
+}
+
+async function assertDurableRunningCheckpoint(t, { hiddenLease = false } = {}) {
+    let root = repositoryRoot;
+    if (hiddenLease) {
+      root = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'checkpoint-observer-copy-'));
+      t.after(() => fs.rm(root, { recursive: true, force: true }));
+      await Promise.all(['src', 'scripts', 'packaging'].map(directory =>
+        fs.cp(path.join(repositoryRoot, directory), path.join(root, directory), { recursive: true })));
+      await fs.copyFile(path.join(repositoryRoot, 'package.json'), path.join(root, 'package.json'));
+      await fs.mkdir(path.join(root, 'test'));
+      await fs.mkdir(path.join(root, '.test-data'));
+    }
+    const directory = await scratch(t, root);
+    const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'runner-checkpoint-'));
+    let preserveFailure = false;
+    t.after(() => preserveFailure ? undefined : fs.rm(evidence, { recursive: true, force: true }));
+    const marker = path.join(directory, 'entered.json');
+    const release = path.join(directory, 'release');
+    const file = path.join(directory, 'silent.test.mjs');
+    await fs.writeFile(file, `import test from 'node:test';import assert from 'node:assert/strict';
+import * as fs from 'node:fs/promises';import {setTimeout as delay} from 'node:timers/promises';
+test('completed root before blocker',()=>assert.equal(2+2,4));
+test('silent blocked root',async()=>{
+  await fs.writeFile(${JSON.stringify(marker)},JSON.stringify({pid:process.pid,producerPid:process.ppid}));
+  const deadline=Date.now()+20000;
+  while(!(await fs.stat(${JSON.stringify(release)}).catch(error=>{
+    if(error.code!=='ENOENT')throw error;return null;
+  }))){
+    assert.ok(Date.now()<deadline,'Owned checkpoint fixture release timed out');await delay(20);
+  }
+});
+test('queued root must remain unstarted',()=>assert.fail('queued root executed'));
+`);
+    const reportPath = path.join(hiddenLease ? path.join(root, '.test-data') : evidence, 'partial.json');
+    const gate = path.join(directory, 'lease-visible');
+    const observationPath = path.join(directory, 'lease-observations.ndjson');
+    if (hiddenLease) {
+      const plan = await createPlan(parseOptions(['targeted', '--workers', '1', file], {}), root);
+      const group = plan.groups.find(group => group.name.includes('silent blocked root'));
+      assert.ok(group);
+      await fs.rename(path.join(root, 'scripts', 'test-budget.mjs'),
+        path.join(root, 'scripts', 'test-budget-observer-original.mjs'));
+      await fs.writeFile(path.join(root, 'scripts', 'test-budget.mjs'), `
+export * from './test-budget-observer-original.mjs';
+import {readTestGroupProcesses as actualProcesses,readTestBudget as actualBudget}
+  from './test-budget-observer-original.mjs';
+import {existsSync} from 'node:fs';import {appendFile} from 'node:fs/promises';
+export async function readTestGroupProcesses(groupId){
+  const hidden=groupId===${JSON.stringify(group.id)}&&!existsSync(${JSON.stringify(gate)});
+  const processes=await actualProcesses(groupId);
+  if(groupId===${JSON.stringify(group.id)})await appendFile(${JSON.stringify(observationPath)},
+    JSON.stringify({hidden,groupId,processes,returned:hidden?[]:processes,budget:await actualBudget()})+'\\n');
+  return hidden?[]:processes;
+}
+`);
+    }
+    const pending = invoke(['targeted', '--workers', '1', file], { SDLC_TEST_REPORT_FILE: reportPath }, root);
+    let owned;
+    try {
+      await waitFor(async () => {
+        try { owned = JSON.parse(await fs.readFile(marker, 'utf8')); return true; }
+        catch (error) { if (error.code !== 'ENOENT') throw error; return false; }
+      }, 'silent fixture process identity');
+      if (hiddenLease) {
+        await waitFor(async () => {
+          let observations;
+          try { observations = (await fs.readFile(observationPath, 'utf8')).split('\n').slice(0, -1).map(JSON.parse); }
+          catch (error) { if (error.code !== 'ENOENT') throw error; return false; }
+          const events = (await fs.readFile(`${reportPath}.journal.ndjson`, 'utf8'))
+            .split('\n').slice(0, -1).map(JSON.parse);
+          return observations.some(row => row.hidden && row.returned.length === 0) &&
+            events.some(row => row.kind === 'start' && row.name === 'silent blocked root') &&
+            events.some(row => row.kind === 'group-end' && row.status === 'Passed');
+        }, 'dequeued root whose first lease observation was withheld');
+        await fs.writeFile(gate, '', { flag: 'wx' });
+      }
+      let report;
+      await waitFor(async () => {
+        const bytes = await fs.readFile(reportPath);
+        if (!bytes.length) return false;
+        report = JSON.parse(bytes);
+        return report.groupExecution.groups.some(group =>
+          report.checkpoint.activeGroupIds.includes(group.id) && group.processIds.includes(owned.pid));
+      }, 'periodic durable checkpoint while the next root is silently blocked');
+      assert.equal(report.process.pid, owned.producerPid);
+      assert.ok(processRunning(owned.pid) && processRunning(owned.producerPid));
+      assert.equal(report.complete, false);
+      assert.equal(report.finishedAt, null);
+      assert.equal(report.exitCode, null);
+      assert.equal(report.summary, null);
+      assert.deepEqual(report.executions.map(row => [row.name, row.status]),
+        [['completed root before blocker', 'Passed']]);
+      assert.equal(report.checkpoint.pendingGroups, 1);
+      const active = report.groupExecution.groups.find(group => group.startedAt && !group.finishedAt);
+      assert.deepEqual(active.processIds, [owned.pid]);
+      assert.equal(active.finishedAt, null);
+      const events = await assertJournalCheckpoint(reportPath, report);
+      assert.ok(events.some(row => row.kind === 'start' && row.name === 'silent blocked root'));
+      assert.ok(events.some(row => row.kind === 'group-start' && row.groupId === active.id));
+      assert.deepEqual(events.filter(row => row.kind === 'completion').map(row => [row.name, row.status]),
+        [['completed root before blocker', 'Passed']]);
+      assert.ok(events.find(row => row.kind === 'group-start' && row.groupId === active.id).sequence >
+        events.find(row => row.kind === 'completion').sequence);
+      if (hiddenLease) {
+        const observations = (await fs.readFile(observationPath, 'utf8')).trim().split('\n').map(JSON.parse);
+        assert.equal(observations[0].hidden, true);
+        assert.deepEqual(observations[0].returned, []);
+        assert.ok(observations.length <= 3, 'Startup queries and one periodic refresh must remain bounded');
+        assert.equal(observations.filter(row => !row.hidden).length, 1,
+          'Concurrent progress requests must coalesce into one real refresh');
+        const visible = observations.find(row => !row.hidden);
+        assert.ok(visible, 'A periodic refresh must query the real broker again after the first miss');
+        assert.deepEqual(visible.returned, visible.processes);
+        assert.deepEqual(active.processes, visible.processes);
+        assert.deepEqual(visible.processes.map(process => process.pid), [owned.pid]);
+        for (const { budget } of observations) {
+          for (const [peak, limit] of [['peakActiveWorkers', 'capacity'],
+            ['peakResidentWorkers', 'residentLimit'], ['peakPotentialResidentWorkers', 'residentLimit'],
+            ['peakProducers', 'producerLimit'], ['peakControls', 'controlLimit']]) {
+            assert.ok(budget[peak] <= budget[limit], `${peak} must remain within the actual broker allocation`);
+          }
+        }
+      }
+      process.kill(owned.producerPid, 'SIGKILL');
+      await waitFor(() => !processRunning(owned.producerPid), 'owned producer termination');
+      const preserved = await fs.readFile(reportPath);
+      await fs.writeFile(release, '');
+      const result = await pending.done;
+      assert.notEqual(result.code, 0);
+      assert.deepEqual(await fs.readFile(reportPath), preserved);
+      await assertJournalCheckpoint(reportPath, JSON.parse(preserved));
+      assert.deepEqual(JSON.parse(preserved).executions.map(row => [row.name, row.status]),
+        [['completed root before blocker', 'Passed']]);
+    } catch (error) {
+      preserveFailure = true;
+      const [snapshot, journal] = await Promise.all([
+        fs.readFile(reportPath), fs.readFile(`${reportPath}.journal.ndjson`),
+      ]);
+      await fs.writeFile(path.join(evidence, 'failure-progress-original.json'), snapshot, { flag: 'wx' });
+      await fs.writeFile(path.join(evidence, 'failure-journal-original.ndjson'), journal, { flag: 'wx' });
+      if (hiddenLease) {
+        await fs.writeFile(path.join(evidence, 'failure-lease-observations.ndjson'),
+          await fs.readFile(observationPath), { flag: 'wx' });
+      }
+      const progress = snapshot.length ? JSON.parse(snapshot) : null;
+      t.diagnostic(JSON.stringify({
+        evidence: path.relative(repositoryRoot, evidence).split(path.sep).join('/'), owned,
+        checkpoint: progress?.checkpoint,
+        groups: progress?.groupExecution.groups.map(group => ({
+          id: group.id, name: group.name, startedAt: group.startedAt,
+          finishedAt: group.finishedAt, processIds: group.processIds,
+        })),
+        journal: { sha256: digest(journal), bytes: journal.length,
+          events: journal.toString('utf8').trim().split('\n').filter(Boolean).map(JSON.parse)
+            .filter(row => ['group-start', 'group-end', 'start', 'completion'].includes(row.kind))
+            .map(({ kind, name, groupId, status, processIds }) => ({ kind, name, groupId, status, processIds })) },
+      }));
+      throw error;
+    } finally {
+      await fs.writeFile(release, '');
+      if (owned && processRunning(owned.producerPid)) process.kill(owned.producerPid, 'SIGTERM');
+      if (owned && processRunning(owned.pid)) process.kill(owned.pid, 'SIGKILL');
+      await pending.done;
+      await waitFor(() => !owned || !processRunning(owned.pid), 'owned silent worker cleanup');
+    }
+}
+
+test('T-PRD018 silent active roots retain durable partial JSON and original journal after abrupt producer termination',
+  { timeout: 30000 }, t => assertDurableRunningCheckpoint(t));
+
+test('T-PRD018 periodic checkpoints refresh a hidden real worker lease before retaining progress',
+  { timeout: 30000 }, t => assertDurableRunningCheckpoint(t, { hiddenLease: true }));
+
+test('T-PRD018 checkpoint capacity rejection preserves a bounded incomplete report and the original journal',
+  { timeout: 30000 }, async t => {
+    const directory = await scratch(t);
+    const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'runner-checkpoint-bound-'));
+    t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+    const file = path.join(directory, 'bounded.test.mjs');
+    await fs.writeFile(file, "import test from 'node:test';test('large safe diagnostic fixture',t=>{" +
+      "for(let index=0;index<12;index++)t.diagnostic('safe original diagnostic '+index+' '+'x'.repeat(350000));});");
+    const reportPath = path.join(evidence, 'bounded.json');
+    const result = await invoke(['targeted', '--workers', '1', file], {
+      SDLC_TEST_REPORT_FILE: reportPath,
+    }).done;
+    assert.equal(result.code, 2, result.stderr.slice(0, 2000));
+    const bytes = await fs.readFile(reportPath);
+    assert.ok(bytes.length > 0 && bytes.length <= 4 * 1024 * 1024);
+    const report = JSON.parse(bytes);
+    assert.equal(report.kind, 'invalid-partial-report');
+    assert.equal(report.complete, false);
+    assert.equal(report.evidenceError.code, 'CAPACITY');
+    assert.ok(report.evidenceError.original.bytes > 4 * 1024 * 1024);
+    assert.deepEqual(report.executions, []);
+    const journal = await fs.readFile(`${reportPath}.journal.ndjson`);
+    const events = journal.toString('utf8').trim().split('\n').map(JSON.parse);
+    assert.equal(events.filter(row => row.kind === 'diagnostic' &&
+      row.message.startsWith('safe original diagnostic ')).length, 12);
+    assert.ok(events.some(row => row.kind === 'completion' &&
+      row.name === 'large safe diagnostic fixture' && row.status === 'Passed'));
+    assert.equal(events.at(-1).kind, 'checkpoint-rejected');
+    assert.equal(events.at(-1).code, 'CAPACITY');
+    await assertJournalCheckpoint(reportPath, report);
+  });
+
 for (const [signal, exitCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
   test(`T-130 ${signal} cancels active file workers before the public runner returns`, async t => {
     const allocation = process.env.SDLC_TEST_BUDGET ? await readTestBudget() : null;
@@ -619,7 +836,11 @@ if(process.connected) process.disconnect();
         const contents = await fs.readFile(`${reportPath}.journal.ndjson`, 'utf8');
         return contents.includes('"kind":"start"');
       }, 'durably flushed running output before final report');
-      assert.equal((await fs.readFile(reportPath)).length, 0);
+      const partial = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+      assert.equal(partial.complete, false);
+      assert.equal(partial.finishedAt, null);
+      assert.equal(partial.exitCode, null);
+      await assertJournalCheckpoint(reportPath, partial);
       await new Promise((resolve, reject) =>
         child.send({ signal }, error => error ? reject(error) : resolve()));
       const actual = await done;
@@ -632,6 +853,8 @@ if(process.connected) process.disconnect();
       assert.equal(report.exitCode, exitCode);
       assert.ok(report.summary.counts.cancelled > 0);
       assert.ok(report.executions.some(item => item.status === 'Cancelled'));
+      assert.equal(report.checkpoint.phase, 'finished');
+      await assertJournalCheckpoint(reportPath, report);
     } finally {
       await fs.writeFile(path.join(release, 'stop'), '');
       await done;

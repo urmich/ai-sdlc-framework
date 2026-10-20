@@ -3,7 +3,8 @@ import { Transform, Writable } from 'node:stream';
 import { availableParallelism, constants, totalmem } from 'node:os';
 import { run } from 'node:test';
 import { spec } from 'node:test/reporters';
-import { open, readFile, realpath } from 'node:fs/promises';
+import { open, readFile, realpath, rename, unlink } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
 import { digest, LIMITS, requireThat, SdlcError } from '../src/core.mjs';
@@ -26,6 +27,7 @@ delete process.env.SDLC_TEST_REPORT_CONTEXT;
 delete process.env.SDLC_TEST_REPORT_COMMAND;
 delete process.env.SDLC_TEST_REPORT_ADVISORY_MS;
 let reportFile;
+let reportClaimed = false;
 let report;
 let journalFile;
 let journal = Promise.resolve();
@@ -36,6 +38,107 @@ let finished = false;
 let interruption;
 const declaredCases = [];
 const observedStarts = [];
+const journalHash = createHash('sha256');
+let journalBytes = 0;
+let checkpointQueue = Promise.resolve();
+let checkpointPending = 0;
+let checkpointError;
+let checkpointTimer;
+let firstGroupCheckpoint = false;
+const pendingGroupStarts = new Map();
+let runningCheckpoint;
+let progressStopped = false;
+
+function serializeReport(value) {
+  const sanitized = sanitizeExecutionPayload(Buffer.from(JSON.stringify({
+    ...value, executions: [], diagnostics: [],
+    groupExecution: { ...value.groupExecution, groups: [] },
+  })));
+  sanitized.executions = value.executions.map(row =>
+    sanitizeExecutionPayload(Buffer.from(JSON.stringify(row))));
+  sanitized.diagnostics = value.diagnostics.map(row =>
+    sanitizeExecutionPayload(Buffer.from(JSON.stringify(row))));
+  sanitized.groupExecution.groups = value.groupExecution.groups.map(group =>
+    sanitizeExecutionPayload(Buffer.from(JSON.stringify(group))));
+  const bytes = Buffer.from(`${JSON.stringify(sanitized)}\n`);
+  requireThat(bytes.length <= LIMITS.artifact, 'CAPACITY', 'Test report exceeds its artifact bound');
+  return bytes;
+}
+
+function checkpointFailed(error) {
+  checkpointError ??= error;
+  process.exitCode ||= 2;
+  cancellation.abort(error);
+}
+
+function requestRunningCheckpoint() {
+  if (runningCheckpoint || progressStopped) return runningCheckpoint;
+  runningCheckpoint = Promise.resolve().then(async () => {
+    await Promise.all([...pendingGroupStarts.values()].map(refresh => refresh()));
+    await requestCheckpoint('running');
+  }).catch(checkpointFailed).finally(() => { runningCheckpoint = null; });
+  return runningCheckpoint;
+}
+
+function requestCheckpoint(phase, { final = false, force = false } = {}) {
+  if (!reportClaimed || !report) return checkpointQueue;
+  if (!force && checkpointPending) return checkpointQueue;
+  const prefix = journal;
+  const snapshot = JSON.parse(JSON.stringify({
+    ...report, complete: final ? report.complete : false,
+    finishedAt: final ? report.finishedAt : null, exitCode: final ? report.exitCode : null,
+    checkpoint: { phase, journalSequence: sequence,
+      originalJournalPrefix: { sha256: journalHash.copy().digest('hex'), bytes: journalBytes },
+      activeGroupIds: report.groupExecution.groups.filter(group =>
+        group.startedAt && !group.finishedAt).map(group => group.id),
+      pendingGroups: report.groupExecution.groups.filter(group => !group.startedAt).length },
+  }));
+  checkpointPending++;
+  checkpointQueue = checkpointQueue.then(async () => {
+    await prefix;
+    snapshot.checkpoint.journalDurable = !journalError;
+    if (journalError || checkpointError) snapshot.complete = false;
+    if (journalError) snapshot.journalError = rejectionCause(journalError);
+    let bytes;
+    try { bytes = serializeReport(snapshot); }
+    catch (error) {
+      if (!(error instanceof SdlcError) || !['UNSAFE', 'CAPACITY', 'JSON'].includes(error.code)) throw error;
+      const original = Buffer.from(JSON.stringify(snapshot));
+      const problem = { code: error.code, message: 'Original checkpoint could not be safely retained.',
+        cause: rejectionCause(error), original: { sha256: digest(original), bytes: original.length } };
+      checkpointFailed(error);
+      retainEvent('checkpoint-rejected', problem);
+      bytes = Buffer.from(`${JSON.stringify(sanitizeExecutionPayload(Buffer.from(JSON.stringify({
+        schemaVersion: 1, kind: 'invalid-partial-report', profile: reportProfile,
+        node: process.version, platform: process.platform, architecture: process.arch,
+        process: { pid: process.pid, parentPid: process.ppid },
+        startedAt: report.startedAt, finishedAt: null, complete: false, exitCode: process.exitCode ?? 2,
+        files: [], executions: [], diagnostics: [], summary: null,
+        checkpoint: { ...snapshot.checkpoint, phase: 'retention-failed',
+          omittedObservationRows: snapshot.executions.length },
+        evidenceError: problem,
+        selectionIdentity: { filesDigest: digest(report.files),
+          patternsDigest: digest(report.selection), groupsDigest: report.groupExecution.selectionDigest },
+      }))))}\n`);
+    }
+    if (reportFile) {
+      try { await reportFile.writeFile(bytes); await reportFile.sync(); }
+      finally { await reportFile.close(); reportFile = null; }
+      return;
+    }
+    const temporary = `${reportPath}.checkpoint-${randomUUID()}`;
+    try {
+      const handle = await open(temporary, 'wx');
+      try { await handle.writeFile(bytes); await handle.sync(); }
+      finally { await handle.close(); }
+      await rename(temporary, reportPath);
+    } finally {
+      try { await unlink(temporary); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+  }).catch(checkpointFailed).finally(() => { checkpointPending--; });
+  return checkpointQueue;
+}
 
 function rejectionCause(error) {
   const message = String(error.message);
@@ -106,9 +209,11 @@ function retainEvent(kind, data, rejectedDiagnostic) {
     console.error(`[test-worker:error] ${evidenceError.message} (${error.code})`);
     abortReason = new Error(evidenceError.message);
   }
+  const lines = [value, ...(diagnosticNotice ? [diagnosticNotice] : [])]
+    .map(item => Buffer.from(`${JSON.stringify(item)}\n`));
+  for (const line of lines) { journalHash.update(line); journalBytes += line.length; }
   journal = journal.then(async () => {
-    await journalFile.write(`${JSON.stringify(value)}\n`);
-    if (diagnosticNotice) await journalFile.write(`${JSON.stringify(diagnosticNotice)}\n`);
+    for (const line of lines) await journalFile.writeFile(line);
     await journalFile.sync();
   }).catch(error => {
     journalError ??= error;
@@ -127,6 +232,7 @@ const cancel = signal => {
       const retained = retainEvent('interruption', interruption);
       if (retained) interruption.sequence = retained.sequence;
     }
+    requestCheckpoint('cancelling', { force: true });
   }
   process.exitCode ||= 128 + constants.signals[signal];
   cancellation.abort(new Error(`Test run interrupted by ${signal}`));
@@ -168,7 +274,8 @@ try {
   });
   requireThat(!options.executionGroups || digest(groups) === digest(options.executionGroups),
     'INVENTORY', 'Dispatched root groups differ from independently read source closures');
-  const capacity = (await readTestBudget()).capacity;
+  const initialBudget = await readTestBudget();
+  const capacity = initialBudget.capacity;
   requireThat(groups.every(group => group.minimumSlots <= capacity), 'BUDGET',
     'An execution group requires more minimum slots than this aggregate host allocation');
   if (reportPath) {
@@ -179,6 +286,7 @@ try {
       throw new Error('Test evidence must remain inside repository-local .test-data.');
     }
     reportFile = await open(path.resolve(reportPath), 'wx');
+    reportClaimed = true;
     journalFile = await open(`${path.resolve(reportPath)}.journal.ndjson`, 'wx');
     report = {
       schemaVersion: 1, profile: reportProfile, node: process.version,
@@ -194,7 +302,7 @@ try {
         skipPatterns: options.testSkipPatterns ?? [],
         concurrency: options.concurrency, coverage: options.coverage ?? false },
       resources: { availableParallelism: availableParallelism(), totalMemoryBytes: totalmem(),
-        fileConcurrency: options.concurrency, budget: await readTestBudget() },
+        fileConcurrency: options.concurrency, budget: initialBudget },
       timing: { advisoryMs, elapsedMs: null, exceeded: null, advisoryOnly: true },
       executions: [], diagnostics: [], summary: null,
       diagnosticsScope: 'non-summary; original native counter diagnostics remain in the journal',
@@ -207,8 +315,11 @@ try {
       ...(options.coverage ? { coverage: { schemaVersion: 1,
         scope: 'per-isolated-root-native-coverage', aggregatePercentages: false, groups: [] } } : {}),
     };
+    await requestCheckpoint('initializing', { force: true });
     retainEvent('execution-start', { profile: reportProfile, files: report.files,
       context: report.context ?? null, selection: report.selection });
+    checkpointTimer = setInterval(requestRunningCheckpoint, 10000);
+    checkpointTimer.unref();
   }
   const summaries = [];
   const executeGroup = async group => {
@@ -229,21 +340,35 @@ try {
     let actualSummary;
     let coverageSummary;
     let groupStart;
+    let startObservation;
+    let observationClosed = false;
     const observeStart = async () => {
-      if (groupStart) return;
-      const processes = await readTestGroupProcesses(group.id);
-      if (!groupStart && processes.length) {
-        groupStart = true;
-        if (groupReport) {
-          groupReport.startedAt = processes[0].startedAt;
-          groupReport.processIds = processes.map(process => process.pid);
-          groupReport.processes = processes;
-          groupReport.workerCommand = [process.execPath, ...groupOptions.execArgv, ...groupOptions.files];
-          retainEvent('group-start', { groupId: group.id, rootId: group.rootId,
-            startedAt: groupReport.startedAt, processIds: groupReport.processIds,
-            minimumSlots: group.minimumSlots, exclusiveResources: group.exclusiveResources });
+      if (startObservation || groupStart || observationClosed) return startObservation;
+      startObservation = Promise.resolve().then(async () => {
+        const processes = await readTestGroupProcesses(group.id);
+        if (!groupStart && processes.length) {
+          groupStart = true;
+          pendingGroupStarts.delete(group.id);
+          if (groupReport) {
+            groupReport.startedAt = processes[0].startedAt;
+            groupReport.processIds = processes.map(process => process.pid);
+            groupReport.processes = processes;
+            groupReport.workerCommand = [process.execPath, ...groupOptions.execArgv, ...groupOptions.files];
+            retainEvent('group-start', { groupId: group.id, rootId: group.rootId,
+              startedAt: groupReport.startedAt, processIds: groupReport.processIds,
+              minimumSlots: group.minimumSlots, exclusiveResources: group.exclusiveResources });
+            if (!firstGroupCheckpoint) {
+              firstGroupCheckpoint = true;
+              await requestCheckpoint('running', { force: true });
+            }
+          }
         }
-      }
+      }).finally(() => { startObservation = null; });
+      return startObservation;
+    };
+    const refreshStart = async () => {
+      await startObservation;
+      await observeStart();
     };
     // Every invocation owns a separate file process, including roots in the same module.
     const tests = run(groupOptions);
@@ -278,7 +403,10 @@ try {
           ...start, groupId: group.id,
           ...(definition ? { parents: definition.parents, assertionId: definition.id } : {}),
         });
-        if (event === 'test:dequeue' && definition && retained) observedStarts.push(retained);
+        if (event === 'test:dequeue' && retained) {
+          if (definition) observedStarts.push(retained);
+          observeStart().catch(checkpointFailed);
+        }
       });
       for (const [event, status] of [['test:pass', 'Passed'], ['test:fail', 'Failed']]) {
         tests.on(event, data => {
@@ -351,8 +479,15 @@ try {
           details: { ...event.data.details, error: safeError } } });
       },
     });
-    await pipeline(tests, reporterView, new spec(), durableOutput, output);
-    await observeStart();
+    if (groupReport) pendingGroupStarts.set(group.id, refreshStart);
+    try {
+      await pipeline(tests, reporterView, new spec(), durableOutput, output);
+      await refreshStart();
+    } finally {
+      observationClosed = true;
+      pendingGroupStarts.delete(group.id);
+      await startObservation;
+    }
     if (options.coverage) {
       requireThat(coverageSummary?.files?.length > 0, 'EVIDENCE',
         'Coverage requires the actual native child coverage summary for every executed root');
@@ -427,10 +562,14 @@ try {
   };
   finished = true;
 } finally {
+  progressStopped = true;
+  clearInterval(checkpointTimer);
+  await runningCheckpoint;
   try {
-    if (reportFile) {
+    if (reportClaimed) {
       try {
         if (report && journalFile) {
+          await requestCheckpoint('finalizing', { force: true });
           for (const row of cancelledNodeStarts({
             cases: declaredCases, starts: observedStarts, executions: report.executions,
             interruption, producerPid: process.pid,
@@ -452,37 +591,35 @@ try {
             if (!process.exitCode || process.exitCode < 128) process.exitCode = 2;
             console.error('[test-worker:error] The selected execution produced no test assertions.');
           }
-          report.complete = finished && !evidenceError && !cancellation.signal.aborted && report.summary !== null &&
+          report.complete = finished && !evidenceError && !checkpointError && !journalError &&
+            !cancellation.signal.aborted && report.summary !== null &&
             report.summary.counts.cancelled === 0 && selectedCases.length > 0 &&
             report.groupExecution.groups.every(group =>
               group.startedAt && group.finishedAt && group.summary !== null);
           report.exitCode = process.exitCode ?? 0;
           report.timing.elapsedMs = performance.now() - producerStarted;
           report.timing.exceeded = advisoryMs !== null && report.timing.elapsedMs > advisoryMs;
-          report.resources.budget = await readTestBudget();
+          try { report.resources.budget = await readTestBudget(); }
+          catch (error) {
+            checkpointFailed(error);
+            report.complete = false;
+            report.budgetObservationError = rejectionCause(error);
+          }
+          if (checkpointError) {
+            report.checkpointError = rejectionCause(checkpointError);
+            report.complete = false;
+            report.exitCode = process.exitCode ?? 2;
+          }
           if (evidenceError) report.evidenceError = evidenceError;
           retainEvent('execution-end', { complete: report.complete, exitCode: report.exitCode,
             summary: report.summary });
           await journal;
-          if (journalError) throw journalError;
-          const sanitized = sanitizeExecutionPayload(Buffer.from(JSON.stringify({
-            ...report, executions: [], diagnostics: [],
-            groupExecution: { ...report.groupExecution, groups: [] },
-          })));
-          sanitized.executions = report.executions.map(row =>
-            sanitizeExecutionPayload(Buffer.from(JSON.stringify(row))));
-          sanitized.diagnostics = report.diagnostics.map(row =>
-            sanitizeExecutionPayload(Buffer.from(JSON.stringify(row))));
-          sanitized.groupExecution.groups = report.groupExecution.groups.map(group =>
-            sanitizeExecutionPayload(Buffer.from(JSON.stringify(group))));
-          const bytes = Buffer.from(`${JSON.stringify(sanitized)}\n`);
-          requireThat(bytes.length <= LIMITS.artifact, 'CAPACITY', 'Test report exceeds its artifact bound');
-          await reportFile.writeFile(bytes);
-          await reportFile.sync();
+          await requestCheckpoint('finished', { final: true, force: true });
         }
       } finally {
+        await journal;
         await journalFile?.close();
-        await reportFile.close();
+        await reportFile?.close();
       }
     }
   } finally {

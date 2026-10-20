@@ -13,6 +13,9 @@ export const homebrewToolchain = Object.freeze({
   commit: '99fd9a8eed4ff942c448da0c1f11156302441e4a', ruby: '4.0.7', node: '22.23.3',
 });
 export const homebrewBottlePlanSource = `
+protocol_output = $stdout
+# Manifest queries can print download progress before returning bottle metadata.
+$stdout = $stderr
 require "formula"
 require "formulary"
 require "formula_installer"
@@ -30,7 +33,7 @@ entries = formulae.uniq(&:full_name).map do |formula|
     compatible: bottle ? bottle.compatible_locations? : false,
     pourable: FormulaInstaller.new(formula, force_bottle: false).pour_bottle? }
 end
-puts JSON.generate({ schemaVersion: 1, kind: "native-homebrew-bottle-plan",
+protocol_output.puts JSON.generate({ schemaVersion: 1, kind: "native-homebrew-bottle-plan",
   prefix: HOMEBREW_PREFIX.to_s, cellar: HOMEBREW_CELLAR.to_s,
   architecture: RbConfig::CONFIG.fetch("host_cpu"), rubyPlatform: RUBY_PLATFORM, rubyVersion: RUBY_VERSION,
   entries: entries })

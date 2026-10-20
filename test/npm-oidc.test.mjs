@@ -14,6 +14,7 @@ import { NPM_TRUST } from '../scripts/npm-handoff.mjs';
 import { verifyPublishedProvenance } from '../scripts/accept-release.mjs';
 import { immutablePublicationBinding, publicationRecoveryDecision, collectPublicationAttempts } from '../scripts/release-history.mjs';
 import { readWorkflowPolicySources, inspectWorkflowPolicy, validateWorkflowPolicy } from '../scripts/workflow-policy.mjs';
+import { safeSummary } from '../src/core.mjs';
 
 const execute = promisify(execFile);
 const sourceCommit = 'a'.repeat(40);
@@ -165,9 +166,31 @@ if (process.argv[2] === '--version') {
     ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'unit-fixture-not-a-credential', TEST_NPM_ROOT: directory,
     TEST_NODE_VERSION: '24.22.0', SOURCE_RUN_ID: '1234', EVIDENCE_ARTIFACT_ID: '1235',
     ARTIFACT_READ_TOKEN: 'unit-fixture-not-a-credential' };
-  const script = (marker, overrides = {}, cwd = directory) => execute(process.execPath, ['--import', pathToFileURL(mockModule).href,
-      '--input-type=module', '-e', inlineScript(marker)],
-    { cwd, env: { ...env, ...overrides }, maxBuffer: 4 * 1024 * 1024 });
+  const diagnostics = [];
+  const script = async (marker, overrides = {}, cwd = directory) => {
+    try {
+      return await execute(process.execPath, ['--import', pathToFileURL(mockModule).href,
+        '--input-type=module', '-e', inlineScript(marker)],
+      { cwd, env: { ...env, ...overrides }, maxBuffer: 4 * 1024 * 1024 });
+    } catch (error) {
+      if (typeof error?.stderr === 'string' && typeof error.stdout === 'string') {
+        const message = error.stderr.match(/^[A-Za-z]*Error(?: \[[A-Z0-9_]+\])?:[^\r\n]*/mu)?.[0];
+        const diagnostic = {
+          kind: 'controlled-workflow-child-failure', marker,
+          exitCode: typeof error.code === 'number' ? error.code : null,
+          code: typeof error.code === 'string' ? error.code : null,
+          stderrMessage: message === undefined ? null : safeSummary(message),
+          stderrTextSha256: sha256(Buffer.from(error.stderr)),
+          stderrTextBytes: Buffer.byteLength(error.stderr),
+          stdoutTextSha256: sha256(Buffer.from(error.stdout)),
+          stdoutTextBytes: Buffer.byteLength(error.stdout),
+        };
+        diagnostics.push(diagnostic);
+        t.diagnostic(JSON.stringify(diagnostic));
+      }
+      throw error;
+    }
+  };
   const run = async (marker, overrides = {}, cwd = directory) => {
     if (marker === 'NPM_OIDC_PUBLISH') {
       const work = path.join(directory, 'npm-work');
@@ -187,7 +210,7 @@ if (process.argv[2] === '--version') {
     return script(marker, overrides, cwd);
   };
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
-  return { directory, assets, bytes, filename, handoff, env, run };
+  return { directory, assets, bytes, filename, handoff, env, run, diagnostics };
 }
 
 test('protected npm job is data-only, tokenless, and trusts the actual reusable caller', async () => {
@@ -263,6 +286,17 @@ test('privileged data verifier reads only data, ignores embedded lifecycle scrip
   assert.deepEqual(await fs.readFile(path.join(f.directory, 'npm-work', f.filename)), f.bytes);
   await assert.rejects(fs.stat(path.join(f.directory, 'npm-work/payload-executed')), { code: 'ENOENT' });
   await assert.rejects(fs.stat(path.join(f.directory, 'npm-work/source-script.mjs')), { code: 'ENOENT' });
+  await assert.rejects(f.run('NPM_DATA_VERIFY', { EXPECTED_BUNDLE_SHA256: '0'.repeat(64) }), error => {
+    const diagnostic = f.diagnostics.at(-1);
+    assert.equal(diagnostic.marker, 'NPM_DATA_VERIFY');
+    assert.equal(diagnostic.exitCode, 1);
+    assert.match(diagnostic.stderrMessage, /Invalid approved npm handoff identity/u);
+    assert.equal(diagnostic.stderrTextSha256, sha256(Buffer.from(error.stderr)));
+    assert.equal(diagnostic.stderrTextBytes, Buffer.byteLength(error.stderr));
+    assert.equal(diagnostic.stdoutTextSha256, sha256(Buffer.from(error.stdout)));
+    assert.equal(diagnostic.stdoutTextBytes, Buffer.byteLength(error.stdout));
+    return true;
+  });
 });
 
 test('protected origin verification rejects foreign artifacts, changed digests and a failed read-only verifier', async t => {

@@ -673,32 +673,35 @@ test('T-PRD041 retained signed fixtures use the actual verifier for payload sign
     assert.equal(baseline.bundleSha256, sha256(original));
     assert.deepEqual(Object.values(baseline.mechanisms).map(item => item.status), ['Passed', 'Passed', 'Passed']);
     assert.equal(baseline.statementSha256, sha256(Buffer.from(saved.dsseEnvelope.payload, 'base64')));
-    const tamper = (value, offset = 0) => {
+    const tamper = value => {
       const bytes = Buffer.from(value, 'base64');
-      assert.ok(offset >= 0 && offset < bytes.length);
-      bytes[offset] ^= 1;
+      assert.ok(bytes.length);
+      bytes[bytes.length - 1] ^= 1;
       return bytes.toString('base64');
     };
     const badSignature = structuredClone(saved);
     badSignature.dsseEnvelope.signatures[0].sig = tamper(badSignature.dsseEnvelope.signatures[0].sig);
     await write(bundleFile, badSignature);
-    await assert.rejects(verifyRetainedNpmAttestation(request), /signature|verification|transparency|log/iu);
+    await assert.rejects(verifyRetainedNpmAttestation(request), /signature|verification|transparency|log/iu,
+      'A changed DSSE signature must be rejected');
     const badPayload = structuredClone(saved);
     const statement = JSON.parse(Buffer.from(badPayload.dsseEnvelope.payload, 'base64'));
     statement.subject[0].digest.sha512 = '0'.repeat(128);
     badPayload.dsseEnvelope.payload = Buffer.from(JSON.stringify(statement)).toString('base64');
     await write(bundleFile, badPayload);
-    await assert.rejects(verifyRetainedNpmAttestation(request), /signature|verification|transparency|log/iu);
+    await assert.rejects(verifyRetainedNpmAttestation(request), /signature|verification|transparency|log/iu,
+      'A changed signed payload must be rejected');
     await fs.writeFile(bundleFile, original);
     await assert.rejects(verifyRetainedNpmAttestation({ ...request,
       certificateIdentity: 'https://github.com/unrelated/fixture/.github/workflows/other.yml@refs/heads/main' }),
-    /identity|alternative|policy|match/iu);
+    /identity|alternative|policy|match/iu, 'An untrusted certificate identity must be rejected');
     const badCertificate = structuredClone(saved);
     const certificate = badCertificate.verificationMaterial.certificate ??
       badCertificate.verificationMaterial.x509CertificateChain.certificates[0];
     certificate.rawBytes = tamper(certificate.rawBytes);
     await write(bundleFile, badCertificate);
-    await assert.rejects(verifyRetainedNpmAttestation(request), /certificate|verification|ASN|sequence|parse/iu);
+    await assert.rejects(verifyRetainedNpmAttestation(request), /certificate|verification|ASN|sequence|parse/iu,
+      'A changed certificate signature must be rejected');
     const badTransparency = structuredClone(saved);
     const entry = badTransparency.verificationMaterial.tlogEntries[0];
     if (entry.inclusionPromise?.signedEntryTimestamp) {
@@ -708,15 +711,15 @@ test('T-PRD041 retained signed fixtures use the actual verifier for payload sign
       const envelope = entry.inclusionProof.checkpoint.envelope;
       entry.inclusionProof.checkpoint.envelope = envelope.replace(
         /^(\u2014 \S+ )([A-Za-z0-9+/]+={0,2})$/gmu,
-        (_match, prefix, signature) =>
-          `${prefix}${tamper(signature, Buffer.from(signature, 'base64').length - 1)}`);
+        (_match, prefix, signature) => `${prefix}${tamper(signature)}`);
       assert.notEqual(entry.inclusionProof.checkpoint.envelope, envelope,
         'The retained checkpoint signature must actually change');
     }
     assert.ok(entry.inclusionPromise?.signedEntryTimestamp || entry.inclusionProof?.checkpoint?.envelope,
       'Retained fixture has no supported verifiable transparency proof');
     await write(bundleFile, badTransparency);
-    await assert.rejects(verifyRetainedNpmAttestation(request), /transparency|checkpoint|signature|log|timestamp/iu);
+    await assert.rejects(verifyRetainedNpmAttestation(request), /transparency|checkpoint|signature|log|timestamp/iu,
+      'Changed transparency witness signatures must be rejected');
     await fs.writeFile(bundleFile, original);
     assert.equal((await verifyRetainedNpmAttestation(request)).bundleSha256, baseline.bundleSha256,
       'Invalid signed fixtures must not alter the original retained valid fixture');

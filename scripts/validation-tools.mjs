@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
-import { open, realpath } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { open, realpath, rename, unlink } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
@@ -216,18 +216,10 @@ function processDiagnostic(error) {
   original: { sha256: digest(original), bytes: Buffer.byteLength(original) } };
 }
 
-async function persistCommandReport(handle, report) {
+function commandReportBytes(report) {
   const sanitized = sanitizeExecutionPayload(Buffer.from(JSON.stringify(report)));
   const bytes = Buffer.from(`${JSON.stringify(sanitized)}\n`);
-  let offset = 0;
-  while (offset < bytes.length) {
-    const { bytesWritten } = await handle.write(bytes, offset, bytes.length - offset, offset);
-    if (!bytesWritten) throw new Error('Validation report persistence made no progress.');
-    offset += bytesWritten;
-  }
-  await handle.truncate(bytes.length);
-  await handle.sync();
-  return sanitized;
+  return { sanitized, bytes };
 }
 
 export async function executeValidationCommand({
@@ -243,12 +235,20 @@ export async function executeValidationCommand({
   if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new Error('Validation process evidence must remain inside repository-local .test-data.');
   }
-  const reportFile = await open(path.join(destination, `${name}.json`), 'wx');
+  const reportPath = path.join(destination, `${name}.json`);
+  let reportFile = await open(reportPath, 'wx');
   let journalFile;
+  let checkpointQueue = Promise.resolve();
+  let progressTimer;
+  let finalizing = false;
   try {
     journalFile = await open(path.join(destination, `${name}.journal.ndjson`), 'wx');
     let sequence = 0;
     let journal = Promise.resolve();
+    let journalError;
+    const journalHash = createHash('sha256');
+    let journalBytes = 0;
+    let checkpointPending = 0;
     let persistenceError;
     let interrupted = signal?.aborted === true;
     let outputError;
@@ -263,6 +263,8 @@ export async function executeValidationCommand({
       cleanup.pid = child.pid;
       cleanup.mechanism = process.platform === 'win32' ? 'owned-pid-tree' : 'owned-process-group';
       cleanup.outcome = 'pending';
+      retain('command-stop-request', { pid: child.pid, cleanup });
+      if (!finalizing) requestCheckpoint('cancelling', { force: true });
       stopping = Promise.resolve().then(async () => {
         if (child.exitCode !== null || child.signalCode !== null) {
           cleanup.outcome = 'root-exited-unverified';
@@ -314,8 +316,9 @@ export async function executeValidationCommand({
         ];
         try {
           retain('cleanup-uncertain', { cleanup, originalOutput });
-          await persistCommandReport(reportFile, { ...report, complete: false, finishedAt: null,
+          Object.assign(report, { complete: false, finishedAt: null,
             diagnostic: causes.map(value => value.message).join('; '), causes, originalOutput });
+          await requestCheckpoint('cancelling', { force: true });
         } catch (retentionError) { persistenceError ??= retentionError; }
       });
     };
@@ -323,10 +326,14 @@ export async function executeValidationCommand({
       const value = sanitizeExecutionPayload(Buffer.from(JSON.stringify({
         sequence: ++sequence, observedAt: new Date().toISOString(), kind, ...data,
       })));
+      const bytes = Buffer.from(`${JSON.stringify(value)}\n`);
+      journalHash.update(bytes);
+      journalBytes += bytes.length;
       journal = journal.then(async () => {
-        await journalFile.write(`${JSON.stringify(value)}\n`);
+        await journalFile.writeFile(bytes);
         await journalFile.sync();
       }).catch(error => {
+        journalError ??= error;
         persistenceError ??= error;
         stop();
       });
@@ -344,8 +351,82 @@ export async function executeValidationCommand({
       stdout: '', stderr: '', exitCode: null, signal: null, diagnostic: null,
       pid: null, cleanup, causes: [],
     };
-    retain('command-start', { command: actualCommand, cwd, context: report.context });
     const streams = new Map();
+    const requestCheckpoint = (phase, { final = false, force = false } = {}) => {
+      if (!force && checkpointPending) return checkpointQueue;
+      const prefix = journal;
+      const snapshot = JSON.parse(JSON.stringify({
+        ...report, complete: final ? report.complete : false,
+        finishedAt: final ? report.finishedAt : null,
+        exitCode: final ? report.exitCode : null, signal: final ? report.signal : null,
+        originalOutput: final ? report.originalOutput : Object.fromEntries([...streams].map(([channel, state]) => [
+          channel, { sha256: state.hash.copy().digest('hex'), bytes: state.bytes },
+        ])),
+        checkpoint: { phase, journalSequence: sequence,
+          originalJournalPrefix: { sha256: journalHash.copy().digest('hex'), bytes: journalBytes } },
+      }));
+      checkpointPending++;
+      checkpointQueue = checkpointQueue.then(async () => {
+        await prefix;
+        snapshot.checkpoint.journalDurable = !journalError;
+        if (persistenceError) snapshot.complete = false;
+        if (journalError) snapshot.checkpoint.journalError = processDiagnostic(journalError);
+        let serialized;
+        try { serialized = commandReportBytes(snapshot); }
+        catch (error) {
+          if (!(error instanceof SdlcError) || !['UNSAFE', 'CAPACITY', 'JSON'].includes(error.code)) throw error;
+          persistenceError ??= error;
+          stop();
+          const original = Buffer.from(JSON.stringify(snapshot));
+          retain('report-retention-rejected', { phase, cause: processDiagnostic(error),
+            original: { sha256: digest(original), bytes: original.length }, complete: false });
+          await journal;
+          serialized = commandReportBytes({
+            ...snapshot, complete: false,
+            stdout: '[Transcript omitted; original output identities and journal remain retained.]',
+            stderr: '[Transcript omitted; original output identities and journal remain retained.]',
+            causes: [...snapshot.causes, { type: 'persistence', ...processDiagnostic(error) }],
+            diagnostic: 'The original command checkpoint could not be safely retained.',
+            checkpoint: { ...snapshot.checkpoint, phase: 'retention-failed',
+              journalSequence: sequence, journalDurable: !journalError,
+              originalJournalPrefix: { sha256: journalHash.copy().digest('hex'), bytes: journalBytes },
+              originalSnapshot: { sha256: digest(original), bytes: original.length } },
+          });
+        }
+        if (reportFile) {
+          const handle = reportFile;
+          reportFile = null;
+          try { await handle.writeFile(serialized.bytes); await handle.sync(); }
+          finally { await handle.close(); }
+        } else {
+          const temporary = `${reportPath}.checkpoint-${randomUUID()}`;
+          try {
+            const handle = await open(temporary, 'wx');
+            try { await handle.writeFile(serialized.bytes); await handle.sync(); }
+            finally { await handle.close(); }
+            await rename(temporary, reportPath);
+          } finally {
+            try { await unlink(temporary); }
+            catch (error) { if (error.code !== 'ENOENT') throw error; }
+          }
+        }
+        return serialized.sanitized;
+      }).catch(error => {
+        persistenceError ??= error;
+        stop();
+        return null;
+      }).finally(() => { checkpointPending--; });
+      return checkpointQueue;
+    };
+    const checkpointProgress = () => {
+      if (progressTimer || finalizing) return;
+      progressTimer = setTimeout(() => {
+        progressTimer = null;
+        requestCheckpoint('running');
+      }, 1000);
+      progressTimer.unref();
+    };
+    retain('command-start', { command: actualCommand, cwd, context: report.context });
     const rejectOutput = (channel, error, original) => {
       const failure = processDiagnostic(error);
       outputError ??= Object.assign(new Error(`Validation ${channel} could not be safely retained (${failure.code}).`),
@@ -357,7 +438,10 @@ export async function executeValidationCommand({
       stop();
     };
     const retainOutput = (channel, record) => {
-      try { report[channel] += retain('output', { channel, ...record }).text; }
+      try {
+        report[channel] += retain('output', { channel, ...record }).text;
+        checkpointProgress();
+      }
       catch (error) {
         rejectOutput(channel, error, record.original);
       }
@@ -393,7 +477,7 @@ export async function executeValidationCommand({
       resetOutputRecord(state);
       streams.set(channel, state);
     }
-    await persistCommandReport(reportFile, report);
+    await requestCheckpoint('initializing', { force: true });
     const abort = () => { interrupted = true; stop(); };
     signal?.addEventListener('abort', abort, { once: true });
     let outcome;
@@ -419,6 +503,7 @@ export async function executeValidationCommand({
           }
           try { retain('command-dispatched', { pid: report.pid }); }
           catch (error) { persistenceError ??= error; stop(); }
+          await requestCheckpoint('running', { force: true });
           outcome = await closed;
         }
       }
@@ -437,12 +522,14 @@ export async function executeValidationCommand({
         rejectOutput(channel, error, { sha256: digest(state.pending), bytes: Buffer.byteLength(state.pending) });
       }
     }
+    finalizing = true;
+    clearTimeout(progressTimer);
     report.finishedAt = new Date().toISOString();
     report.exitCode = outcome.code;
     report.signal = outcome.signal;
     cleanup.rootExitObserved = outcome.closed === true;
     report.originalOutput = Object.fromEntries([...streams].map(([channel, state]) => [
-      channel, { sha256: state.hash.digest('hex'), bytes: state.bytes },
+      channel, { sha256: state.hash.copy().digest('hex'), bytes: state.bytes },
     ]));
     let observedStop;
     do {
@@ -470,18 +557,15 @@ export async function executeValidationCommand({
     } catch (error) { persistenceError ??= error; }
     await journal;
     project();
-    try { return await persistCommandReport(reportFile, report); }
-    catch (error) {
-      if (!(error instanceof SdlcError) || !['UNSAFE', 'CAPACITY', 'JSON'].includes(error.code)) throw error;
-      persistenceError ??= error;
-      report.stdout = '[Transcript omitted from incomplete report; original output identities and partial journal remain retained.]';
-      report.stderr = '[Transcript omitted from incomplete report; original output identities and partial journal remain retained.]';
-      project();
-      return await persistCommandReport(reportFile, report);
-    }
+    const retained = await requestCheckpoint('finished', { final: true, force: true });
+    if (!retained) throw persistenceError;
+    return retained;
   } finally {
+    finalizing = true;
+    clearTimeout(progressTimer);
+    await checkpointQueue;
     await journalFile?.close();
-    await reportFile.close();
+    await reportFile?.close();
   }
 }
 
