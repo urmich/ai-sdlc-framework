@@ -98,7 +98,8 @@ export async function promoteHomebrewLink({
 
 async function brewContext(brew, environment, run) {
   const env = { ...environment, HOMEBREW_NO_AUTO_UPDATE: '1', HOMEBREW_NO_ANALYTICS: '1',
-    HOMEBREW_NO_INSTALL_CLEANUP: '1', HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: '1' };
+    HOMEBREW_NO_INSTALL_CLEANUP: '1', HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: '1',
+    ...(environment.SDLC_HOMEBREW_PREFIX_PROOF ? { HOMEBREW_NO_INSTALL_FROM_API: '1' } : {}) };
   const runBrew = args => run(brew, args, { env, maxBuffer: 8 * 1024 * 1024 });
   await assertNativeMacHost(run, env);
   const prefix = await fs.realpath((await runBrew(['--prefix'])).stdout.trim());
@@ -116,6 +117,29 @@ async function nodeIdentity(node, run, env) {
     throw new Error('The retained Node runtime must be native Node 22+ at the exact selected executable');
   }
   return runtime.execPath;
+}
+
+export async function resolveHomebrewRuntime({ keg, cellar, runBrew, capturedState }) {
+  const captured = capturedState?.kegs.find(record => record.path === keg && record.role === 'live');
+  if (capturedState && !captured) throw new Error('The installed channel is not in the captured live dependency closure');
+  const receipt = captured?.receipt ??
+    JSON.parse(await fs.readFile(path.join(keg, 'INSTALL_RECEIPT.json'), 'utf8'));
+  if (!Array.isArray(receipt.runtime_dependencies)) throw new Error('Missing installed channel runtime dependencies');
+  const dependencies = receipt.runtime_dependencies.filter(dependency =>
+    dependency.declared_directly !== false && /^node@\d+$/u.test(dependency.full_name));
+  if (dependencies.length !== 1 || Number(dependencies[0].full_name.slice(5)) < 22) {
+    throw new Error('The installed channel must record exactly one direct Node 22+ runtime dependency');
+  }
+  const formula = dependencies[0].full_name;
+  const runtimeKeg = await findInstalledKeg(runBrew, formula, cellar);
+  if (captured) {
+    const dependency = captured.dependencies.find(record => record.fullName === formula && record.requiredLive);
+    if (!dependency || dependency.currentKeg !== runtimeKeg ||
+        !capturedState.kegs.some(record => record.path === runtimeKeg && record.role === 'live')) {
+      throw new Error('The retained Node runtime differs from the captured live dependency');
+    }
+  }
+  return { formula, keg: runtimeKeg, node: path.join(runtimeKeg, 'bin', 'node') };
 }
 
 export async function verifyHomebrewHooks({ doctor, forbiddenKegs = [], node, run = runHomebrewCommand,
@@ -284,8 +308,7 @@ export async function switchToHomebrew({
       throw new Error('Homebrew opt does not point to the requested candidate after promotion');
     }
     await advanceSwitchState(state, 'verifying-promoted-channel');
-    const runtimeKeg = await findInstalledKeg(runBrew, 'node@22', cellar);
-    const node = path.join(runtimeKeg, 'bin', 'node');
+    const { node } = await resolveHomebrewRuntime({ keg: newKeg, cellar, runBrew });
     await verifyCopiedHomebrewInstallation({ home: doctor.home, node, frameworkVersion: pkg.version,
       forbiddenKegs: [newKeg, state.previousKeg], run, environment: env });
     await verifyCapturedKegs(state);
@@ -322,11 +345,11 @@ export async function switchFromHomebrew({
   let result;
   try {
     if (!state.targetKeg) throw new Error('There is no installed Homebrew channel to replace');
-    const runtimeKeg = await findInstalledKeg(runBrew, 'node@22', cellar);
-    const node = await nodeIdentity(path.join(runtimeKeg, 'bin', 'node'), run, env);
+    const runtime = await resolveHomebrewRuntime({ keg: state.targetKeg, cellar, runBrew, capturedState: state });
+    const node = await nodeIdentity(runtime.node, run, env);
     await advanceSwitchState(state, 'retaining-node');
-    await runBrew(['tab', '--installed-on-request', '--formula', 'node@22']);
-    const retained = JSON.parse(await fs.readFile(path.join(runtimeKeg, 'INSTALL_RECEIPT.json'), 'utf8'));
+    await runBrew(['tab', '--installed-on-request', '--formula', runtime.formula]);
+    const retained = JSON.parse(await fs.readFile(path.join(runtime.keg, 'INSTALL_RECEIPT.json'), 'utf8'));
     if (retained.installed_on_request !== true) throw new Error('Homebrew did not retain Node independently of the formula');
     state.retainedNode = node;
     await advanceSwitchState(state, 'installing-replacement');

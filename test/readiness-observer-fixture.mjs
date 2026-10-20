@@ -21,6 +21,7 @@ import { createReadinessGitHubClient } from '../scripts/github-readiness-host.mj
 import { createPrReadinessHost, statusConcurrencyGroup } from '../scripts/pr-observer.mjs';
 import { calculatorFiles, calculatorSelection, calculatorCommandArguments } from '../scripts/pr-calculator.mjs';
 import { validationExecutionGroups, validationGroupProtocol, validationSchedulingPolicyDigest } from '../scripts/test-scheduling.mjs';
+import { nativeToolchain, homebrewToolchain } from '../scripts/toolchain-baseline.mjs';
 
 const repository = 'urmich/ai-sdlc-framework';
 const repositoryId = 17;
@@ -189,7 +190,7 @@ function candidateData(sourceCommit, version = '1.2.3', includePrevious = true) 
   const mac = records.find(file => file.filename.endsWith('-macos.tar.gz'));
   const stableFormula = 'class AiSdlcFramework < Formula\n' +
     `  url "https://github.com/${repository}/releases/download/v${version}/${mac.filename}"\n` +
-    `  sha256 "${mac.sha256}"\n  depends_on :macos\n  depends_on "node@22"\nend\n`;
+    `  sha256 "${mac.sha256}"\n  depends_on :macos\n  depends_on "${homebrewToolchain.formula}"\nend\n`;
   assets.push(['ai-sdlc-framework.rb', Buffer.from(stableFormula)]);
   records.push({ filename: 'ai-sdlc-framework.rb', kind: 'homebrew', sha256: digest(stableFormula),
     size: Buffer.byteLength(stableFormula) });
@@ -240,7 +241,7 @@ function homebrewData(candidate, targetArch, previousMetadata = nativeReplayPrev
   const contents = '# Test-only local candidate; never publish to the stable tap.\n' +
     `class AiSdlcFramework < Formula\n  url "${candidateBaseUrl}${archive.filename}"\n` +
     `  version "${candidate.descriptor.version}" if version.to_s != "${candidate.descriptor.version}"\n` +
-    `  sha256 "${archive.sha256}"\n  depends_on :macos\n  depends_on "node@22"\nend\n`;
+    `  sha256 "${archive.sha256}"\n  depends_on :macos\n  depends_on "${homebrewToolchain.formula}"\nend\n`;
   const brew = '/controlled-fixture/isolated/bin/brew';
   const style = { status: 'Passed', exitCode: 0, args: ['style', '/controlled-fixture/Formula/ai-sdlc-framework.rb'] };
   const audit = { status: 'Passed', exitCode: 0, args: ['audit', '--strict', '--formula', '--os=macos',
@@ -251,12 +252,14 @@ function homebrewData(candidate, targetArch, previousMetadata = nativeReplayPrev
     quality: { validation: 'Passed', identity: candidate.context.identity, targetArch, mode: 'candidate',
       formula: { filename: 'ai-sdlc-framework.rb', kind: 'homebrew', sha256: digest(contents),
         size: Buffer.byteLength(contents) },
-      nodeDependency: { validation: 'Passed', formula: 'node@22', major: 22, scope: 'runtime', conditional: false },
+      nodeDependency: { validation: 'Passed', formula: homebrewToolchain.formula,
+        major: homebrewToolchain.major, scope: 'runtime', conditional: false },
       nativeExecution: 'NotRun', tool: 'Homebrew', brew, brewVersion: 'Homebrew controlled provider fixture',
       style, audit, commands: [style, audit].map(command => ({ command: brew, args: command.args, exitCode: 0 })) },
     evidence: { passed: true, platform: 'darwin', architecture: targetArch,
       uname: targetArch === 'arm64' ? 'arm64' : 'x86_64', sysctlProcTranslated: '0',
-      homebrewRuntime: { platform: 'darwin', arch: targetArch, major: 22 }, homebrewNodeVersion: '22.23.3',
+      homebrewRuntime: { platform: 'darwin', arch: targetArch, major: homebrewToolchain.major },
+      homebrewNodeVersion: nativeToolchain.node,
       upgradeKind: 'version', previousIdentity: previousMetadata.identity,
       currentIdentity: candidate.context.identity,
       archiveInputs: [previousArchive, archive], failedPromotionRetry: {
@@ -275,7 +278,7 @@ function homebrewData(candidate, targetArch, previousMetadata = nativeReplayPrev
 function commandRecord(name, target, context, args, start, finish, stdout = '', clock = at) {
   return { schemaVersion: 1, kind: 'validation-command', command: ['/controlled-fixture/node', ...args],
     cwd: '/controlled-fixture/source', startedAt: clock(start), finishedAt: clock(finish),
-    complete: true, node: 'v22.23.3', platform: platforms[target],
+    complete: true, node: `v${nativeToolchain.node}`, platform: platforms[target],
     architecture: target === 'macos-arm64' ? 'arm64' : 'x64',
     context, stdout, stderr: '', exitCode: 0, signal: null, diagnostic: null,
     originalOutput: { stdout: { sha256: digest(stdout), bytes: Buffer.byteLength(stdout) },
@@ -313,7 +316,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
   const resources = nativeResourceFacts({ availableParallelism: 4, totalMemoryBytes: 8 * 1024 ** 3,
     configuredWorkers: null });
   const bootstrap = { schemaVersion: 1, status: 'Passed', target,
-    native: { platform: platforms[target], architecture, node: '22.23.3', go,
+    native: { platform: platforms[target], architecture, node: nativeToolchain.node, go,
       resources,
       os: 'controlled-provider-OS', machine: architecture, imageOS: ImageOS, imageVersion: ImageVersion,
       python: { version: '3.12.10', implementation: 'CPython', executable: '/controlled-fixture/python-base',
@@ -331,10 +334,10 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
     ].map(name => ({ name, complete: true, exitCode: name === 'schema-dependency-probe' ? 1 : 0 })),
     cancelled: false };
   if (target.startsWith('macos-')) bootstrap.native.homebrew = {
-    commit: '99fd9a8eed4ff942c448da0c1f11156302441e4a', ruby: '4.0.7',
-    rubyExecutable: '/controlled-fixture/homebrew/Library/Homebrew/vendor/portable-ruby/4.0.7/bin/ruby',
-    node: { version: '22.23.3', platform: 'darwin', arch: architecture },
-    nodePrefix: '/controlled-fixture/homebrew/opt/node@22',
+    commit: homebrewToolchain.commit, ruby: homebrewToolchain.ruby,
+    rubyExecutable: `/controlled-fixture/homebrew/Library/Homebrew/vendor/portable-ruby/${homebrewToolchain.ruby}/bin/ruby`,
+    node: { version: nativeToolchain.node, platform: 'darwin', arch: architecture },
+    nodePrefix: `/controlled-fixture/homebrew/opt/${homebrewToolchain.formula}`,
     uname: architecture === 'arm64' ? 'arm64' : 'x86_64', translation: '0',
   };
   const specification = nativeSpecification({ plan: source.plan, inventory: source.inventory,
@@ -350,7 +353,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
     mode: 'automated', owner: 'provider',
     native: { kind: 'native', platform: platforms[target], architecture,
       image: `${ImageOS}/${ImageVersion}`, toolchain: {
-        node: '22.23.3', go, python: 'Python 3.12.10', os: 'controlled-provider-OS',
+        node: nativeToolchain.node, go, python: 'Python 3.12.10', os: 'controlled-provider-OS',
         machine: architecture, git: 'git version 2.49.0 controlled fixture', bootstrap: bootstrap.native,
         resources } },
     producer: { provider: 'github', connection: 'repository-ci', scopeRef: `repository:${repositoryId}`,
@@ -390,7 +393,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
         passed: group.assertionIds.length, failed: 0, cancelled: 0, skipped: 0, todo: 0, suites: 0 } },
     }));
     data.set(`${stage}.json`, { schemaVersion: 1, profile: stage === 'unit' ? 'unit' : 'targeted',
-      files, node: 'v22.23.3', executable: '/controlled-fixture/node',
+      files, node: `v${nativeToolchain.node}`, executable: '/controlled-fixture/node',
       command: ['/controlled-fixture/node', '/controlled-fixture/source/scripts/test-runner.mjs', ...args],
       workerCommand: ['/controlled-fixture/node', '/controlled-fixture/source/scripts/test-worker.mjs'],
       platform: platforms[target], architecture, context: stage === 'regression' ? context : smallContext,
@@ -456,7 +459,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
     type: 'test:pass', data: { file: `/controlled-fixture/source/${test.file}`,
       name: test.name, nesting: 0, details: { duration_ms: 1 } },
   })).map(event => JSON.stringify(event)).join('\n') + '\n';
-  data.set('calculator.json', { schemaVersion: 1, namespace: 'calculator', node: 'v22.23.3',
+  data.set('calculator.json', { schemaVersion: 1, namespace: 'calculator', node: `v${nativeToolchain.node}`,
     platform: platforms[target], architecture, context, command: ['/controlled-fixture/node', ...calculatorCommandArguments],
     selection: calculatorExpected, results: calculatorExpected.map(test => ({
       file: test.file, name: test.name, status: 'Passed', durationMs: 1,

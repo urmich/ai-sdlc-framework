@@ -13,6 +13,7 @@ import { buildPackage } from './package.mjs';
 import { buildPlatforms, writeReleaseMetadata } from './package-platforms.mjs';
 import { verifyRelease } from './verify-platform-package.mjs';
 import { collectReleaseAttemptHistory, requireCurrentReleaseGates } from './release-history.mjs';
+import { homebrewToolchain } from './toolchain-baseline.mjs';
 
 export const ROOT = fileURLToPath(new URL('../', import.meta.url));
 export const MACOS_ARCHITECTURES = Object.freeze(['arm64', 'x64']);
@@ -180,16 +181,18 @@ export function validateInitialHomebrewFormula({ descriptor, repository, content
   const sourceRecords = shared ? records.slice(0, 1) : records;
   if (canonical(actualUrls) !== canonical(sourceRecords.map(record => record.url)) ||
       canonical(digests) !== canonical(sourceRecords.map(record => record.sha256)) ||
-      canonical(dependencies) !== canonical(['  depends_on :macos', '  depends_on "node@22"']) ||
+      canonical(dependencies) !== canonical(['  depends_on :macos', `  depends_on "${homebrewToolchain.formula}"`]) ||
       (mode === 'candidate' && !contents.startsWith('# Test-only local candidate; never publish to the stable tap.\n'))) {
     throw new Error('Homebrew formula URL/checksum/architecture or Node dependency contract mismatch');
   }
   return { validation: 'Passed', mode, architectures: records, nativeValidation: 'NotRun',
-    nodeDependency: { validation: 'Passed', formula: 'node@22', major: 22, scope: 'runtime', conditional: false } };
+    nodeDependency: { validation: 'Passed', formula: homebrewToolchain.formula, major: homebrewToolchain.major,
+      scope: 'runtime', conditional: false } };
 }
 
 export function validateHomebrewQualityEvidence(quality, { identity, targetArch, formula, mode }) {
-  const expectedDependency = { validation: 'Passed', formula: 'node@22', major: 22, scope: 'runtime', conditional: false };
+  const expectedDependency = { validation: 'Passed', formula: homebrewToolchain.formula,
+    major: homebrewToolchain.major, scope: 'runtime', conditional: false };
   const expectedAudit = ['audit', '--strict', '--formula', '--os=macos', `--arch=${targetArch === 'x64' ? 'intel' : 'arm'}`];
   if (!quality || quality.validation !== 'Passed' || quality.tool !== 'Homebrew' ||
       typeof quality.brewVersion !== 'string' || !quality.brewVersion.trim() ||

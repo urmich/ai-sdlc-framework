@@ -977,11 +977,38 @@ Separate `archiveTargets` from `executionPlatforms`: two standalone archives
 versus Linux/Windows/Mac-arm64/Mac-x64 validation lanes. Generic archive-library
 capability does not imply Linux release support or a complete native release.
 
-Homebrew uses one stable URL/checksum and native `node@22`. Candidate native
+Homebrew uses one stable URL/checksum and native `node@24`. Candidate native
 tests may use a clearly test-only loopback formula serving verified frozen
 bytes; never rewrite the stable release formula or checksum inventory to pass
 prepublication tests. Both native Homebrew paths must actually execute install,
 upgrade, test, uninstall/switch and post-removal runtime checks.
+
+The user-directed baseline revision selects Node 24.20.0, Homebrew core commit
+`0bae42d6d1e59c2c400da252bd64e585e3fe7d58`, and the existing pinned Brew/Ruby.
+The complete 18-formula snapshot has 35 available native bottle archives; newer
+24.21/24.22 root formulas lack Intel bottles. Pin the core checkout and disable
+API formula installation and automatic updates rather than mixing older Node
+with current dependencies. Registry metadata/HEAD checks establish availability
+only; real installation verifies hashes, poured receipts, relocation and native
+execution. Historical dependency-tab version skews are not assumed ABI passes.
+
+Fixed-cellar Node/OpenSSL bottles require the genuinely owned short prefix
+allocated by `native-homebrew-prefix.mjs`, not the long checkout path or an
+existing global installation. Bind its literal filesystem identity and marker
+to the canonical `GITHUB_WORKSPACE/source` checkout, bootstrap directory,
+target, run, attempt and owner. Persist matching ownership evidence in the
+checkout, verify it before lifecycle mutation, and clean only that allocation.
+Privileged operations are limited to exclusive creation, ownership transfer
+and removal of the exact empty directory; never use privileged recursive
+deletion. An always-evaluated cleanup step retains its outcome after native
+success, failure or interruption.
+
+All four full native lanes use the selected Node 24.20.0 baseline. A separate
+mandatory Linux Node 22.23.3 sanity/static job preserves minimum-supported-major
+coverage without enlarging the local 27-assertion gate. The protected publisher
+remains on its separate Node 24.22.0/npm 11.16.0 identity contract. Existing Node
+22 Homebrew channel receipts and retained runtimes remain valid historical
+inputs for switching; a new default formula does not rewrite or discard them.
 
 ## 8. Release graph and immutable evidence
 

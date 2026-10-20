@@ -6,12 +6,13 @@ import { digest, requireThat } from '../src/core.mjs';
 import { sanitizeExecutionPayload } from 'ai-sdlc-framework/evidence';
 import { repositoryRoot } from './test-runner.mjs';
 import { executeValidationCommand } from './validation-tools.mjs';
-import { nativeToolchain, nativeResourceFacts } from './native-validation.mjs';
+import { nativeResourceFacts } from './native-validation.mjs';
+import { nativeToolchain, homebrewToolchain } from './toolchain-baseline.mjs';
+import { allocateHomebrewPrefix, cleanupHomebrewPrefix,
+  recordHomebrewPrefixNotRequired } from './native-homebrew-prefix.mjs';
 import { provisionPrCryptoFixture, prCryptoFixture } from './pr-capabilities.mjs';
 
-export const homebrewToolchain = Object.freeze({
-  commit: '99fd9a8eed4ff942c448da0c1f11156302441e4a', ruby: '4.0.7', node: '22.23.3',
-});
+export { homebrewToolchain };
 export const homebrewBottlePlanSource = `
 protocol_output = $stdout
 # Manifest queries can print download progress before returning bottle metadata.
@@ -21,7 +22,7 @@ require "formulary"
 require "formula_installer"
 require "json"
 require "rbconfig"
-root = Formulary.factory("node@22")
+root = Formulary.factory(${JSON.stringify(homebrewToolchain.formula)})
 installer = FormulaInstaller.new(root, force_bottle: false)
 formulae = [root]
 formulae.concat(installer.compute_dependencies.map(&:to_formula)) if installer.pour_bottle?
@@ -72,7 +73,7 @@ export function nativeBootstrapEnvironment(directory, inherited = process.env) {
     PIP_BUILD_TRACKER: path.join(directory, 'pip-build-tracker'),
     PIP_SRC: path.join(directory, 'pip-source'),
     XDG_CACHE_HOME: path.join(directory, 'cache'),
-    HOMEBREW_NO_AUTO_UPDATE: '1', HOMEBREW_NO_ANALYTICS: '1',
+    HOMEBREW_NO_AUTO_UPDATE: '1', HOMEBREW_NO_ANALYTICS: '1', HOMEBREW_NO_INSTALL_FROM_API: '1',
     HOMEBREW_NO_COLOR: '1', NO_COLOR: '1',
     HOMEBREW_NO_INSTALL_CLEANUP: '1', HOMEBREW_DEVELOPER: '1',
     HOMEBREW_CACHE: path.join(directory, 'brew-cache'), HOMEBREW_LOGS: path.join(directory, 'brew-logs'),
@@ -124,7 +125,7 @@ export function requireHomebrewBottlePlan(plan, { prefix, target }) {
       entry.prefix === path.join(prefix, 'Cellar', entry.name, entry.pkgVersion) &&
       typeof entry.compatible === 'boolean' && typeof entry.pourable === 'boolean'),
   'HOST', 'Pinned Homebrew bottle eligibility needs the exact owned prefix, native architecture and complete installer plan');
-  const root = plan.entries.find(entry => entry.name === 'node@22');
+  const root = plan.entries.find(entry => entry.name === homebrewToolchain.formula);
   requireThat(root?.version === homebrewToolchain.node, 'HOST',
     `Homebrew Node must remain exactly ${homebrewToolchain.node}; no latest/system runtime substitute is allowed`);
   const unavailable = plan.entries.filter(entry => !entry.compatible || !entry.pourable ||
@@ -132,10 +133,10 @@ export function requireHomebrewBottlePlan(plan, { prefix, target }) {
     typeof entry.bottleTag !== 'string' || !/^[a-z][a-z0-9_]+$/u.test(entry.bottleTag) ||
     (entry.bottleTag !== 'all' && (target === 'macos-arm64' ?
       !/^arm64_(?!linux)/u.test(entry.bottleTag) : /arm64|linux/u.test(entry.bottleTag))) ||
-    entry.name === 'node@22' && entry.bottleTag === 'all');
+    entry.name === homebrewToolchain.formula && entry.bottleTag === 'all');
   requireThat(!unavailable.length, 'HOST',
     `Required native Homebrew bottles unavailable or non-relocatable at owned prefix ${prefix}: ` +
-    unavailable.map(entry => `${entry.name} (${entry.pkgVersion}) [${entry.bottleTag ?? 'no native bottle'}]`).join(', ') +
+    unavailable.map(entry => `${entry.name} (${entry.pkgVersion}) [${entry.bottleTag ?? 'no native bottle eligible at this prefix'}]`).join(', ') +
     '. Source compilation is not permitted. An explicitly approved compatible bottle/dependency snapshot is required; ' +
     'no force-bottle, global prefix or source-build fallback was attempted.');
   return plan;
@@ -190,6 +191,7 @@ export async function bootstrapNativeToolchain(options) {
       os: os.release(), machine: os.machine(), imageOS: process.env.ImageOS ?? null,
       imageVersion: process.env.ImageVersion ?? null }, reports };
   const selected = {};
+  let homebrewAllocationRequested = false;
   try {
     retained.native.resources = nativeResourceFacts();
     const goRoot = await run('go-root', process.env.SDLC_GO || 'go', ['env', 'GOROOT']);
@@ -245,11 +247,16 @@ export async function bootstrapNativeToolchain(options) {
       requireThat(translated.complete && ((translated.exitCode === 0 && translated.stdout.trim() === '0') ||
         (process.arch === 'x64' && translated.exitCode === 1 && translated.stderr.includes('unknown oid'))),
       'HOST', 'Native macOS translation probe is unavailable or indicates Rosetta');
-      const brewRoot = path.join(directory, 'homebrew');
-      await fs.mkdir(brewRoot);
+      homebrewAllocationRequested = true;
+      const { prefix: brewRoot } = await allocateHomebrewPrefix({
+        bootstrapDirectory: directory, repositoryRoot, target: options.target, environment, run,
+      });
+      selected.SDLC_HOMEBREW_PREFIX_PROOF = directory;
       await run('brew-git-init', 'git', ['init', '--quiet', brewRoot]);
+      await run('brew-git-origin', 'git', ['-C', brewRoot, 'remote', 'add', 'origin',
+        'https://github.com/Homebrew/brew.git']);
       await run('brew-git-fetch', 'git', ['-C', brewRoot, 'fetch', '--quiet', '--depth=1',
-        'https://github.com/Homebrew/brew.git', homebrewToolchain.commit]);
+        'origin', homebrewToolchain.commit]);
       await run('brew-git-checkout', 'git', ['-C', brewRoot, 'checkout', '--quiet', '--detach', homebrewToolchain.commit]);
       const actualCommit = await run('brew-git-identity', 'git', ['-C', brewRoot, 'rev-parse', 'HEAD']);
       requireThat(actualCommit === homebrewToolchain.commit, 'HOST', 'Homebrew source pin differs');
@@ -265,6 +272,20 @@ export async function bootstrapNativeToolchain(options) {
       const rubyExecutable = await run('brew-ruby-path', brew, ['ruby', '-rrbconfig', '-e', 'puts RbConfig.ruby']);
       requireThat(path.relative(brewRoot, await fs.realpath(rubyExecutable)).split(path.sep)[0] !== '..',
         'HOST', 'System Ruby cannot substitute for the isolated portable runtime');
+      const coreRoot = path.join(brewRoot, 'Library', 'Taps', 'homebrew', 'homebrew-core');
+      await fs.mkdir(coreRoot, { recursive: true });
+      await run('brew-core-init', 'git', ['init', '--quiet', coreRoot]);
+      await run('brew-core-origin', 'git', ['-C', coreRoot, 'remote', 'add', 'origin',
+        'https://github.com/Homebrew/homebrew-core.git']);
+      await run('brew-core-fetch', 'git', ['-C', coreRoot, 'fetch', '--quiet', '--depth=1',
+        '--filter=blob:none', 'origin', homebrewToolchain.coreCommit],
+      repositoryRoot, environment, homebrewSetupLimits.preflightMs);
+      await run('brew-core-checkout', 'git', ['-C', coreRoot, 'checkout', '--quiet',
+        '--detach', homebrewToolchain.coreCommit],
+      repositoryRoot, environment, homebrewSetupLimits.preflightMs);
+      const actualCoreCommit = await run('brew-core-identity', 'git', ['-C', coreRoot, 'rev-parse', 'HEAD']);
+      requireThat(actualCoreCommit === homebrewToolchain.coreCommit, 'HOST',
+        'The complete Homebrew dependency snapshot must match its selected immutable core commit');
       console.log(`Checking native Homebrew bottle eligibility for ${options.target} ` +
         `(limit ${homebrewSetupLimits.preflightMs / 1000}s); source compilation is not permitted.`);
       const bottlePlan = JSON.parse(await run('brew-node-bottle-plan', brew, ['ruby', '-e', homebrewBottlePlanSource],
@@ -277,7 +298,7 @@ export async function bootstrapNativeToolchain(options) {
       requireHomebrewBottlePlan(bottlePlan, { prefix: brewRoot, target: options.target });
       console.log(`Verified ${bottlePlan.entries.length} compatible native bottle prerequisites; ` +
         `installation limit ${homebrewSetupLimits.installMs / 1000}s; actual receipt/runtime verification remains required.`);
-      await run('brew-node-install', brew, ['install', '--formula', 'node@22'],
+      await run('brew-node-install', brew, ['install', '--formula', homebrewToolchain.formula],
         repositoryRoot, environment, homebrewSetupLimits.installMs);
       const bottleReceipts = [];
       for (const rack of await fs.readdir(bottlePlan.cellar, { withFileTypes: true })) {
@@ -301,14 +322,15 @@ export async function bootstrapNativeToolchain(options) {
         'Actual installed bottle receipts cannot be rewritten while retaining setup evidence');
       await fs.writeFile(path.join(directory, 'homebrew-bottle-receipts.json'),
         `${JSON.stringify(retainedBottleReceipts)}\n`, { flag: 'wx' });
-      const nodePrefix = await run('brew-node-prefix', brew, ['--prefix', 'node@22']);
+      const nodePrefix = await run('brew-node-prefix', brew, ['--prefix', homebrewToolchain.formula]);
       requireThat(!(path.relative(brewRoot, await fs.realpath(nodePrefix))).startsWith('..'),
         'HOST', 'Homebrew dependency must remain inside the owned prefix');
       const node = JSON.parse(await run('brew-node-identity', path.join(nodePrefix, 'bin', 'node'),
         ['-p', 'JSON.stringify({version:process.versions.node,platform:process.platform,arch:process.arch})']));
       requireThat(node.version === homebrewToolchain.node && node.platform === 'darwin' && node.arch === process.arch,
         'HOST', 'The native Homebrew Node dependency pin is unavailable; latest/system/Rosetta cannot substitute');
-      retained.native.homebrew = { commit: actualCommit, ruby, rubyExecutable, node, nodePrefix, bottlePlan,
+      retained.native.homebrew = { commit: actualCommit, coreCommit: actualCoreCommit,
+        formula: homebrewToolchain.formula, ruby, rubyExecutable, node, nodePrefix, bottlePlan,
         bottleReceiptsDigest: digest(bottleReceipts),
         uname, translation: translated.exitCode === 0 ? '0' : 'unavailable on native Intel' };
     }
@@ -339,6 +361,11 @@ export async function bootstrapNativeToolchain(options) {
     process.off('SIGINT', interrupt);
     process.off('SIGTERM', interrupt);
     retained.cancelled = cancellation.signal.aborted;
+    if (process.platform === 'darwin' && !homebrewAllocationRequested) {
+      await recordHomebrewPrefixNotRequired({
+        bootstrapDirectory: directory, repositoryRoot, target: options.target, environment,
+      });
+    }
     const safe = sanitizeExecutionPayload(Buffer.from(JSON.stringify(retained)));
     const handle = await fs.open(path.join(directory, 'toolchain.json'), 'wx');
     try { await handle.writeFile(`${JSON.stringify(safe)}\n`); await handle.sync(); }
@@ -346,9 +373,28 @@ export async function bootstrapNativeToolchain(options) {
   }
 }
 
+export async function cleanupNativeToolchain(options) {
+  const directory = validateBootstrapRequest(options);
+  const environment = nativeBootstrapEnvironment(directory);
+  const run = async (name, command, args, cwd = repositoryRoot, selected = environment, timeoutMs = 30_000) => {
+    const result = await executeValidationCommand({ name, command, args, cwd,
+      environment: selected, signal: AbortSignal.timeout(timeoutMs), outputDir: directory });
+    requireThat(result.complete && result.exitCode === 0, 'HOST',
+      `Owned native toolchain cleanup ${name} failed; original diagnostics are retained`);
+    return result.stdout.trim();
+  };
+  return cleanupHomebrewPrefix({
+    bootstrapDirectory: directory, repositoryRoot, target: options.target, environment, run,
+  });
+}
+
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   const args = process.argv.slice(2);
+  const cleanup = args[0] === '--cleanup';
+  if (cleanup) args.shift();
   requireThat(args.length === 4 && args[0] === '--target' && args[2] === '--output-dir',
-    'INPUT', 'Usage: native-toolchain.mjs --target PLATFORM --output-dir OWNED_DIRECTORY');
-  await bootstrapNativeToolchain({ target: args[1], outputDir: args[3] });
+    'INPUT', 'Usage: native-toolchain.mjs [--cleanup] --target PLATFORM --output-dir OWNED_DIRECTORY');
+  const request = { target: args[1], outputDir: args[3] };
+  if (cleanup) await cleanupNativeToolchain(request);
+  else await bootstrapNativeToolchain(request);
 }

@@ -50,7 +50,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '22.23.3'
+          node-version: '24.20.0'
           architecture: ${{ matrix.architecture }}
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
@@ -61,6 +61,7 @@ jobs:
           python-version: '3.12.10'
           architecture: ${{ matrix.architecture }}
       - name: Provision exact native tools and owned Homebrew prefix without global linking
+        id: bootstrap
         env:
           NATIVE_TARGET: ${{ matrix.target }}
         run: node scripts/native-toolchain.mjs --target "$NATIVE_TARGET" --output-dir .test-data/consumer-tools
@@ -86,4 +87,21 @@ jobs:
           name: release-acceptance-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: source/.test-data/consumer-results/
           if-no-files-found: error
+          retention-days: 90
+      - name: Remove owned short Homebrew prefix
+        if: ${{ always() && runner.os == 'macOS' && steps.bootstrap.outcome != 'skipped' }}
+        env:
+          NATIVE_TARGET: ${{ matrix.target }}
+        run: >-
+          node scripts/native-toolchain.mjs --cleanup
+          --target "$NATIVE_TARGET" --output-dir .test-data/consumer-tools
+      - name: Retain native toolchain originals
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: consumer-toolchain-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            source/.test-data/consumer-tools/*.json
+            source/.test-data/consumer-tools/*.ndjson
+          if-no-files-found: warn
           retention-days: 90

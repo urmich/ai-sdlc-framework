@@ -51,6 +51,7 @@ import { buildLauncher } from '../packaging/winget/build-launcher.mjs';
 import { nativeReplayFixture } from './readiness-observer-fixture.mjs';
 import { retainAttestationMaterial, verifyArchiveWithGh, verifyHistoricalRelease,
   verifyHistoricalCompletion } from '../scripts/release-retention.mjs';
+import { nativeToolchain, homebrewToolchain } from '../scripts/toolchain-baseline.mjs';
 
 const execute = promisify(execFile);
 
@@ -75,10 +76,10 @@ function fixtureFormula(descriptor, { mode = 'stable', candidateBaseUrl } = {}) 
     return (mode === 'candidate' ? '# Test-only local candidate; never publish to the stable tap.\n' : '') +
       `class AiSdlcFramework < Formula\n  url "${base}${shared.filename}"\n` +
       (mode === 'candidate' ? `  version "${descriptor.version}" if version.to_s != "${descriptor.version}"\n` : '') +
-      `  sha256 "${shared.sha256}"\n  depends_on :macos\n  depends_on "node@22"\nend\n`;
+      `  sha256 "${shared.sha256}"\n  depends_on :macos\n  depends_on "${homebrewToolchain.formula}"\nend\n`;
   }
   return (mode === 'candidate' ? '# Test-only local candidate; never publish to the stable tap.\n' : '') +
-    'class AiSdlcFramework < Formula\n  depends_on :macos\n  depends_on "node@22"\n\n  on_macos do\n' +
+    `class AiSdlcFramework < Formula\n  depends_on :macos\n  depends_on "${homebrewToolchain.formula}"\n\n  on_macos do\n` +
     ['arm64', 'x64'].map(arch => {
       const archive = archiveRecord({ descriptor }, `macos-${arch}`);
       return `    on_${arch === 'arm64' ? 'arm' : 'intel'} do\n      url "${base}${archive.filename}"\n` +
@@ -100,7 +101,8 @@ function simulatedQuality(candidate, formula, targetArch, mode = 'stable') {
   const audit = { status: 'Passed', exitCode: 0, args: ['audit', '--strict', '--formula', '--os=macos',
     `--arch=${targetArch === 'x64' ? 'intel' : 'arm'}`, 'local/sdlc-quality-abcdef/ai-sdlc-framework'] };
   return { validation: 'Passed', identity: candidate.context.identity, formula, targetArch, mode,
-    nodeDependency: { validation: 'Passed', formula: 'node@22', major: 22, scope: 'runtime', conditional: false },
+    nodeDependency: { validation: 'Passed', formula: homebrewToolchain.formula,
+      major: homebrewToolchain.major, scope: 'runtime', conditional: false },
     nativeExecution: 'NotRun', tool: 'Homebrew', brew, brewVersion: 'Homebrew unit-test fixture',
     style, audit, commands: [style, audit].map(stage => ({ command: brew, args: stage.args, exitCode: 0 })) };
 }
@@ -117,7 +119,8 @@ function simulatedNativeHomebrew(candidate, targetArch) {
     mode: 'candidate', upgradeKind: 'version', publicAcceptance: 'NotRun',
     previousIdentity: previousFixture.identity, currentIdentity: candidate.context.identity,
     uname: targetArch === 'arm64' ? 'arm64' : 'x86_64', sysctlProcTranslated: '0',
-    homebrewRuntime: { platform: 'darwin', arch: targetArch, major: 22 }, homebrewNodeVersion: '22.23.3',
+    homebrewRuntime: { platform: 'darwin', arch: targetArch, major: homebrewToolchain.major },
+    homebrewNodeVersion: nativeToolchain.node,
     archiveInputs: [archiveRecord(previousFixture, `macos-${targetArch}`), archiveRecord(candidate, `macos-${targetArch}`)],
     failedPromotionRetry: { passed: true, priorKeg: '/fixture/old', candidateKeg: '/fixture/new' },
     commands: [
@@ -139,7 +142,7 @@ function simulatedGates(candidate) {
       reportDirectory: `native/${target}`, finishedAt: new Date().toISOString(),
       run: { id: '123', attempt: '1' },
       host: { kind: 'native', platform: { linux: 'linux', windows: 'win32', macos: 'darwin' }[platform],
-        architecture, image: 'unit-fixture-not-real-native-proof', toolchain: { node: '22.23.3' } } };
+        architecture, image: 'unit-fixture-not-real-native-proof', toolchain: { node: nativeToolchain.node } } };
   });
 }
 
@@ -403,12 +406,12 @@ test('T-PRD061 Homebrew adapter requires the same Mac URL and checksum for the a
     contents => contents.replaceAll(armDigest, 'TEMP').replaceAll(intelDigest, armDigest).replaceAll('TEMP', intelDigest),
     contents => contents.replace('  sha256', '  # sha256'),
     contents => `${contents}url "https://example.invalid/override"\n`,
-    contents => contents.replace('  depends_on "node@22"\n', ''),
-    contents => contents.replace('  depends_on "node@22"\n', '    depends_on "node@22"\n'),
-    contents => contents.replace('  depends_on "node@22"\n', '  depends_on "node@22" => :build\n'),
-    contents => contents.replace('  depends_on "node@22"\n', '  depends_on "node@22" if Hardware::CPU.arm?\n'),
-    contents => contents.replace('  depends_on "node@22"\n', '  depends_on "node@22"\n  depends_on "node@20"\n'),
-    contents => contents.replace('  depends_on "node@22"\n', '  depends_on "node@22"\n  depends_on "node@22"\n'),
+    contents => contents.replace(`  depends_on "${homebrewToolchain.formula}"\n`, ''),
+    contents => contents.replace(`  depends_on "${homebrewToolchain.formula}"\n`, `    depends_on "${homebrewToolchain.formula}"\n`),
+    contents => contents.replace(`  depends_on "${homebrewToolchain.formula}"\n`, `  depends_on "${homebrewToolchain.formula}" => :build\n`),
+    contents => contents.replace(`  depends_on "${homebrewToolchain.formula}"\n`, `  depends_on "${homebrewToolchain.formula}" if Hardware::CPU.arm?\n`),
+    contents => contents.replace(`  depends_on "${homebrewToolchain.formula}"\n`, `  depends_on "${homebrewToolchain.formula}"\n  depends_on "node@20"\n`),
+    contents => contents.replace(`  depends_on "${homebrewToolchain.formula}"\n`, `  depends_on "${homebrewToolchain.formula}"\n  depends_on "${homebrewToolchain.formula}"\n`),
   ]) {
     await assert.rejects(homebrewMetadata({ ...args, generator: async input => {
       const formula = await generator(input);
@@ -552,7 +555,7 @@ test('Homebrew quality runner requires actual style and strict macOS/architectur
         GIT_DIR: f.candidateDir, BUNDLE_PATH: '/unit-test-external-cache' } });
     assert.equal(quality.style.status, 'Passed');
     assert.equal(quality.audit.status, 'Passed');
-    assert.equal(quality.nodeDependency.formula, 'node@22');
+    assert.equal(quality.nodeDependency.formula, homebrewToolchain.formula);
     assert.equal(quality.nativeExecution, 'NotRun');
     assert.ok(quality.audit.args.includes(`--arch=${targetArch === 'x64' ? 'intel' : 'arm'}`));
     assert.ok(quality.audit.args.includes('--os=macos'));
@@ -591,7 +594,7 @@ test('audit/style failures and formula mutation fail closed, with no native life
 test('Node metadata and audit prerequisites are checked before lifecycle or target commands', async t => {
   const f = await qualityFixture(t);
   const wrongFormula = path.join(f.directory, 'wrong-node.rb');
-  await fs.writeFile(wrongFormula, (await fs.readFile(f.formulaPath, 'utf8')).replace('node@22', 'node@20'));
+  await fs.writeFile(wrongFormula, (await fs.readFile(f.formulaPath, 'utf8')).replace(homebrewToolchain.formula, 'node@20'));
   await assert.rejects(verifyHomebrewQuality({ candidate: f.candidate, formulaPath: wrongFormula,
     mode: f.mode, candidateBaseUrl: f.candidateBaseUrl,
     targetArch: 'arm64', outputDir: path.join(f.directory, 'wrong-node-quality'),
@@ -1216,7 +1219,7 @@ test('stable public Homebrew acceptance requires an authentic prior-version life
       assert.equal(options.mode, 'public');
       assert.deepEqual(options.expectedPreviousIdentity, previous.identity);
       assert.deepEqual(options.expectedCurrentIdentity, bundle.identity);
-      assert.equal(options.expectedNodeVersion, '22.23.3');
+      assert.equal(options.expectedNodeVersion, nativeToolchain.node);
       return { passed: true, upgradeKind: 'version', mode: 'public', publicAcceptance: 'Passed',
         previousIdentity: previous.identity, currentIdentity: bundle.identity,
         formulas: { candidate: { source: 'exact-published-bytes',

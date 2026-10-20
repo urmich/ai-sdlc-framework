@@ -11,11 +11,59 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { switchFromHomebrew, switchToHomebrew, verifyHomebrewHooks,
-  verifyCopiedHomebrewInstallation } from '../scripts/homebrew-switch.mjs';
+  verifyCopiedHomebrewInstallation, resolveHomebrewRuntime } from '../scripts/homebrew-switch.mjs';
 
 const nativeMac = { skip: process.platform !== 'darwin' };
 const copiedHookEvents = ['sessionStart', 'userPromptSubmitted', 'preToolUse', 'postToolUse',
   'postToolUseFailure', 'preCompact', 'agentStop', 'sessionEnd'];
+
+test('T-51 runtime resolution follows current and legacy direct receipts without selecting historical or unrelated Node', async t => {
+  const root = path.resolve('.test-data', `homebrew-runtime-${randomUUID()}`);
+  const cellar = path.join(root, 'Cellar');
+  const channel = path.join(cellar, 'ai-sdlc-framework', '0.4.0');
+  await fs.mkdir(channel, { recursive: true });
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const runtimes = [['node@22', '22.23.2'], ['node@24', '24.20.0']];
+  for (const [formula, version] of runtimes) {
+    const keg = path.join(cellar, formula, version);
+    await fs.mkdir(keg, { recursive: true });
+    await fs.writeFile(path.join(keg, 'INSTALL_RECEIPT.json'), JSON.stringify({ source: { tap: 'homebrew/core' } }));
+  }
+  for (const [formula, version] of runtimes) {
+    const keg = path.join(cellar, formula, version);
+    const receipt = { runtime_dependencies: [
+      { full_name: formula, pkg_version: version },
+      { full_name: formula === 'node@22' ? 'node@24' : 'node@22', pkg_version: '1.0.0', declared_directly: false },
+    ] };
+    await fs.writeFile(path.join(channel, 'INSTALL_RECEIPT.json'), JSON.stringify(receipt));
+    const calls = [];
+    const runBrew = async args => {
+      calls.push(args);
+      assert.deepEqual(args, ['--prefix', formula]);
+      return { stdout: keg };
+    };
+    const expected = { formula, keg, node: path.join(keg, 'bin', 'node') };
+    assert.deepEqual(await resolveHomebrewRuntime({ keg: channel, cellar, runBrew }), expected);
+    const currentKeg = await fs.realpath(keg);
+    const capturedState = { kegs: [
+      { path: channel, role: 'live', receipt, dependencies: [
+        { fullName: formula, requiredLive: true, currentKeg },
+      ] },
+      { path: currentKeg, role: 'live' },
+      { path: path.join(cellar, formula, 'retired-version'), role: 'historical' },
+    ] };
+    assert.deepEqual(await resolveHomebrewRuntime({ keg: channel, cellar, runBrew, capturedState }),
+      { ...expected, keg: currentKeg, node: path.join(currentKeg, 'bin', 'node') });
+    capturedState.kegs[0].dependencies[0].currentKeg = path.join(cellar, formula, 'retired-version');
+    await assert.rejects(resolveHomebrewRuntime({ keg: channel, cellar, runBrew, capturedState }), /captured live dependency/u);
+    receipt.runtime_dependencies.push({ full_name: 'node@26', pkg_version: '26.0.0' });
+    await fs.writeFile(path.join(channel, 'INSTALL_RECEIPT.json'), JSON.stringify(receipt));
+    await assert.rejects(resolveHomebrewRuntime({ keg: channel, cellar, runBrew }), /exactly one direct Node/u);
+    await fs.writeFile(path.join(channel, 'INSTALL_RECEIPT.json'), JSON.stringify({ runtime_dependencies: [] }));
+    await assert.rejects(resolveHomebrewRuntime({ keg: channel, cellar, runBrew }), /exactly one direct Node/u);
+    assert.equal(calls.length, 3);
+  }
+});
 
 function copiedHookFixture(home, node) {
   return { hooks: Object.fromEntries(copiedHookEvents.map(event => [event, [{

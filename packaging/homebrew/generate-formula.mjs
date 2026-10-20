@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import { homebrewToolchain } from '../../scripts/toolchain-baseline.mjs';
 
 const NAME = 'ai-sdlc-framework';
 const REPOSITORY = 'https://github.com/urmich/ai-sdlc-framework';
@@ -96,7 +97,7 @@ ${sourceLines(arch, '      ')}    end
 ${single || shared ? sourceLines(selected[0], '  ') : ''}  license "MIT"
 
 ${single ? `  depends_on arch: :${selected[0] === 'arm64' ? 'arm64' : 'x86_64'}\n` : ''}  depends_on :macos
-  depends_on "node@22"
+  depends_on "${homebrewToolchain.formula}"
 
 ${conditionalSources}  # The embedded payload manifest binds these bytes, including Node shebangs.
   skip_clean "libexec"
@@ -105,8 +106,8 @@ ${conditionalSources}  # The embedded payload manifest binds these bytes, includ
     libexec.install Dir["*"]
     cp libexec/"LICENSE", prefix/"LICENSE"
     (bin/"sdlc").write_env_script libexec/"bin/sdlc",
-                                PATH:      "\#{formula_opt_bin("node@22")}:$PATH",
-                                SDLC_NODE: "\#{formula_opt_bin("node@22")}/node"
+                                PATH:      "\#{formula_opt_bin("${homebrewToolchain.formula}")}:$PATH",
+                                SDLC_NODE: "\#{formula_opt_bin("${homebrewToolchain.formula}")}/node"
   end
 
   def caveats

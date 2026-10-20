@@ -7,6 +7,7 @@ import { expectedConsumerContext, consumerOriginalInventory, consumerEvidenceMar
 import { canonical, sha256 } from '../packaging/standalone/archive.mjs';
 import { normalizeExecutionReport, evaluateReadiness, createEvidenceBundle, renderReadinessReport } from 'ai-sdlc-framework/evidence';
 import { ROOT } from '../scripts/release-bundle.mjs';
+import { nativeToolchain } from '../scripts/toolchain-baseline.mjs';
 
 const targets = ['windows-x64', 'macos-arm64', 'macos-x64'];
 const clone = value => structuredClone(value);
@@ -54,10 +55,10 @@ export async function createCompletionFixture(t, { directory, bundle, bundleDire
     const windows = target === 'windows-x64';
     const platform = windows ? 'win32' : 'darwin';
     const architecture = target === 'macos-arm64' ? 'arm64' : 'x64';
-    const bootstrap = { platform, architecture, node: '22.23.3', os: 'fixture-os-build',
+    const bootstrap = { platform, architecture, node: nativeToolchain.node, os: 'fixture-os-build',
       machine: architecture === 'arm64' ? 'arm64' : windows ? 'AMD64' : 'x86_64',
       imageOS: windows ? 'win22' : 'macos15', imageVersion: '20261019.1' };
-    const native = { kind: 'native', platform, architecture, node: '22.23.3',
+    const native = { kind: 'native', platform, architecture, node: nativeToolchain.node,
       image: `${bootstrap.imageOS}/${bootstrap.imageVersion}`, bootstrap };
     const specification = consumerSpecification(plan, target);
     const context = expectedConsumerContext({ bundle, specification, plan, tree, target, native, scope });

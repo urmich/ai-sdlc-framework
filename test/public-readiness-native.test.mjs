@@ -1,7 +1,7 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [
-    {"coverage": "direct", "paths": ["scripts/native-validation.mjs", "scripts/native-toolchain.mjs", "scripts/pr-capabilities.mjs", "scripts/pr-calculator.mjs", "scripts/pr-calculator-reporter.mjs", "scripts/native-components.mjs"]}
+    {"coverage": "direct", "paths": ["scripts/native-validation.mjs", "scripts/native-toolchain.mjs", "scripts/toolchain-baseline.mjs", "scripts/pr-capabilities.mjs", "scripts/pr-calculator.mjs", "scripts/pr-calculator-reporter.mjs", "scripts/native-components.mjs"]}
   ]
 };
 import test from 'node:test';
@@ -25,6 +25,7 @@ import { discoverDeclarations, compileValidationSourceInventory } from '../scrip
 import { runCalculator, calculatorFiles, calculatorSelection, calculatorArguments,
   calculatorCommandArguments, reconcileCalculator } from '../scripts/pr-calculator.mjs';
 import { fetchPinnedFixture, provisionPrCryptoFixture } from '../scripts/pr-capabilities.mjs';
+import { nativeToolchain } from '../scripts/toolchain-baseline.mjs';
 
 const targets = ['linux-x64', 'windows-x64', 'macos-arm64', 'macos-x64'];
 const nativePlatforms = { 'linux-x64': 'linux', 'windows-x64': 'win32',
@@ -329,7 +330,7 @@ function fixture(profile = 'pr', frozenCandidate = candidate) {
       location: specification.cases[0].location, mode: 'automated', owner: 'provider',
       native: { kind: 'native', platform: nativePlatforms[target],
         architecture: target === 'macos-arm64' ? 'arm64' : 'x64', image: `actual-${target}/20261019.1`,
-        toolchain: { node: '22.23.3', go: 'go version go1.27.1 fixture-native',
+        toolchain: { node: nativeToolchain.node, go: 'go version go1.27.1 fixture-native',
           python: 'Python 3.12.10', resources: nativeResourceFacts({
             availableParallelism: 4, totalMemoryBytes: 8 * 1024 ** 3, configuredWorkers: null,
           }) } },
@@ -419,6 +420,7 @@ test('T-PRD016 native aggregation closes four platforms and six PR or four R-PRE
       raw => { raw.context.artifacts[2].sha256 = 'f'.repeat(64); },
       raw => { raw.context.artifacts.pop(); },
       raw => { raw.context.artifacts.push({ name: 'undeclared.tgz', sha256: 'f'.repeat(64) }); },
+      raw => { raw.context.native.toolchain.node = '22.23.3'; },
       raw => { raw.context.native.toolchain.python = 'Python 3.13.0'; },
       raw => { raw.results[0].status = 'Failed'; raw.results[0].expectedMet = false; raw.results[0].exitCode = 1; raw.exitCode = 1; },
       raw => { raw.results[0].status = 'Skipped'; raw.results[0].expectedMet = null; },
@@ -518,7 +520,7 @@ test('T-PRD040 unavailable Intel runtime and denied required clients remain expl
 
 function goReport() {
   const Time = new Date().toISOString();
-  return { complete: true, exitCode: 0, platform: 'linux', architecture: 'x64', node: 'v22.23.3', stdout: [
+  return { complete: true, exitCode: 0, platform: 'linux', architecture: 'x64', node: `v${nativeToolchain.node}`, stdout: [
     ...['TestContract', 'TestContract/one', 'TestContract/two'].flatMap(Test =>
       [{ Time, Action: 'run', Test }, { Time, Action: 'pass', Test, Elapsed: 0.001 }]),
     { Time, Action: 'pass', Package: 'fixture-launcher', Elapsed: 0.003 },

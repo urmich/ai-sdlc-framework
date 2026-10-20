@@ -13,6 +13,7 @@ import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
 import { composeReadinessReport, fileReportReader, writeReadinessReport } from '../scripts/release-report.mjs';
 import { compileValidationInventory } from '../scripts/validation-inventory.mjs';
 import { deriveLocalSanitySpecification } from '../scripts/test-local-evidence.mjs';
+import { nativeToolchain } from '../scripts/toolchain-baseline.mjs';
 
 const sourceCommit = 'a'.repeat(40);
 const observedAt = '2026-10-19T10:30:00.000Z';
@@ -69,7 +70,7 @@ function fixture({ legacyLocal = false, finiteCase = localSanity.specification.c
       profile: specification.profile, environment: definition.environment ?? 'local', location: definition.location,
       mode: definition.mode, owner: definition.owner,
       native: { kind: 'fixture', platform: 'linux', architecture: 'x64', image: 'controlled-only',
-        toolchain: { node: '22.23.3' } },
+        toolchain: { node: nativeToolchain.node } },
       producer: { provider: 'fixture', connection: 'independent-reader', scopeRef: 'repository-17',
         definitionRef: 'controlled-reporter', executionRef: id, attemptKind: 'known', attemptRef: '1' },
       attemptCapability: 'distinct', jobRef: id, artifacts: [] };

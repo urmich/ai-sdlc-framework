@@ -42,8 +42,8 @@ const bundle = { identity: { version: '1.2.3', sourceCommit: 'a'.repeat(40), pay
   descriptorSha256: '2'.repeat(64), checksumsSha256: '3'.repeat(64) },
   releaseIntentId: 'controlled-consumer-fixture',
   descriptor: { files: [{ filename: 'ai-sdlc-framework-1.2.3.tgz', sha256: '1'.repeat(64) }] } };
-const native = { kind: 'native', platform: 'win32', architecture: 'x64', node: '22.23.3', image: 'win22/20261019.1',
-  bootstrap: { platform: 'win32', architecture: 'x64', node: '22.23.3', imageOS: 'win22',
+const native = { kind: 'native', platform: 'win32', architecture: 'x64', node: '24.20.0', image: 'win22/20261019.1',
+  bootstrap: { platform: 'win32', architecture: 'x64', node: '24.20.0', imageOS: 'win22',
     imageVersion: '20261019.1', os: 'fixture-OS-build', machine: 'AMD64' } };
 const specification = consumerSpecification(plan, 'windows-x64');
 const context = expectedConsumerContext({ bundle, specification, plan, tree: 'b'.repeat(40),
@@ -702,24 +702,23 @@ test('T-PRD041 retained signed fixtures use the actual verifier for payload sign
     await write(bundleFile, badCertificate);
     await assert.rejects(verifyRetainedNpmAttestation(request), /certificate|verification|ASN|sequence|parse/iu,
       'A changed certificate signature must be rejected');
-    const badTransparency = structuredClone(saved);
-    const entry = badTransparency.verificationMaterial.tlogEntries[0];
-    if (entry.inclusionPromise?.signedEntryTimestamp) {
-      entry.inclusionPromise.signedEntryTimestamp = tamper(entry.inclusionPromise.signedEntryTimestamp);
-    }
-    if (entry.inclusionProof?.checkpoint?.envelope) {
-      const envelope = entry.inclusionProof.checkpoint.envelope;
-      entry.inclusionProof.checkpoint.envelope = envelope.replace(
-        /^(\u2014 \S+ )([A-Za-z0-9+/]+={0,2})$/gmu,
-        (_match, prefix, signature) => `${prefix}${tamper(signature)}`);
-      assert.notEqual(entry.inclusionProof.checkpoint.envelope, envelope,
-        'The retained checkpoint signature must actually change');
-    }
-    assert.ok(entry.inclusionPromise?.signedEntryTimestamp || entry.inclusionProof?.checkpoint?.envelope,
-      'Retained fixture has no supported verifiable transparency proof');
-    await write(bundleFile, badTransparency);
-    await assert.rejects(verifyRetainedNpmAttestation(request), /transparency|checkpoint|signature|log|timestamp/iu,
-      'Changed transparency witness signatures must be rejected');
+    const badPromise = structuredClone(saved);
+    const promise = badPromise.verificationMaterial.tlogEntries[0].inclusionPromise;
+    assert.ok(promise?.signedEntryTimestamp, 'Retained fixture must contain its signed inclusion promise');
+    promise.signedEntryTimestamp = tamper(promise.signedEntryTimestamp);
+    await write(bundleFile, badPromise);
+    await assert.rejects(verifyRetainedNpmAttestation(request), { code: 'TLOG_INCLUSION_PROMISE_ERROR' },
+      'A changed inclusion-promise signature must be rejected');
+    const badProof = structuredClone(saved);
+    const checkpoint = badProof.verificationMaterial.tlogEntries[0].inclusionProof?.checkpoint;
+    assert.ok(checkpoint?.envelope, 'Retained fixture must contain its signed inclusion checkpoint');
+    const envelope = checkpoint.envelope;
+    checkpoint.envelope = envelope.replace(/^(\u2014 \S+ )([A-Za-z0-9+/]+={0,2})$/gmu,
+      (_match, prefix, signature) => `${prefix}${tamper(signature)}`);
+    assert.notEqual(checkpoint.envelope, envelope, 'The retained checkpoint signature must actually change');
+    await write(bundleFile, badProof);
+    await assert.rejects(verifyRetainedNpmAttestation(request), { code: 'TLOG_INCLUSION_PROOF_ERROR' },
+      'A changed inclusion-checkpoint signature must be rejected');
     await fs.writeFile(bundleFile, original);
     assert.equal((await verifyRetainedNpmAttestation(request)).bundleSha256, baseline.bundleSha256,
       'Invalid signed fixtures must not alter the original retained valid fixture');

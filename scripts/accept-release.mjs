@@ -13,6 +13,7 @@ import { npmInvocation } from './package.mjs';
 import { boundedReadback, githubRequest, registryPackage, verifyRegistryPayload } from './publish-release.mjs';
 import { assertNativeMacHost, verifyCopiedHomebrewInstallation } from './homebrew-switch.mjs';
 import { verifyHomebrewLifecycle, verifyHomebrewUpgradeInputs } from './homebrew-lifecycle.mjs';
+import { nativeToolchain } from './toolchain-baseline.mjs';
 import { assertConsumerUpdate, assertConsumerUninstall, installedConsumerSnapshot, npmPublicCommand,
   seedConsumerPreservation } from './consumer-lifecycle.mjs';
 import { consumerSpecification, consumerTargetSuffixes, evaluateConsumerOriginal,
@@ -302,7 +303,7 @@ export async function acceptPublicHomebrew({ bundle, downloaded, previous, root,
   const evidence = await verifyLifecycle({ brew, candidateDirectory: previous.directory,
     upgradeDirectory: downloaded, root, targetArch: process.arch, mode: 'public',
     expectedPreviousIdentity: previous.identity, expectedCurrentIdentity: bundle.identity,
-    expectedNodeVersion: '22.23.3', environment });
+    expectedNodeVersion: nativeToolchain.node, environment });
   if (evidence.passed !== true || evidence.upgradeKind !== 'version' ||
       evidence.mode !== 'public' || evidence.publicAcceptance !== 'Passed' ||
       evidence.formulas?.candidate?.source !== 'exact-published-bytes' ||
@@ -603,11 +604,11 @@ export async function acceptRelease({ directory, outputFile, target, previousVer
   try {
     const actualTarget = process.platform === 'win32' ? `windows-${process.arch}` :
       process.platform === 'darwin' ? `macos-${process.arch}` : null;
-    if (!suffixes[target] || actualTarget !== target || process.versions.node !== '22.23.3' ||
+    if (!suffixes[target] || actualTarget !== target || process.versions.node !== nativeToolchain.node ||
         process.env.GITHUB_ACTIONS !== 'true' || process.env.RUNNER_ENVIRONMENT !== 'github-hosted' ||
         !process.env.ImageOS || !process.env.ImageVersion ||
         !['GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_REPOSITORY_ID'].every(key => /^[1-9]\d*$/u.test(process.env[key] ?? ''))) {
-      throw blocked('Postpublication consumers require their exact native hosted Windows/ARM/Intel target and Node 22.23.3');
+      throw blocked(`Postpublication consumers require their exact native hosted Windows/ARM/Intel target and Node ${nativeToolchain.node}`);
     }
     await runtimePreflight();
     if (!process.env.SDLC_NATIVE_TOOLCHAIN_REPORT) throw blocked('Native consumer bootstrap report is unavailable');

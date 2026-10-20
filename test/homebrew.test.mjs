@@ -12,6 +12,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { generateHomebrewFormula } from '../packaging/homebrew/generate-formula.mjs';
 import { promoteHomebrewLink, switchToHomebrew } from '../scripts/homebrew-switch.mjs';
+import { validateInitialHomebrewFormula } from '../scripts/release-bundle.mjs';
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const nativeMac = { skip: process.platform !== 'darwin' };
@@ -44,8 +45,16 @@ test('T-PRD061 shared Mac metadata has one verified URL/hash and native Node dep
     [`https://github.com/urmich/ai-sdlc-framework/releases/download/v0.5.0/${record.filename}`]);
   assert.deepEqual([...formula.contents.matchAll(/^\s*sha256 "([^"]+)"/gmu)].map(match => match[1]), [record.sha256]);
   assert.doesNotMatch(formula.contents, /on_arm|on_intel|macos-(?:arm64|x64)|depends_on arch:/u);
-  assert.match(formula.contents, /^  depends_on "node@22"$/mu);
-  assert.match(formula.contents, /SDLC_NODE: "#\{formula_opt_bin\("node@22"\)\}\/node"/u);
+  assert.match(formula.contents, /^  depends_on "node@24"$/mu);
+  assert.match(formula.contents, /SDLC_NODE: "#\{formula_opt_bin\("node@24"\)\}\/node"/u);
+  const validated = validateInitialHomebrewFormula({ descriptor: input.descriptor,
+    repository: 'urmich/ai-sdlc-framework', contents: formula.contents });
+  assert.deepEqual(validated.nodeDependency, {
+    validation: 'Passed', formula: 'node@24', major: 24, scope: 'runtime', conditional: false,
+  });
+  assert.throws(() => validateInitialHomebrewFormula({ descriptor: input.descriptor,
+    repository: 'urmich/ai-sdlc-framework', contents: formula.contents.replaceAll('node@24', 'node@22') }),
+  /Node dependency contract mismatch/u);
   assert.equal(formula.sha256, digest(formula.contents));
   for (const arch of ['arm64', 'x64']) {
     const candidate = await generateHomebrewFormula({ ...input, mode: 'candidate', architectures: [arch],
@@ -53,7 +62,7 @@ test('T-PRD061 shared Mac metadata has one verified URL/hash and native Node dep
     assert.deepEqual([...candidate.contents.matchAll(/^\s*url "([^"]+)"/gmu)].map(match => match[1]),
       [`http://127.0.0.1:8123/${record.filename}`]);
     assert.deepEqual([...candidate.contents.matchAll(/^\s*sha256 "([^"]+)"/gmu)].map(match => match[1]), [record.sha256]);
-    assert.match(candidate.contents, /^  depends_on "node@22"$/mu);
+    assert.match(candidate.contents, /^  depends_on "node@24"$/mu);
   }
   await fs.appendFile(path.join(input.root, record.filename), 'modified');
   await assert.rejects(generateHomebrewFormula(input), /checksum or size/u);
@@ -80,12 +89,12 @@ test('T-51 stable Homebrew metadata deterministically binds both architectures a
   }
   assert.deepEqual(await generateHomebrewFormula({ ...input, architectures: ['x64', 'arm64'] }), first);
   assert.doesNotMatch(first.contents, /depends_on arch:/u);
-  assert.match(first.contents, /depends_on "node@22"/u);
+  assert.match(first.contents, /depends_on "node@24"/u);
   assert.match(first.contents, /libexec.install Dir\["\*"\]/u);
   assert.match(first.contents, /skip_clean "libexec"/u);
   assert.match(first.contents, /cp libexec\/"LICENSE", prefix\/"LICENSE"/u);
-  assert.match(first.contents, /write_env_script libexec\/"bin\/sdlc",\n\s+PATH: +"#\{formula_opt_bin\("node@22"\)\}:\$PATH"/u);
-  assert.match(first.contents, /SDLC_NODE: "#\{formula_opt_bin\("node@22"\)\}\/node"/u);
+  assert.match(first.contents, /write_env_script libexec\/"bin\/sdlc",\n\s+PATH: +"#\{formula_opt_bin\("node@24"\)\}:\$PATH"/u);
+  assert.match(first.contents, /SDLC_NODE: "#\{formula_opt_bin\("node@24"\)\}\/node"/u);
   const install = first.contents.split('  def install\n')[1].split('  end\n')[0];
   assert.doesNotMatch(install, /COPILOT_HOME|system|purge|uninstall/u);
   assert.doesNotMatch(first.contents, /def (post_install|uninstall)|latest|--overwrite/u);

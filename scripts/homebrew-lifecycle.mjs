@@ -11,6 +11,8 @@ import { assertNativeMacHost, runHomebrewCommand, switchFromHomebrew, switchToHo
 import { assertConsumerUpdate, assertConsumerUninstall, installedConsumerSnapshot,
   seedConsumerPreservation } from './consumer-lifecycle.mjs';
 import { verifyReleaseChecksums } from './verify-platform-package.mjs';
+import { nativeToolchain, homebrewToolchain } from './toolchain-baseline.mjs';
+import { verifyHomebrewPrefixOwnership } from './native-homebrew-prefix.mjs';
 
 const execute = runHomebrewCommand;
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -30,7 +32,7 @@ async function snapshot(root, prefix = '') {
 }
 
 export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgradeDirectory, root,
-  targetArch = process.arch, mode = 'stable', expectedNodeVersion, expectedPreviousIdentity,
+  targetArch = process.arch, mode = 'stable', expectedNodeVersion = nativeToolchain.node, expectedPreviousIdentity,
   expectedCurrentIdentity, environment: selectedEnvironment = process.env } = {}) {
   assert.equal(process.platform, 'darwin', 'Homebrew lifecycle requires native macOS');
   assert.ok(['arm64', 'x64'].includes(process.arch), 'Unsupported native architecture');
@@ -59,6 +61,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     HOME: path.join(work, 'home'), COPILOT_HOME: path.join(work, 'copilot home'),
     HOMEBREW_NO_AUTO_UPDATE: '1', HOMEBREW_NO_ANALYTICS: '1', HOMEBREW_DEVELOPER: '1',
     HOMEBREW_NO_INSTALL_CLEANUP: '1', HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: '1',
+    ...(selectedEnvironment.SDLC_HOMEBREW_PREFIX_PROOF ? { HOMEBREW_NO_INSTALL_FROM_API: '1' } : {}),
     HOMEBREW_CACHE: path.join(work, 'cache'), HOMEBREW_LOGS: path.join(work, 'logs'),
     HOMEBREW_TEMP: path.join(work, 'scratch'), TMPDIR: path.join(work, 'scratch'),
     npm_config_cache: path.join(work, 'npm-cache'), npm_config_offline: 'true',
@@ -114,18 +117,27 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
   try {
     const prefix = await fs.realpath((await runBrew(['--prefix'])).stdout.trim());
     const relativePrefix = path.relative(await fs.realpath(scratchRoot), prefix);
-    assert.ok(relativePrefix && !relativePrefix.startsWith('..') && !path.isAbsolute(relativePrefix),
-      'Refusing to mutate a system Homebrew prefix; supply an isolated checkout under .test-data');
+    const repository = await fs.realpath((await runBrew(['--repository'])).stdout.trim());
+    if (relativePrefix && !relativePrefix.startsWith('..') && !path.isAbsolute(relativePrefix)) {
+      const relativeRepository = path.relative(await fs.realpath(scratchRoot), repository);
+      assert.ok(relativeRepository && !relativeRepository.startsWith('..') && !path.isAbsolute(relativeRepository),
+        'Refusing to mutate a system Homebrew repository');
+    } else {
+      assert.ok(selectedEnvironment.SDLC_HOMEBREW_PREFIX_PROOF,
+        'An outside-checkout Homebrew prefix requires its bootstrap ownership proof');
+      const verified = await verifyHomebrewPrefixOwnership({
+        bootstrapDirectory: selectedEnvironment.SDLC_HOMEBREW_PREFIX_PROOF,
+        repositoryRoot: ROOT, target: `macos-${process.arch}`, environment: selectedEnvironment,
+      });
+      assert.equal(prefix, verified.prefix, 'Homebrew prefix differs from its owned allocation');
+      assert.equal(repository, verified.prefix, 'Homebrew repository differs from its owned allocation');
+    }
     environment.PATH = `${prefix}/bin:${environment.PATH}`;
-    const repository = (await runBrew(['--repository'])).stdout.trim();
-    const relativeRepository = path.relative(await fs.realpath(scratchRoot), await fs.realpath(repository));
-    assert.ok(relativeRepository && !relativeRepository.startsWith('..') && !path.isAbsolute(relativeRepository),
-      'Refusing to mutate a system Homebrew repository');
     evidence.brewVersion = (await runBrew(['--version'])).stdout.trim();
-    const node = path.join((await runBrew(['--prefix', 'node@22'])).stdout.trim(), 'bin', 'node');
+    const node = path.join((await runBrew(['--prefix', homebrewToolchain.formula])).stdout.trim(), 'bin', 'node');
     const runtime = await json(node, ['-p', 'JSON.stringify({platform:process.platform,arch:process.arch,major:Number(process.versions.node.split(".")[0])})']);
-    assert.deepEqual(runtime, { platform: 'darwin', arch: process.arch, major: 22 },
-      'Install the real Homebrew node@22 dependency before this test');
+    assert.deepEqual(runtime, { platform: 'darwin', arch: process.arch, major: homebrewToolchain.major },
+      `Install the real Homebrew ${homebrewToolchain.formula} dependency before this test`);
     evidence.homebrewRuntime = runtime;
     evidence.homebrewNodeVersion = (await run(node, ['--version'])).stdout.trim().replace(/^v/u, '');
     if (expectedNodeVersion) assert.equal(evidence.homebrewNodeVersion, expectedNodeVersion,
@@ -351,7 +363,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
 
     const extracted = path.join(work, 'replacement npm payload');
     await fs.cp(path.join(upgradedKeg, 'libexec', 'package'), extracted, { recursive: true });
-    await runBrew(['tab', '--no-installed-on-request', '--formula', 'node@22']);
+    await runBrew(['tab', '--no-installed-on-request', '--formula', homebrewToolchain.formula]);
     const removed = await switchFromHomebrew({
       brew, formula: formulaName, sourceRoot: extracted, home, environment, run,
     });
@@ -481,7 +493,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     values['current-descriptor-sha256'], values['current-checksums-sha256']) : undefined;
   const evidence = await verifyHomebrewLifecycle({ brew: values.brew,
     candidateDirectory: values['candidate-dir'], upgradeDirectory: values['upgrade-dir'],
-    root: values.root, mode: values.mode, expectedNodeVersion: '22.23.3',
+    root: values.root, mode: values.mode, expectedNodeVersion: nativeToolchain.node,
     expectedPreviousIdentity, expectedCurrentIdentity });
   process.stdout.write(`${JSON.stringify({ passed: evidence.passed,
     architecture: evidence.architecture, upgradeKind: evidence.upgradeKind,

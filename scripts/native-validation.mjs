@@ -24,6 +24,8 @@ import { buildPlatforms, renderChecksums } from './package-platforms.mjs';
 import { calculatorProjectFiles, calculatorSelection, calculatorCapability, calculatorBaselineCapability, reconcileCalculator,
   calculatorArguments } from './pr-calculator.mjs';
 import { prCryptoFixture } from './pr-capabilities.mjs';
+import { nativeToolchain } from './toolchain-baseline.mjs';
+export { nativeToolchain } from './toolchain-baseline.mjs';
 export { deriveNativeComponentSpecification, nativeComponentSelection,
   projectNativeComponentEvidence, replayNativeComponentEvidence,
   requireNativeComponentProjection } from './native-components.mjs';
@@ -34,7 +36,6 @@ const platforms = { 'linux-x64': 'linux', 'windows-x64': 'win32',
   'macos-arm64': 'darwin', 'macos-x64': 'darwin' };
 const locations = { 'linux-x64': 'github-linux-x64', 'windows-x64': 'github-windows-x64',
   'macos-arm64': 'github-macos-arm64', 'macos-x64': 'github-macos-x64' };
-export const nativeToolchain = Object.freeze({ node: '22.23.3', go: 'go1.27.1', python: '3.12.10' });
 export const nativeWorkflowContract = Object.freeze({
   path: '.github/workflows/ci.yml',
   sourceJob: 'Freeze source candidate',

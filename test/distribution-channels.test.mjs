@@ -60,6 +60,25 @@ test.before(async () => {
   if (process.env.SDLC_RELEASE_DIR) {
     const candidate = await verifyRelease({ outputDir: process.env.SDLC_RELEASE_DIR, targets, rebuild: false });
     assert.equal(candidate.descriptor.sourceCommit, built.descriptor.sourceCommit);
+    if (candidate.descriptor.payload.sha256 !== payload.sha256) {
+      const summarize = async artifact => {
+        const bytes = await fs.readFile(artifact);
+        return { size: bytes.length, gzipHeader: bytes.subarray(0, 10).toString('hex'),
+          entries: inventory(readTarGzip(bytes), 'package/') };
+      };
+      const frozen = await summarize(path.join(process.env.SDLC_RELEASE_DIR, candidate.descriptor.payload.filename));
+      const fresh = await summarize(payload.artifact);
+      const frozenEntries = new Map(frozen.entries.map(entry => [entry.path, entry]));
+      const freshEntries = new Map(fresh.entries.map(entry => [entry.path, entry]));
+      const differences = [...new Set([...frozenEntries.keys(), ...freshEntries.keys()])].sort()
+        .filter(name => canonical(frozenEntries.get(name) ?? null) !== canonical(freshEntries.get(name) ?? null))
+        .map(name => ({ path: name, frozen: frozenEntries.get(name) ?? null, fresh: freshEntries.get(name) ?? null }));
+      process.stderr.write(`npm payload mismatch ${JSON.stringify({
+        frozen: { sha256: candidate.descriptor.payload.sha256, size: frozen.size, gzipHeader: frozen.gzipHeader },
+        fresh: { sha256: payload.sha256, size: fresh.size, gzipHeader: fresh.gzipHeader },
+        differenceCount: differences.length, differences: differences.slice(0, 100),
+      })}\n`);
+    }
     assert.equal(candidate.descriptor.payload.sha256, payload.sha256);
     for (const archive of built.archives) {
       assert.equal(candidate.descriptor.files.find(file => file.filename === archive.filename)?.sha256, archive.sha256);

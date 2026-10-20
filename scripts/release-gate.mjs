@@ -8,6 +8,7 @@ import { verifyPlatformPackage } from './verify-platform-package.mjs';
 import { buildPackage } from './package.mjs';
 import { buildPlatforms, renderChecksums } from './package-platforms.mjs';
 import { verifyHomebrewQuality } from './homebrew-quality.mjs';
+import { nativeToolchain, homebrewToolchain } from './toolchain-baseline.mjs';
 import { ROOT, MACOS_ARCHITECTURES, RELEASE_GATE_TARGETS, RELEASE_PRE_CASES, RELEASE_SCOPE, archiveRecord, copyNativeReports, homebrewMetadata, options, releaseIntent,
   readJson, trustedEnvironment, validateHomebrewQualityEvidence, validateInitialHomebrewFormula, verifyCandidate, writeJson } from './release-bundle.mjs';
 
@@ -17,7 +18,7 @@ function integrationBlocked(message) {
 }
 
 export function validateNativeHomebrewEvidence(result, { candidate, targetArch,
-  mode = 'candidate', expectedNodeVersion = '22.23.3' }) {
+  mode = 'candidate', expectedNodeVersion = nativeToolchain.node }) {
   const evidence = result?.evidence;
   const previous = candidate.context.previousRelease;
   if (!['arm64', 'x64'].includes(targetArch) || result?.nativeValidation !== 'Passed' ||
@@ -27,7 +28,7 @@ export function validateNativeHomebrewEvidence(result, { candidate, targetArch,
       (targetArch === 'arm64' && evidence.sysctlProcTranslated !== '0') ||
       (targetArch === 'x64' && !['0', 'unavailable on native Intel'].includes(evidence.sysctlProcTranslated)) ||
       evidence.homebrewNodeVersion !== expectedNodeVersion ||
-      canonical(evidence.homebrewRuntime) !== canonical({ platform: 'darwin', arch: targetArch, major: 22 }) ||
+      canonical(evidence.homebrewRuntime) !== canonical({ platform: 'darwin', arch: targetArch, major: homebrewToolchain.major }) ||
       !previous || evidence.upgradeKind !== 'version' ||
       evidence.previousIdentity?.version !== previous.version ||
       evidence.previousIdentity?.descriptorSha256 !== previous.descriptorSha256 ||
@@ -90,7 +91,7 @@ export function validateNativeHomebrewEvidence(result, { candidate, targetArch,
 export async function verifyNativeHomebrew({ candidate, candidateDir, scratch,
   brew = process.env.SDLC_HOMEBREW_BREW, verifyLifecycle, verifyQuality = verifyHomebrewQuality, generator,
   targetArch = 'arm64', mode = 'candidate', previous, verifyUpgradeInputs, environment = process.env,
-  expectedNodeVersion = '22.23.3' } = {}) {
+  expectedNodeVersion = nativeToolchain.node } = {}) {
   if (!['arm64', 'x64'].includes(targetArch) || !['candidate', 'stable'].includes(mode)) {
     throw new Error('Select an explicit native Mac architecture and formula mode');
   }
@@ -163,7 +164,7 @@ export async function verifyNativeHomebrew({ candidate, candidateDir, scratch,
       expectedPreviousIdentity: previous.identity, expectedCurrentIdentity: candidate.context.identity });
     if (evidence?.passed !== true || evidence.platform !== 'darwin' || evidence.architecture !== targetArch ||
         evidence.uname !== (targetArch === 'arm64' ? 'arm64' : 'x86_64') ||
-        canonical(evidence.homebrewRuntime) !== canonical({ platform: 'darwin', arch: targetArch, major: 22 }) ||
+        canonical(evidence.homebrewRuntime) !== canonical({ platform: 'darwin', arch: targetArch, major: homebrewToolchain.major }) ||
         evidence.homebrewNodeVersion !== expectedNodeVersion ||
         [true, 1, '1'].includes(evidence.sysctlProcTranslated) || evidence.cleanupError) {
       throw new Error('Mandatory Homebrew native lifecycle, architecture or cleanup did not pass');

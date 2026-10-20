@@ -55,6 +55,38 @@ jobs:
             }));
             require("fs").appendFileSync(e.GITHUB_OUTPUT, "requiresNative=" + requiresNative + "\n");
           '
+  minimum-node:
+    needs: intent
+    if: ${{ needs.intent.outputs.requires-native == 'true' }}
+    name: Minimum supported Node compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: source
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Select minimum supported Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.23.3'
+          architecture: x64
+          check-latest: false
+      - name: Exercise minimum-runtime compatibility
+        run: node scripts/test-runner.mjs critical && node scripts/check.mjs
+      - name: Retain minimum-runtime originals
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: minimum-node-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            source/.test-data/executions/**/*.json
+            source/.test-data/executions/**/*.ndjson
+            source/.test-data/executions/**/*.md
+          if-no-files-found: error
+          retention-days: 90
   source:
     needs: intent
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
@@ -106,7 +138,7 @@ jobs:
       - name: Select pinned native Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '22.23.3'
+          node-version: '24.20.0'
           architecture: x64
           check-latest: false
       - name: Select pinned native Go
@@ -164,7 +196,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: native-bootstrap-linux-x64-${{ github.run_id }}-${{ github.run_attempt }}
+          name: source-bootstrap-linux-x64-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             source/.test-data/bootstrap-linux-x64/*.json
             source/.test-data/bootstrap-linux-x64/*.ndjson
@@ -236,7 +268,7 @@ jobs:
       - name: Select pinned native Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '22.23.3'
+          node-version: '24.20.0'
           architecture: ${{ matrix.architecture }}
           check-latest: false
       - name: Select pinned native Go
@@ -254,6 +286,7 @@ jobs:
           architecture: ${{ matrix.architecture }}
           check-latest: false
       - name: Provision isolated native toolchain
+        id: bootstrap
         env:
           GOTOOLCHAIN: local
           NATIVE_TARGET: ${{ matrix.target }}
@@ -289,6 +322,13 @@ jobs:
             source/.test-data/native-${{ matrix.target }}/tools-*/*.ndjson
           if-no-files-found: warn
           retention-days: 90
+      - name: Remove owned short Homebrew prefix
+        if: ${{ always() && runner.os == 'macOS' && steps.bootstrap.outcome != 'skipped' }}
+        env:
+          NATIVE_TARGET: ${{ matrix.target }}
+        run: >-
+          node scripts/native-toolchain.mjs --cleanup
+          --target "$NATIVE_TARGET" --output-dir ".test-data/bootstrap-$NATIVE_TARGET"
       - name: Retain native bootstrap diagnostics
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -307,7 +347,7 @@ jobs:
     permissions: {}
     name: Native producer completeness
     if: ${{ always() }}
-    needs: [intent, source, native]
+    needs: [intent, minimum-node, source, native]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -315,6 +355,7 @@ jobs:
         working-directory: ${{ github.workspace }}
         env:
           SOURCE_RESULT: ${{ needs.source.result }}
+          MINIMUM_NODE_RESULT: ${{ needs.minimum-node.result }}
           NATIVE_RESULT: ${{ needs.native.result }}
           INTENT_RESULT: ${{ needs.intent.result }}
           REQUIRES_NATIVE: ${{ needs.intent.outputs.requires-native }}
@@ -323,10 +364,12 @@ jobs:
           test "$INTENT_RESULT" = success
           if test "$REQUIRES_NATIVE" = false; then
             printf 'Metadata-only edit: native assertions were not executed; this is not native passing evidence.\n'
-            test "$SOURCE_RESULT" = skipped && test "$NATIVE_RESULT" = skipped
+            test "$SOURCE_RESULT" = skipped && test "$NATIVE_RESULT" = skipped &&
+              test "$MINIMUM_NODE_RESULT" = skipped
             exit
           fi
           test "$REQUIRES_NATIVE" = true
+          test "$MINIMUM_NODE_RESULT" = success
           printf 'Source freeze: %s\nAll four parallel native lanes: %s\n' "$SOURCE_RESULT" "$NATIVE_RESULT"
           printf 'Provider-verified framework/validation is evaluated independently by the trusted observer.\n'
           test "$SOURCE_RESULT" = success && test "$NATIVE_RESULT" = success

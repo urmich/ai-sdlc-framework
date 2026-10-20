@@ -2,7 +2,7 @@ export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [
     {"coverage": "process", "paths": ["scripts/validation-tools.mjs", "scripts/check.mjs", "scripts/validate-winget-schema.py", "scripts/read-validation-artifact.py", "cmd/sdlc-launcher/main_test.go", "cmd/sdlc-launcher/integrity_test.go"]},
-    {"coverage": "direct", "paths": ["scripts/pr-readiness.mjs", "scripts/github-readiness-host.mjs", "scripts/pr-observer.mjs", "scripts/workflow-policy.mjs", "scripts/native-toolchain.mjs"]}
+    {"coverage": "direct", "paths": ["scripts/pr-readiness.mjs", "scripts/github-readiness-host.mjs", "scripts/pr-observer.mjs", "scripts/workflow-policy.mjs", "scripts/native-toolchain.mjs", "scripts/native-homebrew-prefix.mjs"]}
   ]
 };
 import test from 'node:test';
@@ -32,6 +32,10 @@ import { inspectWorkflowPolicy, readWorkflowPolicySources } from '../scripts/wor
 import { nativeBootstrapEnvironment, portableRubyBootstrapEnvironment,
   schemaPipInstallArguments, nativeBootstrapExports, homebrewToolchain,
   requireHomebrewBottlePlan, requireHomebrewBottleReceipts } from '../scripts/native-toolchain.mjs';
+import { homebrewPrefixBinding, requireShortHomebrewPrefix, allocateOwnedDirectory,
+  cleanupOwnedDirectory, recordOwnedDirectoryNotRequired, allocateHomebrewPrefix,
+  verifyOwnedDirectoryOwnership, verifyHomebrewPrefixOwnership,
+  verifyHomebrewSourceCheckout } from '../scripts/native-homebrew-prefix.mjs';
 
 const sourceA = 'a'.repeat(40);
 const now = Date.parse('2026-10-18T10:00:00.000Z');
@@ -96,6 +100,256 @@ async function fixture(t) {
       signal: t.signal, ...options });
   return { root, reportDir, environment, run };
 }
+
+test('T-PRD015 short Homebrew prefixes bind native disposable GitHub Mac jobs and reject deep or ambient roots', async t => {
+  const environment = { GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted', RUNNER_OS: 'macOS',
+    RUNNER_ARCH: 'ARM64', RUNNER_NAME: 'Hosted Agent', GITHUB_SERVER_URL: 'https://github.com',
+    GITHUB_WORKSPACE: path.join(repositoryRoot, '.test-data', 'virtual-workspace'),
+    GITHUB_REPOSITORY: 'fixture/repository', GITHUB_REPOSITORY_ID: '123',
+    GITHUB_RUN_ID: '456', GITHUB_RUN_ATTEMPT: '2', GITHUB_JOB: 'native_macos' };
+  const host = { platform: 'darwin', architecture: 'arm64', machine: 'arm64', release: '24.6.0',
+    hostname: 'runner-mac', uid: 501, gid: 20 };
+  const request = { target: 'macos-arm64', environment, host };
+  const binding = homebrewPrefixBinding(request);
+  assert.equal(requireShortHomebrewPrefix('/opt/abc12'), '/opt/abc12');
+  assert.equal(Buffer.byteLength('/opt/abc12'), 10);
+  for (const prefix of ['/opt/homebrew', '/usr/local', '/opt/ABC12', '/opt/abcd',
+    '/opt/abcdef', '/opt/abc12/', '/opt/../abc12', '/Users/runner/work/repository/.test-data/bootstrap/homebrew']) {
+    assert.throws(() => requireShortHomebrewPrefix(prefix), { code: 'HOST' });
+  }
+  for (const change of [
+    { target: 'macos-x64' }, { host: { ...host, platform: 'linux' } },
+    { host: { ...host, machine: 'x86_64' } }, { host: { ...host, uid: 0 } },
+    { environment: { ...environment, RUNNER_ENVIRONMENT: 'self-hosted' } },
+    { environment: { ...environment, GITHUB_ACTIONS: 'false' } },
+    { environment: { ...environment, GITHUB_RUN_ATTEMPT: '' } },
+    { environment: { ...environment, GITHUB_JOB: '' } },
+  ]) assert.throws(() => homebrewPrefixBinding({ ...request, ...change }), { code: 'HOST' });
+  const intel = homebrewPrefixBinding({ target: 'macos-x64', environment: { ...environment, RUNNER_ARCH: 'X64' },
+    host: { ...host, architecture: 'x64', machine: 'x86_64' } });
+  assert.equal(intel.target, 'macos-x64');
+  assert.notDeepEqual(homebrewPrefixBinding({ ...request,
+    environment: { ...environment, GITHUB_RUN_ATTEMPT: '3' } }), binding);
+  assert.notDeepEqual(homebrewPrefixBinding({ ...request,
+    environment: { ...environment, GITHUB_JOB: 'other_job' } }), binding);
+  if (process.platform !== 'darwin') {
+    let calls = 0;
+    await assert.rejects(allocateHomebrewPrefix({ environment, target: 'macos-arm64',
+      run: () => { calls++; } }), { code: 'HOST' });
+    await assert.rejects(verifyHomebrewPrefixOwnership({ environment, target: 'macos-arm64' }), { code: 'HOST' });
+    assert.equal(calls, 0, 'Non-Mac hosts must not dispatch privileged provisioning');
+  }
+  const f = await prefixFixture(t);
+  const originalEnvironment = { ...f.environment };
+  assert.deepEqual(await verifyHomebrewSourceCheckout({ ...f.context, environment: f.environment }),
+    { workspace: f.workspace, repositoryRoot: f.context.repositoryRoot });
+  assert.deepEqual(f.environment, originalEnvironment, 'The actual Actions workspace must never be rewritten');
+  for (const workspace of [f.context.repositoryRoot, f.root, `${f.workspace}${path.sep}..`]) {
+    await assert.rejects(verifyHomebrewSourceCheckout({ ...f.context,
+      environment: { ...f.environment, GITHUB_WORKSPACE: workspace } }), { code: 'HOST' });
+  }
+  await assert.rejects(verifyHomebrewSourceCheckout({ ...f.context, environment: f.environment,
+    repositoryRoot: f.workspace }), { code: 'HOST' });
+  const outside = path.join(f.root, 'outside');
+  await fs.mkdir(outside, { mode: 0o700 });
+  await assert.rejects(verifyHomebrewSourceCheckout({ ...f.context, environment: f.environment,
+    repositoryRoot: outside }), { code: 'HOST' });
+  const parked = path.join(f.workspace, 'real-source');
+  await fs.rename(f.context.repositoryRoot, parked);
+  await fs.symlink(parked, f.context.repositoryRoot, process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(verifyHomebrewSourceCheckout({ ...f.context, environment: f.environment }), { code: 'HOST' });
+  await fs.unlink(f.context.repositoryRoot);
+  await fs.rename(parked, f.context.repositoryRoot);
+  const parkedWorkspace = path.join(f.root, 'real-workspace');
+  await fs.rename(f.workspace, parkedWorkspace);
+  await fs.symlink(parkedWorkspace, f.workspace, process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(verifyHomebrewSourceCheckout({ ...f.context, environment: f.environment }), { code: 'HOST' });
+  await fs.unlink(f.workspace);
+  await fs.rename(parkedWorkspace, f.workspace);
+});
+
+async function prefixFixture(t) {
+  const root = path.join(repositoryRoot, '.test-data', `owned-prefix-${randomUUID()}`);
+  await fs.mkdir(root, { mode: 0o700 });
+  t.after(async () => {
+    assert.equal(path.dirname(root), path.join(repositoryRoot, '.test-data'));
+    await fs.rm(root, { recursive: true });
+  });
+  const workspace = path.join(root, 'workspace');
+  const checkout = path.join(workspace, 'source');
+  const data = path.join(checkout, '.test-data');
+  const bootstrapDirectory = path.join(data, 'bootstrap');
+  for (const directory of [workspace, checkout, data, bootstrapDirectory]) await fs.mkdir(directory, { mode: 0o700 });
+  const stat = await fs.lstat(root);
+  const binding = { host: { uid: stat.uid, gid: stat.gid }, job: 'fixture', attempt: '1' };
+  const environment = { GITHUB_WORKSPACE: workspace };
+  const context = { repositoryRoot: checkout, bootstrapDirectory, prefix: path.join(root, 'prefix'), binding,
+    createDirectory: selected => fs.mkdir(selected, { mode: 0o700 }),
+    claimDirectory: async () => {} };
+  await verifyHomebrewSourceCheckout({ ...context, environment });
+  return { root, workspace, context, environment };
+}
+
+test('T-PRD015 owned Homebrew prefix proof survives a separate cleanup step without adopting existing directories', async t => {
+  const { root, context } = await prefixFixture(t);
+  const first = await allocateOwnedDirectory(context);
+  const allocationPath = path.join(context.bootstrapDirectory, 'native-homebrew-prefix-allocation.json');
+  const originalAllocation = await fs.readFile(allocationPath);
+  const before = await fs.lstat(allocationPath, { bigint: true });
+  assert.deepEqual(JSON.parse(originalAllocation), first.allocation);
+  assert.deepEqual(await verifyOwnedDirectoryOwnership(context), first);
+  assert.deepEqual(await fs.readFile(allocationPath), originalAllocation);
+  const after = await fs.lstat(allocationPath, { bigint: true });
+  assert.equal(after.mtimeNs, before.mtimeNs, 'Ownership inspection never rewrites allocation evidence');
+  assert.deepEqual(await fs.readdir(context.prefix), ['.sdlc-native-homebrew-prefix.json']);
+  await fs.mkdir(path.join(context.prefix, 'Cellar'));
+  await fs.writeFile(path.join(context.prefix, 'Cellar', 'retained'), 'owned bottle content');
+  const sentinel = path.join(root, 'unowned');
+  await fs.writeFile(sentinel, 'do not touch');
+  await assert.rejects(allocateOwnedDirectory(context), { code: 'HOST' });
+  const cleanupContext = structuredClone({ repositoryRoot: context.repositoryRoot, bootstrapDirectory: context.bootstrapDirectory,
+    binding: context.binding });
+  await assert.rejects(cleanupOwnedDirectory({ ...cleanupContext,
+    binding: { ...context.binding, attempt: '2' } }), { code: 'HOST' });
+  await assert.rejects(verifyOwnedDirectoryOwnership({ ...cleanupContext,
+    binding: { ...context.binding, attempt: '2' } }), { code: 'HOST' });
+  assert.equal(await fs.readFile(path.join(context.prefix, 'Cellar', 'retained'), 'utf8'), 'owned bottle content');
+  assert.deepEqual(await cleanupOwnedDirectory(cleanupContext), { prefix: context.prefix, status: 'removed' });
+  await assert.rejects(fs.lstat(context.prefix), { code: 'ENOENT' });
+  await assert.rejects(verifyOwnedDirectoryOwnership(context), { code: 'HOST' });
+  assert.deepEqual(await cleanupOwnedDirectory(cleanupContext), { prefix: context.prefix, status: 'removed' });
+  assert.equal(await fs.readFile(sentinel, 'utf8'), 'do not touch');
+  await fs.mkdir(context.prefix);
+  await assert.rejects(cleanupOwnedDirectory(cleanupContext), { code: 'HOST' });
+  assert.ok((await fs.lstat(context.prefix)).isDirectory(), 'A replacement after cleanup is never removed');
+  const unused = await prefixFixture(t);
+  await recordOwnedDirectoryNotRequired(unused.context);
+  assert.deepEqual(await cleanupOwnedDirectory(unused.context),
+    { status: 'not-required', reason: 'No Homebrew prefix allocation was requested' });
+  await assert.rejects(verifyOwnedDirectoryOwnership(unused.context), { code: 'HOST' });
+  await assert.rejects(allocateOwnedDirectory(unused.context), { code: 'EEXIST' });
+  await assert.rejects(fs.lstat(unused.context.prefix), { code: 'ENOENT' });
+});
+
+test('T-PRD015 owned Homebrew prefix cleanup refuses lost tampered linked and replaced ownership evidence', async t => {
+  const { root, context } = await prefixFixture(t);
+  await assert.rejects(cleanupOwnedDirectory(context), { code: 'HOST' });
+  await allocateOwnedDirectory(context);
+  const marker = path.join(context.prefix, '.sdlc-native-homebrew-prefix.json');
+  const originalMarker = await fs.readFile(marker);
+  const proof = path.join(context.bootstrapDirectory, 'native-homebrew-prefix-allocation.json');
+  const originalProof = await fs.readFile(proof);
+  await fs.writeFile(marker, '{"wrong":"marker"}');
+  await assert.rejects(verifyOwnedDirectoryOwnership(context), { code: 'HOST' });
+  await assert.rejects(cleanupOwnedDirectory(context), { code: 'HOST' });
+  await fs.writeFile(marker, originalMarker);
+  const parkedMarker = path.join(root, 'original-marker');
+  await fs.rename(marker, parkedMarker);
+  await fs.writeFile(marker, originalMarker, { flag: 'wx', mode: 0o600 });
+  await assert.rejects(verifyOwnedDirectoryOwnership(context), { code: 'HOST' });
+  assert.deepEqual(await fs.readFile(marker), originalMarker, 'A byte-identical replacement marker is rejected without mutation');
+  await fs.unlink(marker);
+  await fs.symlink(parkedMarker, marker, process.platform === 'win32' ? 'junction' : 'file');
+  await assert.rejects(verifyOwnedDirectoryOwnership(context), { code: 'HOST' });
+  await assert.rejects(cleanupOwnedDirectory(context), { code: 'HOST' });
+  await fs.unlink(marker);
+  await fs.rename(parkedMarker, marker);
+  await fs.unlink(proof);
+  await assert.rejects(verifyOwnedDirectoryOwnership(context), { code: 'ENOENT' });
+  await assert.rejects(cleanupOwnedDirectory(context), { code: 'ENOENT' });
+  const tamperedProof = JSON.parse(originalProof);
+  tamperedProof.requestDigest = '0'.repeat(64);
+  await fs.writeFile(proof, JSON.stringify(tamperedProof), { flag: 'wx', mode: 0o600 });
+  await assert.rejects(verifyOwnedDirectoryOwnership(context), { code: 'HOST' });
+  assert.deepEqual(await fs.readFile(marker), originalMarker, 'Rejected ownership inspection must not remove or change the prefix');
+  await fs.unlink(proof);
+  await fs.writeFile(proof, originalProof, { flag: 'wx', mode: 0o600 });
+  const parked = path.join(root, 'original');
+  await fs.rename(context.prefix, parked);
+  await fs.mkdir(context.prefix, { mode: 0o700 });
+  await fs.writeFile(marker, originalMarker, { mode: 0o600 });
+  await assert.rejects(verifyOwnedDirectoryOwnership(context), { code: 'HOST' });
+  await assert.rejects(cleanupOwnedDirectory(context), { code: 'HOST' });
+  await fs.rm(context.prefix, { recursive: true });
+  await fs.symlink(parked, context.prefix, process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(verifyOwnedDirectoryOwnership(context), { code: 'HOST' });
+  await assert.rejects(cleanupOwnedDirectory(context), { code: 'HOST' });
+  assert.deepEqual(await fs.readFile(path.join(parked, path.basename(marker))), originalMarker);
+  await fs.unlink(context.prefix);
+  await fs.rename(parked, context.prefix);
+  assert.equal((await cleanupOwnedDirectory(context)).status, 'removed');
+});
+
+test('T-PRD015 failed owned Homebrew allocation rolls back only confirmed empty creation and retains original failures', async t => {
+  const { context } = await prefixFixture(t);
+  const denied = new Error('original chown permission failure');
+  let rollbacks = 0;
+  await assert.rejects(allocateOwnedDirectory({ ...context, claimDirectory: async () => { throw denied; },
+    removeEmptyDirectory: async selected => { rollbacks++; await fs.rmdir(selected); } }),
+    error => error.code === 'HOST' && error.cause === denied && /rolled back/u.test(error.message));
+  assert.equal(rollbacks, 1, 'Confirmed empty allocation rollback uses the same narrow removal capability');
+  await assert.rejects(fs.lstat(context.prefix), { code: 'ENOENT' });
+  assert.deepEqual(await cleanupOwnedDirectory(context), { prefix: context.prefix, status: 'rolled-back' });
+  const other = await prefixFixture(t);
+  const original = new Error('uncertain mkdir result');
+  await assert.rejects(allocateOwnedDirectory({ ...other.context, createDirectory: async selected => {
+    await fs.mkdir(selected, { mode: 0o700 });
+    throw original;
+  } }), error => error.code === 'HOST' && error.cause === original && /unconfirmed/u.test(error.message));
+  assert.ok((await fs.lstat(other.context.prefix)).isDirectory());
+  await assert.rejects(cleanupOwnedDirectory(other.context), { code: 'ENOENT' });
+  const unknown = await prefixFixture(t);
+  await assert.rejects(allocateOwnedDirectory({ ...unknown.context, claimDirectory: async selected => {
+    await fs.writeFile(path.join(selected, 'unknown'), 'preserve unknown contents');
+    throw denied;
+  } }), error => error.code === 'HOST' && error.cause === denied && error.cleanupError?.code === 'ENOTEMPTY');
+  assert.equal(await fs.readFile(path.join(unknown.context.prefix, 'unknown'), 'utf8'), 'preserve unknown contents');
+});
+
+test('T-PRD015 owned Homebrew prefix uses retained empty-root removal with a non-writable parent and never retries nonempty roots', async t => {
+  const { root, context } = await prefixFixture(t);
+  const { allocation } = await allocateOwnedDirectory(context);
+  await fs.mkdir(path.join(context.prefix, 'Cellar'));
+  await fs.writeFile(path.join(context.prefix, 'Cellar', 'bottle'), 'owned bottle');
+  const outside = path.join(root, 'outside');
+  await fs.mkdir(outside);
+  await fs.writeFile(path.join(outside, 'sentinel'), 'preserve external target');
+  await fs.symlink(outside, path.join(context.prefix, 'linked-runtime'),
+    process.platform === 'win32' ? 'junction' : 'dir');
+  let removals = 0;
+  await fs.chmod(root, 0o555);
+  try {
+    const result = await cleanupOwnedDirectory({ ...context, removeEmptyDirectory: async selected => {
+      removals++;
+      assert.equal(selected, context.prefix);
+      const stat = await fs.lstat(selected, { bigint: true });
+      assert.equal(String(stat.dev), allocation.prefixIdentity.device);
+      assert.equal(String(stat.ino), allocation.prefixIdentity.inode);
+      assert.equal(Number(stat.uid), context.binding.host.uid);
+      assert.deepEqual(await fs.readdir(selected), [], 'Owned contents and the last marker precede empty-root removal');
+      // Restore only this fixture's parent permission to model the narrow privileged rmdir capability.
+      await fs.chmod(root, 0o700);
+      await fs.rmdir(selected);
+    } });
+    assert.deepEqual(result, { prefix: context.prefix, status: 'removed' });
+  } finally { await fs.chmod(root, 0o700); }
+  assert.equal(removals, 1);
+  await assert.rejects(fs.lstat(context.prefix), { code: 'ENOENT' });
+  assert.equal(await fs.readFile(path.join(outside, 'sentinel'), 'utf8'), 'preserve external target');
+
+  const nonempty = await prefixFixture(t);
+  await allocateOwnedDirectory(nonempty.context);
+  let attempts = 0;
+  await assert.rejects(cleanupOwnedDirectory({ ...nonempty.context, removeEmptyDirectory: async selected => {
+    attempts++;
+    await fs.writeFile(path.join(selected, 'unexpected'), 'never delete this');
+    await fs.rmdir(selected);
+  } }), { code: 'ENOTEMPTY' });
+  assert.equal(attempts, 1);
+  assert.equal(await fs.readFile(path.join(nonempty.context.prefix, 'unexpected'), 'utf8'), 'never delete this');
+  await assert.rejects(fs.lstat(path.join(nonempty.context.bootstrapDirectory,
+    'native-homebrew-prefix-cleanup.json')), { code: 'ENOENT' });
+});
 
 test('T-PRD015 isolated Homebrew bootstrap preserves complete plain transcripts without changing host homes or pins', async t => {
   const f = await fixture(t);
@@ -228,7 +482,7 @@ test('T-PRD015 Homebrew bottle preflight rejects absent native or non-relocatabl
   const plan = { schemaVersion: 1, kind: 'native-homebrew-bottle-plan', prefix,
     cellar: path.join(prefix, 'Cellar'), architecture: 'x86_64', rubyPlatform: 'x86_64-darwin24',
     rubyVersion: homebrewToolchain.ruby, entries: [
-      entry('node@22', homebrewToolchain.node, 'a'), entry('openssl@3', '3.5.9', 'b'),
+      entry(homebrewToolchain.formula, homebrewToolchain.node, 'a'), entry('openssl@3', '3.5.9', 'b'),
     ] };
   assert.equal(requireHomebrewBottlePlan(plan, { prefix, target: 'macos-x64' }), plan);
   for (const mutate of [
@@ -248,7 +502,7 @@ test('T-PRD015 Homebrew bottle preflight rejects absent native or non-relocatabl
   missing.entries[0].bottleTag = null;
   missing.entries[0].pourable = false;
   assert.throws(() => requireHomebrewBottlePlan(missing, { prefix, target: 'macos-x64' }),
-    /node@22.*no native bottle.*Source compilation is not permitted/u);
+    new RegExp(`${homebrewToolchain.formula}.*no native bottle.*Source compilation is not permitted`, 'u'));
   const receipts = plan.entries.map(selected => ({
     name: selected.name, pkgVersion: selected.pkgVersion, prefix: selected.prefix,
     receipt: { poured_from_bottle: true, source: { versions: { stable: selected.version } } } }));

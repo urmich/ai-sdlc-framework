@@ -10,6 +10,11 @@ not installed framework instructions or a policy for framework consumers.
 - Preserve existing changes and immutable execution/release history. Use owned
   repository-local fixtures; never test against a live Copilot home, shared
   package-manager prefix, provider setting or published release.
+  Native Mac prerequisite jobs may use the verified, job-bound short prefix
+  allocated by `scripts/native-homebrew-prefix.mjs`: fixed-cellar bottles cannot
+  relocate into the long checkout path. This exception never permits an existing
+  system prefix, symlink alias, forced bottle or privileged recursive deletion.
+  Keep its ownership evidence in the checkout and always verify guarded cleanup.
 - Classify every new/changed test under the testing policy. New tests are
   PR-only by default. Unit, local and pre-review labels do not make them critical.
 - Default local gate: `npm run test:critical`, then `npm run check`.

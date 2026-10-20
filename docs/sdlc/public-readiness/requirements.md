@@ -38,6 +38,15 @@ execution, publication or unrelated provider-setting authority. The later
 specific approval to enable this repository's private vulnerability reporting
 was applied and verified separately.
 
+The later explicit direction to resolve Mac bottle provisioning and select the
+newest suitable stable Node authorizes the current toolchain-baseline revision,
+not a local runtime installation or release. Select the complete compatible
+native dependency snapshot, preserve Node >=22 product support and all required
+native assertions, and resolve the owned-prefix incompatibility rather than
+silently forcing bottles or substituting system runtimes. Current versions and
+execution projections belong to the living Test Plan; prior approvals and
+failed executions remain unchanged.
+
 ## Outcome
 
 Make this repository professional and safe for public contributors: fast,
