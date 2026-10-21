@@ -180,12 +180,23 @@ content or the owned block, not the entire pre-existing instructions file.
 Modified or conflicting content is preserved and reported. Partial installation
 is rolled back only where doing so cannot overwrite later user edits.
 
+Ordinary update compatibility is determined by recognized ownership data
+(`owner: ai-sdlc-framework`, `schemaVersion: 1`), owned-file hashes and the
+managed instructions block, not `previous.version`. That version is retained
+for diagnostics/provenance, never a whitelist or semver-order test. Unknown
+owner/schema and malformed/unprovable ownership fail while preserving existing
+state. Establish an old installation using its authentic release CLI, then
+invoke the verified new package's updater against that home. Old executables
+are not required to understand future source layouts; installing an incomplete
+old source with the current installer is not genuine prior-release proof.
+
 Ordinary install/uninstall remains recovery-safe and preserves modified owned
 files plus runtime state. The user-facing irreversible migration path is
 `install --purge-existing`, invoked through the new extracted or npm-delivered
-package. It verifies that both the executing package and selected source are
-outside `COPILOT_HOME`, reads and validates the complete replacement
-distribution before deletion, then holds one maintenance lock outside the
+package. This is a separate explicit destructive reinstall, never automatic
+recovery from an ordinary update failure. It verifies that both the executing
+package and selected source are outside `COPILOT_HOME`, reads and validates the
+complete replacement distribution before deletion, then holds one maintenance lock outside the
 owned `sdlc/` deletion tree across purge and reinstall. Purge does not require
 the old runtime tree or ownership manifest to be valid. It removes the owned
 instruction block regardless of content changes and deletes only known
@@ -1934,11 +1945,23 @@ ownership manifest and runtime-state preservation rules in section 3.
 
 Hook and instruction files are loaded at Copilot session startup. Updating them
 on disk cannot replace code already executing in that process. A current
-advisory hook permits its own update command, but an already-running v1.2.0
+advisory hook permits its own update command, but an already-running older
 blocking hook cannot be retroactively changed. The documented recovery is to run
 the literal maintenance command in a host terminal outside the blocked session,
 then restart Copilot. This is an explicit compatibility limitation, not a claim
 that the new package upgraded the old in-memory hook.
+
+T-42 uses authentic public v0.3.1 source pinned to
+`8b2e4e8719b407454e28f84d716907b0ff834d3c` to create the old installed home,
+then the verified current package's updater, updated installed doctor and
+idempotent installed update. The retained source archive and provenance record
+are `test/fixtures/upgrade-v0.3.1-source.tar.gz` and
+`test/fixtures/upgrade-v0.3.1-source.json`.
+Separately controlled recognized-owner/schema-1 manifests exercise version-label
+independence and preservation/rejection boundaries, not fictional old packages
+or historical private binaries. No private v1.2.0 Git tag or exhaustive run of
+all historical binaries is required. Earlier T-42 results remain historical;
+the amended definition starts `NotRun` and requires actual PR validation.
 
 #### 8.1.2 Stage-override intent
 

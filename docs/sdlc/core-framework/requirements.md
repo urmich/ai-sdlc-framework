@@ -1830,6 +1830,13 @@ environment authorization.
   protections, preserve modified/unowned content, and preserve all runtime
   workflow state. `doctor` after an update reports the actual installed version,
   `installed: true`, and no findings when the installation is intact.
+  Ordinary update supports every compatible earlier installation with recognized
+  `owner: ai-sdlc-framework` and `schemaVersion: 1` ownership data. Its version
+  label is diagnostic/provenance data, not a whitelist or semver-order gate.
+  Unknown owner/schema or malformed/unprovable ownership fails without
+  destructive fallback. Use the verified new package's updater: compatibility
+  of installed ownership data does not promise that an arbitrary old executable
+  understands future package layouts.
 - AC-045.9: Updating files cannot replace hooks or instructions already loaded
   in the active Copilot process. Installation and recovery documentation
   explicitly requires restarting Copilot after install/update. If an older
@@ -1840,13 +1847,24 @@ environment authorization.
   non-Git startup, trusted and untrusted maintenance commands, paths containing
   spaces, Bash, Windows PowerShell, Command Prompt, malformed/malicious command
   variants, one-time stage advisories, command-hook bootstrap/import fail-open
-  behavior, ownership/state preservation, and an isolated upgrade from a
-  version-1.2.0 installation to the new version.
+  behavior, ownership/state preservation, and an isolated upgrade established
+  by an authentic earlier public release's own CLI, then updated by the new
+  package's CLI. Separately controlled ownership-format fixtures cover
+  representative earlier/private-style version labels, conflict preservation
+  and rejection of unknown owner/schema or unprovable ownership. Such fixtures
+  are not historical release binaries; neither a private Git tag nor execution
+  of every historical binary is a universal prerequisite.
 - AC-045.11: Static and behavioral checks enumerate every framework-owned hook
   decision path and prove that no evaluator finding or internal hook bootstrap
   exception can produce a framework hard denial. Instructions and skills do not
   tell the agent that the framework makes the user's requested Copilot action
   impossible.
+
+The 2026-10-21 upgrade clarification replaces the earlier literal v1.2.0
+prerequisite without rewriting approved snapshots or claiming that genuine
+private v1.2.0 source/binaries were recovered or tested. Explicit
+`--purge-existing` remains the separate irreversible choice under FR-048,
+never automatic recovery from a failed ordinary upgrade.
 
 **Source:** S-46.
 

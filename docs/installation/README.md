@@ -69,6 +69,14 @@ Close active Copilot processes and development work first. Ordinary update
 preserves runtime workflow state and unrelated files. Restart Copilot afterward:
 an active process retains the old hooks and instructions.
 
+Upgrade support depends on compatible installation ownership data, not a
+specific previous version. Recognized framework-owned schema-1 installations
+use recorded file hashes and the managed instructions block; their version
+labels are diagnostic, not a version whitelist or ordering gate. Modified
+owned files are preserved and reported as conflicts. Unknown owner/schema or
+malformed/unprovable ownership stops ordinary update without destructive
+fallback; `--purge-existing` remains a separate explicit irreversible choice.
+
 The following examples select the actual published **0.4.0** npm archive, not
 unreleased source or a future shared Mac asset. Use version-specific download
 and package directories outside the selected Copilot home. `--clobber` replaces
@@ -81,8 +89,11 @@ to bypass a download or OS-policy restriction.
 
 If an active legacy hook blocks maintenance, run the applicable commands in a
 normal host terminal outside that Copilot session, then restart Copilot.
-The installed entry performs maintenance using the separately selected package
-source; see the [complete CLI contracts](../reference/cli.md).
+Run the updater from the separately extracted, verified **new package** outside
+the home. An arbitrary old installed updater need not understand future package
+layouts. After replacement, use the updated installed entry for doctor and
+subsequent same-version maintenance; see the
+[complete CLI contracts](../reference/cli.md).
 
 ### Update on macOS or Linux
 
@@ -108,7 +119,7 @@ npm install --ignore-scripts --no-audit --no-fund --bin-links=false \
   --prefix "$PACKAGE_ROOT" "$PACKAGE"
 SOURCE_ROOT="$PACKAGE_ROOT/node_modules/ai-sdlc-framework"
 
-node "$COPILOT_HOME/sdlc/bin/sdlc.mjs" \
+node "$SOURCE_ROOT/bin/sdlc.mjs" \
   update --home "$COPILOT_HOME" --source-root "$SOURCE_ROOT"
 node "$COPILOT_HOME/sdlc/bin/sdlc.mjs" \
   doctor --home "$COPILOT_HOME"
@@ -142,7 +153,7 @@ Verify the downloaded release before continuing in the same PowerShell session.
 npm install --ignore-scripts --no-audit --no-fund --bin-links=false `
   --prefix "$PackageRoot" "$Package"
 
-node (Join-Path $CopilotHome "sdlc\bin\sdlc.mjs") `
+node (Join-Path $SourceRoot "bin\sdlc.mjs") `
   update --home "$CopilotHome" --source-root "$SourceRoot"
 node (Join-Path $CopilotHome "sdlc\bin\sdlc.mjs") `
   doctor --home "$CopilotHome"
@@ -167,7 +178,7 @@ Verify the downloaded release before continuing in the same Command Prompt.
 
 ```bat
 npm install --ignore-scripts --no-audit --no-fund --bin-links=false --prefix "%PACKAGE_ROOT%" "%PACKAGE%"
-node "%FRAMEWORK_HOME%\sdlc\bin\sdlc.mjs" update --home "%FRAMEWORK_HOME%" --source-root "%SOURCE_ROOT%"
+node "%SOURCE_ROOT%\bin\sdlc.mjs" update --home "%FRAMEWORK_HOME%" --source-root "%SOURCE_ROOT%"
 node "%FRAMEWORK_HOME%\sdlc\bin\sdlc.mjs" doctor --home "%FRAMEWORK_HOME%"
 ```
 

@@ -1178,6 +1178,27 @@ cache/config. Fetch public assets anonymously and compare external pins and
 inventory before executing anything. Keep the offline lifecycle distinct from
 network-enabled download/signature-verification stages.
 
+Ordinary installation upgrade support is version-independent for recognized
+`owner: ai-sdlc-framework`, `schemaVersion: 1` ownership data. File hashes and the
+managed instructions block determine safe replacement; `previous.version` is
+diagnostic/provenance data, not a whitelist or semver-order gate. Unknown
+owner/schema, malformed/unprovable ownership and modified-owned conflicts
+preserve existing content/state without destructive fallback. Explicit
+`--purge-existing` is a separate irreversible reinstall, never an automatic
+remedy. Compatibility of installed data does not imply that arbitrary old
+executables can understand a future source layout.
+
+Core T-42 establishes a genuine old home with public v0.3.1's own CLI, source
+commit `8b2e4e8719b407454e28f84d716907b0ff834d3c`, then invokes the verified
+new package's updater and checks updated installed doctor/idempotent update.
+The retained fixture is `test/fixtures/upgrade-v0.3.1-source.tar.gz` with
+`test/fixtures/upgrade-v0.3.1-source.json` provenance. Separate controlled
+recognized-owner/schema-1 version-label fixtures are ownership-format proof, not fabricated old packages
+or historical private release execution. No private v1.2.0 tag or all-version
+binary sweep is required. Earlier T-42 evidence remains historical; the amended
+definition is `NotRun` until actual validation. These assertions stay PR-only,
+without adding a readiness case or expanding finite L.
+
 Previous/current lifecycle inputs are independently pinned before parsing their
 descriptor identity. Freeze `previousRelease` version/repository/descriptor/
 checksum references with the candidate, then bind both old/current source,
@@ -1206,8 +1227,9 @@ Matching observed failures remain Failed; missing/foreign origins remain
 NotRun and block passing. Later successful attempts do not erase earlier bytes
 or outcomes.
 
-Exercise genuine prior-version upgrade using the explicitly selected supported
-previous public release, not a same-version reinstall or formula revision.
+Exercise genuine prior-version channel upgrade using the explicitly selected
+compatible previous public release, not a same-version reinstall or formula
+revision. This representative channel input is not an installer support gate.
 Retain old keg/channel/runtime before changing it. Verify installed hooks and
 doctor after old-channel removal and dependency cleanup when that scenario
 requires it. Cleanup affects only owned fixtures and preserves unrelated content.
@@ -1365,9 +1387,11 @@ commit/test-spec digest and optional source/configuration digests; `checkpoints`
 maps L/PR/R-PRE/R-POST/A/OBSERVERS to literal relative data references
 `{ id, filename, sha256, size }`. Optional benchmark/protections references,
 release-history reference arrays and explicit limitations complete the inputs.
-It does not select the denominator: L derives all 69 canonical local cases,
-PR/R-PRE/R-POST/A use the closed 6/4/7/9 sets, and T-PRD019 is an explicit
-OBSERVERS output outside production gate inputs.
+It does not select the denominator: L derives exactly 16 canonical assertions
+plus 11 risk roots, at most 27 total assertions including descendants.
+The historical 69-local denominator is not a separate SDK stage or current
+credit. PR/R-PRE/R-POST/A use the living Test Plan's closed 76/4/7/11 case sets,
+and T-PRD019 is an explicit OBSERVERS output outside production gate inputs.
 
 Each execution reference requires an independently supplied
 `expectations[refId]: { specification, context }` and trusted public evidence
@@ -1424,16 +1448,18 @@ Before claiming operational readiness, independently resolve:
 
 - Actual hosted/tool/runtime availability, including the pinned Homebrew Node/
   portable Ruby paths and exact VM identities; no assumed immutable runner label.
-- Complete per-platform applicability for every existing skip. Historical/private
-  compatibility fixtures, unavailable Windows isolation and client-only capabilities
-  remain visible. No required case is silently dropped, fetched from a private
-  source for a public fork, or converted to Passed for convenience.
+- Complete per-platform applicability for every existing skip. Authentic public
+  upgrade inputs, explicitly controlled ownership-format fixtures, unavailable
+  Windows isolation and client-only capabilities remain distinct. Private Git
+  history is not a public-fork prerequisite; no required behavior is silently
+  dropped or converted to Passed for convenience.
 - Actual commit-status/App association, branch/ruleset capabilities and the
   conditional-review assurance limitations described above.
 - Publishing trust/environment rules and artifact-attestation/crypto capability.
   Permissions/settings require specific owner authority before changing them.
-- A new candidate version greater than the supported previous release for real
-  upgrade/rehearsal; version selection and live publication are explicit decisions.
+- A new candidate version greater than the selected package-manager proof input
+  for real channel upgrade/rehearsal, not an installer version whitelist;
+  version selection and live publication are explicit decisions.
 - Retained evidence availability after CI expiry. Missing signed durable evidence
   is a blocker, not a reason to backfill old tests or mutate 0.4.0.
 

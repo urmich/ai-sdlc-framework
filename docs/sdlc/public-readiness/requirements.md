@@ -339,8 +339,18 @@ instead of relying on the developer's Windows machine.
   empty caches, verify external descriptor/checksums and package inventory before
   execution, and retain candidate-bound results.
 - AC-208.2: Cover the applicable install, doctor, idempotent update, upgrade from
-  the supported previous version, hooks, ordinary uninstall and explicit clean
-  migration/purge scenarios while preserving unrelated content.
+  compatible earlier installations, hooks, ordinary uninstall and explicit clean
+  migration/purge scenarios while preserving unrelated content. Ordinary update
+  recognizes supported ownership data, not a previous-version whitelist or
+  semver-order gate; unknown owner/schema or malformed/unprovable ownership
+  fails without destructive fallback. Use an authentic prior public CLI to
+  establish representative old-install proof, then the verified new package's
+  updater and updated installed CLI/doctor. Controlled ownership-format fixtures
+  with representative version labels are not historical binaries; old updaters
+  need not understand future package layouts. Explicit purge is a separate destructive
+  reinstall, never an automatic upgrade remedy. This clarifies preserved core
+  AC-045.8/10 and T-42; it adds no new readiness case or historical-binary
+  acquisition requirement.
 - AC-208.3: Exercise real supported standalone shells, npm lifecycle and native
   Homebrew install/upgrade/test/uninstall. Do not call an install/test/uninstall
   sequence evidence of upgrade if upgrade was not executed.

@@ -254,8 +254,11 @@ steps/assertions:
   evidence where necessary, then compare external pins and inventory before
   extracting/executing the candidate. Use an isolated native home/prefix. Install,
   doctor, idempotent update, prior-version upgrade, hooks, ordinary uninstall and
-  explicit fixture-only migration/purge must each assert version, preserved
-  unrelated files and surviving runtime. Retain independent per-step results.
+  explicit fixture-only migration/purge must each assert version and preserved
+  unrelated files. Ordinary update/uninstall preserve runtime; explicit purge
+  intentionally removes it. The verified new package's updater upgrades a
+  genuinely established old installation; do not require an arbitrary old
+  updater to parse a future package layout. Retain independent per-step results.
 - **P - provider observation:** prepare the exact approved operation if any,
   record dispatching before one call, retain the actual handle and reconcile
   uncertainty before retry. Observe steps/results from the provider. Verify the
@@ -375,6 +378,21 @@ families, package/install/distribution suites, runner/static/instruction checks,
 Homebrew and native Windows/WinGet suites. The inventory assertion in T-PRD001
 must reconcile actual discovered cases against the current approved selection,
 not this prose list.
+
+The preserved core T-42 upgrade obligation now uses the genuine public v0.3.1
+CLI, pinned to `8b2e4e8719b407454e28f84d716907b0ff834d3c`, to create the old
+installation, then the verified current package's updater, updated installed
+doctor and idempotent installed update. Its source archive/provenance are
+`test/fixtures/upgrade-v0.3.1-source.tar.gz` and
+`test/fixtures/upgrade-v0.3.1-source.json`.
+Separate controlled recognized-owner/schema-1 manifests prove version-label
+independence, modified-owned conflict preservation and rejection of unknown
+owner/schema or malformed/unprovable ownership without destructive fallback.
+They are not fabricated historical releases. The old v1.2.0-specific `Passed`
+projection remains historical; amended T-42 is `NotRun` until executed.
+This is existing upgrade regression coverage in the complete capable PR lanes,
+not a new canonical case, a private-tag prerequisite or growth of L's exact
+16 canonical assertions plus 11 risk roots/27 total assertions.
 
 Node-only discovery is insufficient. Assign the other executable surfaces:
 
@@ -871,13 +889,16 @@ and artifact digest before extraction or execution. Negative corruption tests
 use isolated copies, never published assets.
 
 In a fresh home/cache/prefix, execute each applicable lifecycle operation:
-install, healthy doctor, idempotent update, actual upgrade from a supported
-previous version, all eight installed hook handlers, ordinary uninstall and
-fixture-only clean migration/purge. Preserve sentinels and seeded runtime;
-assert failure/rollback boundaries and retained independent Node. Windows runs
+install, healthy doctor, idempotent update, actual upgrade from an independently
+pinned compatible previous public release, all eight installed hook handlers,
+ordinary uninstall and fixture-only clean migration/purge. Preserve sentinels
+and seeded runtime; assert failure/rollback boundaries and retained independent Node. Windows runs
 both PowerShell and cmd; macOS runs native shells and separately real Homebrew
 install/upgrade/test/uninstall/switch. Capture actual operations, not inferred
-upgrade credit from installing a single version.
+upgrade credit from installing a single version. The selected channel proof
+input is not an installer support whitelist or an obligation to run every
+historical binary. Ordinary updates preserve runtime; only explicitly selected
+fixture purge removes it.
 
 Record npm byte SHA-256 and registry integrity plus declared provenance policy.
 Record semantic attestation binding separately from signature/certificate/
@@ -1024,8 +1045,9 @@ authority. Preflight rejects missing prerequisites before irreversible calls.
    The fixture formula is not published and cannot rewrite the stable formula/
    checksum inventory. These results prove unpublished candidate behavior, not
    public URL availability, which belongs exclusively to R-POST.
-   Genuine upgrade proof starts from the independently authenticated supported
-   previous public release and upgrades to the frozen current candidate.
+   Genuine upgrade proof starts from an independently authenticated compatible
+   previous public release selected for that channel and upgrades to the frozen
+   current candidate; this proof input is not an installer version support gate.
    Capture both descriptor/checksum/source/payload identities before execution.
    A same-version reinstall/formula revision or missing previous input blocks
    this obligation. Public mode later executes the exact saved published
