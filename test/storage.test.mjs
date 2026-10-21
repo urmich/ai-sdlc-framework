@@ -28,7 +28,7 @@ import { promisify } from 'node:util';
 import { fixture, grant, observeFixtureRepository } from './helpers.mjs';
 import { canonical, digest, LIMITS } from '../src/core.mjs';
 import { atomicWrite, readBytes, readJson, readJsonEntries, updateJson, withLock, writeJson, safePath } from '../src/files.mjs';
-import { identity } from '../src/git.mjs';
+import { identity, validateBinding } from '../src/git.mjs';
 import { Store, orderRecordRemovals } from '../src/store.mjs';
 import { validateRecord } from '../src/schemas.mjs';
 import { repositoryObservationKey, pullRequestObservationKey } from '../src/repository-observations.mjs';
@@ -677,6 +677,60 @@ test('Git identity batches fresh path queries and preserves unborn and linked wo
   assert.equal(empty.linkedWorktree, false);
   await f.runGit('checkout', '-q', '--detach', changed.head);
   await assert.rejects(identity(f.repo, 'primary'), { code: 'BINDING' });
+});
+test('Git binding proves the current exact ref without trusting its stored branch or HEAD', async t => {
+  const f = await fixture(t);
+  await f.runGit('add', '.sdlc');
+  await f.runGit('commit', '-qm', 'Create owned binding fixture');
+  const original = await identity(f.repo, 'primary');
+  const calls = [];
+  const observe = ({ process: child }) => {
+    child.once('close', () => calls.push(child.spawnargs.slice(1)));
+  };
+  let current;
+  subscribe('child_process', observe);
+  try {
+    current = await validateBinding(original);
+  } finally {
+    unsubscribe('child_process', observe);
+  }
+  assert.deepEqual(current, original);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1], ['--no-pager', '--no-optional-locks', 'for-each-ref',
+    '--count=1', '--format=%(HEAD)%00%(refname)%00%(objectname)', '--', original.branch]);
+
+  await f.runGit('commit', '--allow-empty', '-qm', 'Advance owned binding fixture');
+  const advanced = await validateBinding(original);
+  assert.notEqual(advanced.head, original.head);
+  assert.equal(advanced.head, await f.runGit('rev-parse', 'HEAD'));
+  await f.runGit('checkout', '-qb', 'feature/binding-same-head');
+  assert.equal(await f.runGit('rev-parse', 'HEAD'), advanced.head);
+  await assert.rejects(validateBinding(original), { code: 'BINDING' });
+
+  await f.runGit('checkout', '-qb', 'feature/binding-prefix/child');
+  await assert.rejects(validateBinding({ ...original, branch: 'refs/heads/feature/binding-prefix' }),
+    { code: 'BINDING' });
+  await f.runGit('checkout', '-q', original.branch.slice('refs/heads/'.length));
+  await assert.rejects(validateBinding({ ...original, branch: `${original.branch}\0` }),
+    { code: 'BINDING' });
+
+  const worktree = path.join(f.root, 'binding linked tree');
+  await f.runGit('worktree', 'add', '-qb', 'feature/binding-linked', worktree);
+  const linked = await identity(worktree, 'primary');
+  assert.deepEqual(await validateBinding(linked), linked);
+  const unborn = path.join(f.root, 'binding unborn');
+  await f.runGit('init', '-q', unborn);
+  await f.runGit('-C', unborn, 'symbolic-ref', 'HEAD', 'refs/heads/binding/unborn');
+  const empty = await identity(unborn, 'primary');
+  assert.equal(empty.head, null);
+  assert.deepEqual(await validateBinding(empty), empty);
+
+  await f.runGit('symbolic-ref', 'refs/heads/binding-alias', original.branch);
+  await f.runGit('symbolic-ref', 'HEAD', 'refs/heads/binding-alias');
+  const alias = await identity(f.repo, 'primary');
+  assert.deepEqual(await validateBinding(alias), alias);
+  await f.runGit('checkout', '-q', '--detach', advanced.head);
+  await assert.rejects(validateBinding(original), { code: 'BINDING' });
 });
 test('T-19 bindings resolve linked worktrees and refuse stale branch authority', async t => {
   const f = await fixture(t);

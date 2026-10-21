@@ -248,8 +248,24 @@ Batch the three fresh Git repository-path queries into one plumbing invocation,
 then retain the existing branch-before-HEAD queries and all three canonical-path
 checks. Ambiguous line-framed path output uses the original individual queries.
 Do not cache repository, worktree, branch or revision state between calls.
+For an already bound ordinary branch, use its stored name only as a bounded
+current-ref lookup hint. Git must independently mark that exact full ref as the
+checked-out HEAD and return its current object ID before either fact is used.
+Missing, stale, unborn or unusual hints retain the original fresh symbolic-ref
+and HEAD queries; a same-commit different branch cannot qualify. All canonical
+path checks still run on each call, without a cross-call identity cache.
 The process-count and fresh-state regression is PR-only, outside the finite
 27-assertion local sanity profile; hosted latency still needs actual native proof.
+
+Read independent small Homebrew rollback-inventory entries in bounded batches
+of sixteen, preserving sorted depth-first records, modes, symlink targets and
+every payload hash. Drain each batch before recursion, failure or owned recovery
+cleanup. Hash initially larger-than-one-MiB payloads sequentially; small entries
+use bounded streaming buffers even if they grow during capture. The scheduling
+threshold is not a new accepted file-size limit.
+Keep receipt validation, real backups, copy verification, locks, durable state
+transitions and all channel, hook and quality commands unchanged. No captured
+dependency state is cached across mutation phases.
 
 For ordinary PR validation, use twenty independently required native producer
 parts consuming the same frozen candidate. Each platform has one unit producer

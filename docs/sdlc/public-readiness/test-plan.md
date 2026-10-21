@@ -818,6 +818,13 @@ partial comparison and do not silently retry to obtain a ratio.
    unborn and linked worktrees` root in `test/storage.test.mjs`. It checks real
    process counts and fresh path, branch and HEAD behavior, not a proxy native
    latency pass. Its addition does not expand L or remove an existing check.
+   Also execute the PR-only exact-current-ref binding regression in that file,
+   including a same-commit different branch, fresh revision, prefix mismatch,
+   unborn and linked-worktree cases. The two controlled Node-only Homebrew
+   rollback-inventory roots in `test/homebrew-switch.test.mjs` must retain all
+   real fixture bytes, modes and links, bound independent reads, serialize
+   large payloads and drain injected failures before recovery-state cleanup.
+   These component checks never replace the genuine Mac procedures or expand L.
 4. Mac jobs consume the same frozen architecture-neutral artifact/digest; do not
    independently rebuild and call different bytes the same artifact. Windows
    jobs use a real PE. Collect native environment/runtime probes and step exits.

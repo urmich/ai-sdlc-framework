@@ -22,20 +22,52 @@ export async function linkState(file) {
 export const ownsLauncher = (state, keg) => Boolean(keg) && state.kind === 'link' &&
   state.absolute === path.join(keg, 'bin', 'sdlc');
 
+async function boundedFileHash(file, size) {
+  const handle = await fs.open(file, 'r');
+  try {
+    let buffer = Buffer.alloc(Math.max(1, Math.min(size + 1, 1024 * 1024)));
+    const hash = createHash('sha256');
+    for (;;) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+      if (bytesRead === 0) return hash.digest('hex');
+      hash.update(buffer.subarray(0, bytesRead));
+      if (bytesRead === buffer.length && buffer.length < 1024 * 1024) {
+        buffer = Buffer.alloc(Math.min(buffer.length * 2, 1024 * 1024));
+      }
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
 async function inventory(root, relative = '') {
   const result = [];
-  for (const name of (await fs.readdir(path.join(root, relative))).sort()) {
-    const entry = path.join(relative, name);
-    const file = path.join(root, entry);
-    const stat = await fs.lstat(file);
-    if (stat.isDirectory()) result.push(...await inventory(root, entry));
-    else if (stat.isSymbolicLink()) result.push({ path: entry, link: await fs.readlink(file) });
-    else if (stat.isFile()) {
+  const names = (await fs.readdir(path.join(root, relative))).sort();
+  for (let offset = 0; offset < names.length; offset += 16) {
+    const batch = await Promise.allSettled(names.slice(offset, offset + 16).map(async name => {
+      const entry = path.join(relative, name);
+      const file = path.join(root, entry);
+      const stat = await fs.lstat(file);
+      if (stat.isDirectory()) return { directory: entry };
+      if (stat.isSymbolicLink()) return { record: { path: entry, link: await fs.readlink(file) } };
+      if (!stat.isFile()) throw new Error(`Unsupported Homebrew keg entry: ${file}`);
       // Homebrew may legitimately change installed-on-request flags in the receipt.
-      if (entry !== 'INSTALL_RECEIPT.json') result.push({
-        path: entry, mode: stat.mode & 0o777, sha256: sha256(await fs.readFile(file)),
-      });
-    } else throw new Error(`Unsupported Homebrew keg entry: ${file}`);
+      if (entry === 'INSTALL_RECEIPT.json') return {};
+      const record = { path: entry, mode: stat.mode & 0o777 };
+      // Keep larger payload buffers serial; this is not an accepted file-size limit.
+      if (stat.size > 1024 * 1024) return { record, file };
+      return { record: { ...record, sha256: await boundedFileHash(file, stat.size) } };
+    }));
+    // Drain dispatched reads before recursion, ordered failure or recovery cleanup.
+    for (const entry of batch) {
+      if (entry.status === 'rejected') throw entry.reason;
+      const { directory, record, file } = entry.value;
+      if (directory !== undefined) result.push(...await inventory(root, directory));
+      else if (record) {
+        if (file) record.sha256 = sha256(await fs.readFile(file));
+        result.push(record);
+      }
+    }
   }
   return result;
 }

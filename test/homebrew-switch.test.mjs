@@ -8,15 +8,209 @@ export const validationDeclarations = {
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
+import fsPromises from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { syncBuiltinESMExports } from 'node:module';
 import { switchFromHomebrew, switchToHomebrew, verifyHomebrewHooks,
   verifyCopiedHomebrewInstallation, resolveHomebrewRuntime } from '../scripts/homebrew-switch.mjs';
-import { linkState, restoreCapturedUpgradeLinks } from '../packaging/homebrew/switch-state.mjs';
+import { captureSwitchState, finishSwitchState, linkState, restoreCapturedUpgradeLinks,
+  verifyCapturedKegs } from '../packaging/homebrew/switch-state.mjs';
 
 const nativeMac = { skip: process.platform !== 'darwin' };
 const copiedHookEvents = ['sessionStart', 'userPromptSubmitted', 'preToolUse', 'postToolUse',
   'postToolUseFailure', 'preCompact', 'agentStop', 'sessionEnd'];
+
+test('Homebrew rollback inventory bounds independent reads and preserves every captured byte', async t => {
+  const root = await fs.mkdtemp(path.resolve('.test-data', 'homebrew-inventory-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const prefix = path.join(root, 'owned prefix');
+  const cellar = path.join(prefix, 'Cellar');
+  const keg = path.join(cellar, 'ai-sdlc-framework', '0.4.0');
+  await fs.mkdir(keg, { recursive: true });
+  await fs.writeFile(path.join(keg, 'INSTALL_RECEIPT.json'), JSON.stringify({
+    source: { tap: 'homebrew/core' }, runtime_dependencies: [],
+  }));
+  const expected = [];
+  for (let index = 0; index < 33; index++) {
+    const name = `payload-${String(index).padStart(2, '0')}`;
+    const bytes = Buffer.from(`owned rollback payload ${index}`);
+    const file = path.join(keg, name);
+    await fs.writeFile(file, bytes);
+    expected.push({ path: name, mode: (await fs.lstat(file)).mode & 0o777,
+      sha256: createHash('sha256').update(bytes).digest('hex') });
+  }
+  const large = Buffer.alloc(2 * 1024 * 1024, 37);
+  const largeFile = path.join(keg, 'payload-large');
+  await fs.writeFile(largeFile, large);
+  expected.push({ path: 'payload-large', mode: (await fs.lstat(largeFile)).mode & 0o777,
+    sha256: createHash('sha256').update(large).digest('hex') });
+  await fs.mkdir(path.join(keg, 'nested'));
+  const nested = path.join('nested', 'child');
+  const nestedBytes = Buffer.from('nested rollback bytes');
+  await fs.writeFile(path.join(keg, nested), nestedBytes);
+  expected.push({ path: nested, mode: (await fs.lstat(path.join(keg, nested))).mode & 0o777,
+    sha256: createHash('sha256').update(nestedBytes).digest('hex') });
+  await fs.symlink('payload-00', path.join(keg, 'payload-link'));
+  expected.push({ path: 'payload-link', link: 'payload-00' });
+  expected.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
+  const growingFile = path.join(keg, 'payload-32');
+  const growingBytes = Buffer.alloc(2 * 1024 * 1024, 91);
+  expected.find(entry => entry.path === 'payload-32').sha256 =
+    createHash('sha256').update(growingBytes).digest('hex');
+  const readFile = fsPromises.readFile;
+  const open = fsPromises.open;
+  let active = 0;
+  let peak = 0;
+  let grew = false;
+  let maximumReadBuffer = 0;
+  const mocked = t.mock.method(fsPromises, 'readFile', async (file, ...options) => {
+    if (['payload-large', 'payload-32'].includes(path.basename(String(file)))) {
+      assert.equal(active, 0, 'Large payloads must not multiply the concurrent read-buffer budget');
+    }
+    return readFile(file, ...options);
+  });
+  const mockedOpen = t.mock.method(fsPromises, 'open', async (file, ...options) => {
+    if (!path.basename(String(file)).startsWith('payload-')) return open(file, ...options);
+    active++;
+    peak = Math.max(peak, active);
+    try {
+      if (String(file) === growingFile && !grew) {
+        grew = true;
+        await fs.writeFile(file, growingBytes);
+      }
+      const handle = await open(file, ...options);
+      const read = handle.read.bind(handle);
+      const close = handle.close.bind(handle);
+      handle.read = async (...parameters) => {
+        maximumReadBuffer = Math.max(maximumReadBuffer, parameters[2]);
+        return read(...parameters);
+      };
+      handle.close = async () => {
+        try { return await close(); }
+        finally { active--; }
+      };
+      await new Promise(resolve => setImmediate(resolve));
+      return handle;
+    } catch (error) {
+      active--;
+      throw error;
+    }
+  });
+  syncBuiltinESMExports();
+  let state;
+  try {
+    state = await captureSwitchState({ prefix, cellar, formula: 'ai-sdlc-framework',
+      runBrew: async args => {
+        assert.deepEqual(args, ['--prefix', 'ai-sdlc-framework']);
+        return { stdout: keg };
+      } });
+    assert.ok(peak > 1 && peak <= 16, `Expected bounded overlapping reads, observed ${peak}`);
+    assert.equal(grew, true);
+    assert.equal(maximumReadBuffer, 1024 * 1024);
+    assert.equal(active, 0);
+    assert.equal(state.capturedBeforeBrew, true);
+    assert.equal(state.kegs.length, 1);
+    assert.deepEqual(state.kegs[0].files, expected);
+    await verifyCapturedKegs(state);
+    await fs.writeFile(path.join(keg, 'payload-17'), 'changed owned bytes');
+    await assert.rejects(verifyCapturedKegs(state), {
+      code: 'HOMEBREW_RETENTION_UNSUPPORTED',
+    });
+    assert.equal(await fs.readFile(path.join(state.kegs[0].backup, 'payload-17'), 'utf8'),
+      'owned rollback payload 17');
+  } finally {
+    mocked.mock.restore();
+    mockedOpen.mock.restore();
+    syncBuiltinESMExports();
+    if (state) await finishSwitchState(state);
+  }
+});
+
+test('Homebrew rollback inventory read failures drain before removing owned recovery state', async t => {
+  const root = await fs.mkdtemp(path.resolve('.test-data', 'homebrew-inventory-error-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const prefix = path.join(root, 'owned prefix');
+  const cellar = path.join(prefix, 'Cellar');
+  const keg = path.join(cellar, 'ai-sdlc-framework', '0.4.0');
+  await fs.mkdir(keg, { recursive: true });
+  await fs.writeFile(path.join(keg, 'INSTALL_RECEIPT.json'), JSON.stringify({
+    source: { tap: 'homebrew/core' }, runtime_dependencies: [],
+  }));
+  for (const name of ['payload-0', 'payload-1', 'payload-2']) {
+    await fs.writeFile(path.join(keg, name), 'owned rollback bytes');
+  }
+  const open = fsPromises.open;
+  const remove = fsPromises.rm;
+  const held = Promise.withResolvers();
+  const failureStarted = Promise.withResolvers();
+  const failure = Object.assign(new Error('controlled owned inventory read failure'), { code: 'EIO' });
+  const drained = [];
+  let started = 0;
+  let active = 0;
+  let cleanupWhileActive = false;
+  const mockedRead = t.mock.method(fsPromises, 'open', async (file, ...options) => {
+    if (!path.basename(String(file)).startsWith('payload-')) return open(file, ...options);
+    const done = Promise.withResolvers();
+    drained.push(done.promise);
+    active++;
+    try {
+      if (++started === 2) {
+        failureStarted.resolve();
+        throw failure;
+      }
+      const handle = await open(file, ...options);
+      const read = handle.read.bind(handle);
+      const close = handle.close.bind(handle);
+      handle.read = async (...parameters) => {
+        await held.promise;
+        return read(...parameters);
+      };
+      handle.close = async () => {
+        try { return await close(); }
+        finally {
+          active--;
+          done.resolve();
+        }
+      };
+      return handle;
+    } catch (error) {
+      active--;
+      done.resolve();
+      throw error;
+    }
+  });
+  const mockedRemove = t.mock.method(fsPromises, 'rm', async (...args) => {
+    cleanupWhileActive ||= active > 0;
+    return remove(...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    const capturing = captureSwitchState({ prefix, cellar, formula: 'ai-sdlc-framework',
+      runBrew: async () => ({ stdout: keg }) });
+    let settled = false;
+    capturing.then(() => { settled = true; }, () => { settled = true; });
+    await Promise.race([failureStarted.promise, capturing.then(
+      () => assert.fail('Expected the controlled inventory failure'),
+      error => { throw error; },
+    )]);
+    await new Promise(resolve => setImmediate(resolve));
+    const settledWhileHeld = settled;
+    held.resolve();
+    await assert.rejects(capturing, error => error === failure);
+    assert.equal(settledWhileHeld, false);
+    assert.equal(active, 0);
+    assert.equal(cleanupWhileActive, false);
+    await assert.rejects(fs.access(path.join(prefix, 'var', 'ai-sdlc-framework-switch', 'active.lock')),
+      { code: 'ENOENT' });
+  } finally {
+    held.resolve();
+    await Promise.allSettled(drained);
+    mockedRead.mock.restore();
+    mockedRemove.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
 
 test('T-PRD061 captured upgrade restores both opt and linked references before promotion without replacing foreign state',
   nativeMac, async t => {

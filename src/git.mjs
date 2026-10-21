@@ -20,7 +20,7 @@ export async function git(cwd, args, { optional = false, maxBuffer = LIMITS.arti
     throw new SdlcError('GIT', `Git ${args[0]} failed`, { cause: error.stderr?.trim() || error.message });
   }
 }
-export async function identity(cwd, repositoryId) {
+export async function identity(cwd, repositoryId, branchHint) {
   id(repositoryId, 'repository ID');
   const paths = (await git(cwd, ['rev-parse', '--path-format=absolute',
     '--show-toplevel', '--git-common-dir', '--absolute-git-dir'])).split(/\r?\n/u);
@@ -31,9 +31,22 @@ export async function identity(cwd, repositoryId) {
     await git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir']));
   const gitDir = await canonicalPath(paths.length === 3 ? paths[2].trimEnd() :
     await git(root, ['rev-parse', '--absolute-git-dir']));
-  const branch = await git(root, ['symbolic-ref', '-q', 'HEAD'], { optional: true });
+  let branch;
+  let head;
+  // A stored branch is only a lookup hint, never evidence of the current checkout.
+  if (typeof branchHint === 'string' && branchHint.length <= 4096 &&
+      /^refs\/heads\/[A-Za-z0-9._/-]+$/u.test(branchHint)) {
+    const current = (await git(root, ['for-each-ref', '--count=1',
+      '--format=%(HEAD)%00%(refname)%00%(objectname)', '--', branchHint])).split('\0');
+    if (current.length === 3 && current[0] === '*' && current[1] === branchHint &&
+        /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(current[2])) {
+      branch = current[1];
+      head = current[2];
+    }
+  }
+  branch ??= await git(root, ['symbolic-ref', '-q', 'HEAD'], { optional: true });
   requireThat(branch?.startsWith('refs/heads/'), 'BINDING', 'Detached HEAD requires an explicitly selected branch/worktree');
-  const head = await git(root, ['rev-parse', '--verify', '-q', 'HEAD'], { optional: true });
+  head ??= await git(root, ['rev-parse', '--verify', '-q', 'HEAD'], { optional: true });
   return { repositoryId, root, commonDir, branch, head, linkedWorktree: !sameNativePath(gitDir, commonDir),
     defaultBranch: null };
 }
@@ -77,7 +90,7 @@ export function sameBinding(left, right) {
     left.branch === right.branch;
 }
 export async function validateBinding(member) {
-  const current = await identity(member.root, member.repositoryId);
+  const current = await identity(member.root, member.repositoryId, member.branch);
   requireThat(sameBinding(member, current), 'BINDING', 'Repository/worktree/branch changed; explicitly bind and resume before mutation');
   return current;
 }
