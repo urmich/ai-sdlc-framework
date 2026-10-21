@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
-import { canonical, digest, id, requireThat } from '../src/core.mjs';
+import { canonical, digest, id, requireThat, SdlcError } from '../src/core.mjs';
 import { parseTestPlan, testSpecificationDigest } from '../src/artifacts.mjs';
 import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
   createEvidenceBundle, renderReadinessReport, requireReadinessEvaluation,
@@ -1343,6 +1343,26 @@ export async function runNativeValidation(options) {
   return { ...result, evaluation };
 }
 
+export async function writeNativeHomebrewReport(directory, result, primaryError) {
+  const report = { ...result, observedAt: new Date().toISOString() };
+  const file = path.join(directory, 'native-homebrew.json');
+  try {
+    await writeJson(file, report);
+  } catch (error) {
+    if (!(error instanceof SdlcError) || !['UNSAFE', 'CAPACITY', 'JSON'].includes(error.code)) throw error;
+    const original = Buffer.from(JSON.stringify(report));
+    await writeJson(file, {
+      nativeValidation: 'NotRun', observedAt: report.observedAt,
+      stage: ['formula', 'quality', 'lifecycle', 'verification'].includes(report.stage) ?
+        report.stage : 'evidence-retention',
+      diagnostic: processDiagnostic(primaryError ?? error),
+      retentionDiagnostic: processDiagnostic(error),
+      original: { sha256: digest(original), bytes: original.length },
+    });
+    throw primaryError ?? error;
+  }
+}
+
 async function runHomebrewProcedure(options) {
   const { target, candidateDir, evidenceDir } = validateNativeRequest(options);
   requireThat(target.startsWith('macos-') && process.platform === 'darwin' &&
@@ -1353,20 +1373,21 @@ async function runHomebrewProcedure(options) {
   const candidate = await verifyCandidate(candidateDir, { sourceCommit: process.env.EXPECTED_SOURCE_COMMIT,
     descriptorSha256: process.env.EXPECTED_DESCRIPTOR_SHA256,
     checksumsSha256: process.env.EXPECTED_CHECKSUMS_SHA256 });
+  let result;
   try {
     const { verifyNativeHomebrew } = await import('./release-gate.mjs');
-    const result = await verifyNativeHomebrew({ candidate, candidateDir, scratch: evidenceDir,
+    result = await verifyNativeHomebrew({ candidate, candidateDir, scratch: evidenceDir,
       targetArch: process.arch, mode: 'candidate' });
-    await writeJson(path.join(evidenceDir, 'native-homebrew.json'), {
-      ...result, observedAt: new Date().toISOString(),
-    });
   } catch (error) {
-    await writeJson(path.join(evidenceDir, 'native-homebrew.json'), {
-      nativeValidation: 'NotRun', diagnostic: error.message, observedAt: new Date().toISOString(),
-      evidence: error.homebrewResult?.evidence ?? null, quality: error.homebrewQuality ?? null,
-    });
+    await writeNativeHomebrewReport(evidenceDir, {
+      nativeValidation: error.homebrewResult?.nativeValidation ?? 'NotRun',
+      diagnostic: processDiagnostic(error), stage: error.homebrewResult?.stage,
+      evidence: error.homebrewResult?.evidence ?? null,
+      quality: error.homebrewResult?.quality ?? error.homebrewQuality ?? null,
+    }, error);
     throw error;
   }
+  await writeNativeHomebrewReport(evidenceDir, result);
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {

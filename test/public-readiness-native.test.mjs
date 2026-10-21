@@ -11,15 +11,16 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { digest } from '../src/core.mjs';
 import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
-  createEvidenceBundle, readEvidenceBundle, requireReadinessEvaluation, validateExecutionContext } from 'ai-sdlc-framework/evidence';
+  createEvidenceBundle, readEvidenceBundle, requireReadinessEvaluation, validateExecutionContext,
+  sanitizeExecutionPayload } from 'ai-sdlc-framework/evidence';
 import { aggregateNativeReadiness, nativeArtifacts, nativeSpecification, nativeGoObservations,
   parseNativeOptions, validateNativeRequest, evaluateNativeExecution,
   finalizeNativeEvidence, writeNativeReadinessBundle, nativeFailureAnnotations, assertGitFreeAncestors,
   nativeResourceFacts, prepareNativeHostFixtures,
   validateNativeSourceDefinitions, validateNativeGroupReport, nativeConfigurationDigest,
-  deriveNativeComponentSpecification } from '../scripts/native-validation.mjs';
+  deriveNativeComponentSpecification, writeNativeHomebrewReport } from '../scripts/native-validation.mjs';
 import { validateBootstrapRequest } from '../scripts/native-toolchain.mjs';
-import { reconcileGoExecution, executeValidationCommand } from '../scripts/validation-tools.mjs';
+import { reconcileGoExecution, executeValidationCommand, validationCommandArguments } from '../scripts/validation-tools.mjs';
 import { repositoryRoot, createPlan, parseOptions, run as runTests } from '../scripts/test-runner.mjs';
 import { discoverDeclarations, compileValidationSourceInventory } from '../scripts/validation-inventory.mjs';
 import { runCalculator, calculatorFiles, calculatorSelection, calculatorArguments,
@@ -659,6 +660,74 @@ test('T-PRD018 native Homebrew CLI failures retain structured diagnostics withou
   assert.equal(diagnostic.message, 'Unknown or repeated native option');
   assert.equal(report.cleanup.requested, false);
   assert.deepEqual(report.causes, []);
+});
+
+test('T-PRD018 Homebrew command evidence omits inline source while preserving its identity and actual execution', async t => {
+  const directory = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'homebrew-inline-'));
+  t.after(() => fs.rm(directory, { recursive: true }));
+  const source = 'JSON.stringify({platform:process.platform,arch:process.arch,major:Number(process.versions.node.split(".")[0])})';
+  const expected = `[inline source omitted; sha256=${digest(source)}; bytes=${Buffer.byteLength(source)}]`;
+  assert.throws(() => sanitizeExecutionPayload(Buffer.from(JSON.stringify({
+    command: process.execPath, args: ['-p', source],
+  }))), { code: 'UNSAFE' });
+  for (const flag of ['--eval', '-e', '--print', '-p', '-c']) {
+    assert.deepEqual(validationCommandArguments([flag, source, '--version']), [flag, expected, '--version']);
+  }
+  const report = await executeValidationCommand({ name: 'homebrew-inline', command: process.execPath,
+    args: ['-p', source], outputDir: directory });
+  assert.equal(report.complete, true);
+  assert.equal(report.exitCode, 0);
+  assert.deepEqual(JSON.parse(report.stdout), { platform: process.platform, arch: process.arch,
+    major: Number(process.versions.node.split('.')[0]) });
+  assert.deepEqual(report.command, [process.execPath, '-p', expected]);
+  await writeNativeHomebrewReport(directory, { nativeValidation: 'Failed', stage: 'lifecycle',
+    evidence: { passed: false, commands: [{ command: process.execPath,
+      args: validationCommandArguments(['-p', source]), success: true, stdout: report.stdout }] } });
+  const retained = JSON.parse(await fs.readFile(path.join(directory, 'native-homebrew.json'), 'utf8'));
+  assert.equal(retained.nativeValidation, 'Failed');
+  assert.deepEqual(retained.evidence.commands[0].args, ['-p', expected]);
+});
+
+test('T-PRD018 Homebrew report rejection preserves the primary failure and safe stage without false passing credit', async t => {
+  for (const kind of ['unsafe', 'capacity']) {
+    const directory = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'homebrew-retention-'));
+    t.after(() => fs.rm(directory, { recursive: true }));
+    const primary = Object.assign(new Error('Homebrew lifecycle command failed'), { code: 'BREW_FAILED' });
+    const evidence = kind === 'unsafe' ? { stderr: 'unsupported({ password: "owned-fixture-secret" })' } :
+      { commands: Array.from({ length: 66000 }, () => ({ success: true })) };
+    await assert.rejects(writeNativeHomebrewReport(directory,
+      { nativeValidation: 'Failed', stage: 'lifecycle', evidence }, primary), error => error === primary);
+    const bytes = await fs.readFile(path.join(directory, 'native-homebrew.json'));
+    const retained = JSON.parse(bytes);
+    assert.equal(retained.nativeValidation, 'NotRun');
+    assert.equal(retained.stage, 'lifecycle');
+    assert.equal(retained.diagnostic.code, 'BREW_FAILED');
+    assert.equal(retained.diagnostic.message, primary.message);
+    assert.equal(retained.diagnostic.original.sha256, digest(primary.message));
+    assert.equal(retained.retentionDiagnostic.code, kind === 'unsafe' ? 'UNSAFE' : 'CAPACITY');
+    assert.deepEqual(retained.original, { sha256: digest(JSON.stringify({
+      nativeValidation: 'Failed', stage: 'lifecycle', evidence, observedAt: retained.observedAt,
+    })), bytes: Buffer.byteLength(JSON.stringify({
+      nativeValidation: 'Failed', stage: 'lifecycle', evidence, observedAt: retained.observedAt,
+    })) });
+    assert.ok(bytes.length < 2000);
+    assert.ok(!bytes.includes(Buffer.from('owned-fixture-secret')));
+  }
+});
+
+test('T-PRD018 unretainable successful Homebrew evidence fails explicitly and cannot replace an original report', async t => {
+  const directory = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'homebrew-success-retention-'));
+  t.after(() => fs.rm(directory, { recursive: true }));
+  await assert.rejects(writeNativeHomebrewReport(directory, { nativeValidation: 'Passed',
+    evidence: { stdout: 'JSON.stringify({platform:process.platform,arch:process.arch,major:Number(process.versions.node.split(".")[0])})' } }),
+  { code: 'UNSAFE' });
+  const original = await fs.readFile(path.join(directory, 'native-homebrew.json'));
+  const report = JSON.parse(original);
+  assert.equal(report.nativeValidation, 'NotRun');
+  assert.equal(report.stage, 'evidence-retention');
+  assert.equal(report.diagnostic.code, 'UNSAFE');
+  await assert.rejects(writeNativeHomebrewReport(directory, { nativeValidation: 'Passed' }), { code: 'EEXIST' });
+  assert.deepEqual(await fs.readFile(path.join(directory, 'native-homebrew.json')), original);
 });
 
 test('T-PRD018 native failure annotations escape workflow-command injection without changing the underlying failure', () => {

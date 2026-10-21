@@ -13,6 +13,7 @@ import { assertConsumerUpdate, assertConsumerUninstall, installedConsumerSnapsho
 import { verifyReleaseChecksums } from './verify-platform-package.mjs';
 import { nativeToolchain, homebrewToolchain } from './toolchain-baseline.mjs';
 import { verifyHomebrewPrefixOwnership } from './native-homebrew-prefix.mjs';
+import { validationCommandArguments } from './validation-tools.mjs';
 
 const execute = runHomebrewCommand;
 const ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
@@ -76,7 +77,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
   let formulaName;
   let formulaFile;
   const run = async (command, args, options = {}) => {
-    const entry = { command, args };
+    const entry = { command, args: validationCommandArguments(args) };
     evidence.commands.push(entry);
     try {
       if (command === brew) {

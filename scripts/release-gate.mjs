@@ -143,6 +143,7 @@ export async function verifyNativeHomebrew({ candidate, candidateDir, scratch,
     candidateBaseUrl = `http://127.0.0.1:${server.address().port}/`;
   }
   let quality;
+  let stage = 'formula';
   try {
     let formula = candidate.descriptor.files.find(file => file.kind === 'homebrew');
     let formulaPath = formula && path.resolve(candidateDir, 'assets', formula.filename);
@@ -156,9 +157,11 @@ export async function verifyNativeHomebrew({ candidate, candidateDir, scratch,
       formulaPath = artifact;
     }
     if (!formulaPath) throw integrationBlocked('Native Homebrew audit/style requires candidate-bound formula metadata');
+    stage = 'quality';
     quality = await verifyQuality({ candidate, formulaPath, mode, candidateBaseUrl, environment,
       targetArch, outputDir: path.join(scratch, `${targetArch}-homebrew-quality`), brew });
     validateHomebrewQualityEvidence(quality, { identity: candidate.context.identity, targetArch, formula, mode });
+    stage = 'lifecycle';
     const evidence = await verifyLifecycle({ brew, candidateDirectory: previous.directory, root,
       targetArch, mode, upgradeDirectory: path.resolve(candidateDir, 'assets'), expectedNodeVersion, environment,
       expectedPreviousIdentity: previous.identity, expectedCurrentIdentity: candidate.context.identity });
@@ -169,6 +172,7 @@ export async function verifyNativeHomebrew({ candidate, candidateDir, scratch,
         [true, 1, '1'].includes(evidence.sysctlProcTranslated) || evidence.cleanupError) {
       throw new Error('Mandatory Homebrew native lifecycle, architecture or cleanup did not pass');
     }
+    stage = 'verification';
     const result = { nativeValidation: 'Passed', evidence, quality,
       previousMetadata: { descriptor: previous.descriptor, checksums: previous.checksums ??
         await fs.readFile(path.join(previous.directory, 'SHA256SUMS'), 'utf8') },
@@ -178,7 +182,7 @@ export async function verifyNativeHomebrew({ candidate, candidateDir, scratch,
   } catch (error) {
     const evidence = await readJson(path.join(root, 'evidence.json')).catch(() => null);
     error.homebrewResult = { nativeValidation: error.code === 'RELEASE_INTEGRATION_BLOCKED' ? 'NotRun' : 'Failed',
-      reason: error.message, evidence, quality };
+      reason: error.message, stage, evidence, quality: quality ?? error.homebrewQuality ?? null };
     error.retainedWorkspace = scratch;
     throw error;
   } finally {

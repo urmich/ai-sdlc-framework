@@ -549,6 +549,16 @@ the lifecycle procedure begins. Do not emit raw Node inspection stacks that
 strict transcript retention must reject. Preserve the original diagnostic
 identity and failed/NotRun outcome without relaxing sanitization, host checks or
 candidate identity requirements.
+Reuse the command-evidence argument normalizer for Homebrew lifecycle records:
+inline programs remain executable inputs, not log fragments. Retain an omitted
+program's exact SHA-256 and byte count without storing its source in log fields.
+The existing top-level native Homebrew report retains sanitized lifecycle and
+quality details; do not upload whole nested workspaces, fixtures or binaries.
+If strict retention rejects that rich report, retain a bounded non-passing
+record with its original identity, the primary process diagnostic, the actual
+procedure stage and a separate retention diagnostic. Rethrow the primary error
+when present; a serialization failure must neither hide it nor create passing
+credit. Preserve exclusive report creation and all existing retention budgets.
 
 ### 5.4 Currentness, reduction and compatibility
 

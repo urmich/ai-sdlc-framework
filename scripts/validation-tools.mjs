@@ -217,6 +217,12 @@ export function processDiagnostic(error) {
   original: { sha256: digest(original), bytes: Buffer.byteLength(original) } };
 }
 
+export function validationCommandArguments(args) {
+  return args.map((argument, index) =>
+    ['--eval', '-e', '--print', '-p', '-c'].includes(args[index - 1]) ?
+      `[inline source omitted; sha256=${digest(argument)}; bytes=${Buffer.byteLength(argument)}]` : argument);
+}
+
 function commandReportBytes(report) {
   const sanitized = sanitizeExecutionPayload(Buffer.from(JSON.stringify(report)));
   const bytes = Buffer.from(`${JSON.stringify(sanitized)}\n`);
@@ -340,9 +346,7 @@ export async function executeValidationCommand({
       });
       return value;
     };
-    const actualCommand = [command, ...args].map((argument, index, values) =>
-      ['--eval', '-e', '--print', '-p', '-c'].includes(values[index - 1]) ?
-        '[inline source omitted; use the source-bound validation procedure]' : argument);
+    const actualCommand = [command, ...validationCommandArguments(args)];
     const report = {
       schemaVersion: 1, kind: 'validation-command', command: actualCommand, cwd,
       startedAt: new Date().toISOString(), finishedAt: null, complete: false,
