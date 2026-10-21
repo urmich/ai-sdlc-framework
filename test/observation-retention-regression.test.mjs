@@ -410,16 +410,24 @@ test('FR-063 newly associated monitor is reported STALE instead of reversing loc
   let waiting;
   const waitingForWorkLock = new Promise(resolve => { waiting = resolve; });
   const transaction = f.store.transaction.bind(f.store);
-  t.mock.method(f.store, 'transaction', (...args) => {
+  t.mock.method(f.store, 'transaction', async (...args) => {
     waiting();
+    await held;
     return transaction(...args);
   });
-  const pruning = pruneObservations(f);
-  const rejection = assert.rejects(pruning, { code: 'STALE' });
-  await waitingForWorkLock;
-  await associationFixture(f, pr);
-  release();
-  await Promise.all([held, rejection]);
+  try {
+    await Promise.all([
+      assert.rejects(pruneObservations(f), { code: 'STALE' }),
+      (async () => {
+        await waitingForWorkLock;
+        try { await associationFixture(f, pr); }
+        finally { release(); }
+      })(),
+    ]);
+  } finally {
+    release();
+    await held;
+  }
   await pruneObservations(f);
   assert.ok((await f.store.records(f.workItemId)).some(record => record.id === pr.id));
 });

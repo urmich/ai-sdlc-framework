@@ -84,14 +84,16 @@ test('T-PRD018 command capture durably retains dispatched identity and sanitized
     delete environment.NODE_TEST_CONTEXT;
     delete environment.SDLC_TEST_REPORT_CONTEXT;
     const module = pathToFileURL(path.resolve('scripts', 'validation-tools.mjs')).href;
+    const filesModule = pathToFileURL(path.resolve('src', 'files.mjs')).href;
     for (const abrupt of [false, true]) {
       const name = abrupt ? 'abrupt-command' : 'cancelled-command';
       const marker = path.join(directory, `${name}-entered.json`);
       const release = path.join(directory, `${name}-release`);
       const source = path.join(directory, `${name}.mjs`);
       await fs.writeFile(source, `import * as fs from 'node:fs/promises';
+import {atomicWrite} from ${JSON.stringify(filesModule)};
 import {setTimeout as delay} from 'node:timers/promises';
-await fs.writeFile(${JSON.stringify(marker)},JSON.stringify({pid:process.pid,parentPid:process.ppid}));
+await atomicWrite(${JSON.stringify(marker)},JSON.stringify({pid:process.pid,parentPid:process.ppid}));
 console.log(JSON.stringify({authorization:'fixture-checkpoint-private-value'}));
 const deadline=Date.now()+20000;
 while(!(await fs.stat(${JSON.stringify(release)}).catch(error=>{

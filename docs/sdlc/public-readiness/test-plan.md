@@ -116,6 +116,11 @@ on filesystem notifications that may coalesce. Launcher fixtures await both the
 real child result and input-stream completion: an early rejecting child's exit
 and stderr remain primary, while an input failure alone cannot pass a successful
 child. Keep every existing signal, cleanup, output-identity and deadline assertion.
+Readiness markers are published atomically; malformed JSON is not an initializing
+state to ignore or retry. The controlled pruning race creates its association
+while a real work-item lock is held, then releases that lock before the queued
+real transaction begins. Its stale-dependency assertion must not depend on
+association setup finishing within the unchanged lock-wait budget.
 
 Local test results are not inputs required from an external contributor merely
 to open a PR. PR jobs never
