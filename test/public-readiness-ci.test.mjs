@@ -20,6 +20,7 @@ import { buildLauncher, launcherBuildEnvironment } from '../packaging/winget/bui
 import { generateManifests } from '../packaging/winget/generate.mjs';
 import { writePayloadFixture, fixtureCanonical, fixtureSHA } from './winget-payload-fixture.mjs';
 import { repositoryRoot } from '../scripts/test-runner.mjs';
+import { previousReleasePins } from '../scripts/release-bundle.mjs';
 import { digest } from '../src/core.mjs';
 import { evaluateApproval, evaluateConversations, sharedStatusKeys, planStatusUpdate, reconcileStatusKey,
   reconcilePrReadiness, statusContexts, normalStatusLimit, disposableStatusLimits,
@@ -784,15 +785,24 @@ writeFileSync(${JSON.stringify(ready)},JSON.stringify({pid:process.pid}));
       if (order !== 'exit-before-stop-failure') {
         const deadline = Date.now() + 20000;
         let partial;
+        let latest;
         while (!partial) {
           try {
             const value = JSON.parse(await fs.readFile(path.join(f.reportDir, `${name}.json`), 'utf8'));
+            latest = value;
             if (value.cleanup.outcome === 'uncertain') partial = value;
           } catch (error) {
             if (!(error instanceof SyntaxError)) throw error;
           }
           if (!partial) {
-            assert.ok(Date.now() < deadline, 'Uncertain cleanup did not retain its pending original report');
+            if (Date.now() >= deadline) {
+              const events = (await fs.readFile(path.join(f.reportDir, `${name}.journal.ndjson`), 'utf8'))
+                .trim().split('\n').map(JSON.parse);
+              assert.fail(`Uncertain cleanup did not retain its pending original report: ${
+                JSON.stringify({ order, report: latest, events: events.map(event => ({
+                  kind: event.kind, cleanup: event.cleanup, cause: event.cause,
+                })) })}`);
+            }
             await delay(10);
           }
         }
@@ -1278,6 +1288,10 @@ test('T-PRD020 actual CI schedules four independent native lanes after source-on
   const result = inspectWorkflowTrust(workflows);
   assert.equal(result.complete, true, JSON.stringify(result.blockers));
   const ci = result.workflows.find(item => item.file === '.github/workflows/ci.yml').document;
+  const previous = previousReleasePins(ci.env, 'fixture/repo', { required: true });
+  const pkg = JSON.parse(await fs.readFile(path.join(repositoryRoot, 'package.json'), 'utf8'));
+  assert.notEqual(previous.version, pkg.version,
+    'Ordinary PR validation must freeze a complete prior-version baseline without repository settings');
   assert.ok(ci.on.pull_request.types.includes('edited'));
   assert.equal(ci.jobs.source.name, 'Freeze source candidate');
   assert.equal(ci.jobs.source.needs, 'intent');

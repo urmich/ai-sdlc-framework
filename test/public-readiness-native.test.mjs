@@ -11,10 +11,10 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { digest } from '../src/core.mjs';
 import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
-  createEvidenceBundle, requireReadinessEvaluation, validateExecutionContext } from 'ai-sdlc-framework/evidence';
+  createEvidenceBundle, readEvidenceBundle, requireReadinessEvaluation, validateExecutionContext } from 'ai-sdlc-framework/evidence';
 import { aggregateNativeReadiness, nativeArtifacts, nativeSpecification, nativeGoObservations,
   parseNativeOptions, validateNativeRequest, evaluateNativeExecution,
-  finalizeNativeEvidence, nativeFailureAnnotations, assertGitFreeAncestors,
+  finalizeNativeEvidence, writeNativeReadinessBundle, nativeFailureAnnotations, assertGitFreeAncestors,
   nativeResourceFacts, prepareNativeHostFixtures,
   validateNativeSourceDefinitions, validateNativeGroupReport, nativeConfigurationDigest,
   deriveNativeComponentSpecification } from '../scripts/native-validation.mjs';
@@ -603,6 +603,42 @@ test('T-PRD018 native finalization persists missing-stage failure bundles and pr
   assert.deepEqual(Buffer.from(original.content, 'base64'), executionBytes);
   assert.match(await fs.readFile(path.join(directory, 'readiness.md'), 'utf8'), /NotRun|Failed/u);
   await assert.rejects(finalizeNativeEvidence(args), { code: 'EEXIST' });
+});
+
+test('T-PRD018 native readiness persistence retains large paged failure bundles without whole-container sanitizer limits', async t => {
+  const f = fixture();
+  const lane = f.lanes[0];
+  const largeInventory = { ...inventory, cases: Array.from({ length: 1800 }, (_, index) => ({
+    ...inventory.cases[0], id: `native-large-${index}`, name: `native incomplete assertion ${index}`,
+  })) };
+  const specification = nativeSpecification({ plan, inventory: largeInventory, goSources: sources,
+    target: lane.target, profile: 'pr' });
+  const context = { ...lane.context, inventoryDigest: validationInventoryDigest(specification) };
+  const directory = path.join(repositoryRoot, '.test-data', `native-partial-large-${randomUUID()}`);
+  await fs.mkdir(directory, { recursive: true });
+  t.after(async () => {
+    assert.equal(path.dirname(directory), path.join(repositoryRoot, '.test-data'));
+    await fs.rm(directory, { recursive: true });
+    await assert.rejects(fs.stat(directory), { code: 'ENOENT' });
+  });
+  const raw = f.report({ ...lane, context, specification }, report => {
+    report.complete = false;
+    report.finishedAt = null;
+    report.exitCode = 2;
+  });
+  const evaluation = evaluateNativeExecution(specification, raw);
+  const file = path.join(directory, 'readiness-bundle.json');
+  await writeNativeReadinessBundle(file, evaluation);
+  assert.equal(evaluation.status, 'NotRun');
+  const bundle = JSON.parse(await fs.readFile(file, 'utf8'));
+  const original = bundle.objects.find(object => object.value.kind === 'execution-bytes').value;
+  assert.equal(original.sha256, digest(raw));
+  assert.deepEqual(JSON.parse(Buffer.from(original.content, 'base64').toString('utf8')), raw);
+  const replayed = readEvidenceBundle(bundle, { specification,
+    context: requireReadinessEvaluation(evaluation).context });
+  assert.equal(replayed.evaluation.status, 'NotRun');
+  assert.equal(replayed.evaluation.cases[0].assertions.length, specification.cases[0].assertions.length);
+  await assert.rejects(writeNativeReadinessBundle(file, evaluation), { code: 'EEXIST' });
 });
 
 test('T-PRD018 native failure annotations escape workflow-command injection without changing the underlying failure', () => {

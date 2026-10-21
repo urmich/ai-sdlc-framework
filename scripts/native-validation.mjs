@@ -90,8 +90,12 @@ export function nativeResourceFacts({ availableParallelism = os.availableParalle
 }
 
 async function writeJson(file, value) {
+  await writeCanonicalJson(file, canonical(safe(value)));
+}
+
+async function writeCanonicalJson(file, contents) {
   const handle = await fs.open(file, 'wx');
-  try { await handle.writeFile(canonical(safe(value))); await handle.sync(); }
+  try { await handle.writeFile(contents); await handle.sync(); }
   finally { await handle.close(); }
 }
 
@@ -1001,6 +1005,11 @@ function producerInputs(context, target) {
     attempt: context.producer.attemptRef };
 }
 
+export async function writeNativeReadinessBundle(file, evaluation) {
+  // The SDK validates each bounded object; its paged container is not one retained object.
+  await writeCanonicalJson(file, canonical(createEvidenceBundle(evaluation)));
+}
+
 export async function finalizeNativeEvidence({ directory, inventory, sources, calculatorSources, target, stages,
   context, specification, startedAt, candidate, failure = null, cancelled = false, completeReportRef }) {
   const collected = await collectExecution({ directory, inventory, sources, calculatorSources, target, stages,
@@ -1013,7 +1022,7 @@ export async function finalizeNativeEvidence({ directory, inventory, sources, ca
   const retainedRaw = safe(collected.raw);
   await writeJson(path.join(directory, 'execution.json'), retainedRaw);
   const evaluation = evaluateNativeExecution(specification, retainedRaw);
-  await writeJson(path.join(directory, 'readiness-bundle.json'), createEvidenceBundle(evaluation));
+  await writeNativeReadinessBundle(path.join(directory, 'readiness-bundle.json'), evaluation);
   const escape = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;').replaceAll('`', '&#96;').replaceAll('\r', '').replaceAll('\n', ' ');
   const markdown = `# Native execution identity\n\n` +

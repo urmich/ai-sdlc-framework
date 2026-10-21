@@ -532,6 +532,11 @@ logical plan has fewer than 100 rows. Reuse referenced catalogs and paged outcom
 objects, including the existing 64-slot page mechanism, rather than truncating
 cases or embedding all histories in one checkpoint. Existing object/record
 budgets remain enforced; capacity failure is explicit and non-passing.
+Persist the SDK-created bundle canonically with exclusive creation and fsync.
+Its objects have already passed the SDK's per-object sanitization, integrity
+and paging checks; applying that single-object sanitizer again to the aggregate
+container incorrectly rejects valid large failure reports. Keep the existing
+object, sanitizer-work and aggregate byte budgets unchanged.
 
 ### 5.4 Currentness, reduction and compatibility
 
@@ -1208,6 +1213,11 @@ upgrade-directory with all four external metadata pins and keeps public
 acceptance NotRun. Public Homebrew executes exact saved published formulas and
 URLs without regeneration. A same-version formula revision cannot receive
 R-PRE or R-POST version-upgrade credit.
+Ordinary PR CI supplies reviewed, source-controlled pins for the genuine public
+v0.3.1 binary baseline, independent of repository variables. Its original
+descriptor binds the legacy platform archives. This is a representative
+regression input, not an installer support whitelist or the release workflow's
+separately selected previous-release configuration.
 
 Each actual operation verifies owned byte/manifest equality and zero changed
 files for idempotence; ordinary uninstall removes every owned asset/manifest/
