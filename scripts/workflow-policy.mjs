@@ -19,7 +19,8 @@ const attest = { ...actionsRead, 'id-token': 'write', attestations: 'write' };
 const statusWriter = { ...actionsRead, 'pull-requests': 'read', statuses: 'write' };
 export const workflowPermissionPolicies = Object.freeze({
   '.github/workflows/ci.yml': { role: 'producer', workflow: read,
-    jobs: { intent: {}, 'minimum-node': read, source: read, native: read, 'producer-summary': {} } },
+    jobs: { intent: {}, 'minimum-node': read, source: read, 'native-units': read,
+      native: read, 'native-homebrew': read, 'producer-summary': {} } },
   '.github/workflows/pr-policy-refresh.yml': { role: 'refresh', workflow: {},
     jobs: { refresh: {}, probe: statusWriter }, jobRoles: { probe: 'observer' } },
   '.github/workflows/pr-readiness.yml': { role: 'observer', workflow: statusWriter, jobs: { observe: statusWriter } },

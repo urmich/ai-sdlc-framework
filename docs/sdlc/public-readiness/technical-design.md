@@ -244,15 +244,31 @@ growth limit and identity/content/metadata confirmation checks. Empty-check PR
 fact updates use their full authoritative transaction without a redundant
 preliminary history scan; monitored checks retain their association preflight.
 
-For ordinary PR validation, run each Mac platform's framework inventory and real
-Homebrew procedure as independently required parallel producer parts on separate
-native hosts and owned prefixes, consuming the same frozen candidate. Preserve
-the complete assertion union and independently verified per-part SDK contexts;
-missing or mismatched parts or cleanup cannot produce platform completeness.
-Default whole-native execution and release prepublication behavior remain
-compatible. The required logical lane span is under fifteen minutes from its
-earliest required part's worker start through its last part's evidence/cleanup
-completion, not a claim based on configured workers or one selected part.
+For ordinary PR validation, use twenty independently required native producer
+parts consuming the same frozen candidate. Each platform has one unit producer
+and one producer containing the entire unchanged 550-refresh root. Partition
+the remaining root closures across two Linux/Windows body producers and three
+body producers per Mac architecture; each Mac also retains its real Homebrew
+producer. Separate hosts add actual execution capacity rather than multiplying
+one host's worker budget. Preserve every original root and descendant identity,
+declared resource constraint and substantive native/tool/static/project stage.
+
+Derive the exact disjoint assignment from the frozen source inventory, not the
+observed part results. Require source-, platform-, job-, run- and attempt-bound
+unit evidence before regression shards execute. Independently verify every
+part's SDK context, complete assertion union and allocated-prefix cleanup;
+missing, duplicated, overlapping or swapped parts cannot produce completeness.
+The initial job-level matrix barrier waits for all four unit producers, including
+their evidence retention and cleanup, before any regression shard starts.
+This deliberately broader barrier is included in every logical lane's elapsed
+time. All twelve Mac producer prefixes require distinct owned allocation and
+matching guarded cleanup; no producer may borrow another's receipt.
+Keep default whole-native execution and release prepublication compatible.
+The required logical lane span remains under fifteen minutes from its earliest
+required unit/framework/Homebrew worker start through its last evidence/cleanup
+completion, including unit barriers, repeated provisioning and internal queues.
+Configured host fan-out, an isolated shard time or an elapsed-work estimate is
+not a passing latency result; fresh complete hosted measurements are required.
 
 Reuse only verified immutable fixture inputs such as an unchanged payload
 build. Keep transactions, durability flushes, lock races, archival and cleanup
@@ -314,6 +330,13 @@ report or an already completed final report; attempt/run identity and digest
 select a new output. Missing final output, interrupted snapshots and journal-only
 recovery cannot pass readiness. A kill before initial publication or an OS/
 filesystem failure may still prevent the first checkpoint.
+
+Periodic worker replacements reuse `atomicWrite`, including its existing
+100-ms recovery budget for classified Windows sharing conflicts, rather than
+performing an unguarded one-shot rename. Keep the initial exclusive report
+claim, staged-file durability and explicit failure/cancellation behavior.
+An exhausted or unclassified replacement error remains non-passing; no test
+deadline, output bound or worker liveness assertion is relaxed.
 
 Checkpoint retention rejection preserves a bounded invalid-partial record with
 the actual cause and original snapshot identity, not passing observation rows.

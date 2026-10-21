@@ -13,6 +13,14 @@ export const validationDeclarations = {
   },
   "applicability": [{
     "names": [
+      "T-PRD018 periodic checkpoints recover a transient Windows replacement conflict without losing the active worker"
+    ],
+    "platforms": ["windows-x64"],
+    "owner": "runner-checkpoint-contract",
+    "reason": "Classified Windows sharing conflicts must recover within the existing atomic replacement budget.",
+    "prerequisites": ["Native Windows atomic file replacement"]
+  }, {
+    "names": [
       "T-130 SIGINT cancels active file workers before the public runner returns",
       "T-130 SIGTERM cancels active file workers before the public runner returns",
       "T-136 public runner enforces 1 real file workers and executes every file once",
@@ -667,7 +675,9 @@ async function assertJournalCheckpoint(reportPath, report) {
   return rows;
 }
 
-async function assertDurableRunningCheckpoint(t, { hiddenLease = false } = {}) {
+async function assertDurableRunningCheckpoint(t, {
+  hiddenLease = false, replacementConflict = false,
+} = {}) {
     let root = repositoryRoot;
     if (hiddenLease) {
       root = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'checkpoint-observer-copy-'));
@@ -703,17 +713,38 @@ test('queued root must remain unstarted',()=>assert.fail('queued root executed')
     const reportPath = path.join(hiddenLease ? path.join(root, '.test-data') : evidence, 'partial.json');
     const gate = path.join(directory, 'lease-visible');
     const observationPath = path.join(directory, 'lease-observations.ndjson');
+    const conflictMarker = path.join(directory, 'replacement-conflict.json');
     if (hiddenLease) {
       const plan = await createPlan(parseOptions(['targeted', '--workers', '1', file], {}), root);
       const group = plan.groups.find(group => group.name.includes('silent blocked root'));
       assert.ok(group);
       await fs.rename(path.join(root, 'scripts', 'test-budget.mjs'),
         path.join(root, 'scripts', 'test-budget-observer-original.mjs'));
+      const replacementProbe = replacementConflict ? `
+import mutableFs from 'node:fs/promises';import {syncBuiltinESMExports} from 'node:module';
+const originalRename=mutableFs.rename;
+let conflictInjected=false;
+mutableFs.rename=async(from,to)=>{
+  if(!conflictInjected&&to===${JSON.stringify(reportPath)}){
+    const snapshot=JSON.parse(await mutableFs.readFile(from,'utf8'));
+    if(snapshot.checkpoint?.phase==='running'&&snapshot.groupExecution.groups.some(group=>
+      group.root==='silent blocked root'&&group.startedAt&&!group.finishedAt&&group.processIds.length)){
+      conflictInjected=true;
+      await mutableFs.writeFile(${JSON.stringify(conflictMarker)},
+        JSON.stringify({code:'EPERM',phase:'running'}),{flag:'wx'});
+      throw Object.assign(new Error('Controlled transient checkpoint replacement conflict'),{code:'EPERM'});
+    }
+  }
+  return originalRename(from,to);
+};
+syncBuiltinESMExports();
+` : '';
       await fs.writeFile(path.join(root, 'scripts', 'test-budget.mjs'), `
 export * from './test-budget-observer-original.mjs';
 import {readTestGroupProcesses as actualProcesses,readTestBudget as actualBudget}
   from './test-budget-observer-original.mjs';
 import {existsSync} from 'node:fs';import {appendFile} from 'node:fs/promises';
+${replacementProbe}
 export async function readTestGroupProcesses(groupId){
   const hidden=groupId===${JSON.stringify(group.id)}&&!existsSync(${JSON.stringify(gate)});
   const processes=await actualProcesses(groupId);
@@ -790,6 +821,10 @@ export async function readTestGroupProcesses(groupId){
           }
         }
       }
+      if (replacementConflict) {
+        assert.deepEqual(JSON.parse(await fs.readFile(conflictMarker, 'utf8')),
+          { code: 'EPERM', phase: 'running' });
+      }
       process.kill(owned.producerPid, 'SIGKILL');
       await waitFor(() => !processRunning(owned.producerPid), 'owned producer termination');
       const preserved = await fs.readFile(reportPath);
@@ -815,6 +850,8 @@ export async function readTestGroupProcesses(groupId){
       t.diagnostic(JSON.stringify({
         evidence: path.relative(repositoryRoot, evidence).split(path.sep).join('/'), owned,
         checkpoint: progress?.checkpoint,
+        checkpointError: progress?.checkpointError,
+        evidenceError: progress?.evidenceError,
         groups: progress?.groupExecution.groups.map(group => ({
           id: group.id, name: group.name, startedAt: group.startedAt,
           finishedAt: group.finishedAt, processIds: group.processIds,
@@ -839,6 +876,12 @@ test('T-PRD018 silent active roots retain durable partial JSON and original jour
 
 test('T-PRD018 periodic checkpoints refresh a hidden real worker lease before retaining progress',
   { timeout: 30000 }, t => assertDurableRunningCheckpoint(t, { hiddenLease: true }));
+
+test('T-PRD018 periodic checkpoints recover a transient Windows replacement conflict without losing the active worker',
+  { timeout: 30000 }, t => {
+    if (process.platform !== 'win32') { t.skip('Native Windows atomic file replacement is required'); return; }
+    return assertDurableRunningCheckpoint(t, { hiddenLease: true, replacementConflict: true });
+  });
 
 test('T-PRD018 checkpoint capacity rejection preserves a bounded incomplete report and the original journal',
   { timeout: 30000 }, async t => {

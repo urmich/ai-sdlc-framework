@@ -22,7 +22,7 @@ import { generateManifests } from '../packaging/winget/generate.mjs';
 import { writePayloadFixture, fixtureCanonical, fixtureSHA } from './winget-payload-fixture.mjs';
 import { repositoryRoot } from '../scripts/test-runner.mjs';
 import { previousReleasePins } from '../scripts/release-bundle.mjs';
-import { nativePrParts } from '../scripts/native-validation.mjs';
+import { nativePrParts, nativeLegacyPrParts, nativePartJobKey } from '../scripts/native-validation.mjs';
 import { digest } from '../src/core.mjs';
 import { evaluateApproval, evaluateConversations, sharedStatusKeys, planStatusUpdate, reconcileStatusKey,
   reconcilePrReadiness, statusContexts, normalStatusLimit, disposableStatusLimits,
@@ -1071,7 +1071,7 @@ jobs:
   native:
     strategy:
       matrix:
-        include: ${JSON.stringify(nativePrParts.map(part => ({ ...part,
+        include: ${JSON.stringify(nativeLegacyPrParts.map(part => ({ ...part,
     os: { 'linux-x64': 'ubuntu-24.04', 'windows-x64': 'windows-2022',
       'macos-arm64': 'macos-15', 'macos-x64': 'macos-15-intel' }[part.target],
     architecture: part.target.split('-')[1] })))}
@@ -1347,7 +1347,7 @@ function contextProof() {
     expectedMerge: body.mergeSha, prNumber: 1 } };
 }
 
-test('T-PRD020 actual CI schedules six producer parts in four native lanes after source-only freeze and distinguishes edited base retargets', async () => {
+test('T-PRD020 actual CI schedules twenty producer parts behind a complete unit barrier and distinguishes edited base retargets', async () => {
   const workflows = await readWorkflowPolicySources(repositoryRoot);
   const result = inspectWorkflowTrust(workflows);
   assert.equal(result.complete, true, JSON.stringify(result.blockers));
@@ -1359,17 +1359,29 @@ test('T-PRD020 actual CI schedules six producer parts in four native lanes after
   assert.ok(ci.on.pull_request.types.includes('edited'));
   assert.equal(ci.jobs.source.name, 'Freeze source candidate');
   assert.equal(ci.jobs.source.needs, 'intent');
-  assert.deepEqual(ci.jobs.native.needs, ['intent', 'source']);
-  const parts = ci.jobs.native.strategy.matrix.include;
-  assert.deepEqual(parts.map(({ target, component, role }) => ({ target, component, role }))
+  assert.deepEqual(ci.jobs.native.needs, ['intent', 'source', 'native-units']);
+  assert.deepEqual(ci.jobs['native-units'].needs, ['intent', 'source']);
+  assert.deepEqual(ci.jobs['native-homebrew'].needs, ['intent', 'source']);
+  const keys = ['native-units', 'native', 'native-homebrew'];
+  const parts = keys.flatMap(key => ci.jobs[key].strategy.matrix.include);
+  assert.deepEqual(parts.map(({ target, component, role, shard }) => ({
+    target, component, role, ...(shard === undefined ? {} : { shard }),
+  }))
     .sort((a, b) => a.role.localeCompare(b.role)),
   [...nativePrParts].sort((a, b) => a.role.localeCompare(b.role)));
   assert.equal(ci.jobs.native.strategy['fail-fast'], false);
   assert.equal(ci.jobs.native['timeout-minutes'], 360);
   assert.equal(ci.jobs.native.name, 'native-${{ matrix.role }}');
+  assert.equal(parts.length, 20);
+  for (const key of keys) {
+    assert.ok(ci.jobs[key].strategy.matrix.include.every(part => nativePartJobKey(part) === key));
+    assert.equal(ci.jobs[key]['timeout-minutes'], 360);
+    assert.equal(ci.jobs[key].strategy['fail-fast'], false);
+  }
   assert.equal(ci.jobs['minimum-node'].needs, 'intent');
   assert.equal(ci.jobs['minimum-node'].if, ci.jobs.native.if);
-  assert.deepEqual(ci.jobs['producer-summary'].needs, ['intent', 'minimum-node', 'source', 'native']);
+  assert.deepEqual(ci.jobs['producer-summary'].needs,
+    ['intent', 'minimum-node', 'source', 'native-units', 'native', 'native-homebrew']);
   const nativeSteps = ci.jobs.native.steps;
   const bootstrapIndex = nativeSteps.findIndex(step => step.name === 'Provision isolated native toolchain');
   const retainedIndex = nativeSteps.findIndex(step => step.name === 'Retain native bootstrap diagnostics');
@@ -1385,6 +1397,7 @@ test('T-PRD020 actual CI schedules six producer parts in four native lanes after
       'Each independently hosted role retains a separate immutable artifact');
   }
   assert.match(nativeSteps[executionIndex].run, /--component "\$NATIVE_COMPONENT"/u);
+  assert.match(nativeSteps[executionIndex].run, /--framework-shard "\$SDLC_FRAMEWORK_SHARD"/u);
   assert.match(nativeSteps[bootstrapIndex].run, /bootstrap-\$NATIVE_ROLE/u);
   assert.match(nativeSteps.find(step => step.name === 'Remove owned short Homebrew prefix').run,
     /bootstrap-\$NATIVE_ROLE/u);

@@ -3,11 +3,12 @@ import { Transform, Writable } from 'node:stream';
 import { availableParallelism, constants, totalmem } from 'node:os';
 import { run } from 'node:test';
 import { spec } from 'node:test/reporters';
-import { open, readFile, realpath, rename, unlink } from 'node:fs/promises';
-import { createHash, randomUUID } from 'node:crypto';
+import { open, readFile, realpath } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
 import { digest, LIMITS, requireThat, SdlcError } from '../src/core.mjs';
+import { atomicWrite } from '../src/files.mjs';
 import { readTestBudget, readTestGroupProcesses } from './test-budget.mjs';
 import { discoverDeclarations, nodeStartDefinition, cancelledNodeStarts,
   reconcileNodeExecution } from './validation-inventory.mjs';
@@ -126,16 +127,7 @@ function requestCheckpoint(phase, { final = false, force = false } = {}) {
       finally { await reportFile.close(); reportFile = null; }
       return;
     }
-    const temporary = `${reportPath}.checkpoint-${randomUUID()}`;
-    try {
-      const handle = await open(temporary, 'wx');
-      try { await handle.writeFile(bytes); await handle.sync(); }
-      finally { await handle.close(); }
-      await rename(temporary, reportPath);
-    } finally {
-      try { await unlink(temporary); }
-      catch (error) { if (error.code !== 'ENOENT') throw error; }
-    }
+    await atomicWrite(reportPath, bytes);
   }).catch(checkpointFailed).finally(() => { checkpointPending--; });
   return checkpointQueue;
 }

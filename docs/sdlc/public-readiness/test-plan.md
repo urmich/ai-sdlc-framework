@@ -111,6 +111,12 @@ Full streams retain only those identities. Revalidate bounded primary messages
 after truncation so a cut JSON value cannot invalidate the complete diagnostic;
 an unretainable message keeps its original identity and an explicit safe fallback.
 Diagnostic recovery cannot change cancellation, cleanup or passing conditions.
+Periodic worker reports and native command capture use the same bounded atomic
+replacement recovery for classified transient Windows sharing conflicts.
+The Windows-only periodic-checkpoint regression injects one conflict while the
+real worker is silently blocked, then requires a durable refreshed lease,
+live processes, exact journal identity and the original kill/cleanup assertions.
+Permanent or unclassified replacement failures remain incomplete and non-passing.
 Owned process fixtures observe ready/trigger/finish markers rather than relying
 on filesystem notifications that may coalesce. Launcher fixtures await both the
 real child result and input-stream completion: an early rejecting child's exit
@@ -775,10 +781,20 @@ partial comparison and do not silently retry to obtain a ratio.
 1. With scoped push/PR authority, use the exact candidate selected for validation and a clean
    controlled contribution without local result files. Observe initial PR and
    new head updates; retain exact candidate/source, workflow and attempt.
-2. Confirm all four logical native lanes and every required producer part start
-   with their own required prerequisites. Linux and Windows retain complete
-   native producers. Each Mac lane joins a framework producer with an independently
-   required real Homebrew producer; neither part alone completes that platform.
+2. Confirm all four logical native lanes and all twenty required producer parts
+   start with their own prerequisites. Each platform has a unit producer and an
+   independently required producer for the unchanged, causally ordered
+   550-refresh root. The remaining complete root closures are partitioned across
+   two body producers on Linux/Windows and three on each Mac architecture.
+   Each Mac lane also requires its genuine Homebrew producer. No part alone
+   completes a platform. Native unit evidence must complete before that
+   platform's regression shards execute; another platform or attempt cannot
+   supply the prerequisite. Include the unit barrier, every part's provisioning,
+   evidence retention and cleanup in the whole-lane elapsed time.
+   The initial workflow uses a global matrix barrier: all four unit producers
+   complete, including evidence and cleanup, before any regression shard starts.
+   Count that broader wait honestly; verify all twelve distinct Mac prefix
+   allocations and their matching guarded cleanup receipts.
    Separate jobs use their own native hosts, resource budgets, scratch paths and
    owned prefixes rather than racing on a shared package-manager installation.
    Exercise actual Go, Python, shell and Homebrew surfaces in their assigned
@@ -789,7 +805,11 @@ partial comparison and do not silently retry to obtain a ratio.
 3. Reconcile every expected file/case/platform variant against completed producer
    evidence. A legitimate cross-platform skip must be satisfied by its matching
    native lane, not counted Passed where skipped. New/deleted/renamed cases and
-   dynamic subtests remain visible in the denominator.
+   dynamic subtests remain visible in the denominator. Derive the complete,
+   disjoint root/descendant assignment from the frozen source inventory rather
+   than the parts that happen to arrive. Require each substantive Go, Python,
+   schema, static and calculator stage at its assigned producer; partitioning
+   cannot omit a stage or count a repeated assertion as independent coverage.
 4. Mac jobs consume the same frozen architecture-neutral artifact/digest; do not
    independently rebuild and call different bytes the same artifact. Windows
    jobs use a real PE. Collect native environment/runtime probes and step exits.

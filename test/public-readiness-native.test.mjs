@@ -19,7 +19,9 @@ import { aggregateNativeReadiness, nativeArtifacts, nativeSpecification, nativeG
   nativeResourceFacts, prepareNativeHostFixtures,
   validateNativeSourceDefinitions, validateNativeGroupReport, nativeConfigurationDigest,
   deriveNativeComponentSpecification, writeNativeHomebrewReport,
-  nativePrParts, nativeProducerRole } from '../scripts/native-validation.mjs';
+  nativePrParts, nativeLegacyPrParts, nativeProducerRole,
+  nativeFrameworkShardPlan, verifyNativeShardUnitOrder } from '../scripts/native-validation.mjs';
+import { observerApiFixture } from './readiness-observer-fixture.mjs';
 import { validateBootstrapRequest } from '../scripts/native-toolchain.mjs';
 import { reconcileGoExecution, executeValidationCommand, validationCommandArguments } from '../scripts/validation-tools.mjs';
 import { repositoryRoot, createPlan, parseOptions, run as runTests } from '../scripts/test-runner.mjs';
@@ -322,7 +324,7 @@ test('T-PRD074 exact typed native source retains code and credential-negative fi
 });
 function fixture(profile = 'pr', frozenCandidate = candidate, components = false) {
   const artifacts = nativeArtifacts(frozenCandidate);
-  const parts = components ? nativePrParts : targets.map(target => ({ target, component: 'full', role: target }));
+  const parts = components ? nativeLegacyPrParts : targets.map(target => ({ target, component: 'full', role: target }));
   const lanes = parts.map(({ target, component, role }) => {
     const specification = nativeSpecification({ plan, inventory, goSources: sources, target, profile, component });
     const context = {
@@ -447,6 +449,71 @@ test('T-PRD016 six PR producer parts require both exact Mac originals and reject
     changed[index] = { ...passing[index], evaluation: f.evaluate(f.lanes[index], mutate) };
     assert.equal(aggregateNativeReadiness(changed, f.expected).status, 'NotRun');
   }
+});
+
+test('T-PRD016 twenty native shard selections preserve complete root unions and require protected actual unit ordering', async t => {
+  const f = await observerApiFixture(t, { frameworkShards: true });
+  assert.equal(f.parts.size, 20);
+  const request = { target: 'linux-x64', profile: 'pr', component: 'framework', shard: 'units',
+    candidateDir: '.test-data/shard-candidate', evidenceDir: '.test-data/shard-evidence' };
+  const environment = { EXPECTED_SOURCE_COMMIT: f.revisions.merge,
+    EXPECTED_DESCRIPTOR_SHA256: 'a'.repeat(64), EXPECTED_CHECKSUMS_SHA256: 'b'.repeat(64) };
+  assert.equal(validateNativeRequest(request, environment).shard, 'units');
+  for (const delta of [{ shard: 'body-2' }, { shard: '' }, { component: 'full' },
+    { component: 'homebrew' }, { profile: 'r-pre' }, { phase: 'candidate' }, { buildCandidate: true }]) {
+    assert.throws(() => validateNativeRequest({ ...request, ...delta }, environment), { code: 'INPUT' });
+  }
+  assert.equal(parseNativeOptions(['--framework-shard', 'body-1']).shard, 'body-1');
+  for (const target of targets) {
+    const assignment = nativeFrameworkShardPlan({ inventory: f.source.inventory, plan: f.source.plan, target });
+    const selected = assignment.parts.flatMap(part => part.assertionIds);
+    assert.deepEqual([...selected].sort(), f.source.inventory.cases.map(test => test.id).sort());
+    assert.equal(new Set(selected).size, selected.length);
+    assert.equal(assignment.parts.filter(part => part.go).length, 1);
+    assert.equal(assignment.parts.find(part => part.shard === 'refresh').assertionIds.length, 1);
+    assert.equal(assignment.parts.length, target.startsWith('macos-') ? 5 : 4);
+    assert.ok(assignment.parts.filter(part => part.shard.startsWith('body-')).every(part => part.assertionIds.length));
+  }
+  const executions = [...f.parts.values()].map(part => ({
+    target: part.target, component: part.component, shard: part.shard, context: part.context,
+    job: f.jobs.find(job => job.name === `native-${part.role}`),
+  }));
+  const unitOrder = verifyNativeShardUnitOrder(executions);
+  const evaluations = [...f.parts.values()].map(part => {
+    const raw = part.data.get('execution.json');
+    const report = normalizeExecutionReport(raw, part.context, input => ({
+      verifierId: 'controlled-shard-origin', reportDigest: input.reportDigest, context: part.context,
+      sourceTime: raw.observedAt, sourceSequence: raw.sequence,
+    }));
+    return { target: part.target, component: part.component, shard: part.shard,
+      evaluation: evaluateReadiness(part.specification, [report], {
+        profile: part.specification.profile, executions: [{ id: part.context.jobRef, context: part.context }],
+        now: new Date(Date.parse(raw.observedAt) + 1000).toISOString(),
+        policy: { maxAgeMs: 86400000, revisionPolicy: 'exact', verifierIds: ['controlled-shard-origin'] },
+      }) };
+  });
+  const expected = { profile: 'pr', components: true, frameworkShards: true,
+    sourceRevision: f.revisions.merge, artifacts: nativeArtifacts(f.candidate), executions,
+    inventory: f.source.inventory, plan: f.source.plan, goSources: f.source.goSources, unitOrder };
+  assert.equal(aggregateNativeReadiness(evaluations, expected).status, 'Passed');
+  assert.equal(aggregateNativeReadiness(evaluations, expected).requiredCases.length, 7);
+  assert.equal(aggregateNativeReadiness(evaluations.slice(0, -1), expected).status, 'NotRun');
+  assert.equal(aggregateNativeReadiness([...evaluations, evaluations[0]], expected).status, 'NotRun');
+  const swapped = [...evaluations];
+  swapped[1] = { ...swapped[1], shard: 'units' };
+  assert.equal(aggregateNativeReadiness(swapped, expected).status, 'NotRun');
+  assert.throws(() => aggregateNativeReadiness(evaluations,
+    { ...expected, unitOrder: JSON.parse(JSON.stringify(unitOrder)) }), { code: 'EVIDENCE' });
+  const early = executions.map(part => ({ ...part, job: structuredClone(part.job) }));
+  early.find(part => part.shard === 'refresh').job.started_at = early[0].job.started_at;
+  assert.throws(() => verifyNativeShardUnitOrder(early), { code: 'EVIDENCE' });
+  const failed = executions.map(part => ({ ...part, job: structuredClone(part.job) }));
+  failed[0].job.conclusion = 'failure';
+  assert.throws(() => verifyNativeShardUnitOrder(failed), { code: 'EVIDENCE' });
+  const duplicateJobs = executions.map(part => ({ ...part, job: structuredClone(part.job) }));
+  duplicateJobs[1].job.id = duplicateJobs[0].job.id;
+  assert.throws(() => verifyNativeShardUnitOrder(duplicateJobs), { code: 'EVIDENCE' });
+  assert.equal(f.calls.length, 0, 'No provider, native toolchain or Python execution is needed for this controlled proof');
 });
 
 test('T-PRD004 native policy rejects fixture, metadata and cross-build credit and uses protected evaluation inputs', () => {

@@ -53,9 +53,36 @@ test('T-36 package is reproducible, integrity-bound and installable in isolation
   assert.ok(intentJob.steps.every(step => !step.uses?.startsWith('actions/checkout@')));
   const nativeJobs = Object.values(ci.jobs).filter(job =>
     job.steps?.some(step => step.name === nativeWorkflowContract.steps.execution));
-  const targets = nativeJobs.flatMap(job => job.strategy?.matrix?.target ??
-    job.strategy?.matrix?.include?.map(item => item.target) ?? []);
-  assert.deepEqual(targets.sort(), Object.keys(nativeWorkflowContract.jobs).sort());
+  const parts = nativeJobs.flatMap(job => {
+    assert.ok(Array.isArray(job.strategy?.matrix?.include),
+      'Native PR jobs must declare their complete producer parts');
+    return job.strategy.matrix.include.map(({ target, component, shard = null, role }) =>
+      ({ target, component, shard, role }));
+  });
+  const expectedParts = Object.keys(nativeWorkflowContract.jobs).flatMap(target => {
+    const mac = target.startsWith('macos-');
+    const shards = ['units', 'refresh', 'body-0', 'body-1', ...(mac ? ['body-2'] : [])];
+    return [
+      ...shards.map(shard => ({ target, component: 'framework', shard,
+        role: `${target}-framework-${shard}` })),
+      ...(mac ? [{ target, component: 'homebrew', shard: null, role: `${target}-homebrew` }] : []),
+    ];
+  });
+  assert.equal(parts.length, expectedParts.length, 'Every required native PR part must be present');
+  assert.equal(new Set(parts.map(part => part.role)).size, parts.length,
+    'Native PR producer roles must be unique');
+  const byRole = (left, right) => left.role.localeCompare(right.role);
+  assert.deepEqual(parts.toSorted(byRole), expectedParts.toSorted(byRole),
+    'Native PR target, component, shard and role bindings must match the complete required inventory');
+  assert.deepEqual([...new Set(parts.map(part => part.target))].sort(),
+    Object.keys(nativeWorkflowContract.jobs).sort(), 'All four native platforms remain required');
+  for (const target of Object.keys(nativeWorkflowContract.jobs)) {
+    assert.deepEqual(parts.filter(part => part.target === target)
+      .map(part => `${part.component}:${part.shard}`).sort(),
+    expectedParts.filter(part => part.target === target)
+      .map(part => `${part.component}:${part.shard}`).sort(),
+    'Each native platform must include every required component and shard');
+  }
   for (const job of nativeJobs) {
     const needs = Array.isArray(job.needs) ? job.needs : [job.needs];
     assert.ok(needs.includes(sourceId) && needs.includes(intentId));

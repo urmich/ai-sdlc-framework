@@ -16,9 +16,11 @@ import { reconcilePrReadiness } from '../scripts/pr-readiness.mjs';
 import { readTrustedMinimumNodeJob, renderObserverSummary, retainObserverResult,
   nativeLaneTimings, verifyNativeCleanup, verifyOriginalNativeRows } from '../scripts/pr-observer.mjs';
 import { nativeStageSelections, nativeConfigurationDigest, replayNativeEvidence,
-  validateNativePreviousLifecycle, nativeWorkflowContract, nativeSpecification } from '../scripts/native-validation.mjs';
+  validateNativePreviousLifecycle, nativeWorkflowContract, nativeSpecification,
+  verifyNativeShardUnitOrder, nativePartJobKey, nativeFrameworkShardProtocol,
+  nativeFrameworkShardPlan } from '../scripts/native-validation.mjs';
 import { testSpecificationDigest } from '../src/artifacts.mjs';
-import { validationInventoryDigest } from 'ai-sdlc-framework/evidence';
+import { validationInventoryDigest, normalizeExecutionReport, evaluateReadiness } from 'ai-sdlc-framework/evidence';
 import { calculatorFiles } from '../scripts/pr-calculator.mjs';
 import { deriveNativeComponentSpecification, nativeComponentSelection,
   projectNativeComponentEvidence, replayNativeComponentEvidence } from '../scripts/native-components.mjs';
@@ -277,6 +279,30 @@ test('T-PRD016 API-only native admission composes six producer parts and four co
   f.assertReadOnly();
 });
 
+test('T-PRD016 API-only twenty-part admission restores every current native shard and twelve guarded cleanups', async t => {
+  const f = await observerApiFixture(t, { frameworkShards: true });
+  const { host } = f.connect();
+  const snapshot = await host.snapshot();
+  assert.equal(verdict(snapshot).status, 'Passed', JSON.stringify(verdict(snapshot).blockers));
+  const retained = host.componentEvidence()[0];
+  assert.equal(retained.nativeParts.length, 20);
+  assert.equal(retained.nativeParts.filter(part => part.cleanupArtifactId).length, 12);
+  assert.equal(retained.sourceArtifacts.length, 18);
+  assert.equal(retained.projection.provenance.length, 18);
+  assert.ok(retained.laneTimings.every(lane => lane.durationMs === 180000));
+  const output = path.join(f.root, 'current-api-retained');
+  await retainObserverResult({ status: 'Passed', results: [] }, output, { componentEvidence: [retained] });
+  const saved = JSON.parse(await fs.readFile(path.join(output, 'observer-result.json'), 'utf8')).components[0];
+  assert.equal(saved.nativeOriginals.length, 18);
+  assert.equal(saved.nativeParts.length, 20);
+  assert.equal(new Set(saved.nativeOriginals.map(original => original.filename)).size, 18);
+  assert.ok(saved.unitOrder);
+  const part = f.jobs.find(job => job.name === 'native-macos-arm64-framework-units');
+  part.steps.find(step => step.name === 'Remove owned short Homebrew prefix').conclusion = 'skipped';
+  assert.equal(verdict(await f.connect().host.snapshot()).status, 'NotRun');
+  f.assertReadOnly();
+});
+
 test('T-PRD016 complete API admission rejects missing lanes artifacts originals and swapped native evidence', async t => {
   const f = await observerApiFixture(t);
   assert.equal(verdict(await f.connect().host.snapshot()).status, 'Passed');
@@ -384,12 +410,146 @@ test('T-PRD020 logical native latency spans earliest required worker through the
       job: { id: 100 + index, created_at: at(0), started_at: at(index ? 700 : 100),
         completed_at: at(index ? 1300 : 600) },
     })));
-  const timings = nativeLaneTimings(parts);
+  const timings = nativeLaneTimings(parts, { frameworkShards: false });
   assert.ok(timings.filter(lane => lane.target.startsWith('macos-')).every(lane =>
     lane.durationMs === 1200000 && !lane.withinBudget && lane.parts.length === 2),
   'Both isolated parts are below fifteen minutes, but their complete required logical span is not');
   assert.deepEqual(timings[2].parts.map(part => part.providerQueueMs), [100000, 700000]);
-  assert.throws(() => nativeLaneTimings(parts.slice(0, -1)), { code: 'EVIDENCE' });
+  assert.throws(() => nativeLaneTimings(parts.slice(0, -1), { frameworkShards: false }), { code: 'EVIDENCE' });
+});
+
+test('T-PRD021 twenty-part originals require exact selected closures cleanup and protected multi-origin SDK composition', async t => {
+  const f = await observerApiFixture(t, { frameworkShards: true });
+  const dictionary = entries => ({ ...Object.fromEntries(entries),
+    texts: Object.fromEntries([...entries].map(([file, value]) =>
+      [file, typeof value === 'string' ? value : canonical(value)])) });
+  const sourceFiles = [...f.source.files].map(([file, contents]) => ({ file, contents }));
+  const prefixes = [];
+  for (const part of f.parts.values()) {
+    await verifyOriginalNativeRows({ data: dictionary(part.data), raw: part.data.get('execution.json'),
+      specification: part.specification, inventory: f.source.inventory, goSources: f.source.goSources,
+      target: part.target, component: part.component, shard: part.shard,
+      candidate: f.candidate, sourceFiles, plan: f.source.plan, context: part.context });
+    if (f.cleanupReports.has(part.role)) prefixes.push(verifyNativeCleanup(
+      dictionary(f.cleanupReports.get(part.role)), { ...part, jobKey: nativePartJobKey(part) }).prefix);
+  }
+  assert.equal(prefixes.length, 12);
+  assert.equal(new Set(prefixes).size, 12);
+  const executions = [...f.parts.values()].map(part => ({ ...part,
+    job: f.jobs.find(job => job.name === `native-${part.role}`) }));
+  const unitOrder = verifyNativeShardUnitOrder(executions);
+  const framework = executions.filter(part => part.component === 'framework');
+  const definition = deriveNativeComponentSpecification({ inventory: f.source.inventory,
+    testPlan: f.source.plan, goSources: f.source.goSources, frameworkShards: true,
+    adapterSourceDigest: digest(f.source.files.get('scripts/native-components.mjs')) });
+  const originals = framework.map(part => ({ target: part.target, role: part.role,
+    text: canonical(part.data.get('execution.json')) }));
+  const nativeEvaluations = framework.map(part => {
+    const original = originals.find(original => original.role === part.role);
+    const raw = JSON.parse(original.text);
+    const normalized = normalizeExecutionReport(original.text, part.context, input => ({
+      verifierId: 'controlled-shard-sdk-facts', reportDigest: input.reportDigest, context: part.context,
+      sourceTime: raw.observedAt, sourceSequence: raw.sequence,
+    }));
+    return { role: part.role, evaluation: evaluateReadiness(part.specification, [normalized], {
+      profile: part.specification.profile, executions: [{ id: part.context.jobRef, context: part.context }],
+      now: '2026-10-18T10:10:00.000Z',
+      policy: { maxAgeMs: 86400000, revisionPolicy: 'exact', verifierIds: ['controlled-shard-sdk-facts'] },
+    }) };
+  });
+  const inputs = { definition, expectedLanes: framework, originals, unitOrder, nativeEvaluations,
+    now: '2026-10-18T10:10:00.000Z', verifyOriginal: input => {
+      const original = originals.find(original => original.role === input.role);
+      const raw = original && JSON.parse(original.text);
+      return raw && input.reportDigest === digest(original.text) ? {
+        verifierId: 'controlled-shard-originals', reportDigest: input.reportDigest, context: raw.context,
+        sourceTime: raw.observedAt, sourceSequence: raw.sequence,
+      } : null;
+    } };
+  const projection = projectNativeComponentEvidence(inputs);
+  assert.equal(projection.evaluation.status, 'Passed');
+  assert.equal(projection.provenance.length, 18);
+  assert.ok(projection.originals.every(original =>
+    JSON.parse(original.text).context.native.toolchain.matrix.length === 18 &&
+    JSON.parse(original.text).context.native.kind === 'metadata'));
+  assert.equal(replayNativeComponentEvidence({ ...inputs, bundle: projection.bundle }).evaluation.status, 'Passed');
+  assert.equal(projectNativeComponentEvidence({ ...inputs, originals: originals.slice(0, -1) }).evaluation.status, 'NotRun');
+  assert.equal(projectNativeComponentEvidence({ ...inputs,
+    originals: [...originals.slice(1), originals[1]] }).evaluation.status, 'NotRun');
+  assert.throws(() => projectNativeComponentEvidence({ ...inputs,
+    unitOrder: JSON.parse(JSON.stringify(unitOrder)) }), { code: 'EVIDENCE' });
+  assert.throws(() => projectNativeComponentEvidence({ ...inputs,
+    nativeEvaluations: JSON.parse(JSON.stringify(nativeEvaluations)) }), { code: 'EVIDENCE' });
+  const borrowedFacts = [...nativeEvaluations];
+  borrowedFacts[1] = { ...borrowedFacts[1], evaluation: borrowedFacts[0].evaluation };
+  assert.throws(() => projectNativeComponentEvidence({ ...inputs, nativeEvaluations: borrowedFacts }), { code: 'EVIDENCE' });
+  const changedOriginals = originals.map(original => ({ ...original }));
+  const changedRaw = JSON.parse(changedOriginals[0].text);
+  changedRaw.results[0].detail = 'Different original bytes with the same claimed passing outcome';
+  changedOriginals[0].text = canonical(changedRaw);
+  assert.throws(() => projectNativeComponentEvidence({ ...inputs, originals: changedOriginals,
+    verifyOriginal: input => {
+      const original = changedOriginals.find(original => original.role === input.role);
+      const raw = JSON.parse(original.text);
+      return { verifierId: 'controlled-changed-original', reportDigest: digest(original.text),
+        context: raw.context, sourceTime: raw.observedAt, sourceSequence: raw.sequence };
+    } }), { code: 'EVIDENCE' });
+  const refresh = framework.find(part => part.shard === 'refresh');
+  const archived = { schemaVersion: 1, kind: 'native-validation-definition',
+    target: refresh.target, profile: 'pr', component: 'framework', shard: 'refresh',
+    frameworkShards: nativeFrameworkShardProtocol, selectedWorkersRequest: null,
+    sourceFiles, plan: f.source.plan, inventory: f.source.inventory, goSources: f.source.goSources,
+    calculatorSources: sourceFiles.filter(source => calculatorFiles.includes(source.file)),
+    specification: refresh.specification,
+    stages: nativeFrameworkShardPlan({ inventory: f.source.inventory, plan: f.source.plan,
+      target: refresh.target }).parts.find(part => part.shard === 'refresh').stages,
+    configDigest: refresh.context.configDigest, testSpecDigest: refresh.context.testSpecDigest,
+    inventoryDigest: refresh.context.inventoryDigest,
+    source: { revision: f.revisions.merge, treeSha: f.source.sha, repositoryId: 'repository-17' } };
+  const replay = await replayNativeEvidence({ definition: archived, data: dictionary(refresh.data),
+    candidate: f.candidate, asOf: inputs.now, verifyArchive: input => ({
+      verifierId: 'controlled-current-shard-archive', definitionDigest: input.definitionDigest,
+      reportDigest: input.reportDigest, context: refresh.context,
+      sourceTime: refresh.data.get('execution.json').observedAt, sourceSequence: 1,
+    }) });
+  assert.equal(replay.evaluation.status, 'Passed');
+  assert.equal(replay.currentCredit, 'NotRun', 'Historical shard replay must never grant current-candidate credit');
+  const borrowed = new Map(refresh.data);
+  const units = framework.find(part => part.target === refresh.target && part.shard === 'units');
+  borrowed.set('unit.json', units.data.get('unit.json'));
+  await assert.rejects(verifyOriginalNativeRows({ data: dictionary(borrowed), raw: refresh.data.get('execution.json'),
+    specification: refresh.specification, inventory: f.source.inventory, goSources: f.source.goSources,
+    target: refresh.target, component: refresh.component, shard: refresh.shard,
+    candidate: f.candidate, sourceFiles, plan: f.source.plan, context: refresh.context }), { code: 'EVIDENCE' });
+  const cleanup = structuredClone(f.cleanupReports.get('macos-arm64-framework-units'));
+  cleanup.get('native-homebrew-prefix-cleanup.json').status = 'rolled-back';
+  const macUnits = f.parts.get('macos-arm64-framework-units');
+  assert.throws(() => verifyNativeCleanup(dictionary(cleanup),
+    { ...macUnits, jobKey: nativePartJobKey(macUnits) }), { code: 'EVIDENCE' });
+  const output = path.join(f.root, 'twenty-part-retained');
+  const nativeParts = executions.map(part => {
+    const artifact = f.artifacts.get(part.role);
+    const bootstrap = f.artifacts.get(`bootstrap-${part.role}`);
+    const cleanup = f.artifacts.get(`cleanup-${part.role}`);
+    return { target: part.target, component: part.component, role: part.role,
+      ...(part.shard === null ? {} : { shard: part.shard }),
+      jobId: part.job.id, runId: f.run.id, attempt: 1,
+      artifactId: artifact.id, artifactDigest: artifact.digest,
+      bootstrapArtifactId: bootstrap.id, bootstrapArtifactDigest: bootstrap.digest,
+      ...(cleanup ? { cleanupArtifactId: cleanup.id, cleanupArtifactDigest: cleanup.digest } : {}) };
+  });
+  const sourceArtifacts = nativeParts.filter(part => part.component === 'framework').map(part => ({
+    target: part.target, role: part.role, artifactId: part.artifactId,
+    artifactDigest: part.artifactDigest, jobId: part.jobId, runId: part.runId, attempt: part.attempt,
+  }));
+  await retainObserverResult({ status: 'Passed', results: [] }, output, { componentEvidence: [{
+    prNumber: 1, sourceCommit: f.revisions.merge, projection, nativeParts, sourceArtifacts,
+  }] });
+  const retained = JSON.parse(await fs.readFile(path.join(output, 'observer-result.json'), 'utf8')).components[0];
+  assert.equal(retained.nativeOriginals.length, 18);
+  assert.equal(new Set(retained.nativeOriginals.map(original => original.filename)).size, 18);
+  assert.ok(retained.unitOrder.filename.endsWith('-unit-order.json'));
+  assert.equal(f.calls.length, 0, 'No native tools, provider acquisition or Python reader runs in this Node-only regression');
 });
 
 test('T-PRD021 acquired native ZIP identities and original outcomes reject forged passing summaries and candidate swaps', async t => {

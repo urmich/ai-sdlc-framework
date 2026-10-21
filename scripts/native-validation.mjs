@@ -11,7 +11,8 @@ import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
   createEvidenceBundle, renderReadinessReport, requireReadinessEvaluation,
   validateExecutionContext, sanitizeExecutionPayload } from 'ai-sdlc-framework/evidence';
 import { compileValidationInventory, compileValidationSourceInventory, reconcileNodeExecution,
-  validationPlatforms, validationSourcePaths, isValidationTestPath } from './validation-inventory.mjs';
+  validationPlatforms, validationSourcePaths, isValidationTestPath,
+  partitionValidationInventory } from './validation-inventory.mjs';
 import { discoverGoDeclarations, executeValidationCommand, reconcileGoExecution, processDiagnostic } from './validation-tools.mjs';
 import { repositoryRoot, unitFiles, validationSelectionDescriptor, validationSelectionProtocol,
   writeValidationSelection } from './test-runner.mjs';
@@ -36,23 +37,49 @@ const platforms = { 'linux-x64': 'linux', 'windows-x64': 'win32',
   'macos-arm64': 'darwin', 'macos-x64': 'darwin' };
 const locations = { 'linux-x64': 'github-linux-x64', 'windows-x64': 'github-windows-x64',
   'macos-arm64': 'github-macos-arm64', 'macos-x64': 'github-macos-x64' };
-export const nativePrParts = Object.freeze(validationPlatforms.flatMap(target =>
+export const nativeFrameworkShardProtocol = 'native-framework-shards-v1';
+export const nativeLegacyPrParts = Object.freeze(validationPlatforms.flatMap(target =>
   (target.startsWith('macos-') ? ['framework', 'homebrew'] : ['full'])
     .map(component => Object.freeze({ target, component, role: nativeProducerRole(target, component) }))));
+export const nativePrParts = Object.freeze(validationPlatforms.flatMap(target => [
+  ...nativeFrameworkShardNames(target).map(shard => Object.freeze({
+    target, component: 'framework', shard, role: nativeProducerRole(target, 'framework', shard),
+  })),
+  ...(target.startsWith('macos-') ? [Object.freeze({
+    target, component: 'homebrew', role: nativeProducerRole(target, 'homebrew'),
+  })] : []),
+]));
 
-export function nativeProducerRole(target, component = 'full') {
+export function nativeFrameworkShardNames(target) {
+  requireThat(validationPlatforms.includes(target), 'INPUT', 'Select an exact native shard target');
+  return ['units', 'refresh', ...Array.from({ length: target.startsWith('macos-') ? 3 : 2 },
+    (_, index) => `body-${index}`)];
+}
+
+export function nativeProducerRole(target, component = 'full', shard = null) {
   requireThat(validationPlatforms.includes(target) && ['full', 'framework', 'homebrew'].includes(component) &&
-    (component === 'full' || target.startsWith('macos-')), 'INPUT',
+    (shard === null ? component === 'full' || target.startsWith('macos-') :
+      component === 'framework' && nativeFrameworkShardNames(target).includes(shard)), 'INPUT',
   'Native components are explicit full executions or PR-only native Mac framework/Homebrew parts');
-  return component === 'full' ? target : `${target}-${component}`;
+  return component === 'full' ? target : `${target}-${component}${shard === null ? '' : `-${shard}`}`;
+}
+
+export function nativePartJobKey({ shard = null, component }) {
+  return shard === 'units' ? 'native-units' : component === 'homebrew' ? 'native-homebrew' : 'native';
+}
+
+function shardFromContext(context, target) {
+  return nativeFrameworkShardNames(target).find(shard =>
+    context.profile === `pr-framework-${shard}-${target}`) ?? null;
 }
 
 function componentFromContext(context, target) {
+  if (shardFromContext(context, target) !== null) return 'framework';
   return ['framework', 'homebrew'].find(component => context.profile === `pr-${component}-${target}`) ?? 'full';
 }
 
-const nativeProfile = (profile, target, component) =>
-  `${profile}${component === 'full' ? '' : `-${component}`}-${target}`;
+const nativeProfile = (profile, target, component, shard = null) =>
+  `${profile}${component === 'full' ? '' : `-${component}`}${shard === null ? '' : `-${shard}`}-${target}`;
 const nativeCaseIds = (target, profile, component) => component === 'homebrew' ?
   [`T-PRD060-${suffixes[target]}`] : component === 'framework' ?
     [`T-PRD014-${suffixes[target]}`] : canonicalIds(target, profile);
@@ -86,11 +113,15 @@ const canonicalIds = (target, profile) => [
 const safe = value => sanitizeExecutionPayload(Buffer.from(JSON.stringify(value)));
 
 export function nativeConfigurationDigest({ inventory, profile, configuredWorkers = null,
-  calculator = calculatorCapability(inventory), component = 'full' }) {
+  calculator = calculatorCapability(inventory), component = 'full', shard = null, shardPlanDigest = null }) {
   requireThat(inventory.complete && /^[a-f0-9]{64}$/u.test(inventory.digest) &&
     ['pr', 'r-pre'].includes(profile) && ['full', 'framework', 'homebrew'].includes(component) &&
     (component === 'full' || profile === 'pr'), 'INVENTORY',
   'Native configuration needs the complete selected source inventory and an applicable component');
+  requireThat(shard === null ? shardPlanDigest === null :
+    profile === 'pr' && component === 'framework' && typeof shard === 'string' &&
+      /^[a-f0-9]{64}$/u.test(shardPlanDigest ?? ''), 'INVENTORY',
+  'Native shard configuration requires its independently derived complete assignment');
   const requested = configuredWorkers === null ? null : String(configuredWorkers);
   requireThat(requested === null || /^[1-9]\d*$/u.test(requested) && Number(requested) <= 32,
     'INVENTORY', 'Native configuration requires the exact selected worker request or explicit automatic allocation');
@@ -101,6 +132,7 @@ export function nativeConfigurationDigest({ inventory, profile, configuredWorker
   'INVENTORY', 'Native calculator capability must preserve its complete independently selected files and assertion count');
   return digest({ nativeToolchain, inventory: inventory.digest, profile,
     ...(component === 'full' ? {} : { component }),
+    ...(shard === null ? {} : { frameworkShards: nativeFrameworkShardProtocol, shard, shardPlanDigest }),
     schedulingPolicy: validationSchedulingPolicyDigest(), selectedWorkersRequest: requested,
     selectionTransport: validationSelectionProtocol,
     requiredCapabilities: { crypto: prCryptoFixture, calculator } });
@@ -123,11 +155,12 @@ async function writeCanonicalJson(file, contents) {
   finally { await handle.close(); }
 }
 
-export function nativeSpecification({ plan, inventory, goSources, target, profile, component = 'full' }) {
+export function nativeSpecification({ plan, inventory, goSources, target, profile, component = 'full', shard = null }) {
   requireThat(validationPlatforms.includes(target) && ['pr', 'r-pre'].includes(profile) && inventory.complete,
     'INVENTORY', 'Native validation requires the complete declared inventory and an explicit profile/platform');
-  const role = nativeProducerRole(target, component);
+  const role = nativeProducerRole(target, component, shard);
   requireThat(component === 'full' || profile === 'pr', 'INPUT', 'Partial native components are PR-only');
+  if (shard !== null) return nativeFrameworkShardSpecification({ plan, inventory, goSources, target, shard });
     calculatorSelection(inventory);
   const definitions = parseTestPlan(plan);
   const node = inventory.cases.filter(test => test.applicability.platforms.includes(target))
@@ -156,6 +189,106 @@ export function nativeSpecification({ plan, inventory, goSources, target, profil
         ...procedures.filter(assertion => assertion.selector.procedure === 'frozen-artifacts'),
       ] : [...node, ...go, ...procedures] };
   }) };
+}
+
+export function nativeFrameworkShardPlan({ inventory, plan, target }) {
+  requireThat(inventory.complete && validationPlatforms.includes(target),
+    'INVENTORY', 'Framework shards need the complete independently declared native inventory');
+  const stages = nativeStageSelections(inventory, plan);
+  const regression = stages.find(stage => stage.name === 'regression');
+  const refreshFile = 'test/observation-retention-refresh.test.mjs';
+  const refreshGroups = validationExecutionGroups(inventory, {
+    files: [refreshFile], pattern: regression.selectorName, preserveOrder: true,
+  });
+  requireThat(refreshGroups.length === 1 &&
+    refreshGroups[0].root === 'FR-063/064 real refresh and prune archive superseded observations/facts before exhaustion',
+  'INVENTORY', 'The unchanged causal refresh root must exist as one complete regression closure');
+  const refreshIds = new Set(refreshGroups[0].assertionIds);
+  requireThat(regression.cases.filter(test => test.file === refreshFile).length === refreshIds.size &&
+    regression.cases.filter(test => refreshIds.has(test.id)).length === refreshIds.size,
+  'INVENTORY', 'The complete causal refresh root cannot be partially assigned or moved between stages');
+  const bodyCases = regression.cases.filter(test => !refreshIds.has(test.id));
+  const bodyFiles = new Set(bodyCases.map(test => test.file));
+  const partitions = partitionValidationInventory({ ...inventory, cases: bodyCases,
+    files: inventory.files.filter(file => bodyFiles.has(file.file)) },
+  target.startsWith('macos-') ? 3 : 2);
+  const roots = validationExecutionGroups(inventory, {
+    files: regression.files, pattern: regression.selectorName, preserveOrder: true,
+  });
+  const procedureFile = 'test/public-readiness-ci.test.mjs';
+  const toolRoot = inventory.cases.find(test => test.file === procedureFile && !test.parents.length &&
+    test.name === 'T-PRD015 actual pinned Go, Python schema and static validators execute valid and invalid owned inputs');
+  const toolPartition = partitions.find(partition => partition.assertionIds.includes(toolRoot?.id));
+  requireThat(toolRoot && toolPartition, 'INVENTORY',
+    'The actual Go/Python/schema/launcher causal root must be assigned intact to one body');
+  const toolShard = `body-${toolPartition.index}`;
+  const parts = nativeFrameworkShardNames(target).map(shard => {
+    const selected = shard === 'units' ? stages.filter(stage => stage.name !== 'regression') :
+      [{ ...regression, cases: shard === 'refresh' ?
+        regression.cases.filter(test => refreshIds.has(test.id)) :
+        bodyCases.filter(test => partitions[Number(shard.slice(5))].assertionIds.includes(test.id)) }];
+    const selectedStages = selected.map(stage => {
+      const files = stage.files.filter(file => stage.cases.some(test => test.file === file));
+      requireThat(files.length > 0 && stage.cases.some(test => test.applicability.platforms.includes(target)),
+        'INVENTORY', 'Every required native shard stage needs a nonempty applicable assertion denominator');
+      const groups = validationExecutionGroups(inventory, {
+        files, pattern: stage.name === 'unit' ? undefined : stage.selectorName, preserveOrder: true,
+      });
+      requireThat(digest(groups.flatMap(group => group.assertionIds).sort()) ===
+        digest(stage.cases.map(test => test.id).sort()), 'INVENTORY',
+      'Native shard selectors must preserve exact complete causal root closures');
+      const definition = { ...stage, files, groups };
+      if (stage.name === 'unit') return definition;
+      const { payload, ...selection } = validationSelectionDescriptor({ files, name: stage.selectorName });
+      return { ...definition, args: ['targeted', '--selection-file', selection.path], selection };
+    });
+    const assertionIds = selectedStages.flatMap(stage => stage.cases.map(test => test.id));
+    const procedures = shard === 'units' ? ['static', 'frozen-artifacts'] :
+      shard === toolShard ? ['calculator'] : [];
+    return { shard, role: nativeProducerRole(target, 'framework', shard),
+      prerequisites: shard === 'units' ? [] :
+        validationPlatforms.map(platform => nativeProducerRole(platform, 'framework', 'units')),
+      stages: selectedStages, assertionIds, procedures, go: shard === toolShard };
+  });
+  const assigned = parts.flatMap(part => part.assertionIds);
+  requireThat(assigned.length === inventory.cases.length && new Set(assigned).size === assigned.length &&
+    inventory.cases.every(test => assigned.includes(test.id)), 'INVENTORY',
+  'Native framework shards must partition every original root and descendant exactly once');
+  const owner = new Map(parts.flatMap(part => part.assertionIds.map(id => [id, part.shard])));
+  for (const group of roots) {
+    const shard = owner.get(group.rootId);
+    requireThat(group.assertionIds.every(id => owner.get(id) === shard) &&
+      group.dependsOn.every(id => {
+        const dependency = roots.find(other => other.id === id);
+        return dependency && owner.get(dependency.rootId) === shard;
+      }) && roots.every(other => other.id === group.id ||
+        !other.exclusiveResources.some(resource => group.exclusiveResources.includes(resource)) ||
+        owner.get(other.rootId) === shard), 'INVENTORY',
+    'Cross-host native shards cannot separate causal dependencies or shared exclusive resources');
+  }
+  const identity = { protocol: nativeFrameworkShardProtocol, target, inventoryDigest: inventory.digest,
+    testSpecDigest: testSpecificationDigest(plan), toolShard, goRootId: toolRoot.id,
+    parts: parts.map(({ stages: selectedStages, ...part }) => ({ ...part,
+      stages: selectedStages.map(stage => ({ name: stage.name, files: stage.files,
+        selectorName: stage.selectorName, groups: stage.groups, ...(stage.selection ? { selection: stage.selection } : {}) })),
+    })) };
+  return { ...identity, digest: digest(identity), parts };
+}
+
+function nativeFrameworkShardSpecification({ plan, inventory, goSources, target, shard }) {
+  const assignment = nativeFrameworkShardPlan({ inventory, plan, target });
+  const part = assignment.parts.find(part => part.shard === shard);
+  requireThat(part, 'INVENTORY', 'Unknown independently expected native framework shard');
+  const whole = nativeSpecification({ plan, inventory, goSources, target, profile: 'pr',
+    component: target.startsWith('macos-') ? 'framework' : 'full' });
+  const ids = new Set(part.assertionIds);
+  const specification = { schemaVersion: 1, profile: nativeProfile('pr', target, 'framework', shard),
+    cases: whole.cases.map(test => ({ ...test, executionId: `native-${part.role}`,
+      assertions: test.assertions.filter(assertion => assertion.selector.tool === 'go' ? part.go :
+        assertion.selector.procedure ? part.procedures.includes(assertion.selector.procedure) : ids.has(assertion.id)),
+    })).filter(test => test.assertions.length) };
+  validationInventoryDigest(specification);
+  return specification;
 }
 
 export function nativeArtifacts(candidate) {
@@ -195,14 +328,14 @@ export async function prepareNativeHostFixtures({ candidate, candidateDir, scrat
   return { ...selected, kind: 'private-test-library-only' };
 }
 
-function nativeContextMatches(context, { target, profile, sourceRevision, artifacts, component = 'full' }) {
+function nativeContextMatches(context, { target, profile, sourceRevision, artifacts, component = 'full', shard = null }) {
   const resources = context.native.toolchain.resources;
   let validResources = false;
   if (resources && typeof resources === 'object') {
     try { validResources = digest(resources) === digest(nativeResourceFacts(resources)); }
     catch (error) { if (!['INPUT', 'BUDGET', 'INVENTORY'].includes(error.code)) throw error; }
   }
-  return validResources && context.profile === nativeProfile(profile, target, component) &&
+  return validResources && context.profile === nativeProfile(profile, target, component, shard) &&
     context.sources.length === 1 && context.sources[0].revision === sourceRevision &&
     context.native.kind === 'native' && context.native.platform === platforms[target] &&
     context.native.architecture === (target === 'macos-arm64' ? 'arm64' : 'x64') &&
@@ -215,15 +348,17 @@ function nativeContextMatches(context, { target, profile, sourceRevision, artifa
     context.attemptCapability === 'distinct' && context.producer.attemptKind === 'known' &&
     /^[1-9]\d*$/u.test(context.producer.executionRef) && /^[1-9]\d*$/u.test(context.producer.attemptRef) &&
     (profile === 'r-pre' ? typeof context.intentId === 'string' : context.intentId === undefined) &&
-    context.jobRef === `native-${nativeProducerRole(target, component)}` &&
+    context.jobRef === `native-${nativeProducerRole(target, component, shard)}` &&
     digest(context.artifacts) === digest(validateExecutionContext({ ...context, artifacts }).artifacts);
 }
 
 export function aggregateNativeReadiness(evaluations, { profile, sourceRevision, artifacts, executions,
-  components = false }) {
+  components = false, frameworkShards = false, inventory, plan, goSources, unitOrder }) {
   requireThat(typeof components === 'boolean' && (!components || profile === 'pr'),
     'INPUT', 'Native component composition is explicit and PR-only');
-  const parts = components ? nativePrParts : validationPlatforms.map(target => ({
+  requireThat(typeof frameworkShards === 'boolean' && (!frameworkShards || components && profile === 'pr'),
+    'INPUT', 'Framework shard aggregation is explicit and PR-only');
+  const parts = frameworkShards ? nativePrParts : components ? nativeLegacyPrParts : validationPlatforms.map(target => ({
     target, component: 'full', role: target,
   }));
   requireThat(Array.isArray(evaluations) && ['pr', 'r-pre'].includes(profile) && /^[a-f0-9]{40}$/u.test(sourceRevision) &&
@@ -234,15 +369,26 @@ export function aggregateNativeReadiness(evaluations, { profile, sourceRevision,
     artifacts.some(file => /-windows-x64\.zip$/u.test(file.name)) &&
     artifacts.some(file => /\.tgz$/u.test(file.name)) &&
     Array.isArray(executions) && executions.length === parts.length &&
-    new Set(executions.map(item => nativeProducerRole(item.target, item.component))).size === parts.length &&
+    new Set(executions.map(item => nativeProducerRole(item.target, item.component, item.shard))).size === parts.length &&
     executions.every(item => parts.some(part =>
-      part.target === item.target && part.component === (item.component ?? 'full'))),
+      part.target === item.target && part.component === (item.component ?? 'full') &&
+      (part.shard ?? null) === (item.shard ?? null))),
   'INPUT', 'Native aggregation needs every independently expected producer part and the complete frozen artifact set');
-  const expected = new Map(executions.map(({ target, context, component = 'full' }) => {
+  const expected = new Map(executions.map(({ target, context, component = 'full', shard = null }) => {
     const actual = validateExecutionContext(context);
-    requireThat(nativeContextMatches(actual, { target, profile, sourceRevision, artifacts, component }),
+    requireThat(nativeContextMatches(actual, { target, profile, sourceRevision, artifacts, component, shard }),
       'EVIDENCE', 'Expected native execution does not match source, artifacts, platform or baseline');
-    return [nativeProducerRole(target, component), actual];
+    if (frameworkShards) {
+      const specification = nativeSpecification({ plan, inventory, goSources, target, profile, component, shard });
+      const assignment = shard === null ? null : nativeFrameworkShardPlan({ inventory, plan, target });
+      requireThat(actual.inventoryDigest === validationInventoryDigest(specification) &&
+        actual.testSpecDigest === testSpecificationDigest(plan) &&
+        actual.configDigest === nativeConfigurationDigest({ inventory, profile, component, shard,
+          shardPlanDigest: assignment?.digest ?? null,
+          configuredWorkers: actual.native.toolchain.resources.configuredWorkers }),
+      'EVIDENCE', 'Expected shard context differs from independently derived complete source/specification/assignment');
+    }
+    return [nativeProducerRole(target, component, shard), actual];
   }));
   const baseline = expected.values().next().value;
   requireThat([...expected.values()].every(context =>
@@ -254,27 +400,84 @@ export function aggregateNativeReadiness(evaluations, { profile, sourceRevision,
   'Expected native lanes must belong to one exact source, configuration and producer attempt');
   const seen = new Set();
   const blockers = [];
-  for (const { target, evaluation, component = 'full' } of evaluations) {
+  for (const { target, evaluation, component = 'full', shard = null } of evaluations) {
     const protectedState = requireReadinessEvaluation(evaluation);
-    const part = parts.find(part => part.target === target && part.component === component);
+    const part = parts.find(part => part.target === target && part.component === component &&
+      (part.shard ?? null) === shard);
     if (!part || seen.has(part.role)) {
       blockers.push('Duplicate or unexpected native lane');
       continue;
     }
     seen.add(part.role);
     const selected = protectedState.context.executions;
-    if (evaluation.profile !== nativeProfile(profile, target, component) || evaluation.status !== 'Passed' ||
-        digest(evaluation.cases.map(test => test.testId).sort()) !== digest(nativeCaseIds(target, profile, component).sort()) ||
+    const specification = frameworkShards ?
+      nativeSpecification({ plan, inventory, goSources, target, profile, component, shard }) : null;
+    if (evaluation.profile !== nativeProfile(profile, target, component, shard) || evaluation.status !== 'Passed' ||
+        digest(evaluation.cases.map(test => test.testId).sort()) !==
+          digest((specification ? specification.cases.map(test => test.id) : nativeCaseIds(target, profile, component)).sort()) ||
         selected.length !== 1 || selected[0].id !== `native-${part.role}` ||
-        digest(selected[0].context) !== digest(expected.get(part.role))) {
+        digest(selected[0].context) !== digest(expected.get(part.role)) ||
+        specification && validationInventoryDigest(protectedState.spec) !== validationInventoryDigest(specification)) {
       blockers.push(`Native ${part.role} evidence is incomplete or belongs to different inputs`);
+    }
+    if (frameworkShards) {
+      requireThat(unitOrder && typeof unitOrder === 'object' &&
+        nativeUnitOrderProofs.get(unitOrder) === digest(unitOrder) &&
+        digest(unitOrder.contexts) === digest(parts.map(part => ({
+          role: part.role, contextDigest: digest(expected.get(part.role)),
+        }))), 'EVIDENCE', 'Framework composition requires the exact protected current unit-order proof');
     }
   }
   for (const part of parts) if (!seen.has(part.role)) blockers.push(`Missing required native ${part.role} part`);
   return { status: blockers.length ? 'NotRun' : 'Passed', blockers,
     requiredPlatforms: [...validationPlatforms],
     requiredParts: parts.map(part => part.role),
-    requiredCases: parts.flatMap(({ target, component }) => nativeCaseIds(target, profile, component)) };
+    requiredCases: [...new Set(parts.flatMap(({ target, component, shard = null }) => frameworkShards ?
+      nativeSpecification({ plan, inventory, goSources, target, profile, component, shard }).cases.map(test => test.id) :
+      nativeCaseIds(target, profile, component)))],
+    ...(frameworkShards ? { frameworkShards: nativeFrameworkShardProtocol } : {}) };
+}
+
+const nativeUnitOrderProofs = new WeakMap();
+export function requireNativeShardUnitOrder(proof, executions) {
+  requireThat(proof && typeof proof === 'object' && nativeUnitOrderProofs.get(proof) === digest(proof) &&
+    executions.every(part => proof.contexts.some(origin =>
+      origin.role === part.context.jobRef.slice('native-'.length) &&
+      origin.contextDigest === digest(part.context))), 'EVIDENCE',
+  'Shard composition requires the exact protected actual unit-order proof');
+  return proof;
+}
+export function verifyNativeShardUnitOrder(parts) {
+  requireThat(Array.isArray(parts) && parts.length === nativePrParts.length &&
+    new Set(parts.map(part => nativeProducerRole(part.target, part.component, part.shard))).size === nativePrParts.length &&
+    new Set(parts.map(part => part.job?.id)).size === nativePrParts.length,
+  'EVIDENCE', 'Unit ordering requires all exact independently acquired producer parts');
+  const selected = nativePrParts.map(expected => {
+    const part = parts.find(part => part.target === expected.target && part.component === expected.component &&
+      (part.shard ?? null) === (expected.shard ?? null));
+    requireThat(part, 'EVIDENCE', 'A required unit-order producer is missing');
+    const context = validateExecutionContext(part.context);
+    const job = part.job;
+    requireThat(job?.name === `native-${expected.role}` && job.status === 'completed' &&
+      job.conclusion === 'success' && Number.isSafeInteger(job.id) && job.id > 0 &&
+      String(job.run_id) === context.producer.executionRef &&
+      String(job.run_attempt) === context.producer.attemptRef &&
+      context.jobRef === job.name && Number.isFinite(Date.parse(job.started_at)) &&
+      Number.isFinite(Date.parse(job.completed_at)) && Date.parse(job.completed_at) >= Date.parse(job.started_at),
+    'EVIDENCE', 'Unit-order evidence differs from the actual required native job/context/attempt');
+    return { ...expected, context, job };
+  });
+  for (const part of selected.filter(part => part.shard && part.shard !== 'units')) {
+    requireThat(selected.filter(other => other.shard === 'units').every(units =>
+      Date.parse(units.job.completed_at) <= Date.parse(part.job.started_at)), 'EVIDENCE',
+    'Every actual platform unit producer must complete before any regression shard starts');
+  }
+  const proof = { protocol: nativeFrameworkShardProtocol,
+    contexts: selected.map(part => ({ role: part.role, contextDigest: digest(part.context) })),
+    jobs: selected.map(part => ({ role: part.role, id: part.job.id,
+      startedAt: part.job.started_at, completedAt: part.job.completed_at })) };
+  nativeUnitOrderProofs.set(proof, digest(proof));
+  return proof;
 }
 
 export function parseNativeOptions(args) {
@@ -283,7 +486,7 @@ export function parseNativeOptions(args) {
   for (let index = 0; index < args.length; index += 2) {
     const key = { '--target': 'target', '--profile': 'profile', '--candidate-dir': 'candidateDir',
       '--evidence-dir': 'evidenceDir', '--build-candidate': 'buildCandidate', '--phase': 'phase',
-      '--component': 'component' }[args[index]];
+      '--component': 'component', '--framework-shard': 'shard' }[args[index]];
     requireThat(key && options[key] === undefined, 'INPUT', 'Unknown or repeated native option');
     requireThat(key !== 'buildCandidate' || ['true', 'false'].includes(args[index + 1]),
       'INPUT', '--build-candidate must be exactly true or false');
@@ -293,7 +496,7 @@ export function parseNativeOptions(args) {
 }
 
 export function validateNativeRequest({ target, profile, candidateDir, evidenceDir, buildCandidate = false,
-  phase = 'validation', component = 'full' },
+  phase = 'validation', component = 'full', shard = null },
   environment = process.env) {
   requireThat(validationPlatforms.includes(target) && ['pr', 'r-pre'].includes(profile) &&
     typeof buildCandidate === 'boolean' && ['candidate', 'validation'].includes(phase),
@@ -301,7 +504,7 @@ export function validateNativeRequest({ target, profile, candidateDir, evidenceD
   requireThat(!buildCandidate || target === 'linux-x64', 'INPUT', 'Only the Linux producer may freeze a candidate');
   requireThat(phase !== 'candidate' || target === 'linux-x64' && buildCandidate,
     'INPUT', 'Source freeze requires the Linux candidate-building phase');
-  nativeProducerRole(target, component);
+  nativeProducerRole(target, component, shard);
   requireThat(component === 'full' || profile === 'pr' && phase === 'validation' && !buildCandidate,
     'INPUT', 'Partial Mac components require the PR validation phase and an already frozen candidate');
   if (profile === 'r-pre') id(environment.RELEASE_INTENT_ID, 'logical release intent');
@@ -324,7 +527,7 @@ export function validateNativeRequest({ target, profile, candidateDir, evidenceD
       const relative = path.relative(directory, resolved[1 - index]);
       return relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
     }), 'INPUT', 'Candidate and evidence directories must be disjoint');
-  return { target, profile, candidateDir: resolved[0], evidenceDir: resolved[1], buildCandidate, phase, component };
+  return { target, profile, candidateDir: resolved[0], evidenceDir: resolved[1], buildCandidate, phase, component, shard };
 }
 
 export async function assertGitFreeAncestors(directory, { lstat = fs.lstat } = {}) {
@@ -556,15 +759,31 @@ async function retainedToolReports(directory) {
   return found.filter(Boolean);
 }
 
-async function collectExecution({ directory, data, inventory, sources, calculatorSources, target, stages, context, specification, startedAt,
+async function collectExecution({ directory, data, inventory, sources, calculatorSources, target, stages, context, specification, startedAt, plan,
   candidate, profile = context.profile.startsWith('r-pre-') ? 'r-pre' : 'pr',
-  component = componentFromContext(context, target) }) {
+  component = componentFromContext(context, target), shard = shardFromContext(context, target) }) {
+  const assignment = shard === null ? null : nativeFrameworkShardPlan({ inventory, plan, target });
+  const part = assignment?.parts.find(part => part.shard === shard);
   const observations = [];
   const diagnostics = [];
   let complete = true;
   let exitCode = 0;
   const read = name => data ? Promise.resolve(data[name] ?? null) : readOptional(path.join(directory, name));
   const frozen = await read('candidate-verification.json');
+  if (part) {
+    const names = data ? Object.keys(data) : await fs.readdir(directory);
+    const extraStages = nativeWorkflowContract.stages.filter(name => !stages.some(stage => stage.name === name) &&
+      names.some(file => [name + '.json', name + '-command.json'].includes(file)));
+    const extraProcedures = ['static', 'calculator'].filter(name => !part.procedures.includes(name) &&
+      names.includes(`${name}.json`));
+    const extraGo = !part.go && (data ? names.some(file => /^tools-[a-f0-9-]+\/go-tests\.json$/u.test(file)) :
+      (await retainedToolReports(directory)).length > 0);
+    if (extraStages.length || extraProcedures.length || extraGo) {
+      complete = false;
+      diagnostics.push({ stage: 'assignment', code: 'UNASSIGNED_NATIVE_EXECUTION',
+        stages: extraStages, procedures: extraProcedures, go: extraGo });
+    }
+  }
   const smallContext = producerInputs(context, target);
   const commandMatches = (command, args, expectedContext, { before, after } = {}) =>
     command?.kind === 'validation-command' && command.complete === true && command.exitCode === 0 &&
@@ -678,13 +897,20 @@ async function collectExecution({ directory, data, inventory, sources, calculato
     id: `assertion-${digest(['procedure', name])}`, status, detail,
     observedAt, durationMs: 0,
   });
-  if (component !== 'homebrew') {
+  if (component !== 'homebrew' && (part === undefined || part.go)) {
   const goReports = data ? Object.entries(data).filter(([file]) =>
     /^tools-[a-f0-9-]+\/go-tests\.json$/u.test(file)).map(([, value]) => value) : await retainedToolReports(directory);
   const go = nativeGoObservations(sources, goReports, target);
+  const toolGroups = part ? originalStages.flatMap(report => report.groupExecution?.groups ?? [])
+    .filter(group => group.rootId === assignment.goRootId) : [];
+  if (part && toolGroups.length !== 1) {
+    complete = false;
+    diagnostics.push({ stage: 'go', code: 'MISSING_CAUSAL_GO_ROOT' });
+  }
   if (goReports.length === 1 && (!commandMatches(goReports[0],
     ['test', '-json', '-count=1', './...'], null, {
-      after: originalStages.at(-1)?.startedAt, before: originalStages.at(-1)?.finishedAt,
+      after: part ? toolGroups[0]?.startedAt : originalStages.at(-1)?.startedAt,
+      before: part ? toolGroups[0]?.finishedAt : originalStages.at(-1)?.finishedAt,
     }) ||
     typeof goReports[0].cwd !== 'string' ||
     !/[\\/]cmd[\\/]sdlc-launcher[\\/]?$/u.test(goReports[0].cwd))) {
@@ -694,6 +920,8 @@ async function collectExecution({ directory, data, inventory, sources, calculato
   observations.push(...go.observations);
   if (go.status !== 'Passed') complete = false;
   diagnostics.push({ stage: 'go', status: go.status, blockers: go.blockers, dispositions: go.dispositions ?? [] });
+  }
+  if (component !== 'homebrew' && (part === undefined || part.procedures.includes('calculator'))) {
   const calculatorReport = await read('calculator.json');
   const calculatorCommand = await read('calculator-command.json');
   const calculatorNodeCommand = await read('calculator-node-command.json');
@@ -727,6 +955,8 @@ async function collectExecution({ directory, data, inventory, sources, calculato
       'Independent calculator namespace: all 8 engine and 3 static assertions must execute; not framework assertion totals' :
       'Independent calculator namespace: every declared project assertion must execute; not framework assertion totals');
   if (!calculatorPassed) complete = false;
+  }
+  if (component !== 'homebrew' && (part === undefined || part.procedures.includes('static'))) {
   const staticReport = await read('static.json');
   const staticMatches = commandMatches(staticReport, ['scripts/check.mjs'], smallContext);
   procedure('static', staticMatches ? 'Passed' :
@@ -870,7 +1100,7 @@ export function evaluateNativeExecution(specification, raw) {
   });
 }
 
-export async function captureNativeDefinitionInputs({ target, profile, component = 'full' }) {
+export async function captureNativeDefinitionInputs({ target, profile, component = 'full', shard = null }) {
   requireThat(validationPlatforms.includes(target) && ['pr', 'r-pre'].includes(profile),
     'INPUT', 'Definition capture needs the explicit native profile and target');
   requireThat(/^[1-9]\d*$/u.test(process.env.GITHUB_REPOSITORY_ID ?? ''),
@@ -906,9 +1136,10 @@ export async function captureNativeDefinitionInputs({ target, profile, component
   }
   const sourceFiles = files.sort((left, right) => left.file < right.file ? -1 : left.file > right.file ? 1 : 0);
   const selectedWorkersRequest = process.env.SDLC_TEST_WORKERS ?? null;
-  const inputs = compileNativeDefinition({ target, profile, component, sourceFiles, selectedWorkersRequest });
+  const inputs = compileNativeDefinition({ target, profile, component, shard, sourceFiles, selectedWorkersRequest });
   const definition = { schemaVersion: 1, kind: 'native-validation-definition', target, profile, sourceFiles,
     ...(component === 'full' ? {} : { component }),
+    ...(shard === null ? {} : { shard, frameworkShards: nativeFrameworkShardProtocol }),
     selectedWorkersRequest, ...inputs, source: { revision: sourceRevision, treeSha,
       repositoryId: `repository-${process.env.GITHUB_REPOSITORY_ID}` } };
   requireThat(Buffer.byteLength(canonical(definition)) <= 64 * 1024 * 1024, 'CAPACITY',
@@ -955,7 +1186,8 @@ export function validateNativeSourceDefinitions(sourceFiles) {
   return sourceFiles;
 }
 
-function compileNativeDefinition({ target, profile, sourceFiles, selectedWorkersRequest = null, component = 'full' }) {
+function compileNativeDefinition({ target, profile, sourceFiles, selectedWorkersRequest = null,
+  component = 'full', shard = null }) {
   validateNativeSourceDefinitions(sourceFiles);
   const paths = sourceFiles.map(source => source.file);
   const selected = new Set(validationSourcePaths(paths));
@@ -967,23 +1199,28 @@ function compileNativeDefinition({ target, profile, sourceFiles, selectedWorkers
     .map(source => ({ file: path.posix.basename(source.file), contents: source.contents }));
   const plan = sourceFiles.find(source => source.file === 'docs/sdlc/public-readiness/test-plan.md')?.contents;
   requireThat(typeof plan === 'string', 'EVIDENCE', 'The original native Test Plan bytes are required');
-  const specification = nativeSpecification({ plan, inventory, goSources, target, profile, component });
+  const specification = nativeSpecification({ plan, inventory, goSources, target, profile, component, shard });
+  const assignment = shard === null ? null : nativeFrameworkShardPlan({ inventory, plan, target });
   const calculatorSources = sourceFiles.filter(source => calculatorProjectFiles(inventory).includes(source.file));
   calculatorSelection(inventory);
   return { plan, inventory, goSources, calculatorSources, specification,
-    stages: component === 'homebrew' ? [] : nativeStageSelections(inventory, plan),
-    configDigest: nativeConfigurationDigest({ inventory, profile, component, configuredWorkers: selectedWorkersRequest }),
+    stages: assignment ? assignment.parts.find(part => part.shard === shard).stages :
+      component === 'homebrew' ? [] : nativeStageSelections(inventory, plan),
+    configDigest: nativeConfigurationDigest({ inventory, profile, component, shard,
+      shardPlanDigest: assignment?.digest ?? null, configuredWorkers: selectedWorkersRequest }),
     testSpecDigest: testSpecificationDigest(plan), inventoryDigest: validationInventoryDigest(specification) };
 }
 
 export async function replayNativeEvidence({ definition, data, candidate, asOf, verifyArchive }) {
   const fields = ['schemaVersion', 'kind', 'target', 'profile', 'sourceFiles', 'selectedWorkersRequest',
-    'component',
+    'component', 'shard', 'frameworkShards',
     'plan', 'inventory', 'goSources', 'calculatorSources', 'specification', 'stages', 'configDigest', 'testSpecDigest',
     'inventoryDigest', 'source'];
   requireThat(definition && Object.getPrototypeOf(definition) === Object.prototype &&
     Object.keys(definition).every(field => fields.includes(field)) &&
     definition.schemaVersion === 1 && definition.kind === 'native-validation-definition' &&
+    (definition.shard === undefined ? definition.frameworkShards === undefined :
+      definition.frameworkShards === nativeFrameworkShardProtocol) &&
     validationPlatforms.includes(definition.target) && ['pr', 'r-pre'].includes(definition.profile) &&
     /^[a-f0-9]{40}$/u.test(definition.source?.revision ?? '') &&
     /^[a-f0-9]{40}$/u.test(definition.source?.treeSha ?? '') &&
@@ -1015,6 +1252,7 @@ export async function replayNativeEvidence({ definition, data, candidate, asOf, 
   const bootstrap = data['toolchain.json'];
   requireThat(nativeContextMatches(context, { target: definition.target, profile: definition.profile,
     component: definition.component,
+    shard: definition.shard,
     sourceRevision: definition.source.revision, artifacts: nativeArtifacts(candidate) }) &&
     context.candidateDigest === digest({ revision: definition.source.revision, tree: definition.source.treeSha }) &&
     context.sources[0].contentDigest === digest(definition.source.treeSha) &&
@@ -1036,7 +1274,7 @@ export async function replayNativeEvidence({ definition, data, candidate, asOf, 
   }));
   const evaluation = evaluateReadiness(inputs.specification, [normalized], {
     profile: inputs.specification.profile,
-    executions: [{ id: `native-${nativeProducerRole(definition.target, definition.component)}`, context }],
+    executions: [{ id: `native-${nativeProducerRole(definition.target, definition.component, definition.shard)}`, context }],
     now: asOf, policy: { maxAgeMs: 24 * 60 * 60 * 1000, revisionPolicy: 'exact',
       verifierIds: [verified.verifierId] },
   });
@@ -1054,9 +1292,12 @@ function parseOriginal(text) {
 
 function producerInputs(context, target) {
   const component = componentFromContext(context, target);
+  const shard = shardFromContext(context, target);
   return { schemaVersion: 1, sourceCommit: context.sources[0].revision, target,
     profile: context.profile.startsWith('r-pre-') ? 'r-pre' : 'pr',
     ...(component === 'full' ? {} : { component }), workflowRef: context.producer.definitionRef,
+    ...(shard === null ? {} : { frameworkShards: nativeFrameworkShardProtocol, shard,
+      configDigest: context.configDigest, inventoryDigest: context.inventoryDigest }),
     repositoryId: context.sources[0].repositoryId, runId: context.producer.executionRef,
     attempt: context.producer.attemptRef };
 }
@@ -1067,9 +1308,9 @@ export async function writeNativeReadinessBundle(file, evaluation) {
 }
 
 export async function finalizeNativeEvidence({ directory, inventory, sources, calculatorSources, target, stages,
-  context, specification, startedAt, candidate, failure = null, cancelled = false, completeReportRef }) {
+  context, specification, startedAt, candidate, plan, failure = null, cancelled = false, completeReportRef }) {
   const collected = await collectExecution({ directory, inventory, sources, calculatorSources, target, stages,
-    context, specification, startedAt, candidate });
+    context, specification, startedAt, candidate, plan });
   if (failure || cancelled) {
     collected.raw.complete = false;
     collected.raw.finishedAt = null;
@@ -1083,8 +1324,9 @@ export async function finalizeNativeEvidence({ directory, inventory, sources, ca
     .replaceAll('>', '&gt;').replaceAll('`', '&#96;').replaceAll('\r', '').replaceAll('\n', ' ');
   const markdown = `# Native execution identity\n\n` +
     (componentFromContext(context, target) === 'full' ? '' :
-      `PR producer part: **${escape(componentFromContext(context, target))}**. ` +
-      `This report alone does not establish complete Mac lane readiness; both required parts must match.\n\n`) +
+      `PR producer part: **${escape(componentFromContext(context, target))}` +
+      `${shardFromContext(context, target) === null ? '' : '/' + escape(shardFromContext(context, target))}**. ` +
+      `This report alone does not establish complete platform readiness; every required part must match.\n\n`) +
     `- Source: \`${context.sources[0].revision}\`\n` +
     `- Native host: ${escape(context.native.platform)} / ${escape(context.native.architecture)}; image ${escape(context.native.image)}\n` +
     `- Run: ${escape(context.producer.executionRef)}; attempt ${escape(context.producer.attemptRef)}; job ${escape(context.jobRef)}\n` +
@@ -1107,27 +1349,30 @@ export function nativeFailureAnnotations(evaluation) {
     escape(`${test.testId}: ${assertion.detail || 'Required assertion failed; see retained complete reports.'}`)));
 }
 
-async function definitionInputs(target, profile, component = 'full') {
+async function definitionInputs(target, profile, component = 'full', shard = null) {
   const plan = await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
   const inventory = await compileValidationInventory(repositoryRoot);
   const sources = await goSources();
-  const specification = nativeSpecification({ plan, inventory, goSources: sources, target, profile, component });
+  const specification = nativeSpecification({ plan, inventory, goSources: sources, target, profile, component, shard });
+  const assignment = shard === null ? null : nativeFrameworkShardPlan({ inventory, plan, target });
   const calculatorSources = await Promise.all(calculatorProjectFiles(inventory).map(async file =>
     ({ file, contents: await fs.readFile(path.join(repositoryRoot, ...file.split('/')), 'utf8') })));
   calculatorSelection(inventory);
   return { plan, inventory, sources, calculatorSources, specification,
-    stages: component === 'homebrew' ? [] : nativeStageSelections(inventory, plan) };
+    stages: assignment ? assignment.parts.find(part => part.shard === shard).stages :
+      component === 'homebrew' ? [] : nativeStageSelections(inventory, plan) };
 }
 
 export async function verifyNativeEvidence({ target, profile, candidateDir, evidenceDir,
   expectedSourceCommit, expectedRunId, expectedAttempt, releaseIntentId,
   expectedRepositoryId = process.env.GITHUB_REPOSITORY_ID, expectedWorkflowRef = process.env.GITHUB_WORKFLOW_REF,
-  component = 'full' }) {
+  component = 'full', shard = null }) {
   const actualSource = (await execute('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot })).stdout.trim();
   requireThat(actualSource === expectedSourceCommit, 'EVIDENCE', 'Replay must use the exact selected source definitions');
   await assertCommittedNativeInputs();
   const candidate = await verifyCandidate(candidateDir, { sourceCommit: expectedSourceCommit });
-  const inputs = await definitionInputs(target, profile, component);
+  const inputs = await definitionInputs(target, profile, component, shard);
+  const assignment = shard === null ? null : nativeFrameworkShardPlan({ inventory: inputs.inventory, plan: inputs.plan, target });
   const stored = await readOptional(path.join(evidenceDir, 'execution.json'));
   const context = validateExecutionContext(stored?.context);
   const bootstrap = await readOptional(path.join(evidenceDir, 'toolchain.json'));
@@ -1135,11 +1380,12 @@ export async function verifyNativeEvidence({ target, profile, candidateDir, evid
     digest(context.native.toolchain.bootstrap) === digest(bootstrap.native),
   'EVIDENCE', 'Original native toolchain/host bootstrap is missing or differs');
   const tree = (await execute('git', ['rev-parse', `${expectedSourceCommit}^{tree}`], { cwd: repositoryRoot })).stdout.trim();
-  requireThat(nativeContextMatches(context, { target, profile, component, sourceRevision: expectedSourceCommit,
+  requireThat(nativeContextMatches(context, { target, profile, component, shard, sourceRevision: expectedSourceCommit,
     artifacts: nativeArtifacts(candidate) }) &&
     context.candidateDigest === digest({ revision: expectedSourceCommit, tree }) &&
     context.testSpecDigest === testSpecificationDigest(inputs.plan) &&
-    context.configDigest === nativeConfigurationDigest({ inventory: inputs.inventory, profile, component,
+    context.configDigest === nativeConfigurationDigest({ inventory: inputs.inventory, profile, component, shard,
+      shardPlanDigest: assignment?.digest ?? null,
       configuredWorkers: process.env.SDLC_TEST_WORKERS ?? null }) &&
     context.inventoryDigest === validationInventoryDigest(inputs.specification) &&
     context.sources[0].contentDigest === digest(tree) &&
@@ -1167,8 +1413,8 @@ export async function verifyNativeEvidence({ target, profile, candidateDir, evid
 
 export async function runNativeValidation(options) {
   const request = validateNativeRequest(options);
-  const { target, profile, candidateDir, evidenceDir, buildCandidate, phase, component } = request;
-  const role = nativeProducerRole(target, component);
+  const { target, profile, candidateDir, evidenceDir, buildCandidate, phase, component, shard } = request;
+  const role = nativeProducerRole(target, component, shard);
   requireThat(process.platform === platforms[target] &&
     process.arch === (target === 'macos-arm64' ? 'arm64' : 'x64') &&
     process.versions.node === nativeToolchain.node, 'HOST', 'Native validation requires its actual selected host and pinned Node');
@@ -1201,7 +1447,9 @@ export async function runNativeValidation(options) {
   try {
     await assertCommittedNativeInputs();
     await runtimePreflight();
-    inputs = await definitionInputs(target, profile, component);
+    inputs = await definitionInputs(target, profile, component, shard);
+    const assignment = shard === null ? null : nativeFrameworkShardPlan({ inventory: inputs.inventory, plan: inputs.plan, target });
+    const part = assignment?.parts.find(part => part.shard === shard);
     const scratch = path.join(directory, 'scratch');
     await fs.mkdir(scratch);
     ambient = await allocateAmbientDirectory();
@@ -1211,10 +1459,11 @@ export async function runNativeValidation(options) {
       GOCACHE: path.join(scratch, 'go-cache'), GOTMPDIR: scratch,
       TMPDIR: ambient.directory, TEMP: ambient.directory, TMP: ambient.directory,
       SDLC_TEST_EVIDENCE_ROOT: directory };
-    environment.SDLC_TEST_REPORT_CONTEXT = JSON.stringify({ schemaVersion: 1, sourceCommit: revision, target,
+    const commandContext = { schemaVersion: 1, sourceCommit: revision, target,
       profile, ...(component === 'full' ? {} : { component }), workflowRef: process.env.GITHUB_WORKFLOW_REF,
+      ...(shard === null ? {} : { frameworkShards: nativeFrameworkShardProtocol, shard }),
       repositoryId: `repository-${process.env.GITHUB_REPOSITORY_ID}`,
-      runId: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT });
+      runId: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT };
     for (const name of ['NODE_AUTH_TOKEN', 'NPM_TOKEN', 'GITHUB_TOKEN', 'GH_TOKEN']) delete environment[name];
     const bootstrap = await readOptional(process.env.SDLC_NATIVE_TOOLCHAIN_REPORT ?? path.join(directory, 'missing-bootstrap.json'));
     const resources = nativeResourceFacts();
@@ -1223,6 +1472,12 @@ export async function runNativeValidation(options) {
       bootstrap.native.architecture === process.arch &&
       bootstrap.native.resources && digest(bootstrap.native.resources) === digest(resources),
     'HOST', 'Required native toolchain bootstrap did not establish this actual host/resource allocation');
+    if (shard !== null) Object.assign(commandContext, {
+      configDigest: nativeConfigurationDigest({ inventory: inputs.inventory, profile, component, shard,
+        shardPlanDigest: assignment.digest, configuredWorkers: resources.configuredWorkers }),
+      inventoryDigest: validationInventoryDigest(inputs.specification),
+    });
+    environment.SDLC_TEST_REPORT_CONTEXT = JSON.stringify(commandContext);
     await writeJson(path.join(directory, 'toolchain.json'), bootstrap);
     const runTool = options => executeValidationCommand({ outputDir: directory, environment,
       signal: cancellation.signal, ...options });
@@ -1237,7 +1492,8 @@ export async function runNativeValidation(options) {
     const tree = (await git(['rev-parse', 'HEAD^{tree}'])).stdout.trim();
     context = validateExecutionContext({
       candidateDigest: digest({ revision, tree }), testSpecDigest: testSpecificationDigest(inputs.plan),
-      configDigest: nativeConfigurationDigest({ inventory: inputs.inventory, profile, component,
+      configDigest: nativeConfigurationDigest({ inventory: inputs.inventory, profile, component, shard,
+        shardPlanDigest: assignment?.digest ?? null,
         configuredWorkers: resources.configuredWorkers }),
       inventoryDigest: validationInventoryDigest(inputs.specification),
       sources: [{ repositoryId: `repository-${process.env.GITHUB_REPOSITORY_ID}`, revision,
@@ -1268,9 +1524,10 @@ export async function runNativeValidation(options) {
       requireThat(command.complete && command.exitCode === 0, 'VALIDATION',
         `Native ${selected.name} did not complete successfully; original reports are retained`);
     };
-    if (component !== 'homebrew') {
-    await stage(inputs.stages[0]);
-    if (phase === 'validation') await stage(inputs.stages[1]);
+    if (component !== 'homebrew' && (part === undefined || shard === 'units')) {
+    for (const selected of inputs.stages.filter(stage => stage.name !== 'regression')) {
+      if (selected.name === 'unit' || phase === 'validation') await stage(selected);
+    }
     const staticReport = await runTool({ name: 'static', command: process.execPath, args: ['scripts/check.mjs'] });
     requireThat(staticReport.complete && staticReport.exitCode === 0, 'VALIDATION', 'Native static validation did not pass');
     }
@@ -1293,7 +1550,7 @@ export async function runNativeValidation(options) {
     candidateReady = true;
     if (phase === 'validation') {
     environment.SDLC_TEST_REPORT_CONTEXT = JSON.stringify(context);
-    if (component !== 'homebrew') {
+    if (component !== 'homebrew' && (part === undefined || shard !== 'units')) {
     const windows = archiveRecord(candidate, 'windows-x64');
     const launcher = readZip(await fs.readFile(path.join(candidateDir, 'assets', windows.filename)))
       .find(entry => entry.path === 'bin/sdlc.exe');
@@ -1315,11 +1572,13 @@ export async function runNativeValidation(options) {
         payloadSha256: candidate.descriptor.payload.sha256, archives: privateFixtures.archives,
       });
     }
-    await stage(inputs.stages[2]);
+    for (const selected of inputs.stages.filter(stage => stage.name === 'regression')) await stage(selected);
+    if (part === undefined || part.procedures.includes('calculator')) {
     const calculator = await runTool({ name: 'calculator-command', command: process.execPath,
       args: ['scripts/pr-calculator.mjs', '--output', path.join(directory, 'calculator.json')] });
     requireThat(calculator.complete && calculator.exitCode === 0, 'VALIDATION',
       'Required independent calculator tests failed or were unavailable; see calculator originals');
+    }
     if (profile === 'r-pre' && target === 'windows-x64') {
       const { downloadPreviousRelease, verifySupportedPreviousLifecycle } = await import('./accept-release.mjs');
       const pins = candidate.context.previousRelease;
@@ -1401,6 +1660,7 @@ export async function runNativeValidation(options) {
     catch (error) { presentationDiagnostic = safe({ code: error.code, message: 'Actions summary write failed; retained reports remain authoritative.' }); }
   }
   const result = { status, phase, ...(component === 'full' ? {} : { component, role }),
+    ...(shard === null ? {} : { shard, frameworkShards: nativeFrameworkShardProtocol }),
     candidateReady: phase === 'candidate' && candidateReady && !failure &&
     !cancellation.signal.aborted, context: phase === 'validation' ? context ?? null : null, sourceCommit: revision,
     descriptorSha256: candidate?.context.identity.descriptorSha256 ?? null,

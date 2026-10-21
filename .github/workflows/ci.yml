@@ -208,7 +208,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
-  native:
+  native-units:
     needs: [intent, source]
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
     name: native-${{ matrix.role }}
@@ -217,33 +217,27 @@ jobs:
       matrix:
         include:
           - target: linux-x64
-            component: full
-            role: linux-x64
+            component: framework
+            shard: units
+            role: linux-x64-framework-units
             os: ubuntu-24.04
             architecture: x64
           - target: windows-x64
-            component: full
-            role: windows-x64
+            component: framework
+            shard: units
+            role: windows-x64-framework-units
             os: windows-2022
             architecture: x64
           - target: macos-arm64
             component: framework
-            role: macos-arm64-framework
+            shard: units
+            role: macos-arm64-framework-units
             os: macos-15
             architecture: arm64
           - target: macos-x64
             component: framework
-            role: macos-x64-framework
-            os: macos-15-intel
-            architecture: x64
-          - target: macos-arm64
-            component: homebrew
-            role: macos-arm64-homebrew
-            os: macos-15
-            architecture: arm64
-          - target: macos-x64
-            component: homebrew
-            role: macos-x64-homebrew
+            shard: units
+            role: macos-x64-framework-units
             os: macos-15-intel
             architecture: x64
     runs-on: ${{ matrix.os }}
@@ -251,6 +245,8 @@ jobs:
     env:
       SDLC_NATIVE_ROLE: ${{ matrix.role }}
       SDLC_NATIVE_COMPONENT: ${{ matrix.component }}
+      SDLC_FRAMEWORK_SHARD: ${{ matrix.shard }}
+      NATIVE_TARGET: ${{ matrix.target }}
     steps:
       - name: Record trusted execution context
         working-directory: ${{ github.workspace }}
@@ -274,6 +270,229 @@ jobs:
               ImageOS: e.ImageOS, ImageVersion: e.ImageVersion,
               platform: process.platform, architecture: process.arch,
               nativeRole: e.SDLC_NATIVE_ROLE, nativeComponent: e.SDLC_NATIVE_COMPONENT,
+              nativeShard: e.SDLC_FRAMEWORK_SHARD,
+              resources: { availableParallelism: require("node:os").availableParallelism(),
+                totalMemoryBytes: require("node:os").totalmem(), configuredWorkers: e.SDLC_TEST_WORKERS ?? null }
+            }));
+          '
+      - name: Check out exact candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: source
+          ref: ${{ needs.source.outputs.source-commit }}
+          persist-credentials: false
+      - name: Materialize committed source bytes
+        run: |
+          git config --local core.autocrlf false
+          git config --local core.eol lf
+          git -c core.autocrlf=false -c core.eol=lf checkout-index --force --all
+      - name: Select pinned native Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.20.0'
+          architecture: ${{ matrix.architecture }}
+          check-latest: false
+      - name: Select pinned native Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        env:
+          GOTOOLCHAIN: local
+        with:
+          go-version: '1.27.1'
+          check-latest: false
+          cache: false
+      - name: Select pinned native CPython
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.10'
+          architecture: ${{ matrix.architecture }}
+          check-latest: false
+      - name: Provision isolated native toolchain
+        id: bootstrap
+        env:
+          GOTOOLCHAIN: local
+        run: node scripts/native-toolchain.mjs --target "$NATIVE_TARGET" --output-dir ".test-data/bootstrap-$SDLC_NATIVE_ROLE"
+      - name: Retain native bootstrap diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-bootstrap-${{ matrix.role }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            source/.test-data/bootstrap-${{ matrix.role }}/*.json
+            source/.test-data/bootstrap-${{ matrix.role }}/*.ndjson
+            source/.test-data/bootstrap-${{ matrix.role }}/crypto-fixture/fixture.json
+            source/.test-data/bootstrap-${{ matrix.role }}/crypto-fixture/public-intoto.sigstore
+            source/.test-data/bootstrap-${{ matrix.role }}/crypto-fixture/offline-trust/*.json
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Retrieve exact frozen candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.source.outputs.candidate-artifact-id }}
+          path: source/.test-data/frozen-candidate
+          merge-multiple: true
+      - name: Execute native validation
+        env:
+          EXPECTED_SOURCE_COMMIT: ${{ needs.source.outputs.source-commit }}
+          EXPECTED_DESCRIPTOR_SHA256: ${{ needs.source.outputs.descriptor-sha256 }}
+          EXPECTED_CHECKSUMS_SHA256: ${{ needs.source.outputs.checksums-sha256 }}
+        run: >-
+          node scripts/native-validation.mjs
+          --target "$NATIVE_TARGET" --profile pr --component "$SDLC_NATIVE_COMPONENT"
+          --framework-shard "$SDLC_FRAMEWORK_SHARD"
+          --candidate-dir .test-data/frozen-candidate
+          --evidence-dir ".test-data/native-$SDLC_NATIVE_ROLE"
+          --build-candidate false
+      - name: Retain native validation evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-evidence-${{ matrix.role }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            source/.test-data/native-${{ matrix.role }}/*.json
+            source/.test-data/native-${{ matrix.role }}/*.ndjson
+            source/.test-data/native-${{ matrix.role }}/*.md
+            source/.test-data/native-${{ matrix.role }}/tools-*/*.json
+            source/.test-data/native-${{ matrix.role }}/tools-*/*.ndjson
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Remove owned short Homebrew prefix
+        if: ${{ always() && runner.os == 'macOS' && steps.bootstrap.outcome != 'skipped' }}
+        run: >-
+          node scripts/native-toolchain.mjs --cleanup
+          --target "$NATIVE_TARGET" --output-dir ".test-data/bootstrap-$SDLC_NATIVE_ROLE"
+      - name: Retain native cleanup diagnostics
+        if: ${{ always() && runner.os == 'macOS' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-cleanup-${{ matrix.role }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            source/.test-data/bootstrap-${{ matrix.role }}/*.json
+            source/.test-data/bootstrap-${{ matrix.role }}/*.ndjson
+          if-no-files-found: warn
+          retention-days: 90
+
+  native:
+    needs: [intent, source, native-units]
+    if: ${{ needs.intent.outputs.requires-native == 'true' }}
+    name: native-${{ matrix.role }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            component: framework
+            shard: refresh
+            role: linux-x64-framework-refresh
+            os: ubuntu-24.04
+            architecture: x64
+          - target: windows-x64
+            component: framework
+            shard: refresh
+            role: windows-x64-framework-refresh
+            os: windows-2022
+            architecture: x64
+          - target: macos-arm64
+            component: framework
+            shard: refresh
+            role: macos-arm64-framework-refresh
+            os: macos-15
+            architecture: arm64
+          - target: macos-x64
+            component: framework
+            shard: refresh
+            role: macos-x64-framework-refresh
+            os: macos-15-intel
+            architecture: x64
+          - target: linux-x64
+            component: framework
+            shard: body-0
+            role: linux-x64-framework-body-0
+            os: ubuntu-24.04
+            architecture: x64
+          - target: linux-x64
+            component: framework
+            shard: body-1
+            role: linux-x64-framework-body-1
+            os: ubuntu-24.04
+            architecture: x64
+          - target: windows-x64
+            component: framework
+            shard: body-0
+            role: windows-x64-framework-body-0
+            os: windows-2022
+            architecture: x64
+          - target: windows-x64
+            component: framework
+            shard: body-1
+            role: windows-x64-framework-body-1
+            os: windows-2022
+            architecture: x64
+          - target: macos-arm64
+            component: framework
+            shard: body-0
+            role: macos-arm64-framework-body-0
+            os: macos-15
+            architecture: arm64
+          - target: macos-arm64
+            component: framework
+            shard: body-1
+            role: macos-arm64-framework-body-1
+            os: macos-15
+            architecture: arm64
+          - target: macos-arm64
+            component: framework
+            shard: body-2
+            role: macos-arm64-framework-body-2
+            os: macos-15
+            architecture: arm64
+          - target: macos-x64
+            component: framework
+            shard: body-0
+            role: macos-x64-framework-body-0
+            os: macos-15-intel
+            architecture: x64
+          - target: macos-x64
+            component: framework
+            shard: body-1
+            role: macos-x64-framework-body-1
+            os: macos-15-intel
+            architecture: x64
+          - target: macos-x64
+            component: framework
+            shard: body-2
+            role: macos-x64-framework-body-2
+            os: macos-15-intel
+            architecture: x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 360
+    env:
+      SDLC_NATIVE_ROLE: ${{ matrix.role }}
+      SDLC_NATIVE_COMPONENT: ${{ matrix.component }}
+      SDLC_FRAMEWORK_SHARD: ${{ matrix.shard }}
+    steps:
+      - name: Record trusted execution context
+        working-directory: ${{ github.workspace }}
+        env:
+          SDLC_REPOSITORY_ID: ${{ github.repository_id }}
+          SDLC_PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          SDLC_HEAD_REPOSITORY_ID: ${{ github.event.pull_request.head.repo.id || '' }}
+          SDLC_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+          SDLC_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          SDLC_MERGE_SHA: ${{ github.sha }}
+          SDLC_EVENT: ${{ github.event_name }}
+        run: |
+          node -e '
+            const e = process.env;
+            console.log("sdlc-run-context:" + JSON.stringify({
+              repositoryId: e.SDLC_REPOSITORY_ID, prNumber: e.SDLC_PR_NUMBER || null,
+              headRepositoryId: e.SDLC_HEAD_REPOSITORY_ID || null,
+              headSha: e.SDLC_HEAD_SHA || null, baseSha: e.SDLC_BASE_SHA || null,
+              mergeSha: e.SDLC_MERGE_SHA, event: e.SDLC_EVENT,
+              runId: e.GITHUB_RUN_ID, attempt: e.GITHUB_RUN_ATTEMPT,
+              ImageOS: e.ImageOS, ImageVersion: e.ImageVersion,
+              platform: process.platform, architecture: process.arch,
+              nativeRole: e.SDLC_NATIVE_ROLE, nativeComponent: e.SDLC_NATIVE_COMPONENT,
+              nativeShard: e.SDLC_FRAMEWORK_SHARD,
               resources: { availableParallelism: require("node:os").availableParallelism(),
                 totalMemoryBytes: require("node:os").totalmem(), configuredWorkers: e.SDLC_TEST_WORKERS ?? null }
             }));
@@ -346,6 +565,7 @@ jobs:
         run: >-
           node scripts/native-validation.mjs
           --target "$NATIVE_TARGET" --profile pr --component "$NATIVE_COMPONENT"
+          --framework-shard "$SDLC_FRAMEWORK_SHARD"
           --candidate-dir .test-data/frozen-candidate
           --evidence-dir ".test-data/native-$NATIVE_ROLE"
           --build-candidate false
@@ -381,11 +601,158 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
+  native-homebrew:
+    needs: [intent, source]
+    if: ${{ needs.intent.outputs.requires-native == 'true' }}
+    name: native-${{ matrix.role }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: macos-arm64
+            component: homebrew
+            role: macos-arm64-homebrew
+            os: macos-15
+            architecture: arm64
+          - target: macos-x64
+            component: homebrew
+            role: macos-x64-homebrew
+            os: macos-15-intel
+            architecture: x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 360
+    env:
+      SDLC_NATIVE_ROLE: ${{ matrix.role }}
+      SDLC_NATIVE_COMPONENT: ${{ matrix.component }}
+      NATIVE_TARGET: ${{ matrix.target }}
+    steps:
+      - name: Record trusted execution context
+        working-directory: ${{ github.workspace }}
+        env:
+          SDLC_REPOSITORY_ID: ${{ github.repository_id }}
+          SDLC_PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          SDLC_HEAD_REPOSITORY_ID: ${{ github.event.pull_request.head.repo.id || '' }}
+          SDLC_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+          SDLC_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          SDLC_MERGE_SHA: ${{ github.sha }}
+          SDLC_EVENT: ${{ github.event_name }}
+        run: |
+          node -e '
+            const e = process.env;
+            console.log("sdlc-run-context:" + JSON.stringify({
+              repositoryId: e.SDLC_REPOSITORY_ID, prNumber: e.SDLC_PR_NUMBER || null,
+              headRepositoryId: e.SDLC_HEAD_REPOSITORY_ID || null,
+              headSha: e.SDLC_HEAD_SHA || null, baseSha: e.SDLC_BASE_SHA || null,
+              mergeSha: e.SDLC_MERGE_SHA, event: e.SDLC_EVENT,
+              runId: e.GITHUB_RUN_ID, attempt: e.GITHUB_RUN_ATTEMPT,
+              ImageOS: e.ImageOS, ImageVersion: e.ImageVersion,
+              platform: process.platform, architecture: process.arch,
+              nativeRole: e.SDLC_NATIVE_ROLE, nativeComponent: e.SDLC_NATIVE_COMPONENT,
+              nativeShard: null,
+              resources: { availableParallelism: require("node:os").availableParallelism(),
+                totalMemoryBytes: require("node:os").totalmem(), configuredWorkers: e.SDLC_TEST_WORKERS ?? null }
+            }));
+          '
+      - name: Check out exact candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: source
+          ref: ${{ needs.source.outputs.source-commit }}
+          persist-credentials: false
+      - name: Materialize committed source bytes
+        run: |
+          git config --local core.autocrlf false
+          git config --local core.eol lf
+          git -c core.autocrlf=false -c core.eol=lf checkout-index --force --all
+      - name: Select pinned native Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.20.0'
+          architecture: ${{ matrix.architecture }}
+          check-latest: false
+      - name: Select pinned native Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        env:
+          GOTOOLCHAIN: local
+        with:
+          go-version: '1.27.1'
+          check-latest: false
+          cache: false
+      - name: Select pinned native CPython
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.10'
+          architecture: ${{ matrix.architecture }}
+          check-latest: false
+      - name: Provision isolated native toolchain
+        id: bootstrap
+        env:
+          GOTOOLCHAIN: local
+        run: node scripts/native-toolchain.mjs --target "$NATIVE_TARGET" --output-dir ".test-data/bootstrap-$SDLC_NATIVE_ROLE"
+      - name: Retain native bootstrap diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-bootstrap-${{ matrix.role }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            source/.test-data/bootstrap-${{ matrix.role }}/*.json
+            source/.test-data/bootstrap-${{ matrix.role }}/*.ndjson
+            source/.test-data/bootstrap-${{ matrix.role }}/crypto-fixture/fixture.json
+            source/.test-data/bootstrap-${{ matrix.role }}/crypto-fixture/public-intoto.sigstore
+            source/.test-data/bootstrap-${{ matrix.role }}/crypto-fixture/offline-trust/*.json
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Retrieve exact frozen candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.source.outputs.candidate-artifact-id }}
+          path: source/.test-data/frozen-candidate
+          merge-multiple: true
+      - name: Execute native validation
+        env:
+          EXPECTED_SOURCE_COMMIT: ${{ needs.source.outputs.source-commit }}
+          EXPECTED_DESCRIPTOR_SHA256: ${{ needs.source.outputs.descriptor-sha256 }}
+          EXPECTED_CHECKSUMS_SHA256: ${{ needs.source.outputs.checksums-sha256 }}
+        run: >-
+          node scripts/native-validation.mjs
+          --target "$NATIVE_TARGET" --profile pr --component "$SDLC_NATIVE_COMPONENT"
+          --candidate-dir .test-data/frozen-candidate
+          --evidence-dir ".test-data/native-$SDLC_NATIVE_ROLE"
+          --build-candidate false
+      - name: Retain native validation evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-evidence-${{ matrix.role }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            source/.test-data/native-${{ matrix.role }}/*.json
+            source/.test-data/native-${{ matrix.role }}/*.ndjson
+            source/.test-data/native-${{ matrix.role }}/*.md
+            source/.test-data/native-${{ matrix.role }}/tools-*/*.json
+            source/.test-data/native-${{ matrix.role }}/tools-*/*.ndjson
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Remove owned short Homebrew prefix
+        if: ${{ always() && steps.bootstrap.outcome != 'skipped' }}
+        run: >-
+          node scripts/native-toolchain.mjs --cleanup
+          --target "$NATIVE_TARGET" --output-dir ".test-data/bootstrap-$SDLC_NATIVE_ROLE"
+      - name: Retain native cleanup diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-cleanup-${{ matrix.role }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            source/.test-data/bootstrap-${{ matrix.role }}/*.json
+            source/.test-data/bootstrap-${{ matrix.role }}/*.ndjson
+          if-no-files-found: warn
+          retention-days: 90
+
   producer-summary:
     permissions: {}
     name: Native producer completeness
     if: ${{ always() }}
-    needs: [intent, minimum-node, source, native]
+    needs: [intent, minimum-node, source, native-units, native, native-homebrew]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -395,6 +762,8 @@ jobs:
           SOURCE_RESULT: ${{ needs.source.result }}
           MINIMUM_NODE_RESULT: ${{ needs.minimum-node.result }}
           NATIVE_RESULT: ${{ needs.native.result }}
+          UNITS_RESULT: ${{ needs.native-units.result }}
+          HOMEBREW_RESULT: ${{ needs.native-homebrew.result }}
           INTENT_RESULT: ${{ needs.intent.result }}
           REQUIRES_NATIVE: ${{ needs.intent.outputs.requires-native }}
         shell: bash
@@ -403,11 +772,13 @@ jobs:
           if test "$REQUIRES_NATIVE" = false; then
             printf 'Metadata-only edit: native assertions were not executed; this is not native passing evidence.\n'
             test "$SOURCE_RESULT" = skipped && test "$NATIVE_RESULT" = skipped &&
+              test "$UNITS_RESULT" = skipped && test "$HOMEBREW_RESULT" = skipped &&
               test "$MINIMUM_NODE_RESULT" = skipped
             exit
           fi
           test "$REQUIRES_NATIVE" = true
           test "$MINIMUM_NODE_RESULT" = success
-          printf 'Source freeze: %s\nFour logical lanes / six required native producer parts: %s\n' "$SOURCE_RESULT" "$NATIVE_RESULT"
+          printf 'Source freeze: %s\nFour logical lanes / twenty required native producer parts: %s\n' "$SOURCE_RESULT" "$NATIVE_RESULT"
           printf 'Provider-verified framework/validation is evaluated independently by the trusted observer.\n'
-          test "$SOURCE_RESULT" = success && test "$NATIVE_RESULT" = success
+          test "$SOURCE_RESULT" = success && test "$NATIVE_RESULT" = success &&
+            test "$UNITS_RESULT" = success && test "$HOMEBREW_RESULT" = success

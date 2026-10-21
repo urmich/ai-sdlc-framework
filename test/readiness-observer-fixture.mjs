@@ -15,6 +15,8 @@ import { archiveRecord } from '../scripts/release-bundle.mjs';
 import { compileValidationSourceInventory, validationPlatforms, validationSourcePaths } from '../scripts/validation-inventory.mjs';
 import { nativeSpecification, nativeConfigurationDigest, nativeArtifacts, nativeGoObservations,
   nativeWorkflowContract, nativeStageSelections, nativeProducerRole, nativePrParts } from '../scripts/native-validation.mjs';
+import { nativeLegacyPrParts, nativeFrameworkShardPlan, nativeFrameworkShardProtocol,
+  nativePartJobKey } from '../scripts/native-validation.mjs';
 import { nativeResourceFacts } from '../scripts/native-validation.mjs';
 import { repositoryRoot, unitFiles } from '../scripts/test-runner.mjs';
 import { createReadinessGitHubClient } from '../scripts/github-readiness-host.mjs';
@@ -131,6 +133,12 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
       level: 'integration', name: 'T-FIX-UNIT-FAMILY full hosted unit family, absent from local critical units' },
     { file: 'test/distribution-channels.test.mjs', stage: 'regression', id: 'T-FIX-INTEGRATION',
       name: `T-FIX-INTEGRATION controlled frozen lifecycle${unadoptedAssertion ? ' changed' : ''}` },
+    { file: 'test/observation-retention-refresh.test.mjs', stage: 'regression', id: 'T-FIX-REFRESH',
+      name: 'FR-063/064 real refresh and prune archive superseded observations/facts before exhaustion' },
+    { file: 'test/public-readiness-ci.test.mjs', stage: 'regression', id: 'T-FIX-TOOLS',
+      name: 'T-PRD015 actual pinned Go, Python schema and static validators execute valid and invalid owned inputs' },
+    { file: 'test/observer-shard-body.test.mjs', stage: 'regression', id: 'T-FIX-BODY',
+      name: 'T-FIX-BODY controlled independent regression body' },
   ];
   const goSources = [
     { file: 'main_test.go', contents: 'package main\nimport "testing"\n' +
@@ -317,8 +325,12 @@ function bundleFromOriginal(raw, specification, independentlyCapturedContext, as
 
 function laneData(source, candidate, revisions, target, { prNumber = 1, executionId = runId,
   profile = 'pr', releaseIntentId = 'controlled-release-intent', startTime = epoch,
-  previousMetadata = nativeReplayPreviousFixture(), component = 'full' } = {}) {
-  const role = nativeProducerRole(target, component);
+  previousMetadata = nativeReplayPreviousFixture(), component = 'full', shard = null, frameworkShards = false } = {}) {
+  const role = nativeProducerRole(target, component, shard);
+  const assignment = shard === null ? null : nativeFrameworkShardPlan({
+    inventory: source.inventory, plan: source.plan, target,
+  });
+  const part = assignment?.parts.find(part => part.shard === shard);
   const at = seconds => new Date(startTime + seconds * 1000).toISOString();
   const commandReport = (name, target, context, args, start, finish, stdout = '') =>
     commandRecord(name, target, context, args, start, finish, stdout, at);
@@ -352,15 +364,16 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
     rubyExecutable: `/controlled-fixture/homebrew/Library/Homebrew/vendor/portable-ruby/${homebrewToolchain.ruby}/bin/ruby`,
     node: { version: nativeToolchain.node, platform: 'darwin', arch: architecture },
     nodePrefix: component === 'full' ? `/controlled-fixture/homebrew/opt/${homebrewToolchain.formula}` :
-      `/opt/${target === 'macos-arm64' ? 'a' : 'b'}000${component === 'framework' ? '1' : '2'}/opt/${homebrewToolchain.formula}`,
+      `/opt/${digest(role).slice(0, 5)}/opt/${homebrewToolchain.formula}`,
     uname: architecture === 'arm64' ? 'arm64' : 'x86_64', translation: '0',
   };
   const specification = nativeSpecification({ plan: source.plan, inventory: source.inventory,
-    goSources: source.goSources, target, profile, component });
+    goSources: source.goSources, target, profile, component, shard });
   const context = validateExecutionContext({
     candidateDigest: digest({ revision: revisions.merge, tree: source.sha }),
     testSpecDigest: testSpecificationDigest(source.plan),
-    configDigest: nativeConfigurationDigest({ inventory: source.inventory, profile, component }),
+    configDigest: nativeConfigurationDigest({ inventory: source.inventory, profile, component, shard,
+      shardPlanDigest: assignment?.digest ?? null }),
     inventoryDigest: validationInventoryDigest(specification),
     sources: [{ repositoryId: `repository-${repositoryId}`, revision: revisions.merge,
       contentDigest: digest(source.sha) }],
@@ -380,14 +393,19 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
   });
   const smallContext = { schemaVersion: 1, sourceCommit: revisions.merge, target, profile,
     ...(component === 'full' ? {} : { component }),
+    ...(shard === null ? {} : { frameworkShards: nativeFrameworkShardProtocol, shard,
+      configDigest: context.configDigest, inventoryDigest: context.inventoryDigest }),
     workflowRef: context.producer.definitionRef, repositoryId: `repository-${repositoryId}`,
     runId: String(executionId), attempt: '1' };
   const data = new Map([['toolchain.json', bootstrap]]);
   const observations = new Map();
-  const selectedStages = nativeStageSelections(source.inventory, source.plan);
-  for (const [index, stage] of nativeWorkflowContract.stages.entries()) {
-    const selected = source.names.filter(test => test.stage === stage);
-    const { files, args, selectorName } = selectedStages[index];
+  const selectedStages = part?.stages ?? nativeStageSelections(source.inventory, source.plan);
+  for (const selectedStage of selectedStages) {
+    const stage = selectedStage.name;
+    const index = nativeWorkflowContract.stages.indexOf(stage);
+    const selected = source.names.filter(test => selectedStage.cases.some(assertion =>
+      assertion.file === test.file && assertion.name === test.name));
+    const { files, args, selectorName } = selectedStage;
     const pattern = stage === 'unit' ? undefined : selectorName;
     const [start, finish] = [[7, 10], [11, 14], [15, 50]][index];
     const expectedGroups = validationExecutionGroups(source.inventory, { files, pattern, preserveOrder: true });
@@ -530,7 +548,12 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
   if (component === 'homebrew') for (const file of [...data.keys()]) {
     if (/^(?:unit|required-units|regression)(?:[.-]|$)|^tools-|^static[.]|^calculator[.-]/u.test(file)) data.delete(file);
   }
-  const observedAt = at(target.startsWith('macos-') && component !== 'framework' ? 55 :
+  if (part) for (const file of [...data.keys()]) {
+    if (!part.go && file.startsWith('tools-') || !part.procedures.includes('calculator') && file.startsWith('calculator') ||
+        !part.procedures.includes('static') && file === 'static.json') data.delete(file);
+  }
+  const observedAt = at(part ? shard === 'units' ? 14.8 : part.go ? 51 : 50 :
+    target.startsWith('macos-') && component !== 'framework' ? 55 :
     profile === 'r-pre' && target === 'windows-x64' ? 56 : 51);
   const raw = { schemaVersion: 1, kind: 'test-execution', context, startedAt: at(6),
     finishedAt: observedAt, observedAt, sequence: 1, complete: true, exitCode: 0,
@@ -562,7 +585,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
       ].map(event => JSON.stringify(event)).join('\n') + '\n');
     }
   }
-  return { target, component, role, context, specification, data, ImageOS, ImageVersion };
+  return { target, component, shard, frameworkShards, role, context, specification, data, ImageOS, ImageVersion };
 }
 
 function cleanupData(lane, executionId = runId) {
@@ -573,7 +596,8 @@ function cleanupData(lane, executionId = runId) {
       release: '24.6.0', hostname: `controlled-${lane.role}`, uid: 501, gid: 20 },
     github: { GITHUB_SERVER_URL: 'https://github.com', GITHUB_REPOSITORY: repository,
       GITHUB_REPOSITORY_ID: String(repositoryId), GITHUB_WORKSPACE: '/controlled-fixture',
-      GITHUB_RUN_ID: String(executionId), GITHUB_RUN_ATTEMPT: '1', GITHUB_JOB: 'native',
+      GITHUB_RUN_ID: String(executionId), GITHUB_RUN_ATTEMPT: '1',
+      GITHUB_JOB: lane.frameworkShards ? nativePartJobKey(lane) : 'native',
       RUNNER_NAME: `controlled-${lane.role}`, RUNNER_ENVIRONMENT: 'github-hosted',
       RUNNER_OS: 'macOS', RUNNER_ARCH: lane.target === 'macos-arm64' ? 'ARM64' : 'X64' } };
   const request = { schemaVersion: 1, kind: 'owned-native-homebrew-prefix',
@@ -642,25 +666,48 @@ export async function observerApiFixture(t, options = {}) {
     await assert.rejects(fs.stat(root), { code: 'ENOENT' });
   });
   assert.equal(path.resolve(os.tmpdir()), scratch, 'SDK artifact scratch must stay inside this owned checkout root');
-  const ci = await fs.readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const currentCi = await fs.readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const ci = options.frameworkShards ? currentCi : `name: CI
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${JSON.stringify(nativeLegacyPrParts.map(part => ({
+    ...part, os: labels[part.target], architecture: part.target.split('-')[1],
+  })))}
+    steps:
+      - uses: ${checkoutPin}
+        with:
+          persist-credentials: false
+`;
   const revisions = { head: 'a'.repeat(40), base: 'b'.repeat(40), merge: 'c'.repeat(40), trusted: 'd'.repeat(40) };
   const adopted = fixtureSources(ci);
   const source = fixtureSources(ci, options);
   const { candidate, entries } = candidateData(revisions.merge);
-  const lanes = new Map(validationPlatforms.map(target => [target, laneData(source, candidate, revisions, target,
-    { component: target.startsWith('macos-') ? 'framework' : 'full' })]));
-  const homebrewLanes = new Map(nativePrParts.filter(part => part.component === 'homebrew')
-    .map(({ target, component }) => [target, laneData(source, candidate, revisions, target, { component })]));
-  const parts = new Map([...lanes.values(), ...homebrewLanes.values()].map(lane => [lane.role, lane]));
+  const expectedParts = options.frameworkShards ? nativePrParts : nativeLegacyPrParts;
+  const parts = new Map(expectedParts.map(part => [part.role,
+    laneData(source, candidate, revisions, part.target, { ...part, frameworkShards: Boolean(options.frameworkShards),
+      startTime: epoch + (part.shard && part.shard !== 'units' ? 100000 : 0) })]));
+  const lanes = new Map(validationPlatforms.map(target => [target, [...parts.values()].find(part =>
+    part.target === target && part.component !== 'homebrew' && (!options.frameworkShards ||
+      part.shard === nativeFrameworkShardPlan({ inventory: source.inventory, plan: source.plan, target }).toolShard))]));
+  const homebrewLanes = new Map([...parts.values()].filter(part => part.component === 'homebrew')
+    .map(part => [part.target, part]));
   const cleanupReports = new Map([...parts.values()].filter(lane => lane.target.startsWith('macos-'))
     .map(lane => [lane.role, cleanupData(lane)]));
   const run = { id: runId, workflow_id: 99, run_attempt: 1, event: 'pull_request',
     path: nativeWorkflowContract.path, head_sha: revisions.head, head_repository: { id: 29 },
     repository: { id: repositoryId }, status: 'completed', conclusion: 'success', pull_requests: [] };
-  const jobs = [...parts.values()].map(({ target, role }, index) => ({
+  const jobs = [...parts.values()].map(({ target, role, shard }, index) => {
+    const shift = shard && shard !== 'units' ? 100 : 0;
+    return ({
     id: 1000 + index, run_id: runId, name: `native-${role}`, head_sha: revisions.head,
     run_attempt: 1, status: 'completed', conclusion: 'success',
-    labels: [labels[target]], started_at: at(0), completed_at: at(80),
+    labels: [labels[target]], started_at: at(shift), completed_at: at(shift + 80),
     steps: [
       [nativeWorkflowContract.steps.context, 0, 1],
       [nativeWorkflowContract.steps.checkout, 2, 3],
@@ -674,8 +721,8 @@ export async function observerApiFixture(t, options = {}) {
         ['Retain native cleanup diagnostics', 65, 66],
       ] : []),
     ].map(([name, start, finish], offset) => ({ name, number: offset + 1, conclusion: 'success',
-      started_at: at(start), completed_at: at(finish) })),
-  }));
+      started_at: at(start + shift), completed_at: at(finish + shift) })),
+  }); });
   const logs = new Map(jobs.map(job => {
     const lane = parts.get(job.name.slice('native-'.length));
     const body = { repositoryId: String(repositoryId), prNumber: '1', headRepositoryId: '29',
@@ -687,10 +734,12 @@ export async function observerApiFixture(t, options = {}) {
         totalMemoryBytes: lane.context.native.toolchain.resources.totalMemoryBytes,
         configuredWorkers: lane.context.native.toolchain.resources.configuredWorkers,
       } };
+    if (options.frameworkShards) body.nativeShard = lane.shard;
     const git = lane.context.native.platform === 'win32' ?
       '"C:\\Program Files\\Git\\bin\\git.exe"' : '/usr/bin/git';
-    return [job.id, `${at(0.5)} sdlc-run-context:${JSON.stringify(body)}\n` +
-      `${at(2)} [command]${git} log -1 --format=%H\n${at(2.1)} ${revisions.merge}\n`];
+    const shift = lane.shard && lane.shard !== 'units' ? 100 : 0;
+    return [job.id, `${at(shift + 0.5)} sdlc-run-context:${JSON.stringify(body)}\n` +
+      `${at(shift + 2)} [command]${git} log -1 --format=%H\n${at(shift + 2.1)} ${revisions.merge}\n`];
   }));
   const sourceJob = { ...structuredClone(jobs[0]), id: 1100, name: nativeWorkflowContract.sourceJob };
   sourceJob.steps.find(step => step.name === nativeWorkflowContract.steps.execution).name = 'Freeze exact source candidate';
@@ -731,7 +780,7 @@ export async function observerApiFixture(t, options = {}) {
   putArtifact('minimum-node', `${nativeWorkflowContract.minimumNodeArtifactPrefix}${runId}-1`,
     archive(new Map([['minimum-runtime-fixture.json', { fixtureOnly: true }]])));
   for (const lane of parts.values()) {
-    const key = lane.component === 'homebrew' ? lane.role : lane.target;
+    const key = options.frameworkShards ? lane.role : lane.component === 'homebrew' ? lane.role : lane.target;
     putArtifact(key, `native-evidence-${lane.role}-${runId}-1`, archive(lane.data));
     putArtifact(`bootstrap-${lane.role}`, `native-bootstrap-${lane.role}-${runId}-1`,
       archive(new Map([['toolchain.json', lane.data.get('toolchain.json')]])));
@@ -866,13 +915,14 @@ export async function observerApiFixture(t, options = {}) {
       const executionId = runId + number;
       const currentRevisions = { ...revisions, merge: mergeSha };
       const frozen = candidateData(mergeSha);
-      const currentLanes = new Map(validationPlatforms.map(target => [target,
-        laneData(source, frozen.candidate, currentRevisions, target, { prNumber: number, executionId,
-          component: target.startsWith('macos-') ? 'framework' : 'full' })]));
-      const currentHomebrewLanes = new Map(nativePrParts.filter(part => part.component === 'homebrew')
-        .map(({ target, component }) => [target, laneData(source, frozen.candidate, currentRevisions, target,
-          { prNumber: number, executionId, component })]));
-      const currentParts = [...currentLanes.values(), ...currentHomebrewLanes.values()];
+      const currentParts = expectedParts.map(part => laneData(source, frozen.candidate, currentRevisions, part.target,
+        { ...part, prNumber: number, executionId, frameworkShards: Boolean(options.frameworkShards),
+          startTime: epoch + (part.shard && part.shard !== 'units' ? 100000 : 0) }));
+      const currentLanes = new Map(validationPlatforms.map(target => [target, currentParts.find(part =>
+        part.target === target && part.component !== 'homebrew' && (!options.frameworkShards ||
+          part.shard === nativeFrameworkShardPlan({ inventory: source.inventory, plan: source.plan, target }).toolShard))]));
+      const currentHomebrewLanes = new Map(currentParts.filter(part => part.component === 'homebrew')
+        .map(part => [part.target, part]));
       const currentJobs = jobs.map(job => ({ ...structuredClone(job), id: job.id + number * 10000,
         run_id: executionId }));
       for (const job of currentJobs) {
@@ -888,7 +938,7 @@ export async function observerApiFixture(t, options = {}) {
       putArtifact('minimum-node', `${nativeWorkflowContract.minimumNodeArtifactPrefix}${executionId}-1`,
         archive(new Map([['minimum-runtime-fixture.json', { fixtureOnly: true }]])), currentArtifacts, executionId);
       for (const lane of currentParts) {
-        const key = lane.component === 'homebrew' ? lane.role : lane.target;
+        const key = options.frameworkShards ? lane.role : lane.component === 'homebrew' ? lane.role : lane.target;
         putArtifact(key, `native-evidence-${lane.role}-${executionId}-1`, archive(lane.data), currentArtifacts, executionId);
         putArtifact(`bootstrap-${lane.role}`, `native-bootstrap-${lane.role}-${executionId}-1`,
           archive(new Map([['toolchain.json', lane.data.get('toolchain.json')]])), currentArtifacts, executionId);
@@ -912,8 +962,8 @@ export async function observerApiFixture(t, options = {}) {
     },
     toolDirectory,
     refresh(target) {
-      const lane = lanes.get(target) ?? parts.get(target);
-      const key = lane.component === 'homebrew' ? lane.role : lane.target;
+        const lane = lanes.get(target) ?? parts.get(target);
+        const key = options.frameworkShards ? lane.role : lane.component === 'homebrew' ? lane.role : lane.target;
       putArtifact(key, `native-evidence-${lane.role}-${runId}-1`, archive(lane.data));
     },
     refreshCleanup(role) {
