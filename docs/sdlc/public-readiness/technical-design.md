@@ -1242,6 +1242,12 @@ only the launcher and linked-keg reference can select the wrong installed
 version. Reuse the guarded link-restoration primitive; retain unidentified
 replacements and reject missing capture records. Keep ordinary formula-based
 link/unlink commands, captured payloads and the failed-promotion/retry assertions.
+If the exact requested candidate keg is already present in the captured
+rollback inventory, resume its verification and promotion rather than invoking
+another upgrade over that retained version. Cellar/tap ownership, receipt
+version, captured payload integrity and copied-framework checks remain
+mandatory. An absent candidate still requires the real version upgrade; do not
+force a reinstall, remove retained payloads or substitute formula-revision credit.
 Ordinary PR CI supplies reviewed, source-controlled pins for the genuine public
 v0.3.1 binary baseline, independent of repository variables. Its original
 descriptor binds the legacy platform archives. This is a representative

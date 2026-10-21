@@ -717,17 +717,19 @@ setInterval(()=>{},1000);
     const source = path.join(directory, 'owned.mjs');
     const unsafe = "{authorization:'fixture-stop-race'}\n";
     const tail = 'owned process completed naturally\n';
-    await fs.writeFile(source, `import {watch,existsSync,writeFileSync} from 'node:fs';
+    await fs.writeFile(source, `import {existsSync,writeFileSync} from 'node:fs';
+import {setTimeout as delay} from 'node:timers/promises';
 let emitted=false,finished=false;
-const watcher=watch(${JSON.stringify(directory)},()=>{
+writeFileSync(${JSON.stringify(ready)},JSON.stringify({pid:process.pid}));
+while(!finished){
   if(!emitted&&existsSync(${JSON.stringify(trigger)})){
     emitted=true;process.stdout.write(${JSON.stringify(unsafe)});
   }
   if(!finished&&existsSync(${JSON.stringify(finish)})){
-    finished=true;watcher.close();process.stdout.write(${JSON.stringify(tail)});
+    finished=true;process.stdout.write(${JSON.stringify(tail)});
   }
-});
-writeFileSync(${JSON.stringify(ready)},JSON.stringify({pid:process.pid}));
+  if(!finished)await delay(10);
+}
 `);
     const originalSpawn = childProcess.spawn;
     const originalKill = process.kill;

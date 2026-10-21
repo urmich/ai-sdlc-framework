@@ -258,7 +258,9 @@ export async function switchToHomebrew({
     await advanceSwitchState(state, 'installing-new-channel');
     if (upgradePackage) {
       if (!state.targetKeg) throw new Error('A real Homebrew upgrade requires an installed previous keg');
-      await runBrew(['upgrade', '--formula', formula]);
+      if (!state.kegs.some(keg => keg.path === requestedCandidate.keg)) {
+        await runBrew(['upgrade', '--formula', formula]);
+      }
     } else await runBrew(['install', '--formula', '--skip-link', formula]);
     if ((await resolveHomebrewCandidate(runBrew, formula, cellar)).keg !== requestedCandidate.keg) {
       throw new Error('Homebrew candidate identity changed during installation');

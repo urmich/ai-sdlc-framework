@@ -208,12 +208,16 @@ export function processDiagnostic(error) {
   let message;
   try {
     const safe = sanitizeExecutionPayload(Buffer.from(original));
-    message = typeof safe === 'string' ? safe : JSON.stringify(safe);
+    const rendered = typeof safe === 'string' ? safe : JSON.stringify(safe);
+    message = sanitizeExecutionPayload(Buffer.from(JSON.stringify({ message: rendered.slice(0, 2000) }))).message;
+    if (typeof message !== 'string' || message.length > 2000) {
+      throw new SdlcError('UNSAFE', 'Process diagnostic cannot be safely bounded.');
+    }
   } catch {
     message = 'Process diagnostic could not be safely retained; its original identity is preserved.';
   }
   return { code: typeof error?.code === 'string' && /^[A-Z0-9_-]{1,80}$/u.test(error.code) ?
-    error.code : 'PROCESS_ERROR', message: message.slice(0, 2000),
+    error.code : 'PROCESS_ERROR', message,
   original: { sha256: digest(original), bytes: Buffer.byteLength(original) } };
 }
 

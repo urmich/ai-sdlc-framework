@@ -59,7 +59,7 @@ import { nativeStageSelections, validateNativeGroupReport } from '../scripts/nat
 import { readTestBudget } from '../scripts/test-budget.mjs';
 import { digest } from '../src/core.mjs';
 import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
-import { executeValidationCommand } from '../scripts/validation-tools.mjs';
+import { executeValidationCommand, processDiagnostic } from '../scripts/validation-tools.mjs';
 
 const canonicalNames = [
   'T-101 selected fetch remote requires exactly one credential-free URL',
@@ -101,12 +101,70 @@ function invoke(args, environment = {}, root = repositoryRoot) {
   return { child, done };
 }
 
+function runnerFailureDiagnostic({ stdout, stderr = '', ...context }) {
+  const errorPrefix = /^(?:\[(?:test-runner|test-worker):error\] |(?:[A-Za-z]+)?Error(?: \[[A-Z0-9_]+\])?: )/u;
+  const errors = `${stdout}\n${stderr}`.split(/\r?\n/u)
+    .filter(line => errorPrefix.test(line))
+    .slice(0, 4).map(line => processDiagnostic(line.replace(errorPrefix, '')));
+  return JSON.stringify({ kind: 'runner-subprocess-failure', ...context, errors,
+    originalOutput: {
+      stdout: { sha256: digest(stdout), bytes: Buffer.byteLength(stdout) },
+      stderr: { sha256: digest(stderr), bytes: Buffer.byteLength(stderr) },
+    } });
+}
+
 function summary(output, kind) {
   const prefix = `[test-runner:${kind}] `;
   const line = output.split(/\r?\n/u).find(value => value.startsWith(prefix));
-  assert.ok(line, output);
+  assert.ok(line, line ? undefined : runnerFailureDiagnostic({ stdout: output, expectedSummary: kind }));
   return JSON.parse(line.slice(prefix.length));
 }
+
+test('T-PRD018 runner assertion diagnostics retain subprocess identities without inline source', () => {
+  const source = 'JSON.stringify({platform:process.platform,arch:process.arch,major:Number(process.versions.node.split(".")[0])})';
+  const stdout = `[test-runner:error] Owned cancellation fixture did not complete\n` +
+    `[test-runner:start] ${JSON.stringify({ command: ['node', '--eval', source] })}\n`;
+  assert.throws(() => summary(stdout, 'end'), error => {
+    const retained = sanitizeExecutionPayload(Buffer.from(JSON.stringify({ message: error.message })));
+    const diagnostic = JSON.parse(retained.message.split('\n')[0]);
+    assert.equal(diagnostic.kind, 'runner-subprocess-failure');
+    assert.equal(diagnostic.expectedSummary, 'end');
+    assert.equal(diagnostic.errors[0].message, 'Owned cancellation fixture did not complete');
+    assert.deepEqual(diagnostic.originalOutput.stdout, { sha256: digest(stdout), bytes: Buffer.byteLength(stdout) });
+    assert.ok(!retained.message.includes(source));
+    return true;
+  });
+  assert.throws(() => assert.equal(1, 130, runnerFailureDiagnostic({
+    stdout, stderr: 'Error: Owned cancellation delivery failed\n',
+    expectedExitCode: 130, actualExitCode: 1,
+  })), error => {
+    const retained = sanitizeExecutionPayload(Buffer.from(JSON.stringify({ message: error.message })));
+    const diagnostic = JSON.parse(retained.message.split('\n')[0]);
+    assert.equal(diagnostic.expectedExitCode, 130);
+    assert.equal(diagnostic.actualExitCode, 1);
+    assert.equal(diagnostic.errors[1].message, 'Owned cancellation delivery failed');
+    assert.ok(!retained.message.includes(source));
+    return true;
+  });
+  const structured = JSON.stringify({ detail: 'x'.repeat(2100) });
+  const stderr = `Error: ${structured}\n`;
+  assert.throws(() => assert.equal(1, 130, runnerFailureDiagnostic({
+    stdout: structured, stderr, expectedExitCode: 130, actualExitCode: 1,
+  })), error => {
+    const retained = sanitizeExecutionPayload(Buffer.from(JSON.stringify({ message: error.message })));
+    const diagnostic = JSON.parse(retained.message.split('\n')[0]);
+    assert.equal(diagnostic.actualExitCode, 1);
+    assert.equal(diagnostic.expectedExitCode, 130);
+    assert.deepEqual(diagnostic.originalOutput.stdout,
+      { sha256: digest(structured), bytes: Buffer.byteLength(structured) });
+    assert.deepEqual(diagnostic.originalOutput.stderr,
+      { sha256: digest(stderr), bytes: Buffer.byteLength(stderr) });
+    assert.deepEqual(diagnostic.errors[0].original,
+      { sha256: digest(structured), bytes: Buffer.byteLength(structured) });
+    assert.ok(diagnostic.errors[0].message.length <= 2000);
+    return true;
+  });
+});
 
 test('T-130 canonical fast manifest preserves the exact three files and 16 original case names', async () => {
   assert.deepEqual(unitFiles, [
@@ -879,7 +937,8 @@ if(process.connected) process.disconnect();
       await new Promise((resolve, reject) =>
         child.send({ signal }, error => error ? reject(error) : resolve()));
       const actual = await done;
-      assert.equal(actual, exitCode, stdout + stderr);
+      assert.equal(actual, exitCode, actual === exitCode ? undefined :
+        runnerFailureDiagnostic({ stdout, stderr, expectedExitCode: exitCode, actualExitCode: actual }));
       assert.match(stdout, /\bcancelled [1-9]\d*\b/u);
       assert.equal(summary(stdout, 'end').interruptedBy, signal);
       assert.ok(pids.every(pid => !processRunning(pid)), 'Runner returned with surviving file workers');

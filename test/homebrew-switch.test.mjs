@@ -276,11 +276,11 @@ async function setup(t, behavior = {}) {
         name: 'ai-sdlc-framework', full_name: formula,
         versions: { stable: candidateVersion }, revision: candidateRevision,
       }] });
-      if (['install', 'tab'].includes(args[0])) {
+      if (['install', 'upgrade', 'tab'].includes(args[0])) {
         const lock = JSON.parse(await fs.readFile(path.join(prefix, 'var', 'ai-sdlc-framework-switch', 'active.lock'), 'utf8'));
         captured = JSON.parse(await fs.readFile(path.join(lock.root, 'state.json'), 'utf8'));
         assert.equal(captured.capturedBeforeBrew, true);
-        assert.equal(captured.phase, args[0] === 'install' ? 'installing-new-channel' : 'retaining-node');
+        assert.equal(captured.phase, args[0] === 'tab' ? 'retaining-node' : 'installing-new-channel');
         assert.equal(captured.capturedLink.absolute, path.join(oldKeg, 'bin', 'sdlc'));
         assert.equal(captured.targetKeg, oldKeg);
         assert.ok(captured.kegs.some(item => item.path === nodeKeg));
@@ -290,7 +290,8 @@ async function setup(t, behavior = {}) {
         ].sort());
         await fs.access(path.join(captured.kegs[0].backup, 'bin', 'sdlc'));
       }
-      if (args[0] === 'install') {
+      if (args[0] === 'install' || args[0] === 'upgrade') {
+        if (args[0] === 'upgrade' && installedNew) throw new Error('Will not overwrite the retained candidate keg');
         if (installedNew || behavior.skipCandidateInstall) return { stdout: 'Candidate already installed', stderr: '' };
         await fs.unlink(destination);
         if (behavior.removeOld || behavior.failInstall) await fs.rm(oldKeg, { recursive: true });
@@ -302,6 +303,7 @@ async function setup(t, behavior = {}) {
         await fs.unlink(path.join(prefix, 'opt', 'ai-sdlc-framework'));
         await fs.symlink(newKeg, path.join(prefix, 'opt', 'ai-sdlc-framework'));
         if (behavior.foreignLink) await fs.writeFile(destination, 'unidentified replacement');
+        else if (args[0] === 'upgrade') await fs.symlink(target(newKeg), destination);
       } else if (args[0] === 'tab') {
         if (!behavior.failRetention) {
           const file = path.join(nodeKeg, 'INSTALL_RECEIPT.json');
@@ -383,13 +385,14 @@ test('T-51 switching verifies retained old kegs and runs copied hooks/doctor aft
 });
 
 test('T-51 promotion rollback then retry activates the intended candidate despite old opt and install no-op', nativeMac, async t => {
-  for (const version of [{}, { candidateVersion: '0.3.0', candidateRevision: 1 }]) {
+  for (const version of [{}, { candidateVersion: '0.3.0', candidateRevision: 1 }, { upgradePackage: true }]) {
     const input = await setup(t, { ...version, failFirstPromotion: true });
-    await assert.rejects(switchToHomebrew(input.options), /first candidate promotion failed/u);
+    const options = { ...input.options, upgradePackage: version.upgradePackage === true };
+    await assert.rejects(switchToHomebrew(options), /first candidate promotion failed/u);
     await fs.access(path.join(input.newKeg, 'INSTALL_RECEIPT.json'));
     assert.equal(await fs.realpath(path.join(input.prefix, 'opt', 'ai-sdlc-framework')), input.oldKeg);
     assert.equal(await fs.readlink(input.destination), input.target(input.oldKeg));
-    const retry = await switchToHomebrew(input.options);
+    const retry = await switchToHomebrew(options);
     assert.equal(retry.launcher, path.join(input.newKeg, 'bin', 'sdlc'));
     assert.equal(retry.frameworkVersion, input.candidateVersion);
     assert.equal(retry.candidateVersion, input.candidatePkgVersion);
@@ -398,6 +401,9 @@ test('T-51 promotion rollback then retry activates the intended candidate despit
     const record = JSON.parse(await fs.readFile(retry.stateFile, 'utf8'));
     assert.equal(record.requestedCandidate.revision, input.candidateRevision);
     assert.equal(record.requestedCandidate.keg, input.newKeg);
+    assert.ok(record.kegs.some(keg => keg.path === input.newKeg));
+    assert.equal(input.calls.filter(call => call.command === 'fake-brew' && call.args[0] === 'upgrade').length,
+      options.upgradePackage ? 1 : 0);
   }
 });
 
