@@ -17,6 +17,7 @@ import { createReadinessGitHubClient, requireReadinessGitHubClient } from './git
 import { evaluateApproval, evaluateConversations, reconcilePrReadiness, statusContexts } from './pr-readiness.mjs';
 import { inspectWorkflowPolicy } from './workflow-policy.mjs';
 import { calculatorProjectFiles, calculatorSelection, reconcileCalculator } from './pr-calculator.mjs';
+import { homebrewToolchain } from './toolchain-baseline.mjs';
 import { deriveNativeComponentSpecification, projectNativeComponentEvidence,
   requireNativeComponentProjection } from './native-components.mjs';
 
@@ -138,6 +139,15 @@ export function inspectWorkflowTrust(workflows) {
     for (const label of Object.values(labels)) if (!runners.includes(`"${label}"`)) {
       result.blockers.push({ file: selected.file, code: 'MISSING_NATIVE_RUNNER', label });
     }
+    const expected = native.nativePrParts.map(({ target, component, role }) => ({
+      target, component, role, os: labels[target], architecture: target.split('-')[1],
+    }));
+    const entries = matrix?.include;
+    if (!Array.isArray(entries) || entries.length !== expected.length ||
+        new Set(entries.map(entry => entry?.role)).size !== expected.length ||
+        expected.some(part => !entries.some(entry => digest(entry) === digest(part)))) {
+      result.blockers.push({ file: selected.file, code: 'NATIVE_COMPONENT_MATRIX_DIFFERS' });
+    }
   }
   return { ...result, complete: result.blockers.length === 0 };
 }
@@ -207,6 +217,75 @@ export function readTrustedJobContext(job, logs, {
   return normalized;
 }
 
+export function verifyNativeCleanup(data, { target, role, context }) {
+  const request = data?.['native-homebrew-prefix-request.json'];
+  const allocation = data?.['native-homebrew-prefix-allocation.json'];
+  const cleanup = data?.['native-homebrew-prefix-cleanup.json'];
+  const binding = request?.binding;
+  const github = binding?.github;
+  const prefix = request?.prefix;
+  requireThat(request?.schemaVersion === 1 && request.kind === 'owned-native-homebrew-prefix' &&
+    typeof prefix === 'string' && /^\/opt\/[a-f0-9]{5}$/u.test(prefix) &&
+    /^[a-f0-9]{64}$/u.test(request.nonce ?? '') &&
+    request.repositoryRoot === `${github?.GITHUB_WORKSPACE}/source` &&
+    request.bootstrapDirectory === `${request.repositoryRoot}/.test-data/bootstrap-${role}` &&
+    binding?.target === target && binding.host?.platform === 'darwin' &&
+    binding.host.architecture === context.native.architecture &&
+    binding.host.machine === (context.native.architecture === 'arm64' ? 'arm64' : 'x86_64') &&
+    /^24\./u.test(binding.host.release ?? '') &&
+    Number.isSafeInteger(binding.host.uid) && binding.host.uid > 0 &&
+    Number.isSafeInteger(binding.host.gid) && binding.host.gid > 0 &&
+    binding.schemaVersion === 1 && github?.GITHUB_SERVER_URL === 'https://github.com' &&
+    github.GITHUB_REPOSITORY === readinessRepository &&
+    `repository-${github.GITHUB_REPOSITORY_ID}` === context.sources[0].repositoryId &&
+    github.GITHUB_RUN_ID === context.producer.executionRef &&
+    github.GITHUB_RUN_ATTEMPT === context.producer.attemptRef && github.GITHUB_JOB === 'native' &&
+    github.RUNNER_ENVIRONMENT === 'github-hosted' && github.RUNNER_OS === 'macOS' &&
+    github.RUNNER_ARCH === (context.native.architecture === 'arm64' ? 'ARM64' : 'X64') &&
+    data['toolchain.json']?.status === 'Passed' &&
+    digest(data['toolchain.json'].native) === digest(context.native.toolchain.bootstrap) &&
+    context.native.toolchain.bootstrap.homebrew?.nodePrefix === `${prefix}/opt/${homebrewToolchain.formula}` &&
+    typeof data.texts?.['native-homebrew-prefix-request.json'] === 'string' &&
+    allocation?.schemaVersion === 1 &&
+    allocation.requestDigest === digest(data.texts['native-homebrew-prefix-request.json']) &&
+    /^[a-f0-9]{64}$/u.test(allocation.markerDigest ?? '') &&
+    allocation.prefixIdentity?.uid === binding.host.uid && allocation.prefixIdentity?.gid === binding.host.gid &&
+    cleanup?.schemaVersion === 1 && cleanup.status === 'removed' &&
+    cleanup.requestDigest === allocation.requestDigest &&
+    digest(cleanup.prefixIdentity) === digest(allocation.prefixIdentity),
+  'EVIDENCE', 'Required Mac producer cleanup differs from its own allocated prefix, bootstrap, source or run attempt');
+  return { role, prefix, requestDigest: allocation.requestDigest };
+}
+
+export function nativeLaneTimings(parts) {
+  requireThat(Array.isArray(parts) && parts.length === native.nativePrParts.length &&
+    new Set(parts.map(part => part.role)).size === native.nativePrParts.length &&
+    parts.every(part => native.nativePrParts.some(expected =>
+      expected.target === part.target && expected.role === part.role)),
+  'EVIDENCE', 'Logical timing needs the exact complete six-role native producer inventory');
+  return validationPlatforms.map(target => {
+    const selected = parts.filter(part => part.target === target);
+    const expected = native.nativePrParts.filter(part => part.target === target);
+    requireThat(selected.length === expected.length &&
+      expected.every(part => selected.filter(item => item.role === part.role).length === 1) &&
+      selected.every(({ job }) => Number.isFinite(Date.parse(job?.started_at)) &&
+        Number.isFinite(Date.parse(job?.completed_at)) &&
+        Date.parse(job.completed_at) >= Date.parse(job.started_at) &&
+        (job.created_at === undefined || job.created_at === null || Number.isFinite(Date.parse(job.created_at)) &&
+          Date.parse(job.created_at) <= Date.parse(job.started_at))),
+    'EVIDENCE', 'Logical lane timing requires every exact required worker start and completed cleanup/evidence job');
+    const startedAt = new Date(Math.min(...selected.map(({ job }) => Date.parse(job.started_at)))).toISOString();
+    const completedAt = new Date(Math.max(...selected.map(({ job }) => Date.parse(job.completed_at)))).toISOString();
+    const durationMs = Date.parse(completedAt) - Date.parse(startedAt);
+    return { target, startedAt, completedAt, durationMs, maximumMs: 15 * 60 * 1000,
+      withinBudget: durationMs < 15 * 60 * 1000,
+      parts: selected.map(({ role, job }) => ({ role, jobId: job.id,
+        startedAt: job.started_at, completedAt: job.completed_at,
+        providerQueueMs: Number.isFinite(Date.parse(job.created_at)) ?
+          Date.parse(job.started_at) - Date.parse(job.created_at) : null })) };
+  });
+}
+
 export function verifyFrozenCandidateData(data, sourceRevision) {
   requireThat(data && typeof data === 'object' && Array.isArray(data.files) &&
     data.files.every(file => file && typeof file.filename === 'string') &&
@@ -259,13 +338,15 @@ export function verifyFrozenCandidateData(data, sourceRevision) {
 
 export async function verifyOriginalNativeRows({
   data, raw, specification, inventory, goSources, target, candidate, sourceFiles, plan, context,
+  component = 'full',
 }) {
   requireThat(Array.isArray(raw.results) && raw.results.every(row => row &&
     Object.getPrototypeOf(row) === Object.prototype), 'EVIDENCE',
   'Original derived native results must be a complete literal result collection');
-  const expectedStages = native.nativeStageSelections(inventory, plan);
+  const expectedStages = component === 'homebrew' ? [] : native.nativeStageSelections(inventory, plan);
   const smallContext = {
     schemaVersion: 1, sourceCommit: context.sources[0].revision, target, profile: 'pr',
+    ...(component === 'full' ? {} : { component }),
     workflowRef: context.producer.definitionRef, repositoryId: context.sources[0].repositoryId,
     runId: context.producer.executionRef, attempt: context.producer.attemptRef,
   };
@@ -283,10 +364,12 @@ export async function verifyOriginalNativeRows({
       digest(command.command.slice(1)) === digest(args) &&
       typeof command.stdout === 'string' && command.stdout.trim() === expected &&
       Date.parse(command.startedAt) >= Date.parse(raw.startedAt) &&
-      Date.parse(command.finishedAt) <= Date.parse(stages[0].startedAt),
+      Date.parse(command.finishedAt) <= Date.parse(stages[0]?.startedAt ??
+        data['candidate-verification.json']?.observedAt),
     'EVIDENCE', 'Original SDK preflight did not establish the selected native toolchain before unit execution');
   }
   const observations = new Map();
+  if (component !== 'homebrew') {
   for (const stage of expectedStages) {
     const report = data[`${stage.name}.json`];
     const command = data[`${stage.name}-command.json`];
@@ -335,6 +418,8 @@ export async function verifyOriginalNativeRows({
   observations.set(`assertion-${digest(['procedure', 'calculator'])}`, {
     status: 'Passed', observedAt: calculator.finishedAt,
   });
+  }
+  const calculatorSources = sourceFiles.filter(source => calculatorProjectFiles(inventory).includes(source.file));
   const frozen = data['candidate-verification.json'];
   const expectedArtifacts = validateExecutionContext({
     ...context, artifacts: native.nativeArtifacts(candidate),
@@ -345,7 +430,7 @@ export async function verifyOriginalNativeRows({
   observations.set(`assertion-${digest(['procedure', 'frozen-artifacts'])}`, {
     status: 'Passed', observedAt: frozen.observedAt,
   });
-  if (target.startsWith('macos-')) {
+  if (target.startsWith('macos-') && component !== 'framework') {
     const homebrew = data['native-homebrew.json'];
     try {
       validateNativeHomebrewEvidence(homebrew, { candidate, targetArch: target.split('-')[1], mode: 'candidate' });
@@ -365,7 +450,7 @@ export async function verifyOriginalNativeRows({
     'EVIDENCE', 'A derived result differs from its retained original outcome/time');
   }
   const reconstructed = await native.reconcileNativeEvidenceData({ data, raw, specification, inventory,
-    sources: goSources, calculatorSources, target, candidate, stages: expectedStages, context, startedAt: raw.startedAt });
+    sources: goSources, calculatorSources, target, component, candidate, stages: expectedStages, context, startedAt: raw.startedAt });
   const resultsMatch = digest(reconstructed.raw.results) === digest(raw.results);
   const observedAtMatch = reconstructed.raw.observedAt === raw.observedAt;
   if (!reconstructed.raw.complete || reconstructed.raw.exitCode !== 0 || !resultsMatch || !observedAtMatch) {
@@ -552,38 +637,84 @@ export function createPrReadinessHost({
       const candidates = artifacts.filter(artifact =>
         artifact.name === `frozen-candidate-${run.id}-${run.run_attempt}` && artifact.expired === false);
       requireThat(candidates.length === 1, 'EVIDENCE', 'One exact Linux-frozen candidate artifact is required');
-      const frozen = verifyFrozenCandidateData(await api.artifact(candidates[0], { kind: 'candidate' }),
-        pr.merge_commit_sha);
+      const artifactFor = name => {
+        const matches = artifacts.filter(artifact => artifact.name === name && artifact.expired === false);
+        requireThat(matches.length === 1, 'EVIDENCE', 'One exact current producer role artifact is required');
+        const artifact = matches[0];
+        requireThat(artifact.workflow_run?.id === run.id &&
+          artifact.workflow_run.repository_id === api.repositoryId &&
+          artifact.workflow_run.head_repository_id === pr.head.repo.id &&
+          artifact.workflow_run.head_sha === pr.head.sha &&
+          Number.isSafeInteger(artifact.id) && artifact.id > 0 &&
+          /^sha256:[a-f0-9]{64}$/u.test(artifact.digest ?? '') &&
+          Number.isSafeInteger(artifact.size_in_bytes) && artifact.size_in_bytes > 0,
+        'EVIDENCE', 'Producer artifact source, run, repository or digest differs from the selected attempt');
+        return artifact;
+      };
+      const frozen = verifyFrozenCandidateData(await api.artifact(artifactFor(candidates[0].name),
+        { kind: 'candidate' }), pr.merge_commit_sha);
+      for (const [prefix, parts] of [
+        [native.nativeWorkflowContract.artifactPrefix, native.nativePrParts],
+        [native.nativeWorkflowContract.bootstrapArtifactPrefix, native.nativePrParts],
+        [native.nativeWorkflowContract.cleanupArtifactPrefix,
+          native.nativePrParts.filter(part => part.target.startsWith('macos-'))],
+      ]) {
+        const current = artifacts.filter(artifact => artifact.name.startsWith(prefix) &&
+          artifact.name.endsWith(`-${run.id}-${run.run_attempt}`) && artifact.expired === false);
+        requireThat(current.length === parts.length && current.every(artifact =>
+          parts.some(part => artifact.name === `${prefix}${part.role}-${run.id}-${run.run_attempt}`)),
+        'EVIDENCE', 'The exact native report artifact role inventory is missing, duplicate or unexpected');
+      }
+      requireThat(jobs.filter(job => job.name.startsWith('native-')).length === native.nativePrParts.length,
+        'EVIDENCE', 'The exact six-producer inventory must not contain missing, duplicate or unexpected roles');
       const acquired = [];
-      for (const target of validationPlatforms) {
-        const matches = jobs.filter(job => job.name === `native-${target}`);
+      for (const { target, component, role } of native.nativePrParts) {
+        const matches = jobs.filter(job => job.name === `native-${role}`);
         requireThat(matches.length === 1, 'EVIDENCE', 'The complete native job inventory must exist exactly once');
         const job = matches[0];
-        requireThat(Array.isArray(job.labels) && job.labels.includes(labels[target]),
+        requireThat(Number.isSafeInteger(job.id) && job.id > 0 &&
+          job.run_attempt === run.run_attempt && job.status === 'completed' &&
+          Array.isArray(job.labels) && job.labels.includes(labels[target]),
           'EVIDENCE', 'Actual required runner family differs from the Test Plan');
+        const requiredSteps = [
+          native.nativeWorkflowContract.steps.context, native.nativeWorkflowContract.steps.checkout,
+          native.nativeWorkflowContract.steps.sourceBytes, 'Provision isolated native toolchain',
+          'Retain native bootstrap diagnostics', native.nativeWorkflowContract.steps.execution,
+          native.nativeWorkflowContract.steps.retention,
+          ...(target.startsWith('macos-') ?
+            ['Remove owned short Homebrew prefix', 'Retain native cleanup diagnostics'] : []),
+        ];
         const facts = readTrustedJobContext(job, await log(job), {
           repositoryId: api.repositoryId, runId: run.id, attempt: run.run_attempt,
-          expectedMerge: pr.merge_commit_sha, prNumber: pr.number,
+          expectedMerge: pr.merge_commit_sha, prNumber: pr.number, requiredSteps,
         });
         requireThat(facts.platform === platforms[target] && facts.architecture === target.split('-')[1] &&
-          facts.headSha === pr.head.sha && facts.baseSha === pr.base.sha,
+          facts.headSha === pr.head.sha && facts.baseSha === pr.base.sha &&
+          facts.nativeRole === role && facts.nativeComponent === component,
         'EVIDENCE', 'Required native/image/source proof differs between jobs');
-        const reported = artifacts.filter(artifact =>
-          artifact.name === `${native.nativeWorkflowContract.artifactPrefix}${target}-${run.id}-${run.run_attempt}` &&
-            artifact.expired === false);
-        requireThat(reported.length === 1, 'EVIDENCE', 'One exact current native report artifact is required');
-        const data = await api.artifact(reported[0]);
-        acquired.push({ target, job, facts, metadata: reported[0], data });
+        const metadata = artifactFor(`${native.nativeWorkflowContract.artifactPrefix}${role}-${run.id}-${run.run_attempt}`);
+        const bootstrapMetadata = artifactFor(
+          `${native.nativeWorkflowContract.bootstrapArtifactPrefix}${role}-${run.id}-${run.run_attempt}`);
+        const data = await api.artifact(metadata);
+        let cleanupData;
+        let cleanupMetadata;
+        if (target.startsWith('macos-')) {
+          cleanupMetadata = artifactFor(
+            `${native.nativeWorkflowContract.cleanupArtifactPrefix}${role}-${run.id}-${run.run_attempt}`);
+          cleanupData = await api.artifact(cleanupMetadata, { kind: 'cleanup' });
+        }
+        acquired.push({ target, component, role, job, facts, metadata, data,
+          bootstrapMetadata, cleanupMetadata, cleanupData });
       }
       const executions = [];
-      const evaluations = await Promise.all(acquired.map(async ({ target, job, facts, data }) => {
+      const evaluations = await Promise.all(acquired.map(async ({ target, component, role, job, facts, data, cleanupData }) => {
         const raw = data['execution.json'];
         requireThat(raw?.context?.native?.toolchain && data['toolchain.json']?.native,
           'EVIDENCE', 'Original native/bootstrap execution context is missing');
         requireThat(data['toolchain.json'].status === 'Passed' && data['toolchain.json'].target === target,
           'EVIDENCE', 'Report context differs from the successful copied native/bootstrap target');
         const specification = native.nativeSpecification({
-          plan: source.plan, inventory: source.inventory, goSources: source.goSources, target, profile: 'pr',
+          plan: source.plan, inventory: source.inventory, goSources: source.goSources, target, component, profile: 'pr',
         });
         const toolchain = raw.context.native.toolchain;
         const expectedResources = native.nativeResourceFacts(facts.resources);
@@ -600,7 +731,7 @@ export function createPrReadinessHost({
         const context = validateExecutionContext({
           candidateDigest: digest({ revision: pr.merge_commit_sha, tree: source.tree.treeSha }),
           testSpecDigest: testSpecificationDigest(source.plan),
-          configDigest: native.nativeConfigurationDigest({ inventory: source.inventory, profile: 'pr',
+          configDigest: native.nativeConfigurationDigest({ inventory: source.inventory, profile: 'pr', component,
             configuredWorkers: expectedResources.configuredWorkers }),
           inventoryDigest: validationInventoryDigest(specification),
           sources: [{ repositoryId: `repository-${api.repositoryId}`, revision: pr.merge_commit_sha,
@@ -612,7 +743,7 @@ export function createPrReadinessHost({
           producer: { provider: 'github', connection: 'repository-ci', scopeRef: `repository:${api.repositoryId}`,
             definitionRef: `${readinessRepository}/${native.nativeWorkflowContract.path}@refs/pull/${pr.number}/merge`,
             executionRef: String(run.id), attemptRef: String(run.run_attempt), attemptKind: 'known' },
-          attemptCapability: 'distinct', jobRef: `native-${target}`, artifacts: frozen.artifacts,
+          attemptCapability: 'distinct', jobRef: `native-${role}`, artifacts: frozen.artifacts,
         });
         requireThat(digest(context) === digest(raw.context), 'EVIDENCE',
           'Report context does not match independently acquired source/producer/native/artifact facts');
@@ -620,11 +751,12 @@ export function createPrReadinessHost({
           Date.parse(raw.observedAt) < Date.parse(job.completed_at) + 1000,
         'EVIDENCE', 'Original execution times do not belong to this actual job');
         await verifyOriginalNativeRows({ data, raw, specification, inventory: source.inventory,
-          goSources: source.goSources, target, candidate: frozen.candidate,
+          goSources: source.goSources, target, component, candidate: frozen.candidate,
           sourceFiles: source.files, plan: source.plan, context });
+        if (cleanupData) verifyNativeCleanup(cleanupData, { target, role, context });
         const rawDigest = digest(data.texts[native.nativeWorkflowContract.reports.execution]);
         const selection = {
-          profile: specification.profile, executions: [{ id: `native-${target}`, context }],
+          profile: specification.profile, executions: [{ id: `native-${role}`, context }],
           now: new Date(now()).toISOString(),
           policy: { maxAgeMs: 24 * 60 * 60 * 1000, revisionPolicy: 'exact', verifierIds: ['github-actions-observer'] },
         };
@@ -634,21 +766,30 @@ export function createPrReadinessHost({
           verifierId: 'github-actions-observer', reportDigest: rawDigest, context,
           sourceTime: raw.observedAt, sourceSequence: raw.sequence,
         } : null);
-        executions.push({ target, context });
-        return { target, evaluation: restored.evaluation,
+        executions.push({ target, component, context });
+        return { target, component, evaluation: restored.evaluation,
           originalText: data.texts[native.nativeWorkflowContract.reports.execution] };
       }));
       const result = native.aggregateNativeReadiness(evaluations, {
-        profile: 'pr', sourceRevision: pr.merge_commit_sha, artifacts: frozen.artifacts, executions,
+        profile: 'pr', components: true, sourceRevision: pr.merge_commit_sha, artifacts: frozen.artifacts, executions,
       });
+      const laneTimings = nativeLaneTimings(acquired);
+      const auxiliaryJobs = [freezes[0], minimumJobs[0]].map(job => ({
+        name: job.name, jobId: job.id, startedAt: job.started_at, completedAt: job.completed_at,
+        durationMs: Date.parse(job.completed_at) - Date.parse(job.started_at),
+        providerQueueMs: Number.isFinite(Date.parse(job.created_at)) ?
+          Date.parse(job.started_at) - Date.parse(job.created_at) : null,
+      }));
+      const frameworkExecutions = executions.filter(part => part.component !== 'homebrew');
+      const frameworkEvaluations = evaluations.filter(part => part.component !== 'homebrew');
       const definition = deriveNativeComponentSpecification({ inventory: source.inventory,
         testPlan: source.plan, adapterSourceDigest: digest(source.adapterSource.contents) });
-      const projection = projectNativeComponentEvidence({ definition, expectedLanes: executions,
-        originals: evaluations.map(({ target, originalText }) => ({ target, text: originalText })),
+      const projection = projectNativeComponentEvidence({ definition, expectedLanes: frameworkExecutions,
+        originals: frameworkEvaluations.map(({ target, originalText }) => ({ target, text: originalText })),
         now: new Date(now()).toISOString(), verifyOriginal: input => {
-          const original = acquired.find(lane => lane.target === input.target)?.data;
+          const original = acquired.find(lane => lane.target === input.target && lane.component !== 'homebrew')?.data;
           const raw = original?.['execution.json'];
-          const expected = executions.find(lane => lane.target === input.target)?.context;
+          const expected = frameworkExecutions.find(lane => lane.target === input.target)?.context;
           return raw && expected && input.reportDigest === digest(original.texts['execution.json']) &&
             digest(input.claimedContext ?? input.context) === digest(expected) &&
             input.sourceTime === raw.observedAt && input.sourceSequence === raw.sequence ? {
@@ -657,20 +798,31 @@ export function createPrReadinessHost({
             } : null;
         } });
       componentEvidence.set(pr.number, { prNumber: pr.number, sourceCommit: pr.merge_commit_sha, projection,
-        sourceArtifacts: acquired.map(({ target, job, metadata }) => ({
+        laneTimings, auxiliaryJobs,
+        nativeParts: acquired.map(({ target, component, role, job, metadata, bootstrapMetadata, cleanupMetadata }) => ({
+          target, component, role, jobId: job.id,
+          artifactId: metadata.id, artifactDigest: metadata.digest,
+          bootstrapArtifactId: bootstrapMetadata.id, bootstrapArtifactDigest: bootstrapMetadata.digest,
+          ...(cleanupMetadata ? { cleanupArtifactId: cleanupMetadata.id, cleanupArtifactDigest: cleanupMetadata.digest } : {}),
+          runId: run.id, attempt: run.run_attempt,
+        })),
+        sourceArtifacts: acquired.filter(part => part.component !== 'homebrew').map(({ target, job, metadata }) => ({
           target, artifactId: metadata.id, artifactDigest: metadata.digest, jobId: job.id,
           runId: run.id, attempt: run.run_attempt,
         })) });
-      const passed = result.status === 'Passed' && projection.evaluation.status === 'Passed';
+      const timingBlockers = laneTimings.filter(lane => !lane.withinBudget)
+        .map(lane => `Native ${lane.target} complete required worker span ${lane.durationMs}ms is not under 15 minutes`);
+      const passed = result.status === 'Passed' && projection.evaluation.status === 'Passed' && !timingBlockers.length;
       return { status: passed ? 'Passed' : 'NotRun',
-        blockers: [...result.blockers, ...projection.evaluation.cases.filter(test => test.status !== 'Passed')
+        laneTimings,
+        blockers: [...result.blockers, ...timingBlockers, ...projection.evaluation.cases.filter(test => test.status !== 'Passed')
           .map(test => `Required component ${test.testId}: ${test.status}`)],
         inputDigest: digest({ run: run.id, attempt: run.run_attempt,
           minimumNode,
           source: pr.merge_commit_sha, artifacts: artifacts.map(artifact =>
             ({ id: artifact.id, digest: artifact.digest, expired: artifact.expired })),
           cases: [...result.requiredCases, ...definition.requiredCaseIds],
-          componentDefinition: definition.adapterDefinitionDigest,
+          componentDefinition: definition.adapterDefinitionDigest, laneTimings,
           status: passed ? 'Passed' : 'NotRun' }) };
     }
     return failedVerdict('No current PR producer execution exists for this exact source');
@@ -778,7 +930,8 @@ export function createPrReadinessHost({
   return { host, policy: { repositoryId: api.repositoryId, writerId, detailsUrl } };
 }
 
-export function renderObserverSummary(result, { completeReportRef, maxBytes = 900 * 1024 }) {
+export function renderObserverSummary(result, { completeReportRef, maxBytes = 900 * 1024,
+  componentEvidence = [] }) {
   requireThat(Number.isSafeInteger(maxBytes) && maxBytes >= 1024 && maxBytes <= 900 * 1024 &&
     /^https:\/\/github\.com\/urmich\/ai-sdlc-framework\/actions\/runs\/[1-9]\d*\/attempts\/[1-9]\d*$/u.test(completeReportRef),
   'INPUT', 'Observer summaries need a bounded UI budget and the matching complete-report run');
@@ -806,6 +959,24 @@ export function renderObserverSummary(result, { completeReportRef, maxBytes = 90
     return text;
   };
   let omitted = 0;
+  for (const entry of componentEvidence) for (const lane of entry.laneTimings ?? []) {
+    const queues = lane.parts.map(part =>
+      `${part.role}: ${part.providerQueueMs === null ? 'unknown' : `${part.providerQueueMs}ms`}`).join('; ');
+    const line = `| Native span / ${cell(lane.target)} | ${lane.withinBudget ? 'Under 15m' : 'Over budget'} | ` +
+      `PR #${cell(entry.prNumber)} | Earliest required worker to last job completion: ${cell(lane.durationMs)}ms ` +
+      `(includes bootstrap, evidence and guarded cleanup). Provider queue separately: ${cell(queues)} |`;
+    if (bytes + Buffer.byteLength(line) + 1 > maxBytes - reserve) { omitted++; continue; }
+    lines.push(line);
+    bytes += Buffer.byteLength(line) + 1;
+  }
+  for (const entry of componentEvidence) for (const job of entry.auxiliaryJobs ?? []) {
+    const line = `| Upstream prerequisite / ${cell(job.name)} | Required separately | PR #${cell(entry.prNumber)} | ` +
+      `Worker wall: ${cell(job.durationMs)}ms; provider queue: ` +
+      `${job.providerQueueMs === null ? 'unknown' : `${cell(job.providerQueueMs)}ms`}. Not hidden in native part timings. |`;
+    if (bytes + Buffer.byteLength(line) + 1 > maxBytes - reserve) { omitted++; continue; }
+    lines.push(line);
+    bytes += Buffer.byteLength(line) + 1;
+  }
   for (const conversation of result.conversations ?? []) {
     const diagnostic = [conversation.enforcement, conversation.capability,
       ...(conversation.blockers ?? [])].filter(Boolean).join('; ');
@@ -852,7 +1023,8 @@ export async function retainObserverResult(result, directory, { componentEvidenc
     files.push({ filename, sha256: digest(text), size });
   }
   const components = [];
-  for (const { prNumber, sourceCommit, projection, sourceArtifacts = [] } of componentEvidence) {
+  for (const { prNumber, sourceCommit, projection, sourceArtifacts = [], laneTimings = [],
+    nativeParts = [], auxiliaryJobs = [] } of componentEvidence) {
     requireNativeComponentProjection(projection);
     requireThat(Number.isSafeInteger(prNumber) && prNumber > 0 && revision.test(sourceCommit),
       'EVIDENCE', 'Retained component projection requires its actual PR/source identity');
@@ -863,6 +1035,17 @@ export async function retainObserverResult(result, directory, { componentEvidenc
         validationPlatforms.includes(item.target) && /^sha256:[a-f0-9]{64}$/u.test(item.artifactDigest ?? '') &&
         ['artifactId', 'jobId', 'runId', 'attempt'].every(key => Number.isSafeInteger(item[key]) && item[key] > 0)),
     'EVIDENCE', 'Native artifact references must preserve bounded actual provider identities, never serialized origin authority');
+    requireThat(Array.isArray(nativeParts) && (nativeParts.length === 0 || nativeParts.length === 6) &&
+      new Set(nativeParts.map(part => part.role)).size === nativeParts.length &&
+      nativeParts.every(part => native.nativePrParts.some(expected => expected.role === part.role &&
+        expected.target === part.target && expected.component === part.component) &&
+        ['artifactId', 'bootstrapArtifactId', 'jobId', 'runId', 'attempt'].every(key =>
+          Number.isSafeInteger(part[key]) && part[key] > 0) &&
+        /^sha256:[a-f0-9]{64}$/u.test(part.artifactDigest ?? '') &&
+        /^sha256:[a-f0-9]{64}$/u.test(part.bootstrapArtifactDigest ?? '') &&
+        (!part.target.startsWith('macos-') || Number.isSafeInteger(part.cleanupArtifactId) &&
+          part.cleanupArtifactId > 0 && /^sha256:[a-f0-9]{64}$/u.test(part.cleanupArtifactDigest ?? ''))),
+    'EVIDENCE', 'Native producer references require all six distinct roles and their own bootstrap/cleanup artifacts');
     const retain = async (filename, value, maximum = 4 * 1024 * 1024) => {
       const text = typeof value === 'string' ? value : JSON.stringify(value);
       const size = Buffer.byteLength(text);
@@ -886,7 +1069,7 @@ export async function retainObserverResult(result, directory, { componentEvidenc
     });
     components.push({ prNumber, sourceCommit, status: projection.evaluation.status,
       adapterDefinitionDigest: projection.definition.adapterDefinitionDigest,
-      bundle, definition, provenance, originals, nativeOriginals, sourceArtifacts });
+      bundle, definition, provenance, originals, nativeOriginals, sourceArtifacts, nativeParts, laneTimings, auxiliaryJobs });
   }
   const { results, ...summary } = result;
   await fs.writeFile(path.join(directory, 'observer-result.json'),
@@ -936,7 +1119,9 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   const reference = `https://github.com/${readinessRepository}/actions/runs/${env.GITHUB_RUN_ID}/attempts/${env.GITHUB_RUN_ATTEMPT}`;
   if (env.GITHUB_STEP_SUMMARY && /^[1-9]\d*$/u.test(env.GITHUB_RUN_ID ?? '') &&
       /^[1-9]\d*$/u.test(env.GITHUB_RUN_ATTEMPT ?? '')) {
-    await fs.appendFile(env.GITHUB_STEP_SUMMARY, renderObserverSummary(safe, { completeReportRef: reference }));
+    await fs.appendFile(env.GITHUB_STEP_SUMMARY, renderObserverSummary(safe, {
+      completeReportRef: reference, componentEvidence,
+    }));
   }
   console.log(JSON.stringify({ status: safe.status, keys: safe.results.length,
     diagnostic: safe.diagnostic ?? null }));

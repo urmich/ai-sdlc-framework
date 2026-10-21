@@ -233,6 +233,27 @@ same-process concurrency around environment changes, module patches, registries
 or mutable shared package-manager state. A causally ordered 550-refresh retention
 scenario stays ordered; moving it to another shard does not make it faster.
 
+Read independent active and archived JSON entries in bounded batches of sixteen,
+using the directory's canonical root once per scan while preserving the existing
+per-entry containment/symlink checks and complete bounded file validation. Drain
+all dispatched reads before yielding sorted records or exposing an ordered
+failure, so a validation error or early consumer exit leaves no background reads.
+Do not cache contents or infer a record's type from its filename. Size ordinary
+read buffers from the observed file size plus an EOF probe, retaining the existing
+growth limit and identity/content/metadata confirmation checks. Empty-check PR
+fact updates use their full authoritative transaction without a redundant
+preliminary history scan; monitored checks retain their association preflight.
+
+For ordinary PR validation, run each Mac platform's framework inventory and real
+Homebrew procedure as independently required parallel producer parts on separate
+native hosts and owned prefixes, consuming the same frozen candidate. Preserve
+the complete assertion union and independently verified per-part SDK contexts;
+missing or mismatched parts or cleanup cannot produce platform completeness.
+Default whole-native execution and release prepublication behavior remain
+compatible. The required logical lane span is under fifteen minutes from its
+earliest required part's worker start through its last part's evidence/cleanup
+completion, not a claim based on configured workers or one selected part.
+
 Reuse only verified immutable fixture inputs such as an unchanged payload
 build. Keep transactions, durability flushes, lock races, archival and cleanup
 real. Any runtime optimization of repeated reads/indexing must preserve revision,

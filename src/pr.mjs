@@ -482,9 +482,32 @@ export async function updatePrFacts(store, input) {
   if (input.mergeContext) object(input.mergeContext, ['sourceRevision', 'targetRevision', 'mergeRevision', 'evidenceRef'],
     ['sourceRevision', 'targetRevision', 'mergeRevision', 'evidenceRef']);
   if (input.runMonitorRefs) strings(input.runMonitorRefs, 'run monitor references', 30);
+  const persistFacts = verifiedMonitorRefs => store.transaction(input.workItemId, tx => {
+    const pr = tx.get(input.prRecordId);
+    requireThat(['pr', 'pr-observation'].includes(pr?.type), 'INPUT',
+      'PR record is unavailable');
+    requireThat(pr.type !== 'pr-observation' ||
+      currentObservation(tx.all(), pr), 'STALE',
+    'PR facts cannot be updated for an older observation');
+    requireThat(pr.sourceRevision === input.sourceRevision &&
+      pr.targetRevision === input.targetRevision,
+    'STALE',
+    'Provider facts do not match the current PR source/target observation');
+    const facts = {
+      ...input,
+      runMonitorRefs: verifiedMonitorRefs,
+      id: `facts-${input.prRecordId}`,
+      type: 'pr-facts',
+      observedAt: now(store.clock),
+    };
+    tx.put(facts);
+    return facts;
+  });
   return withMonitorLocks(store,
     input.checks.flatMap(check => check.runKey ? [check.runKey] : []),
     async () => {
+      // Without monitor claims, only the authoritative transaction needs to scan history.
+      if (!input.checks.length && !input.runMonitorRefs?.length) return persistFacts([]);
       const state = await store.load(input.workItemId);
       const observedPr = state.records.find(record =>
         record.id === input.prRecordId && ['pr', 'pr-observation'].includes(record.type));
@@ -554,27 +577,7 @@ export async function updatePrFacts(store, input) {
         verifiedMonitorRefs.includes(reference)),
       'EVIDENCE',
       'Supplied PR monitor references must resolve to matching verified monitor records');
-      return store.transaction(input.workItemId, tx => {
-        const pr = tx.get(input.prRecordId);
-        requireThat(['pr', 'pr-observation'].includes(pr?.type), 'INPUT',
-          'PR record is unavailable');
-        requireThat(pr.type !== 'pr-observation' ||
-          currentObservation(tx.all(), pr), 'STALE',
-        'PR facts cannot be updated for an older observation');
-        requireThat(pr.sourceRevision === input.sourceRevision &&
-          pr.targetRevision === input.targetRevision,
-        'STALE',
-        'Provider facts do not match the current PR source/target observation');
-        const facts = {
-          ...input,
-          runMonitorRefs: verifiedMonitorRefs,
-          id: `facts-${input.prRecordId}`,
-          type: 'pr-facts',
-          observedAt: now(store.clock),
-        };
-        tx.put(facts);
-        return facts;
-      });
+      return persistFacts(verifiedMonitorRefs);
     });
 }
 export function evaluateReadiness(records, input, { clock = Date, maxAgeMs = 60000, cycle } = {}) {

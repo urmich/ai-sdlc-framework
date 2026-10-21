@@ -209,7 +209,7 @@ export function createReadinessGitHubClient({
       Number.isSafeInteger(metadata.size_in_bytes) && metadata.size_in_bytes > 0 &&
       metadata.size_in_bytes <= 128 * 1024 * 1024,
     'EVIDENCE', 'Native evidence needs a current digest-bound provider artifact');
-    requireThat(['native', 'candidate'].includes(kind), 'INPUT', 'Select a declared data-only artifact format');
+    requireThat(['native', 'candidate', 'cleanup'].includes(kind), 'INPUT', 'Select a declared data-only artifact format');
     const key = `${metadata.id}:${metadata.digest}:${kind}`;
     if (!artifacts.has(key)) artifacts.set(key, (async () => {
       const archive = await bytes(`/actions/artifacts/${metadata.id}/zip`);

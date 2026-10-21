@@ -22,6 +22,7 @@ import { generateManifests } from '../packaging/winget/generate.mjs';
 import { writePayloadFixture, fixtureCanonical, fixtureSHA } from './winget-payload-fixture.mjs';
 import { repositoryRoot } from '../scripts/test-runner.mjs';
 import { previousReleasePins } from '../scripts/release-bundle.mjs';
+import { nativePrParts } from '../scripts/native-validation.mjs';
 import { digest } from '../src/core.mjs';
 import { evaluateApproval, evaluateConversations, sharedStatusKeys, planStatusUpdate, reconcileStatusKey,
   reconcilePrReadiness, statusContexts, normalStatusLimit, disposableStatusLimits,
@@ -1070,7 +1071,10 @@ jobs:
   native:
     strategy:
       matrix:
-        runner: [ubuntu-24.04, windows-2022, macos-15, macos-15-intel]
+        include: ${JSON.stringify(nativePrParts.map(part => ({ ...part,
+    os: { 'linux-x64': 'ubuntu-24.04', 'windows-x64': 'windows-2022',
+      'macos-arm64': 'macos-15', 'macos-x64': 'macos-15-intel' }[part.target],
+    architecture: part.target.split('-')[1] })))}
     steps:
       - uses: ${checkoutPin}
         with:
@@ -1343,7 +1347,7 @@ function contextProof() {
     expectedMerge: body.mergeSha, prNumber: 1 } };
 }
 
-test('T-PRD020 actual CI schedules four independent native lanes after source-only freeze and distinguishes edited base retargets', async () => {
+test('T-PRD020 actual CI schedules six producer parts in four native lanes after source-only freeze and distinguishes edited base retargets', async () => {
   const workflows = await readWorkflowPolicySources(repositoryRoot);
   const result = inspectWorkflowTrust(workflows);
   assert.equal(result.complete, true, JSON.stringify(result.blockers));
@@ -1356,8 +1360,13 @@ test('T-PRD020 actual CI schedules four independent native lanes after source-on
   assert.equal(ci.jobs.source.name, 'Freeze source candidate');
   assert.equal(ci.jobs.source.needs, 'intent');
   assert.deepEqual(ci.jobs.native.needs, ['intent', 'source']);
-  assert.deepEqual(ci.jobs.native.strategy.matrix.include.map(lane => lane.target),
-    ['linux-x64', 'windows-x64', 'macos-arm64', 'macos-x64']);
+  const parts = ci.jobs.native.strategy.matrix.include;
+  assert.deepEqual(parts.map(({ target, component, role }) => ({ target, component, role }))
+    .sort((a, b) => a.role.localeCompare(b.role)),
+  [...nativePrParts].sort((a, b) => a.role.localeCompare(b.role)));
+  assert.equal(ci.jobs.native.strategy['fail-fast'], false);
+  assert.equal(ci.jobs.native['timeout-minutes'], 360);
+  assert.equal(ci.jobs.native.name, 'native-${{ matrix.role }}');
   assert.equal(ci.jobs['minimum-node'].needs, 'intent');
   assert.equal(ci.jobs['minimum-node'].if, ci.jobs.native.if);
   assert.deepEqual(ci.jobs['producer-summary'].needs, ['intent', 'minimum-node', 'source', 'native']);
@@ -1370,6 +1379,25 @@ test('T-PRD020 actual CI schedules four independent native lanes after source-on
   const cleanup = nativeSteps.find(step => step.name === 'Retain native cleanup diagnostics');
   assert.notEqual(cleanup.with.name, nativeSteps[retainedIndex].with.name,
     'Later cleanup cannot overwrite immutable provisioning evidence');
+  for (const name of ['Retain native bootstrap diagnostics', 'Retain native validation evidence',
+    'Retain native cleanup diagnostics']) {
+    assert.match(nativeSteps.find(step => step.name === name).with.name, /\$\{\{ matrix\.role \}\}/u,
+      'Each independently hosted role retains a separate immutable artifact');
+  }
+  assert.match(nativeSteps[executionIndex].run, /--component "\$NATIVE_COMPONENT"/u);
+  assert.match(nativeSteps[bootstrapIndex].run, /bootstrap-\$NATIVE_ROLE/u);
+  assert.match(nativeSteps.find(step => step.name === 'Remove owned short Homebrew prefix').run,
+    /bootstrap-\$NATIVE_ROLE/u);
+  for (const change of [
+    text => text.replace('role: macos-arm64-homebrew', 'role: macos-arm64-framework'),
+    text => text.replace('component: homebrew', 'component: full'),
+    text => text.replace('os: macos-15-intel', 'os: macos-15'),
+  ]) {
+    const altered = structuredClone(workflows);
+    mutateWorkflowSource(altered.find(item => item.file === '.github/workflows/ci.yml'), change,
+      'Reject mismatched Mac component/runner roles');
+    assert.ok(inspectWorkflowTrust(altered).blockers.some(blocker => blocker.code === 'NATIVE_COMPONENT_MATRIX_DIFFERS'));
+  }
   const freeze = ci.jobs.source.steps.find(step => step.name === 'Freeze exact source candidate');
   assert.match(freeze.run, /--phase candidate/u);
   const pr = { number: 1, head: { sha: sourceA }, base: { sha: 'b'.repeat(40) },

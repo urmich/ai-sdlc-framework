@@ -5,7 +5,7 @@ import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
   requireReadinessEvaluation } from 'ai-sdlc-framework/evidence';
 import { validationPlatforms } from './validation-inventory.mjs';
 // The shared native configuration recipe is invoked only after module initialization.
-import { nativeConfigurationDigest } from './native-validation.mjs';
+import { nativeConfigurationDigest, nativeProducerRole } from './native-validation.mjs';
 import { calculatorCapability, calculatorBaselineCapability } from './pr-calculator.mjs';
 
 const projections = new WeakMap();
@@ -100,8 +100,11 @@ function expectedMatrix(expectedLanes, definition) {
     const selected = expectedLanes.find(lane => lane.target === target);
     requireThat(selected, 'EVIDENCE', `Missing independently expected native ${target} context`);
     const context = validateExecutionContext(selected.context);
+    const component = target.startsWith('macos-') && context.profile === `pr-framework-${target}` ?
+      'framework' : 'full';
     const configuredWorkers = context.native.toolchain.resources?.configuredWorkers;
-    requireThat(context.profile === `pr-${target}` && context.jobRef === `native-${target}` &&
+    requireThat(context.profile === `pr-${component === 'full' ? '' : 'framework-'}${target}` &&
+      context.jobRef === `native-${nativeProducerRole(target, component)}` &&
       context.location === `github-${target}` && context.owner === 'provider' &&
       context.mode === 'automated' && context.environment === 'local' &&
       context.producer.provider === 'github' && context.producer.connection === 'repository-ci' &&
@@ -110,14 +113,14 @@ function expectedMatrix(expectedLanes, definition) {
       context.testSpecDigest === definition.testSpecDigest && configuredWorkers !== undefined &&
       context.configDigest === nativeConfigurationDigest({
         inventory: { complete: true, digest: definition.sourceInventoryDigest },
-        profile: 'pr', configuredWorkers, calculator: definition.calculator ?? calculatorBaselineCapability,
+        profile: 'pr', component, configuredWorkers, calculator: definition.calculator ?? calculatorBaselineCapability,
       }),
     'EVIDENCE', 'Component expectations must preserve actual native host and original specification identities');
-    return { target, context };
+    return { target, context, component };
   });
   const first = lanes[0].context;
   requireThat(lanes.every(({ context }) => context.candidateDigest === first.candidateDigest &&
-    context.configDigest === first.configDigest && digest(context.sources) === digest(first.sources) &&
+    digest(context.sources) === digest(first.sources) &&
     digest(context.artifacts) === digest(first.artifacts) && digest(context.producer) === digest(first.producer)),
   'EVIDENCE', 'Component native lanes belong to different source/configuration/artifact/producer identities');
   return lanes;

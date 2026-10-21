@@ -179,7 +179,13 @@ counts.
   of dependent groups through original process/timing evidence, locally and in
   the applicable PR environment. Report worker utilization, critical-path and
   remaining serial-tail measurements. Configured concurrency or valid YAML is
-  not execution proof and is not advertised as full optimization.
+  not execution proof and is not advertised as full optimization. Each complete
+  logical native PR lane must finish in under 15 minutes, including its toolchain
+  setup, required tests/procedures, evidence retention and owned-resource cleanup.
+  If a lane has parallel required parts, measure from the earliest part's worker
+  start to the latest part's completion; timing one part alone does not satisfy
+  this target. Report provider queueing separately without hiding a queued part
+  inside an otherwise running lane.
 
 ### FR-203: Require complete PR validation without trusting local claims
 
@@ -204,6 +210,9 @@ merge, even when its author ran nothing locally.
 - AC-203.4: One stable required result aggregates the complete expected job/case
   inventory for the exact PR candidate. Failure, cancellation, missing jobs,
   unexpected skips and unavailable required capabilities cannot produce success.
+  Parallel producer parts are independently required, source/artifact-bound
+  executions; a passing framework part cannot substitute for a missing native
+  package-manager procedure or its cleanup evidence.
 - AC-203.5: Sharding and change-aware selection never omit required coverage.
   Heavy stress/security/install cases are assigned explicit required jobs rather
   than silently moved to non-blocking schedules.

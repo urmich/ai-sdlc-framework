@@ -29,6 +29,9 @@ export function within(root, file) {
 export async function safePath(root, relative) {
   requireThat(typeof relative === 'string' && relative && !path.isAbsolute(relative), 'PATH', 'Expected a relative path');
   const canonicalRoot = await canonicalPath(root);
+  return resolveSafePath(canonicalRoot, relative);
+}
+async function resolveSafePath(canonicalRoot, relative) {
   const absolute = path.resolve(canonicalRoot, relative);
   let current = canonicalRoot;
   for (const part of path.relative(canonicalRoot, absolute).split(path.sep)) {
@@ -58,11 +61,14 @@ export async function safePath(root, relative) {
 export async function privateDirectory(directory) {
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
 }
-async function boundedHandleBytes(handle, limit, file) {
+async function boundedHandleBytes(handle, limit, file, expectedSize) {
   const chunks = [];
   let size = 0;
+  const expectedBytes = Number(expectedSize);
   while (true) {
-    const chunk = Buffer.alloc(Math.min(65536, limit + 1 - size));
+    const remaining = expectedBytes - size;
+    const chunk = Buffer.alloc(Math.min(65536, limit + 1 - size,
+      remaining >= 0 ? remaining + 1 : 65536));
     const { bytesRead } = await handle.read(chunk, 0, chunk.length, size);
     if (!bytesRead) break;
     size += bytesRead;
@@ -84,14 +90,14 @@ export async function readBytes(file, limit = LIMITS.input) {
     requireThat(stat.isFile() && stat.dev === before.dev && stat.ino === before.ino,
       'STALE', 'File identity changed while opening');
     requireThat(stat.size <= BigInt(limit), 'CAPACITY', `File exceeds ${limit} bytes: ${file}`);
-    const bytes = await boundedHandleBytes(handle, limit, file);
+    const bytes = await boundedHandleBytes(handle, limit, file, stat.size);
     let after = await handle.stat({ bigint: true });
     if (after.mtimeNs !== stat.mtimeNs || after.ctimeNs !== stat.ctimeNs) {
       let settled = false;
       // Bound metadata settling; content or identity changes are never retried.
       for (let confirmation = 0; confirmation < 2; confirmation++) {
         const confirmationStart = after;
-        const confirmed = await boundedHandleBytes(handle, limit, file);
+        const confirmed = await boundedHandleBytes(handle, limit, file, confirmationStart.size);
         const confirmationEnd = await handle.stat({ bigint: true });
         requireThat(confirmationEnd.isFile() &&
           confirmationEnd.dev === stat.dev &&
@@ -338,11 +344,35 @@ export async function updateJson(file, initial, update, { expectedRevision, limi
     return after;
   }, lockOptions);
 }
-export async function listJson(directory) {
-  let names;
-  try { names = await fs.readdir(directory); }
+async function readDirectory(directory, options) {
+  try { return await fs.readdir(directory, options); }
   catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+}
+export async function listJson(directory) {
+  const names = await readDirectory(directory);
   return names.filter(name => name.endsWith('.json')).sort();
+}
+export async function* readJsonEntries(directory, { limit = LIMITS.input } = {}) {
+  const canonicalDirectory = await canonicalPath(directory);
+  const entries = (await readDirectory(canonicalDirectory, { withFileTypes: true }))
+    .filter(entry => entry.name.endsWith('.json'))
+    .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+  const batchSize = 16;
+  for (let offset = 0; offset < entries.length; offset += batchSize) {
+    const batch = await Promise.allSettled(entries.slice(offset, offset + batchSize).map(async entry => {
+      const name = entry.name;
+      requireThat(path.basename(name) === name && !path.isAbsolute(name),
+        'PATH', 'JSON directory entries must be relative basenames');
+      const file = entry.isSymbolicLink() ? await resolveSafePath(canonicalDirectory, name) :
+        path.join(canonicalDirectory, name);
+      return { name, record: await readJson(file, { limit }) };
+    }));
+    // Drain every dispatched read before yielding, even when a read or caller fails.
+    for (const result of batch) {
+      if (result.status === 'rejected') throw result.reason;
+      yield result.value;
+    }
+  }
 }
 export async function immutableJson(file, value, options) {
   const old = await readJson(file, { optional: true });

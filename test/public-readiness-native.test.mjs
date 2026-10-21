@@ -18,7 +18,8 @@ import { aggregateNativeReadiness, nativeArtifacts, nativeSpecification, nativeG
   finalizeNativeEvidence, writeNativeReadinessBundle, nativeFailureAnnotations, assertGitFreeAncestors,
   nativeResourceFacts, prepareNativeHostFixtures,
   validateNativeSourceDefinitions, validateNativeGroupReport, nativeConfigurationDigest,
-  deriveNativeComponentSpecification, writeNativeHomebrewReport } from '../scripts/native-validation.mjs';
+  deriveNativeComponentSpecification, writeNativeHomebrewReport,
+  nativePrParts, nativeProducerRole } from '../scripts/native-validation.mjs';
 import { validateBootstrapRequest } from '../scripts/native-toolchain.mjs';
 import { reconcileGoExecution, executeValidationCommand, validationCommandArguments } from '../scripts/validation-tools.mjs';
 import { repositoryRoot, createPlan, parseOptions, run as runTests } from '../scripts/test-runner.mjs';
@@ -319,10 +320,11 @@ test('T-PRD074 exact typed native source retains code and credential-negative fi
       error => error.code === 'UNSAFE' && !error.message.includes(text));
   }
 });
-function fixture(profile = 'pr', frozenCandidate = candidate) {
+function fixture(profile = 'pr', frozenCandidate = candidate, components = false) {
   const artifacts = nativeArtifacts(frozenCandidate);
-  const lanes = targets.map(target => {
-    const specification = nativeSpecification({ plan, inventory, goSources: sources, target, profile });
+  const parts = components ? nativePrParts : targets.map(target => ({ target, component: 'full', role: target }));
+  const lanes = parts.map(({ target, component, role }) => {
+    const specification = nativeSpecification({ plan, inventory, goSources: sources, target, profile, component });
     const context = {
       candidateDigest: digest('candidate'), testSpecDigest: digest('specification'), configDigest: digest(profile),
       inventoryDigest: validationInventoryDigest(specification),
@@ -338,13 +340,13 @@ function fixture(profile = 'pr', frozenCandidate = candidate) {
       producer: { provider: 'github', connection: 'repository-ci', scopeRef: 'repository:123',
         definitionRef: 'fixture/repo/.github/workflows/ci.yml@refs/pull/7/merge',
         executionRef: '12345', attemptKind: 'known', attemptRef: '1' },
-      attemptCapability: 'distinct', jobRef: `native-${target}`, artifacts: structuredClone(artifacts),
+      attemptCapability: 'distinct', jobRef: `native-${role}`, artifacts: structuredClone(artifacts),
       ...(profile === 'r-pre' ? { intentId: 'release-fixture-1' } : {}),
     };
-    return { target, specification, context };
+    return { target, component, specification, context };
   });
-  const expected = { profile, sourceRevision, artifacts,
-    executions: lanes.map(({ target, context }) => ({ target, context: structuredClone(context) })) };
+  const expected = { profile, sourceRevision, artifacts, components,
+    executions: lanes.map(({ target, component, context }) => ({ target, component, context: structuredClone(context) })) };
   const report = (lane, mutate = () => {}) => {
     const observedAt = new Date(Date.now() - 1000).toISOString();
     const raw = { schemaVersion: 1, kind: 'test-execution', context: structuredClone(lane.context),
@@ -365,12 +367,87 @@ function fixture(profile = 'pr', frozenCandidate = candidate) {
       sourceTime: raw.observedAt, sourceSequence: raw.sequence,
     }));
     return evaluateReadiness(spec, [normalized], { profile: spec.profile,
-      executions: [{ id: `native-${lane.target}`, context: raw.context }], now: new Date().toISOString(),
+      executions: [{ id: raw.context.jobRef, context: raw.context }], now: new Date().toISOString(),
       policy: { maxAgeMs: 3600000, revisionPolicy: 'exact', verifierIds: ['fixture-native-host'] } });
   };
-  const passing = () => lanes.map(lane => ({ target: lane.target, evaluation: evaluate(lane) }));
+  const passing = () => lanes.map(lane => ({ target: lane.target, component: lane.component, evaluation: evaluate(lane) }));
   return { lanes, expected, report, evaluate, passing };
 }
+
+test('T-PRD016 PR Mac components partition the complete original framework closure and reject non-PR partial requests', () => {
+  const environment = { EXPECTED_SOURCE_COMMIT: sourceRevision,
+    EXPECTED_DESCRIPTOR_SHA256: 'a'.repeat(64), EXPECTED_CHECKSUMS_SHA256: 'b'.repeat(64) };
+  const selectedInventory = { ...inventory, digest: digest('component-causal-fixture'),
+    cases: [...inventory.cases, { ...inventory.cases[0], id: 'distribution-child',
+      name: 'retained causal child', parents: [inventory.cases[0].name] }] };
+  for (const target of ['macos-arm64', 'macos-x64']) {
+    const options = { target, profile: 'pr', candidateDir: '.test-data/component-candidate',
+      evidenceDir: '.test-data/component-evidence', buildCandidate: false, component: 'framework' };
+    assert.equal(validateNativeRequest(options, environment).component, 'framework');
+    assert.equal(parseNativeOptions(['--component', 'homebrew']).component, 'homebrew');
+    for (const delta of [
+      { target: 'linux-x64' }, { target: 'windows-x64' }, { profile: 'r-pre' },
+      { phase: 'candidate' }, { buildCandidate: true }, { component: 'unknown' }, { component: '' },
+    ]) assert.throws(() => validateNativeRequest({ ...options, ...delta }, environment), { code: 'INPUT' });
+    const inputs = { plan, inventory: selectedInventory, goSources: sources, target, profile: 'pr' };
+    const full = nativeSpecification(inputs);
+    assert.deepEqual(full, nativeSpecification({ ...inputs, component: 'full' }),
+      'The existing whole-native CLI profile, selectors and execution identities are unchanged');
+    const framework = nativeSpecification({ ...inputs, component: 'framework' });
+    const homebrew = nativeSpecification({ ...inputs, component: 'homebrew' });
+    assert.deepEqual(framework.cases[0].assertions,
+      full.cases[0].assertions.filter(assertion => assertion.selector.procedure !== 'native-homebrew'));
+    assert.deepEqual(homebrew.cases[0].assertions,
+      full.cases[0].assertions.filter(assertion =>
+        ['native-homebrew', 'frozen-artifacts'].includes(assertion.selector.procedure)));
+    assert.equal(framework.cases.length, 1);
+    assert.match(framework.cases[0].id, /^T-PRD014-/u);
+    assert.equal(homebrew.cases.length, 1);
+    assert.match(homebrew.cases[0].id, /^T-PRD060-/u);
+    assert.equal(homebrew.cases[0].assertions.some(assertion => assertion.selector.file), false);
+    assert.deepEqual(framework.cases[0].assertions.filter(assertion => assertion.selector.file && !assertion.selector.tool)
+      .map(assertion => assertion.id), selectedInventory.cases.map(assertion => assertion.id));
+    assert.deepEqual(framework.cases[0].assertions.find(assertion => assertion.id === 'distribution-child').selector.parents,
+      [inventory.cases[0].name], 'The native root and descendant identities remain in one unchanged framework closure');
+    assert.notEqual(nativeConfigurationDigest({ inventory, profile: 'pr', component: 'framework' }),
+      nativeConfigurationDigest({ inventory, profile: 'pr', component: 'homebrew' }));
+    const release = nativeSpecification({ ...inputs, profile: 'r-pre' });
+    assert.deepEqual(release, nativeSpecification({ ...inputs, profile: 'r-pre', component: 'full' }));
+    assert.ok(release.cases[0].assertions.some(assertion => assertion.selector.procedure === 'native-homebrew'));
+    assert.throws(() => nativeSpecification({ ...inputs, profile: 'r-pre', component: 'homebrew' }), { code: 'INPUT' });
+    assert.equal(framework.cases[0].executionId, `native-${nativeProducerRole(target, 'framework')}`);
+  }
+});
+
+test('T-PRD016 six PR producer parts require both exact Mac originals and reject duplicate swapped failed or stale parts', () => {
+  const f = fixture('pr', candidate, true);
+  const passing = f.passing();
+  const result = aggregateNativeReadiness(passing, f.expected);
+  assert.equal(result.status, 'Passed');
+  assert.equal(result.requiredParts.length, 6);
+  assert.equal(result.requiredCases.length, 7);
+  assert.equal(aggregateNativeReadiness(passing.slice(0, -1), f.expected).status, 'NotRun');
+  assert.equal(aggregateNativeReadiness([...passing, passing[2]], f.expected).status, 'NotRun');
+  const swapped = [...passing];
+  swapped[2] = { ...passing[2], component: 'homebrew' };
+  assert.equal(aggregateNativeReadiness(swapped, f.expected).status, 'NotRun');
+  const index = f.lanes.findIndex(lane => lane.component === 'homebrew');
+  assert.throws(() => f.evaluate(f.lanes[index], raw => {
+    raw.context.jobRef = `native-${f.lanes[index].target}-framework`;
+  }), { code: 'EVIDENCE', message: 'Case execution owner/location/checkpoint differs from the expected producer' });
+  for (const mutate of [
+    raw => { raw.context.sources[0].revision = 'b'.repeat(40); },
+    raw => { raw.context.producer.attemptRef = '2'; },
+    raw => { raw.context.artifacts[0].sha256 = 'f'.repeat(64); },
+    raw => { raw.results[0].status = 'Skipped'; raw.results[0].expectedMet = null; },
+    raw => { raw.results[0].status = 'Failed'; raw.results[0].expectedMet = false;
+      raw.results[0].exitCode = 1; raw.exitCode = 1; },
+  ]) {
+    const changed = [...passing];
+    changed[index] = { ...passing[index], evaluation: f.evaluate(f.lanes[index], mutate) };
+    assert.equal(aggregateNativeReadiness(changed, f.expected).status, 'NotRun');
+  }
+});
 
 test('T-PRD004 native policy rejects fixture, metadata and cross-build credit and uses protected evaluation inputs', () => {
   const f = fixture();

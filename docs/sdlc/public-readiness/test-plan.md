@@ -585,8 +585,8 @@ a Test Design/review responsibility.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | T-PRD014-LX | local | integration | post-review | automated | provider | github-linux-x64 | FR-203; AC-203.1; AC-203.2 | P: open/update the approved fixture PR with no local-result artifact; full current applicable cases execute on Ubuntu, including shared filesystem/Git/tooling; retain exact candidate and case inventory. | procedure: section-7-pr-matrix | NotRun | |
 | T-PRD014-WX | local | integration | post-review | automated | provider | github-windows-x64 | FR-203; AC-203.1; AC-203.2; AC-203.3 | P/N: same PR candidate runs complete applicable Windows assertions, actual hooks, PowerShell/cmd and provisioned native PE launcher; missing launcher is a non-passing prerequisite, not a skip. | procedure: section-7-pr-matrix | NotRun | |
-| T-PRD014-MA | local | integration | post-review | automated | provider | github-macos-arm64 | FR-203; AC-203.1; AC-203.2; AC-203.3 | P/N: same PR candidate runs complete applicable Apple Silicon assertions and real isolated Homebrew/shell behavior; verify native Node and reject translated evidence. | procedure: section-7-pr-matrix | NotRun | |
-| T-PRD014-MI | local | integration | post-review | automated | provider | github-macos-x64 | FR-203; AC-203.1; AC-203.2; AC-203.3 | P/N: same PR candidate runs complete applicable Intel assertions and isolated Homebrew/shell behavior on actual x86_64; ARM metadata simulation cannot satisfy this case. | procedure: section-7-pr-matrix | NotRun | |
+| T-PRD014-MA | local | integration | post-review | automated | provider | github-macos-arm64 | FR-203; AC-203.1; AC-203.2; AC-203.3 | P/N: same PR candidate runs complete applicable Apple Silicon framework, tooling, runtime and shell assertions; verify native Node and reject translated evidence. This framework result alone is not whole-platform proof: independently require T-PRD060-MA for the same frozen artifact before platform completeness. | procedure: section-7-pr-matrix | NotRun | |
+| T-PRD014-MI | local | integration | post-review | automated | provider | github-macos-x64 | FR-203; AC-203.1; AC-203.2; AC-203.3 | P/N: same PR candidate runs complete applicable framework, tooling, runtime and shell assertions on actual x86_64; ARM metadata simulation cannot satisfy this case. This framework result alone is not whole-platform proof: independently require T-PRD060-MI for the same frozen artifact before platform completeness. | procedure: section-7-pr-matrix | NotRun | |
 | T-PRD015 | local | integration | post-review | automated | provider | github-pr-matrix | FR-203; AC-203.3; AC-203.7 | F/P: required capable PR groups provision and execute actual pinned Go/Python/schema/launcher and specialized verification inputs against positive/negative fixtures. Missing required capability fails with its actionable setup diagnostic, never an optional skip or an added local sanity prerequisite. | test/public-readiness-ci.test.mjs#T-PRD015; actual tool execution in section-7-pr-matrix | NotRun | |
 | T-PRD016 | local | unit | post-review | automated | provider | github-pr-matrix | FR-203; AC-203.4 | E: aggregate the exact declared profile's complete matching jobs to Passed; missing, failed, cancelled, skipped, duplicate, cross-profile, foreign-attempt or stale-source results cannot pass; the stable check cannot require its own output or later release consumers. | test/public-readiness-inventory.test.mjs#T-PRD016; test/public-readiness-native.test.mjs#T-PRD016; test/public-readiness-observer.test.mjs#T-PRD016 API-only four-lane positive and missing/swapped-original negatives | NotRun | |
 | T-PRD017 | local | unit | post-review | automated | provider | github-pr-matrix | FR-202; FR-203; AC-202.5; AC-203.5 | F: partition complete root/descendant inventory over uneven groups and deletion/rename/addition changes; union equals all applicable assertions exactly once, including stress/install and unknown-duration roots. Reject missing/duplicate/unknown/cyclic declarations; stale timing hints never alter coverage and path filters cannot remove a required gate. | test/public-readiness-inventory.test.mjs#T-PRD017; group-partition admission regressions | NotRun | |
@@ -646,8 +646,8 @@ a Test Design/review responsibility.
 | T-PRD057 | local | integration | post-review | automated | provider | github-pr-matrix | FR-212; AC-212.1 | F: build a new-version release; exactly one Mac archive is published in the inventory, its name contains macos not one CPU, and both native consumers resolve the same asset. | test/distribution-channels.test.mjs#T-PRD057 | NotRun | |
 | T-PRD058 | local | unit | post-review | automated | provider | github-pr-matrix | FR-212; AC-212.2 | F: inspect verified archive entries; exactly one shared JS/shell payload, no nested prior archives, no bundled Node and no claim of a Universal 2 executable; extra executable/runtime entries fail. | test/distribution-channels.test.mjs#T-PRD058 | NotRun | |
 | T-PRD059 | local | integration | post-review | automated | provider | github-pr-matrix | FR-212; AC-212.3 | F: wrong/missing/non-native/shadowed Node and unsupported host fixtures fail before channel/home writes; compatible host/runtime passes the public preflight without weakening archive checks. | test/distribution-channels.test.mjs#T-PRD059 | NotRun | |
-| T-PRD060-MA | local | integration | post-review | automated | provider | github-macos-arm64 | FR-212; AC-212.4 | P/N: verify the frozen shared archive digest and execute its candidate lifecycle natively on arm64; compare sibling Intel report identity; swapped/rebuilt/different bytes cannot be admitted as the same tested artifact. Restore captured opt and linked-keg references before promotion; the injected failure must reach linking, restore the exact prior owned state and permit a genuine newer-version retry without forced overwrite. Reuse only the exact captured pending candidate with receipt/tap/payload verification; the real initial upgrade executes once, not again over its retained keg on retry. | procedure: section-7-pr-matrix | NotRun | |
-| T-PRD060-MI | local | integration | post-review | automated | provider | github-macos-x64 | FR-212; AC-212.4 | P/N: independently verify the same frozen digest and execute its native x86_64 lifecycle; ARM-only/Rosetta evidence or a missing sibling result fails shared-artifact eligibility. Restore captured opt and linked-keg references before promotion; the injected failure must reach linking, restore the exact prior owned state and permit a genuine newer-version retry without forced overwrite. Reuse only the exact captured pending candidate with receipt/tap/payload verification; the real initial upgrade executes once, not again over its retained keg on retry. | procedure: section-7-pr-matrix | NotRun | |
+| T-PRD060-MA | local | integration | post-review | automated | provider | github-macos-arm64 | FR-203; AC-203.3; FR-212; AC-212.4 | P/N: verify the frozen shared archive digest and execute its candidate lifecycle through real Homebrew natively on arm64; compare sibling Intel report identity; swapped/rebuilt/different bytes cannot be admitted as the same tested artifact. Restore captured opt and linked-keg references before promotion; the injected failure must reach linking, restore the exact prior owned state and permit a genuine newer-version retry without forced overwrite. Reuse only the exact captured pending candidate with receipt/tap/payload verification; the real initial upgrade executes once, not again over its retained keg on retry. | procedure: section-7-pr-matrix | NotRun | |
+| T-PRD060-MI | local | integration | post-review | automated | provider | github-macos-x64 | FR-203; AC-203.3; FR-212; AC-212.4 | P/N: independently verify the same frozen digest and execute its native x86_64 lifecycle through real Homebrew; ARM-only/Rosetta evidence or a missing sibling result fails shared-artifact eligibility. Restore captured opt and linked-keg references before promotion; the injected failure must reach linking, restore the exact prior owned state and permit a genuine newer-version retry without forced overwrite. Reuse only the exact captured pending candidate with receipt/tap/payload verification; the real initial upgrade executes once, not again over its retained keg on retry. | procedure: section-7-pr-matrix | NotRun | |
 | T-PRD061 | local | integration | post-review | automated | provider | github-pr-matrix | FR-212; AC-212.5 | F/D: generated Homebrew metadata has one verified Mac URL/hash, declared native Node dependency selection and no obsolete architecture-specific URL; assert these local metadata contracts only. Actual native lifecycle proof is assigned to T-PRD079-MA/MI before publication and T-PRD039-MA/MI afterwards, never as prerequisites for this local case. | test/homebrew.test.mjs#T-PRD061 | NotRun | |
 | T-PRD062 | local | integration | post-review | automated | provider | github-pr-matrix | FR-212; AC-212.6 | F: repeat builds and traverse verifier/gate/descriptor/checksum/docs consumers with one shared Mac asset; stale requests for old CPU filenames, changed manifests or mismatched hashes fail. | test/distribution-channels.test.mjs#T-PRD062; test/release-ci.test.mjs#T-PRD062; test/public-readiness-docs.test.mjs#T-PRD062 packaging readers reject obsolete future Mac assets and nonblocking native gates | NotRun | |
 | T-PRD063 | local | integration | post-review | automated | provider | github-pr-matrix | FR-212; AC-212.7 | F: new-version fixture keeps separate real Windows PE and npm payload; installed0.4 and original release metadata/assets/tag are not mutation targets; attempted existing-version replacement is rejected. | test/release-ci.test.mjs#T-PRD063 actual pinned-Go PE preservation and original immutable version/tag/asset replacement rejection; local binary preservation is not native Windows execution proof | NotRun | |
@@ -715,10 +715,17 @@ fixture evidence through the actual API-only observer boundary.
 
 ## 6. Comparable benchmark procedure
 
-The current delivery goal is an advisory **10-minute wall-clock target for the
-complete required PR test phase**, with two minutes a stretch goal, not a
-promise or timeout. Measure the parallel matrix's actual test-phase span and
-report queueing, toolchain provisioning and total workflow duration separately.
+The required delivery target is **under 15 minutes for each complete logical
+native PR lane**. Include job-specific toolchain provisioning, every required
+test/procedure, evidence retention and owned-resource cleanup. For a lane with
+parallel required parts, use the earliest part's actual worker start and the
+latest part's completion; do not time only the fastest or longest isolated part,
+exclude a serial auxiliary stage, or hide a queued part after the lane starts.
+Report initial provider queueing and the complete workflow duration separately.
+The separate advisory test-phase goal remains ten minutes, with two minutes a
+stretch goal; neither is a timeout or permission to omit work. Record actual
+native correctness and the lane-latency verdict separately: passing assertions
+do not prove that the latency target was achieved.
 Stability, complete native coverage and honest failure reporting take precedence:
 do not drop assertions, weaken checks or hide retries to meet the target.
 An incomplete or failed attempt is not a successful full-suite benchmark.
@@ -768,7 +775,12 @@ partial comparison and do not silently retry to obtain a ratio.
 1. With scoped push/PR authority, use the exact candidate selected for validation and a clean
    controlled contribution without local result files. Observe initial PR and
    new head updates; retain exact candidate/source, workflow and attempt.
-2. Confirm all four full applicable native lanes start with required prerequisites.
+2. Confirm all four logical native lanes and every required producer part start
+   with their own required prerequisites. Linux and Windows retain complete
+   native producers. Each Mac lane joins a framework producer with an independently
+   required real Homebrew producer; neither part alone completes that platform.
+   Separate jobs use their own native hosts, resource budgets, scratch paths and
+   owned prefixes rather than racing on a shared package-manager installation.
    Exercise actual Go, Python, shell and Homebrew surfaces in their assigned
    lanes. Install tests operate only in fixture homes; fork jobs have no publish
    capability. Required authentic-verifier setup supplies independently pinned
@@ -781,6 +793,9 @@ partial comparison and do not silently retry to obtain a ratio.
 4. Mac jobs consume the same frozen architecture-neutral artifact/digest; do not
    independently rebuild and call different bytes the same artifact. Windows
    jobs use a real PE. Collect native environment/runtime probes and step exits.
+   Retain exact job/component, source, attempt, toolchain and artifact identities
+   for each part. Reject missing, duplicate or swapped parts and verify guarded
+   cleanup for every allocated Mac prefix; one part cannot borrow another's receipt.
 5. Observe the stable check, complete/failing sanitized reports and provider
    review policy. Read-only checking does not authorize merge. Preserve the PR
    and reconcile any disposable artifacts; deletion requires its own authority.

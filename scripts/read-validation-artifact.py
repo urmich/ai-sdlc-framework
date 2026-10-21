@@ -51,11 +51,11 @@ def read_results(archive, kind="native"):
                 raise ValueError("Executable links or encrypted result data are forbidden")
             if entry.is_dir():
                 continue
-            if ((kind == "native" and mode & 0o111)
+            if ((kind != "candidate" and mode & 0o111)
                     or any(previous.startswith(f"{key}/") for previous in seen)):
                 raise ValueError("Result data cannot be executable or replace a directory")
             regular.add(key)
-            if kind == "native" and not name.endswith((".json", ".ndjson", ".jsonl", ".md", ".log", ".txt")):
+            if kind != "candidate" and not name.endswith((".json", ".ndjson", ".jsonl", ".md", ".log", ".txt")):
                 raise ValueError("Only declared result data formats may enter the trusted observer")
             maximum = (MAX_ARCHIVE if kind == "candidate" else
                        MAX_EXPANDED if name == "readiness-bundle.json" else
@@ -69,23 +69,28 @@ def read_results(archive, kind="native"):
                 raise ValueError("Result entry size differs from its archive declaration")
             fingerprints.append({"filename": name, "size": len(data),
                                  "sha256": hashlib.sha256(data).hexdigest()})
-            if kind == "native":
+            if kind != "candidate":
                 selected[name] = data.decode("utf-8", errors="strict")
             elif name in ("context.json", "assets/release-descriptor.json", "assets/SHA256SUMS"):
                 if len(data) > MAX_FILE:
                     raise ValueError("Candidate identity document exceeds its budget")
                 selected[name] = data.decode("utf-8", errors="strict")
     required = ({"execution.json", "readiness-bundle.json"} if kind == "native" else
+                {"toolchain.json", "native-homebrew-prefix-request.json",
+                 "native-homebrew-prefix-allocation.json", "native-homebrew-prefix-cleanup.json"}
+                if kind == "cleanup" else
                 {"context.json", "assets/release-descriptor.json", "assets/SHA256SUMS"})
     if not required.issubset(selected):
-        raise ValueError("Required original execution and readiness bundle are missing")
+        raise ValueError("Required owned-prefix cleanup and bootstrap originals are missing"
+                         if kind == "cleanup" else
+                         "Required original execution and readiness bundle are missing")
     return {"texts": selected, "files": fingerprints}
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--archive", required=True, type=Path)
-    parser.add_argument("--kind", choices=("native", "candidate"), default="native")
+    parser.add_argument("--kind", choices=("native", "candidate", "cleanup"), default="native")
     args = parser.parse_args()
     if sys.version_info[:3] != (3, 12, 10):
         raise RuntimeError("The trusted result reader requires CPython 3.12.10")

@@ -211,25 +211,46 @@ jobs:
   native:
     needs: [intent, source]
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
-    name: native-${{ matrix.target }}
+    name: native-${{ matrix.role }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: linux-x64
+            component: full
+            role: linux-x64
             os: ubuntu-24.04
             architecture: x64
           - target: windows-x64
+            component: full
+            role: windows-x64
             os: windows-2022
             architecture: x64
           - target: macos-arm64
+            component: framework
+            role: macos-arm64-framework
             os: macos-15
             architecture: arm64
           - target: macos-x64
+            component: framework
+            role: macos-x64-framework
+            os: macos-15-intel
+            architecture: x64
+          - target: macos-arm64
+            component: homebrew
+            role: macos-arm64-homebrew
+            os: macos-15
+            architecture: arm64
+          - target: macos-x64
+            component: homebrew
+            role: macos-x64-homebrew
             os: macos-15-intel
             architecture: x64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 360
+    env:
+      SDLC_NATIVE_ROLE: ${{ matrix.role }}
+      SDLC_NATIVE_COMPONENT: ${{ matrix.component }}
     steps:
       - name: Record trusted execution context
         working-directory: ${{ github.workspace }}
@@ -252,6 +273,7 @@ jobs:
               runId: e.GITHUB_RUN_ID, attempt: e.GITHUB_RUN_ATTEMPT,
               ImageOS: e.ImageOS, ImageVersion: e.ImageVersion,
               platform: process.platform, architecture: process.arch,
+              nativeRole: e.SDLC_NATIVE_ROLE, nativeComponent: e.SDLC_NATIVE_COMPONENT,
               resources: { availableParallelism: require("node:os").availableParallelism(),
                 totalMemoryBytes: require("node:os").totalmem(), configuredWorkers: e.SDLC_TEST_WORKERS ?? null }
             }));
@@ -292,18 +314,19 @@ jobs:
         env:
           GOTOOLCHAIN: local
           NATIVE_TARGET: ${{ matrix.target }}
-        run: node scripts/native-toolchain.mjs --target "$NATIVE_TARGET" --output-dir ".test-data/bootstrap-$NATIVE_TARGET"
+          NATIVE_ROLE: ${{ matrix.role }}
+        run: node scripts/native-toolchain.mjs --target "$NATIVE_TARGET" --output-dir ".test-data/bootstrap-$NATIVE_ROLE"
       - name: Retain native bootstrap diagnostics
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: native-bootstrap-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: native-bootstrap-${{ matrix.role }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            source/.test-data/bootstrap-${{ matrix.target }}/*.json
-            source/.test-data/bootstrap-${{ matrix.target }}/*.ndjson
-            source/.test-data/bootstrap-${{ matrix.target }}/crypto-fixture/fixture.json
-            source/.test-data/bootstrap-${{ matrix.target }}/crypto-fixture/public-intoto.sigstore
-            source/.test-data/bootstrap-${{ matrix.target }}/crypto-fixture/offline-trust/*.json
+            source/.test-data/bootstrap-${{ matrix.role }}/*.json
+            source/.test-data/bootstrap-${{ matrix.role }}/*.ndjson
+            source/.test-data/bootstrap-${{ matrix.role }}/crypto-fixture/fixture.json
+            source/.test-data/bootstrap-${{ matrix.role }}/crypto-fixture/public-intoto.sigstore
+            source/.test-data/bootstrap-${{ matrix.role }}/crypto-fixture/offline-trust/*.json
           if-no-files-found: warn
           retention-days: 90
       - name: Retrieve exact frozen candidate
@@ -315,43 +338,46 @@ jobs:
       - name: Execute native validation
         env:
           NATIVE_TARGET: ${{ matrix.target }}
+          NATIVE_COMPONENT: ${{ matrix.component }}
+          NATIVE_ROLE: ${{ matrix.role }}
           EXPECTED_SOURCE_COMMIT: ${{ needs.source.outputs.source-commit }}
           EXPECTED_DESCRIPTOR_SHA256: ${{ needs.source.outputs.descriptor-sha256 }}
           EXPECTED_CHECKSUMS_SHA256: ${{ needs.source.outputs.checksums-sha256 }}
         run: >-
           node scripts/native-validation.mjs
-          --target "$NATIVE_TARGET" --profile pr
+          --target "$NATIVE_TARGET" --profile pr --component "$NATIVE_COMPONENT"
           --candidate-dir .test-data/frozen-candidate
-          --evidence-dir ".test-data/native-$NATIVE_TARGET"
+          --evidence-dir ".test-data/native-$NATIVE_ROLE"
           --build-candidate false
       - name: Retain native validation evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: native-evidence-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: native-evidence-${{ matrix.role }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            source/.test-data/native-${{ matrix.target }}/*.json
-            source/.test-data/native-${{ matrix.target }}/*.ndjson
-            source/.test-data/native-${{ matrix.target }}/*.md
-            source/.test-data/native-${{ matrix.target }}/tools-*/*.json
-            source/.test-data/native-${{ matrix.target }}/tools-*/*.ndjson
+            source/.test-data/native-${{ matrix.role }}/*.json
+            source/.test-data/native-${{ matrix.role }}/*.ndjson
+            source/.test-data/native-${{ matrix.role }}/*.md
+            source/.test-data/native-${{ matrix.role }}/tools-*/*.json
+            source/.test-data/native-${{ matrix.role }}/tools-*/*.ndjson
           if-no-files-found: warn
           retention-days: 90
       - name: Remove owned short Homebrew prefix
         if: ${{ always() && runner.os == 'macOS' && steps.bootstrap.outcome != 'skipped' }}
         env:
           NATIVE_TARGET: ${{ matrix.target }}
+          NATIVE_ROLE: ${{ matrix.role }}
         run: >-
           node scripts/native-toolchain.mjs --cleanup
-          --target "$NATIVE_TARGET" --output-dir ".test-data/bootstrap-$NATIVE_TARGET"
+          --target "$NATIVE_TARGET" --output-dir ".test-data/bootstrap-$NATIVE_ROLE"
       - name: Retain native cleanup diagnostics
         if: ${{ always() && runner.os == 'macOS' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: native-cleanup-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: native-cleanup-${{ matrix.role }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            source/.test-data/bootstrap-${{ matrix.target }}/*.json
-            source/.test-data/bootstrap-${{ matrix.target }}/*.ndjson
+            source/.test-data/bootstrap-${{ matrix.role }}/*.json
+            source/.test-data/bootstrap-${{ matrix.role }}/*.ndjson
           if-no-files-found: warn
           retention-days: 90
 
@@ -382,6 +408,6 @@ jobs:
           fi
           test "$REQUIRES_NATIVE" = true
           test "$MINIMUM_NODE_RESULT" = success
-          printf 'Source freeze: %s\nAll four parallel native lanes: %s\n' "$SOURCE_RESULT" "$NATIVE_RESULT"
+          printf 'Source freeze: %s\nFour logical lanes / six required native producer parts: %s\n' "$SOURCE_RESULT" "$NATIVE_RESULT"
           printf 'Provider-verified framework/validation is evaluated independently by the trusted observer.\n'
           test "$SOURCE_RESULT" = success && test "$NATIVE_RESULT" = success

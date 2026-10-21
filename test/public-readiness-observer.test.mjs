@@ -13,7 +13,8 @@ import { digest } from '../src/core.mjs';
 import { canonical } from '../src/core.mjs';
 import { observerApiFixture, nativeReplayFixture } from './readiness-observer-fixture.mjs';
 import { reconcilePrReadiness } from '../scripts/pr-readiness.mjs';
-import { readTrustedMinimumNodeJob, renderObserverSummary, retainObserverResult } from '../scripts/pr-observer.mjs';
+import { readTrustedMinimumNodeJob, renderObserverSummary, retainObserverResult,
+  nativeLaneTimings, verifyNativeCleanup, verifyOriginalNativeRows } from '../scripts/pr-observer.mjs';
 import { nativeStageSelections, nativeConfigurationDigest, replayNativeEvidence,
   validateNativePreviousLifecycle, nativeWorkflowContract, nativeSpecification } from '../scripts/native-validation.mjs';
 import { testSpecificationDigest } from '../src/artifacts.mjs';
@@ -59,7 +60,7 @@ test('T-PRD021 native component projection retains four verified original platfo
     assert.equal(raw.context.location, 'github-pr-matrix');
     assert.equal(raw.context.native.kind, 'metadata', 'The derived view never invents a fifth native execution');
     assert.equal(raw.context.native.toolchain.matrix.length, 4);
-    assert.equal(raw.observedAt, '2026-10-18T10:00:55.000Z');
+    assert.equal(raw.observedAt, '2026-10-18T10:00:51.000Z');
     for (const row of raw.results) {
       const lane = f.lanes.get(row.selector.target);
       const source = lane.data.get('execution.json').results.find(source =>
@@ -174,7 +175,7 @@ test('T-PRD016 minimum-runtime prerequisite rejects missing failed skipped or un
     jobId: selected.id, runId: f.run.id, attempt: f.run.run_attempt,
     headSha: f.revisions.head, mergeSha: f.revisions.merge,
   });
-  assert.equal(f.jobs.filter(job => job.name.startsWith('native-') && job.conclusion === 'success').length, 4);
+  assert.equal(f.jobs.filter(job => job.name.startsWith('native-') && job.conclusion === 'success').length, 6);
   for (const change of [
     () => { f.jobs.splice(f.jobs.indexOf(selected), 1); },
     () => { selected.conclusion = 'failure'; },
@@ -225,7 +226,7 @@ test('T-PRD016 minimum-runtime prerequisite rejects missing failed skipped or un
   f.assertReadOnly();
 });
 
-test('T-PRD016 API-only native admission restores a complete original four-lane six-case fixture without candidate execution', async t => {
+test('T-PRD016 API-only native admission composes six producer parts and four complete logical lanes without candidate execution', async t => {
   const f = await observerApiFixture(t);
   const definition = { plan: f.source.plan, inventory: f.source.inventory, goSources: f.source.goSources,
     target: 'linux-x64', profile: 'pr' };
@@ -259,7 +260,16 @@ test('T-PRD016 API-only native admission restores a complete original four-lane 
   assert.equal(snapshot.prs[0].verdicts['framework/approval'].status, 'Passed');
   assert.equal(await host.verifyWriterControl(), true);
   const downloads = f.calls.filter(call => /\/actions\/artifacts\/\d+\/zip$/u.test(new URL(call.url).pathname));
-  assert.equal(downloads.length, 5, 'Frozen candidate plus every original native artifact must be acquired');
+  assert.equal(downloads.length, 11, 'Frozen candidate, six original native artifacts and four guarded cleanup artifacts must be acquired');
+  const retained = host.componentEvidence()[0];
+  assert.equal(retained.nativeParts.length, 6);
+  assert.equal(retained.nativeParts.filter(part => part.cleanupArtifactId).length, 4);
+  assert.equal(new Set(retained.nativeParts.map(part => part.artifactId)).size, 6);
+  assert.equal(new Set(retained.nativeParts.map(part => part.bootstrapArtifactId)).size, 6);
+  assert.equal(new Set(retained.nativeParts.filter(part => part.cleanupArtifactId)
+    .map(part => part.cleanupArtifactId)).size, 4);
+  assert.ok(retained.laneTimings.every(lane => lane.durationMs === 80000 && lane.withinBudget &&
+    lane.parts.every(part => part.providerQueueMs === null)));
   for (const job of f.jobs) {
     assert.ok(f.calls.some(call => new URL(call.url).pathname.endsWith(`/actions/jobs/${job.id}/logs`)));
   }
@@ -272,15 +282,15 @@ test('T-PRD016 complete API admission rejects missing lanes artifacts originals 
   assert.equal(verdict(await f.connect().host.snapshot()).status, 'Passed');
   const originalJobs = [...f.jobs];
   const originalArtifacts = new Map(f.artifacts);
-  f.jobs.splice(f.jobs.findIndex(job => job.name === 'native-macos-x64'), 1);
+  f.jobs.splice(f.jobs.findIndex(job => job.name === 'native-macos-x64-framework'), 1);
   let result = verdict(await f.connect().host.snapshot());
   assert.equal(result.status, 'NotRun');
-  assert.ok(result.blockers.some(message => message.includes('native job inventory')));
+  assert.ok(result.blockers.some(message => /producer inventory|native job inventory/u.test(message)));
   f.jobs.splice(0, f.jobs.length, ...originalJobs);
   f.artifacts.delete('windows-x64');
   result = verdict(await f.connect().host.snapshot());
   assert.equal(result.status, 'NotRun');
-  assert.ok(result.blockers.some(message => message.includes('native report artifact')));
+  assert.ok(result.blockers.some(message => /producer role artifact|native report artifact/u.test(message)));
   f.artifacts.clear();
   for (const [key, value] of originalArtifacts) f.artifacts.set(key, value);
   const lane = f.lanes.get('linux-x64');
@@ -293,7 +303,7 @@ test('T-PRD016 complete API admission rejects missing lanes artifacts originals 
   assert.ok(result.blockers.some(message => message.includes('Original Go execution')));
   lane.data.set(goFile, originalGo);
   f.refresh('linux-x64');
-  const mac = f.lanes.get('macos-arm64');
+  const mac = f.homebrewLanes.get('macos-arm64');
   const previous = structuredClone(mac.data.get('native-homebrew.json'));
   for (const change of [
     report => { report.previousMetadata.descriptor.sourceCommit = f.revisions.head; },
@@ -303,7 +313,7 @@ test('T-PRD016 complete API admission rejects missing lanes artifacts originals 
     const changed = structuredClone(previous);
     change(changed);
     mac.data.set('native-homebrew.json', changed);
-    f.refresh('macos-arm64');
+    f.refresh(mac.role);
     const snapshot = await f.connect().host.snapshot();
     result = verdict(snapshot);
     assert.equal(snapshot.complete, true);
@@ -312,13 +322,74 @@ test('T-PRD016 complete API admission rejects missing lanes artifacts originals 
       'A tampered original byte/source identity must remain a per-PR verification blocker');
   }
   mac.data.set('native-homebrew.json', previous);
-  f.refresh('macos-arm64');
+  f.refresh(mac.role);
   assert.equal(verdict(await f.connect().host.snapshot()).status, 'Passed');
   f.swap('macos-arm64', 'macos-x64');
   result = verdict(await f.connect().host.snapshot());
   assert.equal(result.status, 'NotRun');
   assert.ok(result.blockers.some(message => message.includes('Report context')));
   f.assertReadOnly();
+});
+
+test('T-PRD016 Mac part originals reject failed skipped swapped procedures and foreign or unproven cleanup without native execution', async t => {
+  const f = await observerApiFixture(t);
+  const role = 'macos-arm64-homebrew';
+  const lane = f.parts.get(role);
+  const originalData = new Map([...lane.data].map(([file, value]) => [file, structuredClone(value)]));
+  const dictionary = entries => ({ ...Object.fromEntries(entries),
+    texts: Object.fromEntries([...entries].map(([file, value]) =>
+      [file, typeof value === 'string' ? value : canonical(value)])) });
+  const input = { raw: lane.data.get('execution.json'), specification: lane.specification,
+    inventory: f.source.inventory, goSources: f.source.goSources, target: lane.target, component: 'homebrew',
+    candidate: f.candidate, sourceFiles: [...f.source.files].map(([file, contents]) => ({ file, contents })),
+    plan: f.source.plan, context: lane.context };
+  await verifyOriginalNativeRows({ ...input, data: dictionary(originalData) });
+  for (const change of [
+    data => { data.get('native-homebrew.json').nativeValidation = 'NotRun'; },
+    data => { data.get('homebrew-command.json').exitCode = 1; },
+    data => { data.get('homebrew-command.json').complete = false; },
+    data => { data.get('homebrew-command.json').context = f.lanes.get(lane.target).context; },
+    data => { data.delete('homebrew-command.json'); },
+  ]) {
+    const data = structuredClone(originalData);
+    change(data);
+    await assert.rejects(verifyOriginalNativeRows({ ...input, data: dictionary(data) }), { code: 'EVIDENCE' });
+  }
+  const originalSupport = f.cleanupReports.get(role);
+  const expected = { target: lane.target, role, context: lane.context };
+  assert.equal(verifyNativeCleanup(dictionary(originalSupport), expected).role, role);
+  for (const change of [
+    data => { data.delete('native-homebrew-prefix-cleanup.json'); },
+    data => { data.get('native-homebrew-prefix-cleanup.json').status = 'rolled-back'; },
+    data => { data.get('native-homebrew-prefix-cleanup.json').prefixIdentity.inode = 'different-prefix'; },
+    data => { data.get('native-homebrew-prefix-request.json').binding.github.GITHUB_RUN_ATTEMPT = '2'; },
+    data => { data.get('native-homebrew-prefix-request.json').binding.github.GITHUB_RUN_ID = '202'; },
+    data => { data.get('native-homebrew-prefix-request.json').binding.github.GITHUB_REPOSITORY_ID = '33'; },
+    data => { data.set('toolchain.json', f.lanes.get(lane.target).data.get('toolchain.json')); },
+  ]) {
+    const data = structuredClone(originalSupport);
+    change(data);
+    assert.throws(() => verifyNativeCleanup(dictionary(data), expected), { code: 'EVIDENCE' });
+  }
+  assert.equal(f.calls.length, 0, 'Node-only regressions never invoke provider acquisition, Python, Homebrew or native tests');
+});
+
+test('T-PRD020 logical native latency spans earliest required worker through the last independent cleanup and reports queue separately', () => {
+  const targets = ['linux-x64', 'windows-x64', 'macos-arm64', 'macos-x64'];
+  const epoch = Date.parse('2026-10-18T10:00:00.000Z');
+  const at = seconds => new Date(epoch + seconds * 1000).toISOString();
+  const parts = targets.flatMap(target =>
+    (target.startsWith('macos-') ? ['framework', 'homebrew'] : ['full']).map((component, index) => ({
+      target, role: component === 'full' ? target : `${target}-${component}`,
+      job: { id: 100 + index, created_at: at(0), started_at: at(index ? 700 : 100),
+        completed_at: at(index ? 1300 : 600) },
+    })));
+  const timings = nativeLaneTimings(parts);
+  assert.ok(timings.filter(lane => lane.target.startsWith('macos-')).every(lane =>
+    lane.durationMs === 1200000 && !lane.withinBudget && lane.parts.length === 2),
+  'Both isolated parts are below fifteen minutes, but their complete required logical span is not');
+  assert.deepEqual(timings[2].parts.map(part => part.providerQueueMs), [100000, 700000]);
+  assert.throws(() => nativeLaneTimings(parts.slice(0, -1)), { code: 'EVIDENCE' });
 });
 
 test('T-PRD021 acquired native ZIP identities and original outcomes reject forged passing summaries and candidate swaps', async t => {

@@ -2,7 +2,7 @@ import path from 'node:path';
 import os from 'node:os';
 import * as fs from 'node:fs/promises';
 import { LIMITS, PHASES, budget, byteSize, choice, digest, id, newId, object, recordLimit, requireThat, safeRecord, text } from './core.mjs';
-import { atomicWrite, canonicalPath, exists, immutableJson, listJson, privateDirectory, readBytes, readJson, safePath, updateJson, withLock, writeJson } from './files.mjs';
+import { atomicWrite, canonicalPath, exists, immutableJson, listJson, privateDirectory, readBytes, readJson, readJsonEntries, safePath, updateJson, withLock, writeJson } from './files.mjs';
 import { bindingKey, identity, sameBinding, validateBinding } from './git.mjs';
 import { validateManifest, validateRecord } from './schemas.mjs';
 import { sameNativePath } from './platform.mjs';
@@ -426,9 +426,7 @@ export class Store {
   async records(workItemId) {
     const directory = path.join(this.workPath(workItemId), 'records');
     const records = [];
-    for (const name of await listJson(directory)) {
-      const file = await safePath(directory, name);
-      const record = await readJson(file, { limit: LIMITS.workingSet });
+    for await (const { record } of readJsonEntries(directory, { limit: LIMITS.workingSet })) {
       validateRecord(record);
       budget(record, recordLimit(record), 'Active record');
       requireThat(record.workItemId === workItemId && typeof record.type === 'string', 'SCHEMA', 'Record identity/type is invalid');

@@ -2,7 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LIMITS, canonical, choice, digest, id, object, recordLimit, requireThat,
   safeRecord, safeSummary } from './core.mjs';
-import { listJson, readBytes, readJson, safePath } from './files.mjs';
+import { readBytes, readJson, readJsonEntries, safePath } from './files.mjs';
 import { validateRecord } from './schemas.mjs';
 import { bindCycleCatalog, buildTestCatalog, cycleTests, OUTCOME_PAGE_SIZE,
   readValidationObject, stageValidationObject, validateObjectReference } from './validation-catalog.mjs';
@@ -200,8 +200,7 @@ export async function prepareValidationHistory(store, workItemId, active) {
   const evidence = new Map();
   const events = new Map();
   const directory = path.join(store.workPath(workItemId), 'evidence');
-  for (const name of await listJson(directory)) {
-    const record = await readJson(await safePath(directory, name), { limit: LIMITS.workingSet + 1 });
+  for await (const { name, record } of readJsonEntries(directory, { limit: LIMITS.workingSet + 1 })) {
     if (['test-evidence', 'event'].includes(record.type)) {
       requireThat(record.workItemId === workItemId && record.id === name.slice(0, -5),
         'BINDING', 'Archived evidence or event identity differs from its locator');
