@@ -22,9 +22,15 @@ export async function git(cwd, args, { optional = false, maxBuffer = LIMITS.arti
 }
 export async function identity(cwd, repositoryId) {
   id(repositoryId, 'repository ID');
-  const root = await canonicalPath(await git(cwd, ['rev-parse', '--show-toplevel']));
-  const commonDir = await canonicalPath(await git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir']));
-  const gitDir = await canonicalPath(await git(root, ['rev-parse', '--absolute-git-dir']));
+  const paths = (await git(cwd, ['rev-parse', '--path-format=absolute',
+    '--show-toplevel', '--git-common-dir', '--absolute-git-dir'])).split(/\r?\n/u);
+  // Individual outputs preserve paths whose line breaks make the combined framing ambiguous.
+  const root = await canonicalPath(paths.length === 3 ? paths[0].trimEnd() :
+    await git(cwd, ['rev-parse', '--show-toplevel']));
+  const commonDir = await canonicalPath(paths.length === 3 ? paths[1].trimEnd() :
+    await git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir']));
+  const gitDir = await canonicalPath(paths.length === 3 ? paths[2].trimEnd() :
+    await git(root, ['rev-parse', '--absolute-git-dir']));
   const branch = await git(root, ['symbolic-ref', '-q', 'HEAD'], { optional: true });
   requireThat(branch?.startsWith('refs/heads/'), 'BINDING', 'Detached HEAD requires an explicitly selected branch/worktree');
   const head = await git(root, ['rev-parse', '--verify', '-q', 'HEAD'], { optional: true });

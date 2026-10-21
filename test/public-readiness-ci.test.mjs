@@ -1362,7 +1362,8 @@ test('T-PRD020 actual CI schedules twenty producer parts behind a complete unit 
   assert.deepEqual(ci.jobs.native.needs, ['intent', 'source', 'native-units']);
   assert.deepEqual(ci.jobs['native-units'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-homebrew'].needs, ['intent', 'source']);
-  const keys = ['native-units', 'native', 'native-homebrew'];
+  const keys = ['native-units', 'native', 'native-units-wx', 'native-wx',
+    'native-units-ma', 'native-ma', 'native-units-mi', 'native-mi', 'native-homebrew'];
   const parts = keys.flatMap(key => ci.jobs[key].strategy.matrix.include);
   assert.deepEqual(parts.map(({ target, component, role, shard }) => ({
     target, component, role, ...(shard === undefined ? {} : { shard }),
@@ -1377,11 +1378,15 @@ test('T-PRD020 actual CI schedules twenty producer parts behind a complete unit 
     assert.ok(ci.jobs[key].strategy.matrix.include.every(part => nativePartJobKey(part) === key));
     assert.equal(ci.jobs[key]['timeout-minutes'], 360);
     assert.equal(ci.jobs[key].strategy['fail-fast'], false);
+    const part = ci.jobs[key].strategy.matrix.include[0];
+    assert.deepEqual(ci.jobs[key].needs, ['intent', 'source',
+      ...(part.shard && part.shard !== 'units' ? [nativePartJobKey({ ...part, shard: 'units' })] : [])]);
+    if (part.shard === 'units') assert.equal(ci.jobs[key].strategy.matrix.include.length, 1);
   }
   assert.equal(ci.jobs['minimum-node'].needs, 'intent');
   assert.equal(ci.jobs['minimum-node'].if, ci.jobs.native.if);
   assert.deepEqual(ci.jobs['producer-summary'].needs,
-    ['intent', 'minimum-node', 'source', 'native-units', 'native', 'native-homebrew']);
+    ['intent', 'minimum-node', 'source', ...keys]);
   const nativeSteps = ci.jobs.native.steps;
   const bootstrapIndex = nativeSteps.findIndex(step => step.name === 'Provision isolated native toolchain');
   const retainedIndex = nativeSteps.findIndex(step => step.name === 'Retain native bootstrap diagnostics');
@@ -1409,6 +1414,15 @@ test('T-PRD020 actual CI schedules twenty producer parts behind a complete unit 
     const altered = structuredClone(workflows);
     mutateWorkflowSource(altered.find(item => item.file === '.github/workflows/ci.yml'), change,
       'Reject mismatched Mac component/runner roles');
+    assert.ok(inspectWorkflowTrust(altered).blockers.some(blocker => blocker.code === 'NATIVE_COMPONENT_MATRIX_DIFFERS'));
+  }
+  for (const needs of [
+    '[intent, source]', '[intent, source, native-units]', '[intent, source, native-units-mi]',
+  ]) {
+    const altered = structuredClone(workflows);
+    mutateWorkflowSource(altered.find(item => item.file === '.github/workflows/ci.yml'),
+      text => text.replace('needs: [intent, source, native-units-wx]', `needs: ${needs}`),
+      'Windows regression must depend on its own complete units job');
     assert.ok(inspectWorkflowTrust(altered).blockers.some(blocker => blocker.code === 'NATIVE_COMPONENT_MATRIX_DIFFERS'));
   }
   const freeze = ci.jobs.source.steps.find(step => step.name === 'Freeze exact source candidate');

@@ -20,6 +20,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import fsPromises from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
+import { subscribe, unsubscribe } from 'node:diagnostics_channel';
 import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
@@ -627,6 +628,55 @@ test('T-48 batch work-item locks are acquired before any invalidation action', a
   assert.equal(actionRan, false);
   release();
   await held;
+});
+test('Git identity batches fresh path queries and preserves unborn and linked worktrees', async t => {
+  const f = await fixture(t);
+  await f.runGit('add', '.sdlc');
+  await f.runGit('commit', '-qm', 'Create owned identity fixture');
+  const nested = path.join(f.repo, 'nested folder');
+  await fs.mkdir(nested);
+  const calls = [];
+  const observe = ({ process: child }) => {
+    child.once('close', () => calls.push(child.spawnargs.slice(1)));
+  };
+  let original;
+  subscribe('child_process', observe);
+  try {
+    original = await identity(nested, 'primary');
+  } finally {
+    unsubscribe('child_process', observe);
+  }
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls[0], ['--no-pager', '--no-optional-locks', 'rev-parse',
+    '--path-format=absolute', '--show-toplevel', '--git-common-dir', '--absolute-git-dir']);
+  assert.equal(original.root, await fs.realpath(f.repo));
+  assert.equal(original.commonDir, await fs.realpath(path.join(f.repo, '.git')));
+  assert.equal(original.linkedWorktree, false);
+  assert.equal(original.head, await f.runGit('rev-parse', 'HEAD'));
+
+  await f.runGit('commit', '--allow-empty', '-qm', 'Advance owned identity fixture');
+  const changed = await identity(nested, 'primary');
+  assert.notEqual(changed.head, original.head);
+  assert.equal(changed.head, await f.runGit('rev-parse', 'HEAD'));
+  assert.equal(changed.branch, original.branch);
+  const worktree = path.join(f.root, 'identity linked tree');
+  await f.runGit('worktree', 'add', '-qb', 'feature/identity-linked', worktree);
+  const linked = await identity(worktree, 'primary');
+  assert.equal(linked.root, await fs.realpath(worktree));
+  assert.equal(linked.commonDir, original.commonDir);
+  assert.equal(linked.branch, 'refs/heads/feature/identity-linked');
+  assert.equal(linked.head, changed.head);
+  assert.equal(linked.linkedWorktree, true);
+
+  const unborn = path.join(f.root, 'identity unborn');
+  await f.runGit('init', '-q', unborn);
+  await f.runGit('-C', unborn, 'symbolic-ref', 'HEAD', 'refs/heads/feature/unborn');
+  const empty = await identity(unborn, 'primary');
+  assert.equal(empty.branch, 'refs/heads/feature/unborn');
+  assert.equal(empty.head, null);
+  assert.equal(empty.linkedWorktree, false);
+  await f.runGit('checkout', '-q', '--detach', changed.head);
+  await assert.rejects(identity(f.repo, 'primary'), { code: 'BINDING' });
 });
 test('T-19 bindings resolve linked worktrees and refuse stale branch authority', async t => {
   const f = await fixture(t);

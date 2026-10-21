@@ -7,6 +7,7 @@ import { validationPlatforms } from './validation-inventory.mjs';
 // The shared native configuration recipe is invoked only after module initialization.
 import { nativeConfigurationDigest, nativeProducerRole, nativePrParts, nativeFrameworkShardPlan,
   nativeSpecification, nativeFrameworkShardProtocol, requireNativeShardUnitOrder } from './native-validation.mjs';
+import { nativeLegacyFrameworkShardProtocol } from './native-validation.mjs';
 import { calculatorCapability, calculatorBaselineCapability } from './pr-calculator.mjs';
 
 const projections = new WeakMap();
@@ -34,15 +35,16 @@ const bindingDigest = assertion => digest({ id: assertion.id, file: assertion.fi
   applicability: assertion.applicability });
 
 export function deriveNativeComponentSpecification({ inventory, testPlan, adapterSourceDigest,
-  frameworkShards = false, goSources = [] }) {
+  frameworkShards = false, goSources = [], shardProtocol = nativeFrameworkShardProtocol }) {
   requireThat(inventory?.complete === true && /^[a-f0-9]{64}$/u.test(inventory.digest ?? '') &&
     typeof testPlan === 'string' && /^[a-f0-9]{64}$/u.test(adapterSourceDigest ?? ''),
   'INVENTORY', 'Component expectations require complete adopted source, canonical Plan and exact adapter source digest');
-  requireThat(typeof frameworkShards === 'boolean' && (!frameworkShards || goSources.length > 0),
+  requireThat(typeof frameworkShards === 'boolean' && (!frameworkShards || goSources.length > 0 &&
+    [nativeFrameworkShardProtocol, nativeLegacyFrameworkShardProtocol].includes(shardProtocol)),
     'INVENTORY', 'Shard component expectations require exact complete Go source definitions');
   const policy = frameworkShards ? shardPolicy : nativeComponentPolicy;
   const assignments = frameworkShards ? new Map(validationPlatforms.map(target =>
-    [target, nativeFrameworkShardPlan({ inventory, plan: testPlan, target })])) : null;
+    [target, nativeFrameworkShardPlan({ inventory, plan: testPlan, target, protocol: shardProtocol })])) : null;
   const tests = parseTestPlan(testPlan).filter(test => !test.outOfScope &&
     test.location === nativeComponentPolicy.location && !nativeComponentPolicy.excludedCases.includes(test.id));
   const roots = inventory.cases.filter(test => test.parents.length === 0);
@@ -91,11 +93,11 @@ export function deriveNativeComponentSpecification({ inventory, testPlan, adapte
     requiredCaseIds: cases.map(test => test.id), requiredPlatforms: [...validationPlatforms],
     specification, bindings: bindings.sort((a, b) => a.assertionId.localeCompare(b.assertionId, 'en')), blockers,
     ...(digest(calculator) === digest(calculatorBaselineCapability) ? {} : { calculator }),
-    ...(frameworkShards ? { frameworkShards: nativeFrameworkShardProtocol,
+    ...(frameworkShards ? { frameworkShards: shardProtocol,
       shardParts: nativePrParts.filter(part => part.component === 'framework').map(part => ({
         ...part, assignmentDigest: assignments.get(part.target).digest,
         inventoryDigest: validationInventoryDigest(nativeSpecification({
-          plan: testPlan, inventory, goSources, ...part, profile: 'pr',
+          plan: testPlan, inventory, goSources, ...part, profile: 'pr', shardProtocol,
         })),
       })) } : {}) };
   return { ...definition, adapterDefinitionDigest: digest(definition) };
@@ -109,7 +111,8 @@ function checkDefinition(definition) {
     digest(definition.policy) === digest(definition.frameworkShards ? shardPolicy : nativeComponentPolicy), 'EVIDENCE',
   'Component adapter definition differs from its independently derived source-bound identity');
   validationInventoryDigest(definition.specification);
-  requireThat(definition.frameworkShards === undefined || definition.frameworkShards === nativeFrameworkShardProtocol &&
+  requireThat(definition.frameworkShards === undefined ||
+    [nativeFrameworkShardProtocol, nativeLegacyFrameworkShardProtocol].includes(definition.frameworkShards) &&
     Array.isArray(definition.shardParts) && definition.shardParts.length === 18 &&
     new Set(definition.shardParts.map(part => part.role)).size === 18 &&
     nativePrParts.filter(part => part.component === 'framework').every(expected =>
@@ -148,6 +151,7 @@ function expectedMatrix(expectedLanes, definition) {
         inventory: { complete: true, digest: definition.sourceInventoryDigest },
         profile: 'pr', component, configuredWorkers, calculator: definition.calculator ?? calculatorBaselineCapability,
         shard, shardPlanDigest: part.assignmentDigest ?? null,
+        shardProtocol: definition.frameworkShards ?? nativeFrameworkShardProtocol,
       }) && (!definition.frameworkShards || context.inventoryDigest === part.inventoryDigest),
     'EVIDENCE', 'Component expectations must preserve actual native host and original specification identities');
     return { target, context, component, ...(definition.frameworkShards ? { role: part.role } : {}) };
@@ -163,7 +167,7 @@ function expectedMatrix(expectedLanes, definition) {
 export function nativeComponentSelection({ definition, expectedLanes, now, unitOrder }) {
   checkDefinition(definition);
   const lanes = expectedMatrix(expectedLanes, definition);
-  if (definition.frameworkShards) requireNativeShardUnitOrder(unitOrder, expectedLanes);
+  if (definition.frameworkShards) requireNativeShardUnitOrder(unitOrder, expectedLanes, definition.frameworkShards);
   const baseline = lanes[0].context;
   const matrix = lanes.map(({ target, context, role }) => ({
     target, contextDigest: digest(context), platform: context.native.platform,

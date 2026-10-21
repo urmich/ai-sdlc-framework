@@ -791,10 +791,14 @@ partial comparison and do not silently retry to obtain a ratio.
    platform's regression shards execute; another platform or attempt cannot
    supply the prerequisite. Include the unit barrier, every part's provisioning,
    evidence retention and cleanup in the whole-lane elapsed time.
-   The initial workflow uses a global matrix barrier: all four unit producers
-   complete, including evidence and cleanup, before any regression shard starts.
-   Count that broader wait honestly; verify all twelve distinct Mac prefix
-   allocations and their matching guarded cleanup receipts.
+   For `native-framework-shards-v2-platform-units`, require each platform's
+   actual unit job to finish successfully, including evidence and cleanup,
+   before its own regression jobs start. Other platforms' unit jobs may finish
+   later; all twenty successful parts still remain mandatory for completeness.
+   Keep `native-framework-shards-v1` global-barrier replay distinct and reject
+   wrong-version or borrowed unit proofs. Do not start waiting regression hosts
+   early to overlap bootstrap. Verify all twelve distinct Mac prefix allocations
+   and their matching guarded cleanup receipts; count every real wait honestly.
    Separate jobs use their own native hosts, resource budgets, scratch paths and
    owned prefixes rather than racing on a shared package-manager installation.
    Exercise actual Go, Python, shell and Homebrew surfaces in their assigned
@@ -810,6 +814,10 @@ partial comparison and do not silently retry to obtain a ratio.
    than the parts that happen to arrive. Require each substantive Go, Python,
    schema, static and calculator stage at its assigned producer; partitioning
    cannot omit a stage or count a repeated assertion as independent coverage.
+   Include the PR-only `Git identity batches fresh path queries and preserves
+   unborn and linked worktrees` root in `test/storage.test.mjs`. It checks real
+   process counts and fresh path, branch and HEAD behavior, not a proxy native
+   latency pass. Its addition does not expand L or remove an existing check.
 4. Mac jobs consume the same frozen architecture-neutral artifact/digest; do not
    independently rebuild and call different bytes the same artifact. Windows
    jobs use a real PE. Collect native environment/runtime probes and step exits.

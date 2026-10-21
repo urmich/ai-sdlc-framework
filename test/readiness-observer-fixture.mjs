@@ -16,7 +16,7 @@ import { compileValidationSourceInventory, validationPlatforms, validationSource
 import { nativeSpecification, nativeConfigurationDigest, nativeArtifacts, nativeGoObservations,
   nativeWorkflowContract, nativeStageSelections, nativeProducerRole, nativePrParts } from '../scripts/native-validation.mjs';
 import { nativeLegacyPrParts, nativeFrameworkShardPlan, nativeFrameworkShardProtocol,
-  nativePartJobKey } from '../scripts/native-validation.mjs';
+  nativeLegacyFrameworkShardProtocol, nativePartJobKey } from '../scripts/native-validation.mjs';
 import { nativeResourceFacts } from '../scripts/native-validation.mjs';
 import { repositoryRoot, unitFiles } from '../scripts/test-runner.mjs';
 import { createReadinessGitHubClient } from '../scripts/github-readiness-host.mjs';
@@ -325,10 +325,11 @@ function bundleFromOriginal(raw, specification, independentlyCapturedContext, as
 
 function laneData(source, candidate, revisions, target, { prNumber = 1, executionId = runId,
   profile = 'pr', releaseIntentId = 'controlled-release-intent', startTime = epoch,
-  previousMetadata = nativeReplayPreviousFixture(), component = 'full', shard = null, frameworkShards = false } = {}) {
+  previousMetadata = nativeReplayPreviousFixture(), component = 'full', shard = null, frameworkShards = false,
+  shardProtocol = nativeFrameworkShardProtocol } = {}) {
   const role = nativeProducerRole(target, component, shard);
   const assignment = shard === null ? null : nativeFrameworkShardPlan({
-    inventory: source.inventory, plan: source.plan, target,
+    inventory: source.inventory, plan: source.plan, target, protocol: shardProtocol,
   });
   const part = assignment?.parts.find(part => part.shard === shard);
   const at = seconds => new Date(startTime + seconds * 1000).toISOString();
@@ -368,11 +369,11 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
     uname: architecture === 'arm64' ? 'arm64' : 'x86_64', translation: '0',
   };
   const specification = nativeSpecification({ plan: source.plan, inventory: source.inventory,
-    goSources: source.goSources, target, profile, component, shard });
+    goSources: source.goSources, target, profile, component, shard, shardProtocol });
   const context = validateExecutionContext({
     candidateDigest: digest({ revision: revisions.merge, tree: source.sha }),
     testSpecDigest: testSpecificationDigest(source.plan),
-    configDigest: nativeConfigurationDigest({ inventory: source.inventory, profile, component, shard,
+    configDigest: nativeConfigurationDigest({ inventory: source.inventory, profile, component, shard, shardProtocol,
       shardPlanDigest: assignment?.digest ?? null }),
     inventoryDigest: validationInventoryDigest(specification),
     sources: [{ repositoryId: `repository-${repositoryId}`, revision: revisions.merge,
@@ -393,7 +394,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
   });
   const smallContext = { schemaVersion: 1, sourceCommit: revisions.merge, target, profile,
     ...(component === 'full' ? {} : { component }),
-    ...(shard === null ? {} : { frameworkShards: nativeFrameworkShardProtocol, shard,
+    ...(shard === null ? {} : { frameworkShards: shardProtocol, shard,
       configDigest: context.configDigest, inventoryDigest: context.inventoryDigest }),
     workflowRef: context.producer.definitionRef, repositoryId: `repository-${repositoryId}`,
     runId: String(executionId), attempt: '1' };
@@ -585,7 +586,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
       ].map(event => JSON.stringify(event)).join('\n') + '\n');
     }
   }
-  return { target, component, shard, frameworkShards, role, context, specification, data, ImageOS, ImageVersion };
+  return { target, component, shard, frameworkShards, shardProtocol, role, context, specification, data, ImageOS, ImageVersion };
 }
 
 function cleanupData(lane, executionId = runId) {
@@ -597,7 +598,7 @@ function cleanupData(lane, executionId = runId) {
     github: { GITHUB_SERVER_URL: 'https://github.com', GITHUB_REPOSITORY: repository,
       GITHUB_REPOSITORY_ID: String(repositoryId), GITHUB_WORKSPACE: '/controlled-fixture',
       GITHUB_RUN_ID: String(executionId), GITHUB_RUN_ATTEMPT: '1',
-      GITHUB_JOB: lane.frameworkShards ? nativePartJobKey(lane) : 'native',
+      GITHUB_JOB: lane.frameworkShards ? nativePartJobKey(lane, lane.shardProtocol) : 'native',
       RUNNER_NAME: `controlled-${lane.role}`, RUNNER_ENVIRONMENT: 'github-hosted',
       RUNNER_OS: 'macOS', RUNNER_ARCH: lane.target === 'macos-arm64' ? 'ARM64' : 'X64' } };
   const request = { schemaVersion: 1, kind: 'owned-native-homebrew-prefix',
@@ -655,9 +656,10 @@ export async function observerApiFixture(t, options = {}) {
   const scratch = path.join(root, 'scratch');
   await fs.mkdir(scratch, { recursive: true });
   const previous = Object.fromEntries(['TMPDIR', 'TMP', 'TEMP'].map(name => [name, process.env[name]]));
-  for (const name of Object.keys(previous)) process.env[name] = scratch;
+  const ambient = options.ambient !== false;
+  if (ambient) for (const name of Object.keys(previous)) process.env[name] = scratch;
   t.after(async () => {
-    for (const [name, value] of Object.entries(previous)) {
+    if (ambient) for (const [name, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
@@ -665,9 +667,25 @@ export async function observerApiFixture(t, options = {}) {
     await fs.rm(root, { recursive: true });
     await assert.rejects(fs.stat(root), { code: 'ENOENT' });
   });
-  assert.equal(path.resolve(os.tmpdir()), scratch, 'SDK artifact scratch must stay inside this owned checkout root');
+  if (ambient) assert.equal(path.resolve(os.tmpdir()), scratch, 'SDK artifact scratch must stay inside this owned checkout root');
   const currentCi = await fs.readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
-  const ci = options.frameworkShards ? currentCi : `name: CI
+  const shardProtocol = options.shardProtocol ?? nativeFrameworkShardProtocol;
+  const globalCi = `name: CI\non: pull_request\npermissions: {contents: read}\njobs:\n` +
+    ['native-units', 'native', 'native-homebrew'].map(key => `  ${key}:
+    needs: ${JSON.stringify(['intent', 'source', ...(key === 'native' ? ['native-units'] : [])])}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${JSON.stringify(nativePrParts.filter(part =>
+    nativePartJobKey(part, nativeLegacyFrameworkShardProtocol) === key).map(part =>
+    ({ ...part, os: labels[part.target], architecture: part.target.split('-')[1] })))}
+    steps:
+      - uses: ${checkoutPin}
+        with:
+          persist-credentials: false
+`).join('');
+  const ci = options.frameworkShards ? shardProtocol === nativeLegacyFrameworkShardProtocol ? globalCi : currentCi : `name: CI
 on: pull_request
 permissions:
   contents: read
@@ -690,11 +708,11 @@ jobs:
   const { candidate, entries } = candidateData(revisions.merge);
   const expectedParts = options.frameworkShards ? nativePrParts : nativeLegacyPrParts;
   const parts = new Map(expectedParts.map(part => [part.role,
-    laneData(source, candidate, revisions, part.target, { ...part, frameworkShards: Boolean(options.frameworkShards),
+    laneData(source, candidate, revisions, part.target, { ...part, frameworkShards: Boolean(options.frameworkShards), shardProtocol,
       startTime: epoch + (part.shard && part.shard !== 'units' ? 100000 : 0) })]));
   const lanes = new Map(validationPlatforms.map(target => [target, [...parts.values()].find(part =>
     part.target === target && part.component !== 'homebrew' && (!options.frameworkShards ||
-      part.shard === nativeFrameworkShardPlan({ inventory: source.inventory, plan: source.plan, target }).toolShard))]));
+      part.shard === nativeFrameworkShardPlan({ inventory: source.inventory, plan: source.plan, target, protocol: shardProtocol }).toolShard))]));
   const homebrewLanes = new Map([...parts.values()].filter(part => part.component === 'homebrew')
     .map(part => [part.target, part]));
   const cleanupReports = new Map([...parts.values()].filter(lane => lane.target.startsWith('macos-'))
@@ -916,11 +934,11 @@ jobs:
       const currentRevisions = { ...revisions, merge: mergeSha };
       const frozen = candidateData(mergeSha);
       const currentParts = expectedParts.map(part => laneData(source, frozen.candidate, currentRevisions, part.target,
-        { ...part, prNumber: number, executionId, frameworkShards: Boolean(options.frameworkShards),
+        { ...part, prNumber: number, executionId, frameworkShards: Boolean(options.frameworkShards), shardProtocol,
           startTime: epoch + (part.shard && part.shard !== 'units' ? 100000 : 0) }));
       const currentLanes = new Map(validationPlatforms.map(target => [target, currentParts.find(part =>
         part.target === target && part.component !== 'homebrew' && (!options.frameworkShards ||
-          part.shard === nativeFrameworkShardPlan({ inventory: source.inventory, plan: source.plan, target }).toolShard))]));
+          part.shard === nativeFrameworkShardPlan({ inventory: source.inventory, plan: source.plan, target, protocol: shardProtocol }).toolShard))]));
       const currentHomebrewLanes = new Map(currentParts.filter(part => part.component === 'homebrew')
         .map(part => [part.target, part]));
       const currentJobs = jobs.map(job => ({ ...structuredClone(job), id: job.id + number * 10000,

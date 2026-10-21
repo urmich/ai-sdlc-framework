@@ -14,11 +14,11 @@ import { canonical } from '../src/core.mjs';
 import { observerApiFixture, nativeReplayFixture } from './readiness-observer-fixture.mjs';
 import { reconcilePrReadiness } from '../scripts/pr-readiness.mjs';
 import { readTrustedMinimumNodeJob, renderObserverSummary, retainObserverResult,
-  nativeLaneTimings, verifyNativeCleanup, verifyOriginalNativeRows } from '../scripts/pr-observer.mjs';
+  nativeLaneTimings, verifyNativeCleanup, verifyOriginalNativeRows, inspectWorkflowTrust } from '../scripts/pr-observer.mjs';
 import { nativeStageSelections, nativeConfigurationDigest, replayNativeEvidence,
   validateNativePreviousLifecycle, nativeWorkflowContract, nativeSpecification,
   verifyNativeShardUnitOrder, nativePartJobKey, nativeFrameworkShardProtocol,
-  nativeFrameworkShardPlan } from '../scripts/native-validation.mjs';
+  nativeLegacyFrameworkShardProtocol, nativeFrameworkShardPlan } from '../scripts/native-validation.mjs';
 import { testSpecificationDigest } from '../src/artifacts.mjs';
 import { validationInventoryDigest, normalizeExecutionReport, evaluateReadiness } from 'ai-sdlc-framework/evidence';
 import { calculatorFiles } from '../scripts/pr-calculator.mjs';
@@ -419,7 +419,13 @@ test('T-PRD020 logical native latency spans earliest required worker through the
 });
 
 test('T-PRD021 twenty-part originals require exact selected closures cleanup and protected multi-origin SDK composition', async t => {
-  const f = await observerApiFixture(t, { frameworkShards: true });
+  for (const shardProtocol of [nativeFrameworkShardProtocol, nativeLegacyFrameworkShardProtocol]) {
+  const f = await observerApiFixture(t, { frameworkShards: true, shardProtocol,
+    ambient: shardProtocol === nativeFrameworkShardProtocol });
+  const trust = inspectWorkflowTrust([{ file: nativeWorkflowContract.path,
+    contents: f.source.files.get(nativeWorkflowContract.path) }]);
+  assert.equal(trust.complete, true, JSON.stringify(trust.blockers));
+  assert.equal(trust.nativeProtocol, shardProtocol);
   const dictionary = entries => ({ ...Object.fromEntries(entries),
     texts: Object.fromEntries([...entries].map(([file, value]) =>
       [file, typeof value === 'string' ? value : canonical(value)])) });
@@ -428,19 +434,19 @@ test('T-PRD021 twenty-part originals require exact selected closures cleanup and
   for (const part of f.parts.values()) {
     await verifyOriginalNativeRows({ data: dictionary(part.data), raw: part.data.get('execution.json'),
       specification: part.specification, inventory: f.source.inventory, goSources: f.source.goSources,
-      target: part.target, component: part.component, shard: part.shard,
+      target: part.target, component: part.component, shard: part.shard, shardProtocol,
       candidate: f.candidate, sourceFiles, plan: f.source.plan, context: part.context });
     if (f.cleanupReports.has(part.role)) prefixes.push(verifyNativeCleanup(
-      dictionary(f.cleanupReports.get(part.role)), { ...part, jobKey: nativePartJobKey(part) }).prefix);
+      dictionary(f.cleanupReports.get(part.role)), { ...part, jobKey: nativePartJobKey(part, shardProtocol) }).prefix);
   }
   assert.equal(prefixes.length, 12);
   assert.equal(new Set(prefixes).size, 12);
   const executions = [...f.parts.values()].map(part => ({ ...part,
     job: f.jobs.find(job => job.name === `native-${part.role}`) }));
-  const unitOrder = verifyNativeShardUnitOrder(executions);
+  const unitOrder = verifyNativeShardUnitOrder(executions, { protocol: shardProtocol });
   const framework = executions.filter(part => part.component === 'framework');
   const definition = deriveNativeComponentSpecification({ inventory: f.source.inventory,
-    testPlan: f.source.plan, goSources: f.source.goSources, frameworkShards: true,
+    testPlan: f.source.plan, goSources: f.source.goSources, frameworkShards: true, shardProtocol,
     adapterSourceDigest: digest(f.source.files.get('scripts/native-components.mjs')) });
   const originals = framework.map(part => ({ target: part.target, role: part.role,
     text: canonical(part.data.get('execution.json')) }));
@@ -497,12 +503,12 @@ test('T-PRD021 twenty-part originals require exact selected closures cleanup and
   const refresh = framework.find(part => part.shard === 'refresh');
   const archived = { schemaVersion: 1, kind: 'native-validation-definition',
     target: refresh.target, profile: 'pr', component: 'framework', shard: 'refresh',
-    frameworkShards: nativeFrameworkShardProtocol, selectedWorkersRequest: null,
+    frameworkShards: shardProtocol, selectedWorkersRequest: null,
     sourceFiles, plan: f.source.plan, inventory: f.source.inventory, goSources: f.source.goSources,
     calculatorSources: sourceFiles.filter(source => calculatorFiles.includes(source.file)),
     specification: refresh.specification,
     stages: nativeFrameworkShardPlan({ inventory: f.source.inventory, plan: f.source.plan,
-      target: refresh.target }).parts.find(part => part.shard === 'refresh').stages,
+      target: refresh.target, protocol: shardProtocol }).parts.find(part => part.shard === 'refresh').stages,
     configDigest: refresh.context.configDigest, testSpecDigest: refresh.context.testSpecDigest,
     inventoryDigest: refresh.context.inventoryDigest,
     source: { revision: f.revisions.merge, treeSha: f.source.sha, repositoryId: 'repository-17' } };
@@ -519,13 +525,13 @@ test('T-PRD021 twenty-part originals require exact selected closures cleanup and
   borrowed.set('unit.json', units.data.get('unit.json'));
   await assert.rejects(verifyOriginalNativeRows({ data: dictionary(borrowed), raw: refresh.data.get('execution.json'),
     specification: refresh.specification, inventory: f.source.inventory, goSources: f.source.goSources,
-    target: refresh.target, component: refresh.component, shard: refresh.shard,
+    target: refresh.target, component: refresh.component, shard: refresh.shard, shardProtocol,
     candidate: f.candidate, sourceFiles, plan: f.source.plan, context: refresh.context }), { code: 'EVIDENCE' });
   const cleanup = structuredClone(f.cleanupReports.get('macos-arm64-framework-units'));
   cleanup.get('native-homebrew-prefix-cleanup.json').status = 'rolled-back';
   const macUnits = f.parts.get('macos-arm64-framework-units');
   assert.throws(() => verifyNativeCleanup(dictionary(cleanup),
-    { ...macUnits, jobKey: nativePartJobKey(macUnits) }), { code: 'EVIDENCE' });
+    { ...macUnits, jobKey: nativePartJobKey(macUnits, shardProtocol) }), { code: 'EVIDENCE' });
   const output = path.join(f.root, 'twenty-part-retained');
   const nativeParts = executions.map(part => {
     const artifact = f.artifacts.get(part.role);
@@ -550,6 +556,7 @@ test('T-PRD021 twenty-part originals require exact selected closures cleanup and
   assert.equal(new Set(retained.nativeOriginals.map(original => original.filename)).size, 18);
   assert.ok(retained.unitOrder.filename.endsWith('-unit-order.json'));
   assert.equal(f.calls.length, 0, 'No native tools, provider acquisition or Python reader runs in this Node-only regression');
+  }
 });
 
 test('T-PRD021 acquired native ZIP identities and original outcomes reject forged passing summaries and candidate swaps', async t => {

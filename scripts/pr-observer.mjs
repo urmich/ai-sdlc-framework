@@ -133,32 +133,44 @@ async function mapReads(values, operation) {
 
 export function inspectWorkflowTrust(workflows) {
   const result = inspectWorkflowPolicy(workflows);
+  let nativeProtocol = null;
   for (const selected of result.workflows.filter(item => item.file === native.nativeWorkflowContract.path)) {
     const jobs = selected.document.jobs;
     const sharded = jobs?.['native-units'] !== undefined;
-    const keys = sharded ? ['native-units', 'native', 'native-homebrew'] : ['native'];
+    const platformBarrier = ['native-units-wx', 'native-wx', 'native-units-ma', 'native-ma',
+      'native-units-mi', 'native-mi'].some(key => jobs?.[key] !== undefined);
+    const protocol = platformBarrier ? native.nativeFrameworkShardProtocol :
+      sharded ? native.nativeLegacyFrameworkShardProtocol : null;
+    nativeProtocol = protocol;
+    const keys = protocol ? [...new Set(native.nativePrParts.map(part =>
+      native.nativePartJobKey(part, protocol)))] : ['native'];
     const entries = keys.flatMap(key => jobs?.[key]?.strategy?.matrix?.include ?? []);
     const runners = JSON.stringify(entries);
     for (const label of Object.values(labels)) if (!runners.includes(`"${label}"`)) {
       result.blockers.push({ file: selected.file, code: 'MISSING_NATIVE_RUNNER', label });
     }
-    const expectedParts = sharded ? native.nativePrParts : native.nativeLegacyPrParts;
+    const expectedParts = protocol ? native.nativePrParts : native.nativeLegacyPrParts;
     const expected = expectedParts.map(part => ({
       ...part, os: labels[part.target], architecture: part.target.split('-')[1],
     }));
     if (entries.length !== expected.length ||
         new Set(entries.map(entry => entry?.role)).size !== expected.length ||
         expected.some(part => !entries.some(entry => digest(entry) === digest(part))) ||
-        sharded && (keys.some(key => jobs[key]?.strategy?.['fail-fast'] !== false ||
-          jobs[key]?.['timeout-minutes'] !== 360 ||
-          jobs[key]?.strategy?.matrix?.include?.some(part => native.nativePartJobKey(part) !== key)) ||
-          digest(jobs.native.needs) !== digest(['intent', 'source', 'native-units']) ||
-          digest(jobs['native-units'].needs) !== digest(['intent', 'source']) ||
-          digest(jobs['native-homebrew'].needs) !== digest(['intent', 'source']))) {
+        protocol && keys.some(key => {
+          const part = expectedParts.find(part => native.nativePartJobKey(part, protocol) === key);
+          const needs = ['intent', 'source', ...(part.shard && part.shard !== 'units' ?
+            [native.nativePartJobKey({ ...part, shard: 'units' }, protocol)] : [])];
+          return jobs[key]?.strategy?.['fail-fast'] !== false || jobs[key]?.['timeout-minutes'] !== 360 ||
+            jobs[key]?.strategy?.matrix?.include?.some(row => native.nativePartJobKey(row, protocol) !== key) ||
+            digest(jobs[key]?.needs ?? null) !== digest(needs);
+        }) ||
+        protocol === native.nativeFrameworkShardProtocol &&
+          digest([...(jobs['producer-summary']?.needs ?? [])].sort()) !==
+            digest(['intent', 'minimum-node', 'source', ...keys].sort())) {
       result.blockers.push({ file: selected.file, code: 'NATIVE_COMPONENT_MATRIX_DIFFERS' });
     }
   }
-  return { ...result, complete: result.blockers.length === 0 };
+  return { ...result, nativeProtocol, complete: result.blockers.length === 0 };
 }
 
 export function readTrustedJobContext(job, logs, {
@@ -348,19 +360,19 @@ export function verifyFrozenCandidateData(data, sourceRevision) {
 
 export async function verifyOriginalNativeRows({
   data, raw, specification, inventory, goSources, target, candidate, sourceFiles, plan, context,
-  component = 'full', shard = null,
+  component = 'full', shard = null, shardProtocol = native.nativeFrameworkShardProtocol,
 }) {
   requireThat(Array.isArray(raw.results) && raw.results.every(row => row &&
     Object.getPrototypeOf(row) === Object.prototype), 'EVIDENCE',
   'Original derived native results must be a complete literal result collection');
   if (shard !== null) {
-    const assignment = native.nativeFrameworkShardPlan({ inventory, plan, target });
+    const assignment = native.nativeFrameworkShardPlan({ inventory, plan, target, protocol: shardProtocol });
     const part = assignment.parts.find(part => part.shard === shard);
     requireThat(part && digest(specification) === digest(native.nativeSpecification({
-      inventory, plan, goSources, target, profile: 'pr', component, shard,
+      inventory, plan, goSources, target, profile: 'pr', component, shard, shardProtocol,
     })), 'EVIDENCE', 'Native shard specification differs from the independently derived assignment');
     const calculatorSources = sourceFiles.filter(source => calculatorProjectFiles(inventory).includes(source.file));
-    const reconstructed = await native.reconcileNativeEvidenceData({ data, inventory, plan,
+    const reconstructed = await native.reconcileNativeEvidenceData({ data, inventory, plan, shardProtocol,
       sources: goSources, calculatorSources, target, component, shard, candidate,
       stages: part.stages, context, specification, startedAt: raw.startedAt });
     requireThat(reconstructed.raw.complete && reconstructed.raw.exitCode === 0 &&
@@ -532,9 +544,9 @@ async function sourceDefinitions(api, sha) {
     contents: await api.file(tree, native.nativeWorkflowContract.path) };
   const trust = inspectWorkflowTrust([workflow]);
   requireThat(trust.complete, 'EVIDENCE', 'Native producer role/dependency definition differs from the adopted topology');
-  const frameworkShards = trust.workflows[0].document.jobs['native-units'] !== undefined;
+  const frameworkShards = trust.nativeProtocol !== null;
   return { tree, inventory, goSources, requirements, testPlans, files, adapterSource,
-    frameworkShards,
+    frameworkShards, shardProtocol: trust.nativeProtocol,
     coverage: { repositoryId: 'primary', sourceRevision: sha, requirements, testPlans },
     plan: testPlans.find(plan => plan.artifactId === 'public-readiness').contents };
 }
@@ -598,6 +610,7 @@ export function createPrReadinessHost({
   }
   async function nativeVerdict(pr, source, { workflowId, runs }) {
     const frameworkShards = source.frameworkShards;
+    const shardProtocol = source.shardProtocol ?? native.nativeFrameworkShardProtocol;
     const expectedParts = frameworkShards ? native.nativePrParts : native.nativeLegacyPrParts;
     if (!(await producerAdopted(source))) return failedVerdict('Producer definitions have not been maintainer-adopted');
     const adopted = await selectedSource(adoptedRevision);
@@ -755,10 +768,11 @@ export function createPrReadinessHost({
         requireThat(data['toolchain.json'].status === 'Passed' && data['toolchain.json'].target === target,
           'EVIDENCE', 'Report context differs from the successful copied native/bootstrap target');
         const specification = native.nativeSpecification({
-          plan: source.plan, inventory: source.inventory, goSources: source.goSources, target, component, shard, profile: 'pr',
+          plan: source.plan, inventory: source.inventory, goSources: source.goSources,
+          target, component, shard, profile: 'pr', shardProtocol,
         });
         const assignment = shard === null ? null : native.nativeFrameworkShardPlan({
-          inventory: source.inventory, plan: source.plan, target,
+          inventory: source.inventory, plan: source.plan, target, protocol: shardProtocol,
         });
         const toolchain = raw.context.native.toolchain;
         const expectedResources = native.nativeResourceFacts(facts.resources);
@@ -775,7 +789,7 @@ export function createPrReadinessHost({
         const context = validateExecutionContext({
           candidateDigest: digest({ revision: pr.merge_commit_sha, tree: source.tree.treeSha }),
           testSpecDigest: testSpecificationDigest(source.plan),
-          configDigest: native.nativeConfigurationDigest({ inventory: source.inventory, profile: 'pr', component, shard,
+          configDigest: native.nativeConfigurationDigest({ inventory: source.inventory, profile: 'pr', component, shard, shardProtocol,
             shardPlanDigest: assignment?.digest ?? null,
             configuredWorkers: expectedResources.configuredWorkers }),
           inventoryDigest: validationInventoryDigest(specification),
@@ -796,10 +810,10 @@ export function createPrReadinessHost({
           Date.parse(raw.observedAt) < Date.parse(job.completed_at) + 1000,
         'EVIDENCE', 'Original execution times do not belong to this actual job');
         await verifyOriginalNativeRows({ data, raw, specification, inventory: source.inventory,
-          goSources: source.goSources, target, component, shard, candidate: frozen.candidate,
+          goSources: source.goSources, target, component, shard, shardProtocol, candidate: frozen.candidate,
           sourceFiles: source.files, plan: source.plan, context });
         if (cleanupData) verifyNativeCleanup(cleanupData, { target, role, context,
-          jobKey: frameworkShards ? native.nativePartJobKey({ shard, component }) : 'native' });
+          jobKey: frameworkShards ? native.nativePartJobKey({ target, shard, component }, shardProtocol) : 'native' });
         const rawDigest = digest(data.texts[native.nativeWorkflowContract.reports.execution]);
         const selection = {
           profile: specification.profile, executions: [{ id: `native-${role}`, context }],
@@ -818,7 +832,7 @@ export function createPrReadinessHost({
       }));
       const unitOrder = frameworkShards ? native.verifyNativeShardUnitOrder(executions.map(part => ({
         ...part, job: acquired.find(original => original.role === part.context.jobRef.slice('native-'.length)).job,
-      }))) : null;
+      })), { protocol: shardProtocol }) : null;
       const prefixes = acquired.filter(part => part.cleanupData).map(part =>
         part.cleanupData['native-homebrew-prefix-request.json'].prefix);
       requireThat(new Set(prefixes).size === prefixes.length, 'EVIDENCE',
@@ -826,7 +840,7 @@ export function createPrReadinessHost({
       const result = native.aggregateNativeReadiness(evaluations, {
         profile: 'pr', components: true, frameworkShards, sourceRevision: pr.merge_commit_sha,
         artifacts: frozen.artifacts, executions, inventory: source.inventory, plan: source.plan,
-        goSources: source.goSources, unitOrder,
+        goSources: source.goSources, unitOrder, shardProtocol,
       });
       const laneTimings = nativeLaneTimings(acquired, { frameworkShards });
       const auxiliaryJobs = [freezes[0], minimumJobs[0]].map(job => ({
@@ -839,7 +853,7 @@ export function createPrReadinessHost({
       const frameworkEvaluations = evaluations.filter(part => part.component !== 'homebrew');
       const definition = deriveNativeComponentSpecification({ inventory: source.inventory,
         testPlan: source.plan, adapterSourceDigest: digest(source.adapterSource.contents),
-        frameworkShards, goSources: source.goSources });
+        frameworkShards, goSources: source.goSources, shardProtocol });
       const projection = projectNativeComponentEvidence({ definition, expectedLanes: frameworkExecutions,
         ...(frameworkShards ? { unitOrder, nativeEvaluations: frameworkEvaluations.map(part => ({
           role: part.role, evaluation: part.evaluation,

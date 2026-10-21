@@ -244,6 +244,13 @@ growth limit and identity/content/metadata confirmation checks. Empty-check PR
 fact updates use their full authoritative transaction without a redundant
 preliminary history scan; monitored checks retain their association preflight.
 
+Batch the three fresh Git repository-path queries into one plumbing invocation,
+then retain the existing branch-before-HEAD queries and all three canonical-path
+checks. Ambiguous line-framed path output uses the original individual queries.
+Do not cache repository, worktree, branch or revision state between calls.
+The process-count and fresh-state regression is PR-only, outside the finite
+27-assertion local sanity profile; hosted latency still needs actual native proof.
+
 For ordinary PR validation, use twenty independently required native producer
 parts consuming the same frozen candidate. Each platform has one unit producer
 and one producer containing the entire unchanged 550-refresh root. Partition
@@ -258,11 +265,16 @@ observed part results. Require source-, platform-, job-, run- and attempt-bound
 unit evidence before regression shards execute. Independently verify every
 part's SDK context, complete assertion union and allocated-prefix cleanup;
 missing, duplicated, overlapping or swapped parts cannot produce completeness.
-The initial job-level matrix barrier waits for all four unit producers, including
-their evidence retention and cleanup, before any regression shard starts.
-This deliberately broader barrier is included in every logical lane's elapsed
-time. All twelve Mac producer prefixes require distinct owned allocation and
-matching guarded cleanup; no producer may borrow another's receipt.
+The source-adopted `native-framework-shards-v2-platform-units` protocol uses four
+explicit platform-specific unit-to-regression job groups. A platform's unit
+producer must complete successfully, including retention and cleanup, before
+its own regression jobs start. Unrelated unit producers may finish later, but
+overall completeness still requires every one of the twenty parts. No waiting
+regression host is started early merely to overlap provisioning.
+Preserve the original `native-framework-shards-v1` global-barrier proof and
+archive semantics; a new protocol must not relabel its older evidence.
+All twelve Mac producer prefixes require distinct owned allocation and matching
+guarded cleanup; no producer may borrow another's receipt.
 Keep default whole-native execution and release prepublication compatible.
 The required logical lane span remains under fifteen minutes from its earliest
 required unit/framework/Homebrew worker start through its last evidence/cleanup
