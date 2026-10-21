@@ -825,6 +825,13 @@ partial comparison and do not silently retry to obtain a ratio.
    real fixture bytes, modes and links, bound independent reads, serialize
    large payloads and drain injected failures before recovery-state cleanup.
    These component checks never replace the genuine Mac procedures or expand L.
+   The two PR-only candidate Git-read roots in `test/candidate-stamp.test.mjs`
+   must observe actual independent process overlap only after fresh binding,
+   preserve complete staged/unstaged/untracked source identities, and hold one
+   real query's completion while another owned query fails. Neither the primary
+   error nor fixture cleanup may proceed before every dispatched read drains.
+   Retain the existing byte, timestamp, staged-index, branch and capacity guards.
+   These bounded component checks do not replace full native timing or enlarge L.
 4. Mac jobs consume the same frozen architecture-neutral artifact/digest; do not
    independently rebuild and call different bytes the same artifact. Windows
    jobs use a real PE. Collect native environment/runtime probes and step exits.

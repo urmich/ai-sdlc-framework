@@ -257,6 +257,17 @@ path checks still run on each call, without a cross-call identity cache.
 The process-count and fresh-state regression is PR-only, outside the finite
 27-assertion local sanity profile; hosted latency still needs actual native proof.
 
+After fresh binding validation, issue the independent candidate Git reads
+together: three index/diff/untracked queries for a dispatch stamp and those
+same queries plus object-format and file-mode configuration for a full snapshot.
+The bound is five read-only Git processes per member; members remain sequential.
+Await every dispatched read before returning or failing, then consume results
+and apply index/dirty-file capacity checks in their original order. Keep all
+queries, options, exact-byte hashing, mode handling and branch/worktree guards.
+This does not cache a candidate or make separate Git reads an atomic snapshot.
+The overlap and held-completion failure regressions are PR-only; native
+whole-platform timing remains the performance acceptance test.
+
 Read independent small Homebrew rollback-inventory entries in bounded batches
 of sixteen, preserving sorted depth-first records, modes, symlink targets and
 every payload hash. Drain each batch before recursion, failure or owned recovery

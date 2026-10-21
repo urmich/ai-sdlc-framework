@@ -26,13 +26,25 @@ function gitBlobId(bytes, algorithm) {
   return createHash(algorithm).update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 }
 
+function completedGitRead(result) {
+  if (result.status === 'rejected') throw result.reason;
+  return result.value;
+}
+
 export async function candidateSnapshot(metadata, manifest) {
   const sources = [];
   for (const member of metadata.members) {
     const actual = await validateBinding(member);
+    const [indexRead, changedRead, untrackedRead, formatRead, fileModeRead] = await Promise.allSettled([
+      git(member.root, ['ls-files', '--stage', '-z']),
+      git(member.root, ['diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z']),
+      git(member.root, ['ls-files', '--others', '--exclude-standard', '-z']),
+      git(member.root, ['rev-parse', '--show-object-format']),
+      git(member.root, ['config', '--bool', 'core.filemode'], { optional: true }),
+    ]);
     const documents = new Set(manifest.artifacts.filter(a => a.kind === 'git' && a.repositoryId === member.repositoryId).map(a => a.path));
     const included = name => !documents.has(name) && (!name.startsWith('.sdlc/') || name === '.sdlc/config.json');
-    const indexEntries = (await git(member.root, ['ls-files', '--stage', '-z'])).split('\0').filter(Boolean)
+    const indexEntries = completedGitRead(indexRead).split('\0').filter(Boolean)
       .filter(entry => included(entry.slice(entry.indexOf('\t') + 1)));
     requireThat(indexEntries.length <= 20000, 'CAPACITY', 'Candidate index exceeds 20,000 files; use a scoped member checkout');
     const effective = new Map();
@@ -44,12 +56,12 @@ export async function candidateSnapshot(metadata, manifest) {
       values.push([mode, objectId, stage]);
       effective.set(name, values);
     }
-    const changed = await git(member.root, ['diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z']);
-    const untracked = await git(member.root, ['ls-files', '--others', '--exclude-standard', '-z']);
+    const changed = completedGitRead(changedRead);
+    const untracked = completedGitRead(untrackedRead);
     const names = [...new Set([...changed.split('\0'), ...untracked.split('\0')].filter(name => name && included(name)))].sort();
     requireThat(names.length <= 20000, 'CAPACITY', 'Candidate working changes exceed 20,000 files; use a scoped member checkout');
-    const objectFormat = await git(member.root, ['rev-parse', '--show-object-format']);
-    const coreFileMode = (await git(member.root, ['config', '--bool', 'core.filemode'], { optional: true })) !== 'false';
+    const objectFormat = completedGitRead(formatRead);
+    const coreFileMode = completedGitRead(fileModeRead) !== 'false';
     for (const name of names) {
       try {
         await safePath(member.root, name);
@@ -110,9 +122,14 @@ export async function candidateStamp(metadata, manifest) {
   const members = [];
   for (const member of metadata.members) {
     const actual = await validateBinding(member);
-    const index = await git(member.root, ['ls-files', '--stage', '-z']);
-    const changed = await git(member.root, ['diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z']);
-    const untracked = await git(member.root, ['ls-files', '--others', '--exclude-standard', '-z']);
+    const [indexRead, changedRead, untrackedRead] = await Promise.allSettled([
+      git(member.root, ['ls-files', '--stage', '-z']),
+      git(member.root, ['diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z']),
+      git(member.root, ['ls-files', '--others', '--exclude-standard', '-z']),
+    ]);
+    const index = completedGitRead(indexRead);
+    const changed = completedGitRead(changedRead);
+    const untracked = completedGitRead(untrackedRead);
     const documents = new Set(manifest.artifacts.filter(a => a.kind === 'git' && a.repositoryId === member.repositoryId).map(a => a.path));
     const included = name => !documents.has(name) && (!name.startsWith('.sdlc/') || name === '.sdlc/config.json');
     const indexed = index.split('\0').filter(Boolean).filter(entry => included(entry.slice(entry.indexOf('\t') + 1)));
