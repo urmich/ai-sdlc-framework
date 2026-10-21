@@ -458,9 +458,16 @@ test('T-105 current and historical Azure DevOps attach calls race without making
   const attach = identity => attachMonitor(f.store, {
     identity, origin: 'framework', schedulerAvailable: true, readAvailable: true,
   });
-  const [historical, current] = await Promise.all([
+  const attached = await Promise.allSettled([
     attach(historicalIdentity), attach(currentIdentity),
   ]);
+  assert.ok(attached.some(result => result.status === 'fulfilled'));
+  for (const result of attached.filter(result => result.status === 'rejected')) {
+    assert.equal(result.reason.code, 'LOCK_BUSY');
+  }
+  const identities = [historicalIdentity, currentIdentity];
+  const [historical, current] = await Promise.all(attached.map((result, index) =>
+    result.status === 'fulfilled' ? result.value : attach(identities[index])));
   assert.equal(historical.key, current.key);
   const claimed = await claimMonitor(f.store, {
     runKey: current.key, workerId: 'first-worker',

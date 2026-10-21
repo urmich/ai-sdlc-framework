@@ -16,6 +16,13 @@ repositories. The 29 tests include 27 local pre-review checks and two review
 checks. The Status column reflects the active validation cycle; a planned
 test or a passing fixture does not count as live-provider proof.
 
+Concurrent monitor-attachment fixtures retain both initial outcomes before
+retrying only an explicit `LOCK_BUSY` result after the competing owner has
+completed. At least one original attachment must succeed; unrelated errors
+fail immediately. Retries must resolve to the same record and one polling owner.
+The production lock-wait budget and all identity/ownership assertions remain
+unchanged; this is operation-level contention recovery, not a test-suite rerun.
+
 ## Planned tests
 
 | ID | Environment | Level | Checkpoint | Mode | Owner | Location | Requirements | Expected Outcome | Implementation | Status |

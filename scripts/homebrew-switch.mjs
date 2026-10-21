@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import {
   advanceSwitchState, captureSwitchState, findInstalledKeg, finishSwitchState,
-  linkState, ownsLauncher, resolveHomebrewCandidate, verifyCapturedKegs,
+  linkState, ownsLauncher, resolveHomebrewCandidate, restoreCapturedUpgradeLinks, verifyCapturedKegs,
 } from '../packaging/homebrew/switch-state.mjs';
 
 const execute = promisify(execFile);
@@ -272,19 +272,7 @@ export async function switchToHomebrew({
         if (!owned(state.capturedLink, state.previousKeg)) throw new Error('Unidentified captured upgrade link');
         await fs.symlink(state.capturedLink.target, path.join(prefix, 'bin', 'sdlc'));
       }
-      const linkedRecord = state.links.find(link => link.name === path.basename(path.dirname(newKeg)) &&
-        link.path === path.join(prefix, 'var', 'homebrew', 'linked', link.name));
-      if (linkedRecord) {
-        const current = await linkState(linkedRecord.path);
-        if (current.kind !== 'absent' && (current.kind !== 'link' ||
-            ![newKeg, state.previousKeg].includes(current.absolute))) {
-          throw new Error('Unidentified Homebrew linked-keg record appeared during upgrade');
-        }
-        if (current.kind !== 'absent') await fs.unlink(linkedRecord.path);
-        if (linkedRecord.captured.kind === 'link') {
-          await fs.symlink(linkedRecord.captured.target, linkedRecord.path);
-        }
-      }
+      await restoreCapturedUpgradeLinks(state, newKeg);
     }
     const receipt = JSON.parse(await fs.readFile(path.join(newKeg, 'INSTALL_RECEIPT.json'), 'utf8'));
     if (receipt.source?.versions?.stable !== requestedCandidate.version) {

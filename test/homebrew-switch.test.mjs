@@ -12,10 +12,44 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { switchFromHomebrew, switchToHomebrew, verifyHomebrewHooks,
   verifyCopiedHomebrewInstallation, resolveHomebrewRuntime } from '../scripts/homebrew-switch.mjs';
+import { linkState, restoreCapturedUpgradeLinks } from '../packaging/homebrew/switch-state.mjs';
 
 const nativeMac = { skip: process.platform !== 'darwin' };
 const copiedHookEvents = ['sessionStart', 'userPromptSubmitted', 'preToolUse', 'postToolUse',
   'postToolUseFailure', 'preCompact', 'agentStop', 'sessionEnd'];
+
+test('T-PRD061 captured upgrade restores both opt and linked references before promotion without replacing foreign state',
+  nativeMac, async t => {
+    const root = await fs.mkdtemp(path.resolve('.test-data', 'homebrew-upgrade-links-'));
+    t.after(() => fs.rm(root, { recursive: true }));
+    const name = 'ai-sdlc-framework';
+    const previousKeg = path.join(root, 'Cellar', name, '0.3.1');
+    const newKeg = path.join(root, 'Cellar', name, '0.4.0');
+    for (const keg of [previousKeg, newKeg]) await fs.mkdir(keg, { recursive: true });
+    const state = { prefix: root, previousKeg, links: [] };
+    for (const file of [path.join(root, 'opt', name), path.join(root, 'var', 'homebrew', 'linked', name)]) {
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.symlink(path.relative(path.dirname(file), previousKeg), file);
+      state.links.push({ path: file, name, captured: await linkState(file) });
+      await fs.unlink(file);
+      await fs.symlink(newKeg, file);
+    }
+    await restoreCapturedUpgradeLinks(state, newKeg);
+    for (const record of state.links) {
+      assert.deepEqual(await linkState(record.path), record.captured);
+      assert.equal(await fs.realpath(record.path), previousKeg);
+    }
+    await fs.access(newKeg);
+    await fs.access(previousKeg);
+    const opt = state.links[0].path;
+    await fs.unlink(opt);
+    await fs.writeFile(opt, 'unidentified replacement');
+    await assert.rejects(restoreCapturedUpgradeLinks(state, newKeg), /Unidentified replacement retained/u);
+    assert.equal(await fs.readFile(opt, 'utf8'), 'unidentified replacement');
+    assert.deepEqual(await linkState(state.links[1].path), state.links[1].captured);
+    await assert.rejects(restoreCapturedUpgradeLinks({ ...state, links: [] }, newKeg),
+      /Captured Homebrew link record is missing/u);
+  });
 
 test('T-51 runtime resolution follows current and legacy direct receipts without selecting historical or unrelated Node', async t => {
   const root = path.resolve('.test-data', `homebrew-runtime-${randomUUID()}`);

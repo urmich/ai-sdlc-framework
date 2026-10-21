@@ -306,6 +306,22 @@ async function restoreLink(file, captured, isOwned) {
   }
 }
 
+export async function restoreCapturedUpgradeLinks(state, newKeg) {
+  const name = path.basename(path.dirname(newKeg));
+  const records = [
+    path.join(state.prefix, 'opt', name),
+    path.join(state.prefix, 'var', 'homebrew', 'linked', name),
+  ].map(file => {
+    const record = state.links.find(link => link.name === name && link.path === file);
+    if (!record) throw new Error(`Captured Homebrew link record is missing: ${file}`);
+    return record;
+  });
+  for (const record of records) {
+    await restoreLink(record.path, record.captured, current =>
+      current.absolute === newKeg || current.absolute === state.previousKeg);
+  }
+}
+
 export async function finishSwitchState(state, { error, newKeg } = {}) {
   let recoveryError;
   if (error) {

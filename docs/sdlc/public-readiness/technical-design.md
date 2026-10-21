@@ -1235,6 +1235,13 @@ upgrade-directory with all four external metadata pins and keeps public
 acceptance NotRun. Public Homebrew executes exact saved published formulas and
 URLs without regeneration. A same-version formula revision cannot receive
 R-PRE or R-POST version-upgrade credit.
+After `brew upgrade` temporarily links the candidate, restore both captured
+owned `opt` and linked-keg references before the normal promotion boundary.
+Homebrew resolves `unlink` from `opt` before its linked-keg record, so restoring
+only the launcher and linked-keg reference can select the wrong installed
+version. Reuse the guarded link-restoration primitive; retain unidentified
+replacements and reject missing capture records. Keep ordinary formula-based
+link/unlink commands, captured payloads and the failed-promotion/retry assertions.
 Ordinary PR CI supplies reviewed, source-controlled pins for the genuine public
 v0.3.1 binary baseline, independent of repository variables. Its original
 descriptor binds the legacy platform archives. This is a representative
