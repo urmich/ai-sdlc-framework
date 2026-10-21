@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
-import { open, realpath, rename, unlink } from 'node:fs/promises';
-import { createHash, randomUUID } from 'node:crypto';
+import { open, realpath } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
 import { digest, SdlcError } from '../src/core.mjs';
+import { atomicWrite } from '../src/files.mjs';
 import { declarationTokens } from './validation-inventory.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -399,16 +400,7 @@ export async function executeValidationCommand({
           try { await handle.writeFile(serialized.bytes); await handle.sync(); }
           finally { await handle.close(); }
         } else {
-          const temporary = `${reportPath}.checkpoint-${randomUUID()}`;
-          try {
-            const handle = await open(temporary, 'wx');
-            try { await handle.writeFile(serialized.bytes); await handle.sync(); }
-            finally { await handle.close(); }
-            await rename(temporary, reportPath);
-          } finally {
-            try { await unlink(temporary); }
-            catch (error) { if (error.code !== 'ENOENT') throw error; }
-          }
+          await atomicWrite(reportPath, serialized.bytes);
         }
         return serialized.sanitized;
       }).catch(error => {

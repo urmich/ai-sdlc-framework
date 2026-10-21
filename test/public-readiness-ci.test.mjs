@@ -8,6 +8,7 @@ export const validationDeclarations = {
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
+import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -844,6 +845,63 @@ writeFileSync(${JSON.stringify(ready)},JSON.stringify({pid:process.pid}));
       }
       await settled;
       t.mock.restoreAll();
+      syncBuiltinESMExports();
+    }
+  }
+});
+
+test('T-PRD018 command checkpoints recover Windows sharing conflicts without hiding permanent persistence failures', async t => {
+  const f = await fixture(t);
+  const source = path.join(f.root, 'checkpoint.mjs');
+  const output = 'owned checkpoint output\n';
+  await fs.writeFile(source, `process.stdout.write(${JSON.stringify(output)});\n`);
+  const originalRename = fsPromises.rename;
+  for (const mode of ['transient', 'permanent', 'nontransient']) {
+    const name = `checkpoint-${mode}`;
+    const reportPath = path.join(f.reportDir, `${name}.json`);
+    const failure = Object.assign(new Error(`Owned checkpoint ${mode} replacement failure`),
+      { code: mode === 'nontransient' ? 'EIO' : 'EPERM' });
+    const attempts = [];
+    let previous;
+    const mocked = t.mock.method(fsPromises, 'rename', async (staged, destination) => {
+      if (destination === reportPath) {
+        const bytes = await fs.readFile(staged);
+        if (JSON.parse(bytes).checkpoint.phase === 'finished') {
+          previous ??= await fs.readFile(reportPath);
+          attempts.push({ staged, sha256: fixtureSHA(bytes) });
+          if (mode !== 'transient' || attempts.length === 1) throw failure;
+        }
+      }
+      return originalRename(staged, destination);
+    });
+    syncBuiltinESMExports();
+    try {
+      if (mode === 'transient' && process.platform === 'win32') {
+        const report = await f.run(name, process.execPath, [source]);
+        assert.equal(report.complete, true);
+        assert.equal(report.exitCode, 0);
+        assert.deepEqual(report.causes, []);
+        assert.equal(report.stdout, output);
+        assert.equal(report.originalOutput.stdout.sha256, fixtureSHA(Buffer.from(output)));
+        assert.deepEqual(JSON.parse(await fs.readFile(reportPath, 'utf8')), report);
+        assert.equal(attempts.length, 2);
+        assert.deepEqual(attempts[1], attempts[0], 'Retry the same flushed atomic snapshot');
+      } else {
+        await assert.rejects(f.run(name, process.execPath, [source]), error => error === failure);
+        assert.deepEqual(await fs.readFile(reportPath), previous,
+          'A failed replacement must preserve the previous incomplete checkpoint');
+        assert.equal(JSON.parse(previous).complete, false);
+        if (mode === 'nontransient' || process.platform !== 'win32') assert.equal(attempts.length, 1);
+      }
+      assert.ok(attempts.length > 0, 'The actual final command checkpoint must encounter the injected fault');
+      for (const staged of new Set(attempts.map(attempt => attempt.staged))) {
+        await assert.rejects(fs.stat(staged), { code: 'ENOENT' });
+      }
+      const retained = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+      assert.ok(Number.isSafeInteger(retained.pid));
+      assert.throws(() => process.kill(retained.pid, 0), { code: 'ESRCH' });
+    } finally {
+      mocked.mock.restore();
       syncBuiltinESMExports();
     }
   }

@@ -537,6 +537,12 @@ Its objects have already passed the SDK's per-object sanitization, integrity
 and paging checks; applying that single-object sanitizer again to the aggregate
 container incorrectly rejects valid large failure reports. Keep the existing
 object, sanitizer-work and aggregate byte budgets unchanged.
+Command checkpoints reuse the existing atomic-write helper rather than a
+one-shot temporary-file rename. Its Windows-only EACCES/EBUSY/EPERM handling
+uses the existing 100 ms retry budget and 10 ms backoff; unrelated errors fail
+immediately and exhausted conflicts remain explicit non-passing persistence
+failures. Preserve exclusive initial creation, the prior durable report,
+original journals and owned-process cleanup assertions.
 
 ### 5.4 Currentness, reduction and compatibility
 
