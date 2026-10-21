@@ -641,6 +641,26 @@ test('T-PRD018 native readiness persistence retains large paged failure bundles 
   await assert.rejects(writeNativeReadinessBundle(file, evaluation), { code: 'EEXIST' });
 });
 
+test('T-PRD018 native Homebrew CLI failures retain structured diagnostics without unsafe stack output', async t => {
+  const directory = path.join(repositoryRoot, '.test-data', `native-cli-error-${randomUUID()}`);
+  await fs.mkdir(directory, { recursive: true });
+  t.after(async () => {
+    assert.equal(path.dirname(directory), path.join(repositoryRoot, '.test-data'));
+    await fs.rm(directory, { recursive: true });
+    await assert.rejects(fs.stat(directory), { code: 'ENOENT' });
+  });
+  const report = await executeValidationCommand({ name: 'homebrew-cli-error', command: process.execPath,
+    args: [path.join(repositoryRoot, 'scripts', 'native-validation.mjs'), 'homebrew',
+      '--unsupported-option', 'fixture'], outputDir: directory });
+  assert.equal(report.complete, true, JSON.stringify({ diagnostic: report.diagnostic, causes: report.causes }));
+  assert.equal(report.exitCode, 1);
+  const diagnostic = JSON.parse(report.stderr);
+  assert.equal(diagnostic.code, 'INPUT');
+  assert.equal(diagnostic.message, 'Unknown or repeated native option');
+  assert.equal(report.cleanup.requested, false);
+  assert.deepEqual(report.causes, []);
+});
+
 test('T-PRD018 native failure annotations escape workflow-command injection without changing the underlying failure', () => {
   const f = fixture();
   const lane = f.lanes[0];

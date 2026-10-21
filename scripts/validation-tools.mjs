@@ -203,7 +203,7 @@ function resetOutputRecord(state) {
     stack: [], inspections: [], quote: null, escaped: false, header: false });
 }
 
-function processDiagnostic(error) {
+export function processDiagnostic(error) {
   const original = String(error?.message ?? error);
   let message;
   try {

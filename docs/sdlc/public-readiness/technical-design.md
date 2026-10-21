@@ -543,6 +543,12 @@ uses the existing 100 ms retry budget and 10 ms backoff; unrelated errors fail
 immediately and exhausted conflicts remain explicit non-passing persistence
 failures. Preserve exclusive initial creation, the prior durable report,
 original journals and owned-process cleanup assertions.
+Native Homebrew CLI failures use the shared bounded process-diagnostic renderer
+before a nonzero exit, including argument, host and frozen-input failures before
+the lifecycle procedure begins. Do not emit raw Node inspection stacks that
+strict transcript retention must reject. Preserve the original diagnostic
+identity and failed/NotRun outcome without relaxing sanitization, host checks or
+candidate identity requirements.
 
 ### 5.4 Currentness, reduction and compatibility
 

@@ -12,7 +12,7 @@ import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
   validateExecutionContext, sanitizeExecutionPayload } from 'ai-sdlc-framework/evidence';
 import { compileValidationInventory, compileValidationSourceInventory, reconcileNodeExecution,
   validationPlatforms, validationSourcePaths, isValidationTestPath } from './validation-inventory.mjs';
-import { discoverGoDeclarations, executeValidationCommand, reconcileGoExecution } from './validation-tools.mjs';
+import { discoverGoDeclarations, executeValidationCommand, reconcileGoExecution, processDiagnostic } from './validation-tools.mjs';
 import { repositoryRoot, unitFiles, validationSelectionDescriptor, validationSelectionProtocol,
   writeValidationSelection } from './test-runner.mjs';
 import { verifyCandidate, archiveRecord } from './release-bundle.mjs';
@@ -1372,7 +1372,11 @@ async function runHomebrewProcedure(options) {
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   const args = process.argv.slice(2);
   if (args[0] === 'homebrew') {
-    await runHomebrewProcedure(parseNativeOptions(args.slice(1)));
+    try { await runHomebrewProcedure(parseNativeOptions(args.slice(1))); }
+    catch (error) {
+      console.error(JSON.stringify(processDiagnostic(error)));
+      process.exitCode = 1;
+    }
   } else {
     const result = await runNativeValidation(parseNativeOptions(args));
     if ((result.status === 'Passed' || result.candidateReady) && process.env.GITHUB_OUTPUT) {
