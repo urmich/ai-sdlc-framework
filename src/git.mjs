@@ -62,7 +62,7 @@ export function validateRemoteName(name) {
   return name;
 }
 async function selectedRemoteName(member, configuredName, requestedName, direction) {
-  await validateBinding(member);
+  await validateWorktreeBinding(member);
   if (configuredName !== undefined) validateRemoteName(configuredName);
   if (requestedName !== undefined) validateRemoteName(requestedName);
   requireThat(!configuredName || !requestedName || configuredName === requestedName,

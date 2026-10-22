@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import childProcess from 'node:child_process';
@@ -17,9 +18,9 @@ import { syncBuiltinESMExports } from 'node:module';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { executeValidationCommand, reconcileGoExecution } from '../scripts/validation-tools.mjs';
-import { buildLauncher, launcherBuildEnvironment } from '../packaging/winget/build-launcher.mjs';
+import { launcherBuildEnvironment } from '../packaging/winget/build-launcher.mjs';
 import { generateManifests } from '../packaging/winget/generate.mjs';
-import { writePayloadFixture, fixtureCanonical, fixtureSHA } from './winget-payload-fixture.mjs';
+import { writePayloadFixture, fixtureCanonical, fixtureSHA, fixtureWindowsLauncher } from './winget-payload-fixture.mjs';
 import { repositoryRoot } from '../scripts/test-runner.mjs';
 import { previousReleasePins } from '../scripts/release-bundle.mjs';
 import { nativePrParts, nativeLegacyPrParts, nativePartJobKey } from '../scripts/native-validation.mjs';
@@ -103,6 +104,109 @@ async function fixture(t) {
       signal: t.signal, ...options });
   return { root, reportDir, environment, run };
 }
+
+async function frozenLauncherFixture(f) {
+  const bytes = Buffer.alloc(512);
+  bytes.write('MZ');
+  bytes.writeUInt32LE(128, 60);
+  bytes.writeUInt32LE(0x00004550, 128);
+  bytes.writeUInt16LE(0x8664, 132);
+  bytes.writeUInt16LE(0x20b, 152);
+  const directory = path.join(f.root, 'frozen-input');
+  await fs.mkdir(directory);
+  const input = path.join(directory, 'sdlc.exe');
+  await fs.writeFile(input, bytes);
+  const environment = {
+    SDLC_WINDOWS_LAUNCHER: input, SDLC_WINDOWS_LAUNCHER_SHA256: fixtureSHA(bytes),
+    SDLC_RELEASE_SOURCE_COMMIT: sourceA,
+    SDLC_WINDOWS_LAUNCHER_CONTEXT: JSON.stringify({ sources: [{ revision: sourceA }] }),
+  };
+  return { bytes, input, directory, environment };
+}
+
+test('T-PRD015 frozen launcher setup reuses only source-matched owned bytes', async t => {
+  const f = await fixture(t);
+  const prepared = await frozenLauncherFixture(f);
+  const isolated = await fs.mkdtemp(path.join(repositoryRoot, 'test', '.runner-fixture-'));
+  t.after(() => fs.rm(isolated, { recursive: true }));
+  const file = path.join(isolated, 'launcher.test.mjs');
+  const isolatedOutput = path.join(f.root, 'isolated-launcher');
+  await fs.writeFile(file, `import test from 'node:test';
+import assert from 'node:assert/strict';
+import { fixtureWindowsLauncher } from ${JSON.stringify(pathToFileURL(path.join(repositoryRoot, 'test', 'winget-payload-fixture.mjs')).href)};
+test('isolated source-bound launcher setup', async () => {
+  for (const name of ['FILE', 'PROFILE', 'CONTEXT', 'COMMAND', 'ADVISORY_MS']) {
+    assert.equal(process.env['SDLC_TEST_REPORT_' + name], undefined);
+  }
+  const result = await fixtureWindowsLauncher({
+    outputDir: ${JSON.stringify(isolatedOutput)}, goCommand: process.execPath,
+  });
+  assert.equal(result.sha256, ${JSON.stringify(fixtureSHA(prepared.bytes))});
+});
+`);
+  const isolatedReport = path.join(f.reportDir, 'isolated-launcher-tests.json');
+  const environment = { ...f.environment, ...prepared.environment, NO_COLOR: '1',
+    SDLC_TEST_REPORT_FILE: isolatedReport,
+    SDLC_TEST_REPORT_CONTEXT: JSON.stringify({ reporterOnly: true }) };
+  delete environment.FORCE_COLOR;
+  const execution = await f.run('isolated-launcher', process.execPath,
+    ['scripts/test-runner.mjs', 'targeted', '--workers', '1', file], {
+      environment,
+    });
+  assert.equal(execution.complete, true, execution.diagnostic);
+  assert.equal(execution.exitCode, 0, execution.stdout + execution.stderr);
+  const report = JSON.parse(await fs.readFile(isolatedReport, 'utf8'));
+  assert.equal(report.complete, true);
+  assert.equal(report.summary.counts.passed, 1);
+  assert.deepEqual(report.context, { reporterOnly: true });
+  assert.deepEqual(await fs.readFile(path.join(isolatedOutput, 'sdlc.exe')), prepared.bytes);
+  const result = await fixtureWindowsLauncher({
+    outputDir: path.join(f.root, 'copied-launcher'), goCommand: process.execPath,
+    environment: prepared.environment,
+  });
+  assert.equal(result.sha256, fixtureSHA(prepared.bytes));
+  assert.equal(result.size, prepared.bytes.length);
+  assert.notEqual(result.artifact, prepared.input);
+  assert.deepEqual(await fs.readFile(result.artifact), prepared.bytes);
+  await fs.appendFile(result.artifact, 'owned copy changed');
+  assert.deepEqual(await fs.readFile(prepared.input), prepared.bytes);
+  await fs.appendFile(prepared.input, 'source changed');
+  const outputDir = path.join(f.root, 'changed-input');
+  await assert.rejects(fixtureWindowsLauncher({
+    outputDir, goCommand: process.execPath, environment: prepared.environment,
+  }), /bytes differ from their verified source digest/u);
+  await assert.rejects(fs.stat(outputDir), { code: 'ENOENT' });
+});
+
+test('T-PRD015 frozen launcher setup rejects incomplete source proof and linked or invalid inputs', async t => {
+  const f = await fixture(t);
+  const prepared = await frozenLauncherFixture(f);
+  const variants = [
+    [{ SDLC_WINDOWS_LAUNCHER_SHA256: undefined }, /expected byte digest/u],
+    [{ SDLC_WINDOWS_LAUNCHER_CONTEXT: undefined,
+      SDLC_TEST_REPORT_CONTEXT: prepared.environment.SDLC_WINDOWS_LAUNCHER_CONTEXT }, /source-bound native context/u],
+    [{ SDLC_WINDOWS_LAUNCHER_CONTEXT: JSON.stringify({ sources: [null] }) }, /source differs/u],
+    [{ SDLC_RELEASE_SOURCE_COMMIT: 'b'.repeat(40) }, /source differs/u],
+    [{ SDLC_WINDOWS_LAUNCHER_SHA256: '0'.repeat(64) }, /bytes differ/u],
+    [{ SDLC_WINDOWS_LAUNCHER: path.join(repositoryRoot, 'LICENSE') }, /owned repository-local/u],
+    [{ SDLC_WINDOWS_LAUNCHER: prepared.directory }, /regular owned repository-local/u],
+  ];
+  const linked = path.join(f.root, 'linked-input');
+  await fs.symlink(prepared.directory, linked, process.platform === 'win32' ? 'junction' : 'dir');
+  variants.push([{ SDLC_WINDOWS_LAUNCHER: path.join(linked, 'sdlc.exe') }, /regular owned repository-local/u]);
+  for (const [index, [change, expected]] of variants.entries()) {
+    const outputDir = path.join(f.root, `invalid-${index}`);
+    await assert.rejects(fixtureWindowsLauncher({
+      outputDir, goCommand: process.execPath, environment: { ...prepared.environment, ...change },
+    }), expected);
+    await assert.rejects(fs.stat(outputDir), { code: 'ENOENT' });
+  }
+  await fs.writeFile(prepared.input, Buffer.alloc(512));
+  await assert.rejects(fixtureWindowsLauncher({
+    outputDir: path.join(f.root, 'invalid-pe'), goCommand: process.execPath,
+    environment: { ...prepared.environment, SDLC_WINDOWS_LAUNCHER_SHA256: fixtureSHA(Buffer.alloc(512)) },
+  }), /native launcher is required/u);
+});
 
 test('T-PRD015 short Homebrew prefixes bind native disposable GitHub Mac jobs and reject deep or ambient roots', async t => {
   const environment = { GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted', RUNNER_OS: 'macOS',
@@ -554,7 +658,7 @@ test('T-PRD015 actual pinned Go, Python schema and static validators execute val
   const goVersion = await f.run('go-identity', go, ['version']);
   assert.equal(goVersion.exitCode, 0, goVersion.stderr);
   assert.match(goVersion.stdout, /^go version go1\.27\.1 /u);
-  const launcher = await buildLauncher({
+  const launcher = await fixtureWindowsLauncher({
     outputDir: path.join(f.root, 'launcher'), goCommand: go, environment: f.environment,
   });
 

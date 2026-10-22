@@ -28,7 +28,7 @@ import { promisify } from 'node:util';
 import { fixture, grant, observeFixtureRepository } from './helpers.mjs';
 import { canonical, digest, LIMITS } from '../src/core.mjs';
 import { atomicWrite, readBytes, readJson, readJsonEntries, updateJson, withLock, writeJson, safePath } from '../src/files.mjs';
-import { identity, validateBinding } from '../src/git.mjs';
+import { identity, selectedFetchRemote, selectedPushRemote, validateBinding } from '../src/git.mjs';
 import { Store, orderRecordRemovals } from '../src/store.mjs';
 import { validateRecord } from '../src/schemas.mjs';
 import { repositoryObservationKey, pullRequestObservationKey } from '../src/repository-observations.mjs';
@@ -679,6 +679,77 @@ test('T-19 manifest binding guards recheck the branch after all canonical path c
     mocked.mock.restore();
     syncBuiltinESMExports();
   }
+});
+
+test('T-19 remote selection validates fresh bindings without unused revision queries', async t => {
+  const f = await fixture(t);
+  const member = await identity(f.repo, 'primary');
+  const calls = [];
+  const observe = ({ process: child }) => {
+    child.once('close', () => {
+      if (child.spawnargs[0] === 'git') calls.push(child.spawnargs.slice(1));
+    });
+  };
+  subscribe('child_process', observe);
+  try {
+    assert.deepEqual(await selectedFetchRemote(member), {
+      selectedRemoteName: 'origin', fetchURLs: ['https://example.invalid/repository.git'],
+    });
+    assert.deepEqual(calls.map(args => args[2]), ['rev-parse', 'symbolic-ref', 'remote', 'remote'],
+      'An unborn remote selection needs fresh paths and branch, not an unused HEAD');
+    calls.length = 0;
+    assert.deepEqual(await selectedPushRemote(member, 'origin'), {
+      selectedRemoteName: 'origin', pushURLs: ['https://example.invalid/repository.git'],
+    });
+    assert.deepEqual(calls.map(args => args[2]), ['rev-parse', 'symbolic-ref', 'remote', 'remote']);
+    await f.runGit('commit', '--allow-empty', '-qm', 'Advance remote binding fixture');
+    await f.runGit('remote', 'set-url', 'origin', 'https://example.invalid/current.git');
+    calls.length = 0;
+    assert.deepEqual(await selectedFetchRemote(member, undefined, 'origin'), {
+      selectedRemoteName: 'origin', fetchURLs: ['https://example.invalid/current.git'],
+    });
+    assert.deepEqual(calls.map(args => args[2]), ['rev-parse', 'symbolic-ref', 'remote', 'remote']);
+    await f.runGit('checkout', '-qb', 'feature/remote-same-head');
+    calls.length = 0;
+    await assert.rejects(selectedFetchRemote(member), { code: 'BINDING' });
+    assert.deepEqual(calls.map(args => args[2]), ['rev-parse', 'symbolic-ref']);
+  } finally {
+    unsubscribe('child_process', observe);
+  }
+});
+
+test('T-19 remote selection preserves late branch and linked-worktree guards', async t => {
+  const f = await fixture(t);
+  await f.runGit('commit', '--allow-empty', '-qm', 'Create remote binding race fixture');
+  const member = await identity(f.repo, 'primary');
+  await f.runGit('branch', 'feature/remote-path-race');
+  const gitDir = await fs.realpath(path.join(f.repo, '.git'));
+  const realpath = fsPromises.realpath;
+  let checks = 0;
+  const mocked = t.mock.method(fsPromises, 'realpath', async (...args) => {
+    const resolved = await realpath(...args);
+    if (resolved === gitDir && ++checks === 2) {
+      await f.runGit('checkout', '-q', 'feature/remote-path-race');
+    }
+    return resolved;
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(selectedPushRemote(member, 'origin'), { code: 'BINDING' });
+    assert.equal(checks, 2);
+  } finally {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+  }
+  const linked = path.join(f.root, 'linked remote worktree');
+  await f.runGit('worktree', 'add', '-q', '-b', 'feature/remote-linked', linked, 'HEAD');
+  const linkedMember = await identity(linked, 'primary');
+  assert.equal(linkedMember.linkedWorktree, true);
+  assert.deepEqual(await selectedFetchRemote(linkedMember), {
+    selectedRemoteName: 'origin', fetchURLs: ['https://example.invalid/repository.git'],
+  });
+  await f.runGit('-C', linked, 'checkout', '-q', '--detach');
+  await assert.rejects(selectedFetchRemote(linkedMember), { code: 'BINDING' });
 });
 
 test('Git identity batches fresh path queries and preserves unborn and linked worktrees', async t => {

@@ -1583,6 +1583,8 @@ export async function runNativeValidation(options) {
     requireThat(launcher, 'EVIDENCE', 'Frozen candidate must contain the real Windows launcher');
     environment.SDLC_WINDOWS_LAUNCHER = path.join(scratch, 'sdlc.exe');
     await fs.writeFile(environment.SDLC_WINDOWS_LAUNCHER, launcher.data, { flag: 'wx' });
+    environment.SDLC_WINDOWS_LAUNCHER_SHA256 = digest(launcher.data);
+    environment.SDLC_WINDOWS_LAUNCHER_CONTEXT = JSON.stringify(context);
     environment.SDLC_RELEASE_DIR = path.join(candidateDir, 'assets');
     environment.SDLC_RELEASE_SOURCE_COMMIT = revision;
     environment.SDLC_DISTRIBUTION_TARGETS = 'macos,windows-x64';

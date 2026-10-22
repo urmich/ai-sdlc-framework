@@ -47,7 +47,7 @@ import { admitAcceptanceHandoff, prepareAcceptanceHandoff, runReleaseAcceptance,
   releaseConsumerTargets } from '../scripts/release-orchestration.mjs';
 import { readWorkflowPolicySources } from '../scripts/workflow-policy.mjs';
 import { immutablePublicationBinding } from '../scripts/release-history.mjs';
-import { buildLauncher } from '../packaging/winget/build-launcher.mjs';
+import { fixtureWindowsLauncher } from './winget-payload-fixture.mjs';
 import { nativeReplayFixture } from './readiness-observer-fixture.mjs';
 import { retainAttestationMaterial, verifyArchiveWithGh, verifyHistoricalRelease,
   verifyHistoricalCompletion } from '../scripts/release-retention.mjs';
@@ -303,7 +303,7 @@ test('T-PRD063 future Mac output leaves the separate Windows v1 PE and cross-pla
   const original = await fs.readFile(payload.artifact);
   const future = tarGzip(readTarGzip(original).map(entry => entry.path === 'package/package.json' ?
     { ...entry, data: Buffer.from(JSON.stringify({ ...JSON.parse(entry.data), version: '0.5.0' })) } : entry));
-  const built = await buildLauncher({ outputDir: path.join(f.directory, 'real-pinned-Windows-launcher') });
+  const built = await fixtureWindowsLauncher({ outputDir: path.join(f.directory, 'real-pinned-Windows-launcher') });
   const launcher = await fs.readFile(built.artifact);
   validateWindowsLauncher(launcher);
   assert.equal(launcher.length, built.size);

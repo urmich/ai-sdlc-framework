@@ -406,6 +406,17 @@ Manifest-binding PR regressions cover an unborn repository becoming committed,
 a same-commit branch switch and a controlled switch after all canonical-path
 checks. The binding-only guard still reads fresh paths and the current branch;
 the separate full-identity regressions keep their revision and fallback checks.
+Remote-selection PR regressions retain current fetch/push URLs, unborn-to-commit
+transitions, same-commit branch rejection, a branch switch during canonical-path
+checks and linked/detached-worktree guards without querying an unused revision.
+Frozen-launcher setup regressions require matching source and byte identities,
+owned regular paths and a separate writable copy, rejecting changed inputs
+without a compiler fallback. Exercise the real public runner and isolated
+worker boundary: fixture provenance survives while all reporter control
+variables remain isolated, and reporter context alone cannot supply it.
+The actual pinned Go tests/vet, native launcher
+execution and two independent cold-cache rebuilds stay required on capable PR
+runners; only setup-only consumers reuse the verified frozen candidate.
 
 ### 3.2 Existing full selection
 

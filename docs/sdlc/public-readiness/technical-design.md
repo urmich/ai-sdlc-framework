@@ -263,6 +263,10 @@ unused HEAD object ID or current-ref lookup for this binding-only guard.
 Revision-bearing callers retain the complete identity queries and fallbacks.
 PR-only process and controlled branch-switch regressions preserve unborn,
 newly committed and same-commit branch behavior without trusting stored state.
+Remote-name selection uses that same fresh binding-only guard because choosing
+current fetch/push URLs does not consume a revision. Keep the actual remote-name
+enumeration, URL queries, configuration checks and full identity checks at
+revision-bearing consumers unchanged.
 The retention fixture's existing immutable Git-read cache also recognizes the
 read-only current-ref query. Writes and unknown Git commands still invalidate
 all cached fixture reads. This test-only reuse does not cache production state
@@ -345,6 +349,15 @@ build. Keep transactions, durability flushes, lock races, archival and cleanup
 real. Any runtime optimization of repeated reads/indexing must preserve revision,
 containment, invalidation and crash guarantees and receive its affected regression
 coverage. Do not add a test-only switch disabling fsync or reducing stress limits.
+Setup-only Windows-launcher consumers may copy the already source-verified
+frozen native candidate. Require its exported byte digest, matching execution
+source and owned regular-file paths; read and hash each input again and write
+only a fresh owned fixture copy. Transport the verified source context through
+the dedicated launcher-fixture environment channel, not the reporter context
+that isolated test dispatch removes. Invalid supplied inputs fail rather than
+falling back. Without prepared input, retain the real pinned builder. Actual
+Go tests, vet, native launcher execution and independent cold-cache rebuild
+comparisons remain unchanged.
 
 The agent/maintainer may explicitly select affected local families for debugging
 from the actual dependency trace; no automatic impact-map implementation is
