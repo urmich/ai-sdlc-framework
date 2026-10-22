@@ -12,7 +12,8 @@ import { buildPackage, npmInvocation } from '../scripts/package.mjs';
 import { packageInstallArguments, verifyPackage } from '../scripts/verify-package.mjs';
 import { isolatedNpmEnvironment } from './npm-environment.mjs';
 import { parseWorkflow, validateWorkflowPolicy, workflowActionPins } from '../scripts/workflow-policy.mjs';
-import { nativeWorkflowContract } from '../scripts/native-validation.mjs';
+import { nativeWorkflowContract, nativeFrameworkShardProtocol,
+  nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
 
 test('T-36 package is reproducible, integrity-bound and installable in isolation', async t => {
   const root = path.resolve('.test-data', randomUUID());
@@ -59,15 +60,8 @@ test('T-36 package is reproducible, integrity-bound and installable in isolation
     return job.strategy.matrix.include.map(({ target, component, shard = null, role }) =>
       ({ target, component, shard, role }));
   });
-  const expectedParts = Object.keys(nativeWorkflowContract.jobs).flatMap(target => {
-    const mac = target.startsWith('macos-');
-    const shards = ['units', 'refresh', 'body-0', 'body-1', ...(mac ? ['body-2'] : [])];
-    return [
-      ...shards.map(shard => ({ target, component: 'framework', shard,
-        role: `${target}-framework-${shard}` })),
-      ...(mac ? [{ target, component: 'homebrew', shard: null, role: `${target}-homebrew` }] : []),
-    ];
-  });
+  const expectedParts = nativePrPartsForProtocol(nativeFrameworkShardProtocol)
+    .map(part => ({ ...part, shard: part.shard ?? null }));
   assert.equal(parts.length, expectedParts.length, 'Every required native PR part must be present');
   assert.equal(new Set(parts.map(part => part.role)).size, parts.length,
     'Native PR producer roles must be unique');
