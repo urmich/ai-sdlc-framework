@@ -23,7 +23,8 @@ import { generateManifests } from '../packaging/winget/generate.mjs';
 import { writePayloadFixture, fixtureCanonical, fixtureSHA, fixtureWindowsLauncher } from './winget-payload-fixture.mjs';
 import { repositoryRoot } from '../scripts/test-runner.mjs';
 import { previousReleasePins } from '../scripts/release-bundle.mjs';
-import { nativePrParts, nativeLegacyPrParts, nativePartJobKey } from '../scripts/native-validation.mjs';
+import { nativePrParts, nativeLegacyPrParts, nativePartJobKey,
+  nativeResourceFacts } from '../scripts/native-validation.mjs';
 import { digest } from '../src/core.mjs';
 import { evaluateApproval, evaluateConversations, sharedStatusKeys, planStatusUpdate, reconcileStatusKey,
   reconcilePrReadiness, statusContexts, normalStatusLimit, disposableStatusLimits,
@@ -1486,6 +1487,24 @@ test('T-PRD020 actual CI schedules twenty producer parts behind a complete unit 
     assert.deepEqual(ci.jobs[key].needs, ['intent', 'source',
       ...(part.shard && part.shard !== 'units' ? [nativePartJobKey({ ...part, shard: 'units' })] : [])]);
     if (part.shard === 'units') assert.equal(ci.jobs[key].strategy.matrix.include.length, 1);
+    if (part.component === 'framework') {
+      const hosts = {
+        'linux-x64': { availableParallelism: 4, totalMemoryBytes: 16760344576 },
+        'windows-x64': { availableParallelism: 4, totalMemoryBytes: 17174360064 },
+        'macos-arm64': { availableParallelism: 3, totalMemoryBytes: 7516192768 },
+        'macos-x64': { availableParallelism: 4, totalMemoryBytes: 15032385536 },
+      };
+      const host = hosts[part.target];
+      const configuredWorkers = ci.jobs[key].env.SDLC_TEST_WORKERS;
+      assert.match(configuredWorkers ?? '', /^[1-9]\d*$/u);
+      const resources = nativeResourceFacts({ ...host, configuredWorkers });
+      assert.equal(resources.workerCapacity, Math.min(32, Math.floor(host.totalMemoryBytes / (1024 ** 3))),
+        'I/O-heavy PR roots use the observed memory budget rather than the CPU-count default');
+      assert.ok(resources.workerCapacity > host.availableParallelism);
+      assert.equal(resources.configuredWorkers, configuredWorkers);
+      assert.ok(ci.jobs[key].steps.every(step => step.env?.SDLC_TEST_WORKERS === undefined),
+        'Bootstrap, trusted context and execution must inherit one matching host allocation');
+    }
   }
   assert.equal(ci.jobs['minimum-node'].needs, 'intent');
   assert.equal(ci.jobs['minimum-node'].if, ci.jobs.native.if);

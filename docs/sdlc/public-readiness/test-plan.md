@@ -765,6 +765,14 @@ Stability, complete native coverage and honest failure reporting take precedence
 do not drop assertions, weaken checks or hide retries to meet the target.
 An incomplete or failed attempt is not a successful full-suite benchmark.
 
+For the next PR measurement, explicitly request the native hosts' observed
+memory-bounded shared worker allocations: Linux/Windows 15, Apple Silicon 7,
+Intel Mac 14. Verify the actual producer's requested/capacity fields and shared
+nested-allocation bounds; the default local gate and 32-slot ceiling do not
+change. Account for the personal-account limit of five concurrent hosted Mac
+jobs across both architectures. A lane still active at 16 minutes is cancelled,
+retained as non-passing and returned to measured parallelism work.
+
 Use independent owned baseline and candidate workspaces on the **same host**
 with the same Node/tool versions, worker/resource limits and environment policy.
 Freeze exact original case/assertion membership before timing. Capture at least

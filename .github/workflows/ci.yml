@@ -225,6 +225,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 360
     env:
+      SDLC_TEST_WORKERS: '15'
       SDLC_NATIVE_ROLE: ${{ matrix.role }}
       SDLC_NATIVE_COMPONENT: ${{ matrix.component }}
       SDLC_FRAMEWORK_SHARD: ${{ matrix.shard }}
@@ -382,6 +383,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 360
     env:
+      SDLC_TEST_WORKERS: '15'
       SDLC_NATIVE_ROLE: ${{ matrix.role }}
       SDLC_NATIVE_COMPONENT: ${{ matrix.component }}
       SDLC_FRAMEWORK_SHARD: ${{ matrix.shard }}
@@ -529,6 +531,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 360
     env:
+      SDLC_TEST_WORKERS: '15'
       SDLC_NATIVE_ROLE: ${{ matrix.role }}
       SDLC_NATIVE_COMPONENT: ${{ matrix.component }}
       SDLC_FRAMEWORK_SHARD: ${{ matrix.shard }}
@@ -632,6 +635,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 360
     env:
+      SDLC_TEST_WORKERS: '15'
       SDLC_NATIVE_ROLE: ${{ matrix.role }}
       SDLC_NATIVE_COMPONENT: ${{ matrix.component }}
       SDLC_FRAMEWORK_SHARD: ${{ matrix.shard }}
@@ -733,6 +737,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 360
     env:
+      SDLC_TEST_WORKERS: '7'
       SDLC_NATIVE_ROLE: ${{ matrix.role }}
       SDLC_NATIVE_COMPONENT: ${{ matrix.component }}
       SDLC_FRAMEWORK_SHARD: ${{ matrix.shard }}
@@ -837,6 +842,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 360
     env:
+      SDLC_TEST_WORKERS: '7'
       SDLC_NATIVE_ROLE: ${{ matrix.role }}
       SDLC_NATIVE_COMPONENT: ${{ matrix.component }}
       SDLC_FRAMEWORK_SHARD: ${{ matrix.shard }}
@@ -938,6 +944,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 360
     env:
+      SDLC_TEST_WORKERS: '14'
       SDLC_NATIVE_ROLE: ${{ matrix.role }}
       SDLC_NATIVE_COMPONENT: ${{ matrix.component }}
       SDLC_FRAMEWORK_SHARD: ${{ matrix.shard }}
@@ -1042,6 +1049,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 360
     env:
+      SDLC_TEST_WORKERS: '14'
       SDLC_NATIVE_ROLE: ${{ matrix.role }}
       SDLC_NATIVE_COMPONENT: ${{ matrix.component }}
       SDLC_FRAMEWORK_SHARD: ${{ matrix.shard }}

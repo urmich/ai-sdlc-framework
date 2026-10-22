@@ -359,6 +359,17 @@ falling back. Without prepared input, retain the real pinned builder. Actual
 Go tests, vet, native launcher execution and independent cold-cache rebuild
 comparisons remain unchanged.
 
+The PR workflow explicitly allocates 15 shared test-worker slots on Linux and
+Windows, 7 on Apple Silicon and 14 on Intel Mac. These memory-bounded allocations
+use the observed native hosts' whole-GiB capacities rather than limiting
+I/O-heavy isolated roots to CPU count. They stay below the existing 32-slot
+ceiling; nested producers still share that one host allocation, with all
+dependency, exclusive-resource and resident-process bounds unchanged.
+The personal-account hosted Mac ceiling is five simultaneous jobs, shared by
+both architectures; adding queued Mac shards is not additional execution capacity.
+If any required complete lane remains active at 16 minutes, cancel that attempt
+and revise the measured bottleneck rather than waiting for a late green result.
+
 The agent/maintainer may explicitly select affected local families for debugging
 from the actual dependency trace; no automatic impact-map implementation is
 claimed. Unknown impact broadens that explicit regression choice, not the
