@@ -47,6 +47,7 @@ export const validationDeclarations = {
       {"name": "T-130 SIGTERM cancels active file workers before the public runner returns", "parents": []}
     ]},
     {"id": "T-PRD018", "selectors": [
+      {"name": "T-PRD018 command cancellation settles the owned group before return and fails closed on unknown survivors", "parents": []},
       {"name": "T-PRD018 owned worker exit assertions distinguish reused identities from surviving workers", "parents": []},
       {"name": "T-GHB24 native execution evidence distinguishes passing, failing and skipped assertions without overwriting reports", "parents": []},
       {"name": "T-130 SIGINT cancels active file workers before the public runner returns", "parents": []},
@@ -60,14 +61,19 @@ import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { createContext, runInContext } from 'node:vm';
 import { setTimeout as delay } from 'node:timers/promises';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createPlan, parseOptions, repositoryRoot, unitFiles, validationSelectionDescriptor,
   validationSelectionProtocol, writeValidationSelection } from '../scripts/test-runner.mjs';
-import { discoverDeclarations } from '../scripts/validation-inventory.mjs';
+import { declarationTokens, discoverDeclarations } from '../scripts/validation-inventory.mjs';
 import { nativeStageSelections, validateNativeGroupReport } from '../scripts/native-validation.mjs';
 import { readTestBudget } from '../scripts/test-budget.mjs';
-import { digest } from '../src/core.mjs';
+import { digest, SdlcError } from '../src/core.mjs';
+import { atomicWrite } from '../src/files.mjs';
 import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
 import { executeValidationCommand, processDiagnostic } from '../scripts/validation-tools.mjs';
 import { windowsProcessIdentity, assertOwnedProcessExited } from './owned-process-fixture.mjs';
@@ -130,6 +136,133 @@ function summary(output, kind) {
   assert.ok(line, line ? undefined : runnerFailureDiagnostic({ stdout: output, expectedSummary: kind }));
   return JSON.parse(line.slice(prefix.length));
 }
+
+test('T-PRD018 command cancellation settles the owned group before return and fails closed on unknown survivors', async t => {
+  const modulePath = path.join(repositoryRoot, 'scripts', 'validation-tools.mjs');
+  const source = (await fs.readFile(modulePath, 'utf8'))
+    .replace(/^import .+;\r?$/gmu, '').replace(/^export /gmu, '')
+    .replaceAll('import.meta.url', JSON.stringify(pathToFileURL(modulePath).href));
+  const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'group-boundary-'));
+  t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+  const partial = 'Authorization: Bearer owned-group-fixture\n';
+  for (const mode of ['drain', 'root-exits-before-stop', 'stop-after-root-close', 'persistent', 'denied', 'unknown', 'missing']) {
+    const directory = path.join(evidence, mode);
+    await fs.mkdir(directory);
+    const cancellation = new AbortController();
+    const owned = Object.assign(new EventEmitter(), {
+      pid: 731941, exitCode: null, signalCode: null,
+      stdout: new PassThrough(), stderr: new PassThrough(),
+    });
+    let spawned;
+    const launched = new Promise(resolve => { spawned = resolve; });
+    let observedDrain;
+    const draining = new Promise(resolve => { observedDrain = resolve; });
+    let releaseDrain;
+    const released = new Promise(resolve => { releaseDrain = resolve; });
+    let present = mode !== 'missing';
+    let rootClosed = false;
+    let clock = 0;
+    let returned = false;
+    const signals = [];
+    // Only this VM kernel sees these synthetic group IDs; no host process is signalled.
+    const context = createContext({
+      Buffer, TextDecoder, URL, fileURLToPath, path, createHash, SdlcError, digest,
+      declarationTokens, sanitizeExecutionPayload, atomicWrite, setTimeout, clearTimeout,
+      open: fs.open, realpath: fs.realpath,
+      performance: { now: () => clock },
+      delay: async milliseconds => {
+        assert.equal(milliseconds, 10);
+        clock += milliseconds;
+        if (mode === 'persistent') return;
+        observedDrain('draining');
+        await released;
+        present = false;
+      },
+      process: { platform: 'darwin', version: process.version, arch: 'x64', env: {},
+        kill(pid, signal) {
+          assert.equal(pid, -owned.pid);
+          signals.push(signal);
+          if (signal === 'SIGTERM') {
+            assert.equal(rootClosed, false, 'Never signal a group after losing its tracked root');
+            if (mode === 'missing') throw Object.assign(new Error('Owned group absent'), { code: 'ESRCH' });
+            return true;
+          }
+          assert.equal(signal, 0, 'Settlement must not send a delayed destructive signal');
+          assert.equal(rootClosed, true, 'Descendant settlement follows the original root close');
+          if (mode === 'denied') throw Object.assign(new Error('Owned group observation denied'), { code: 'EPERM' });
+          if (mode === 'unknown') return false;
+          if (!present) throw Object.assign(new Error('Owned group absent'), { code: 'ESRCH' });
+          return true;
+        } },
+      spawn(command, args, options) {
+        assert.equal(command, 'controlled-owned-producer');
+        assert.equal(options.detached, true);
+        spawned();
+        return owned;
+      },
+    });
+    const execute = runInContext(`${source}\nexecuteValidationCommand;`, context);
+    const pending = execute({ name: 'cancelled', command: 'controlled-owned-producer', args: [],
+      outputDir: directory, signal: cancellation.signal });
+    const settled = pending.then(value => { returned = true; return value; });
+    try {
+      await launched;
+      owned.stdout.end(partial);
+      owned.stderr.end('original validator failure\n');
+      const close = () => {
+        rootClosed = true;
+        owned.signalCode = mode === 'drain' || ['persistent', 'denied', 'unknown', 'missing'].includes(mode) ? 'SIGTERM' : null;
+        owned.exitCode = owned.signalCode ? null : 7;
+        owned.emit('close', owned.exitCode, owned.signalCode);
+      };
+      if (mode === 'stop-after-root-close') close();
+      cancellation.abort();
+      if (mode === 'root-exits-before-stop' || mode === 'stop-after-root-close') {
+        if (!rootClosed) close();
+      } else {
+        // Let the actual stop callback send TERM before publishing root close.
+        await Promise.resolve();
+        close();
+      }
+      if (['drain', 'root-exits-before-stop', 'stop-after-root-close'].includes(mode)) {
+        assert.equal(await Promise.race([draining, settled.then(() => 'returned')]), 'draining',
+          'Root close must not finish a command while its owned group remains');
+        assert.equal(returned, false);
+        const journal = await fs.readFile(path.join(directory, 'cancelled.journal.ndjson'), 'utf8');
+        assert.ok(!journal.split('\n').filter(Boolean).map(JSON.parse).some(row => row.kind === 'command-end'));
+        assert.equal(JSON.parse(await fs.readFile(path.join(directory, 'cancelled.json'), 'utf8')).complete, false);
+        releaseDrain();
+      }
+      const report = await settled;
+      assert.equal(report.complete, false);
+      assert.equal(report.cleanup.rootExitObserved, true);
+      assert.equal(report.cleanup.survivorsVerified, !['persistent', 'denied', 'unknown'].includes(mode));
+      assert.equal(report.signal, owned.signalCode);
+      assert.equal(report.exitCode, owned.exitCode);
+      assert.ok(report.causes.some(cause => cause.type === 'cancellation'));
+      assert.equal(report.originalOutput.stdout.sha256, digest(partial));
+      assert.equal(report.originalOutput.stderr.sha256, digest('original validator failure\n'));
+      assert.ok(!report.stdout.includes('owned-group-fixture'));
+      if (['persistent', 'denied', 'unknown'].includes(mode)) {
+        const code = mode === 'persistent' ? 'STOP_TIMEOUT' : mode === 'denied' ? 'EPERM' : 'STOP_UNVERIFIED';
+        assert.equal(report.cleanup.outcome, 'uncertain');
+        assert.equal(report.cleanup.error.code, code);
+        assert.ok(report.causes.some(cause => cause.type === 'cleanup' && cause.code === code));
+        if (mode !== 'persistent') assert.equal(signals.filter(signal => signal === 0).length, 1);
+      } else {
+        assert.equal(report.cleanup.outcome, 'group-exited');
+        assert.equal(signals.at(-1), 0);
+      }
+      if (mode.includes('root')) assert.ok(!signals.includes('SIGTERM'));
+      if (mode === 'missing') assert.deepEqual(signals, ['SIGTERM', 0]);
+      assert.ok(clock <= 1000, 'Persistent groups use a bounded settlement budget');
+      assert.deepEqual(JSON.parse(await fs.readFile(path.join(directory, 'cancelled.json'), 'utf8')), report);
+    } finally {
+      releaseDrain();
+      await settled;
+    }
+  }
+});
 
 test('T-PRD018 owned worker exit assertions distinguish reused identities from surviving workers', async t => {
   const owned = { pid: process.pid, present: true, creationTime: '100', image: 'node' };

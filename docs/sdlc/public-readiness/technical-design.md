@@ -485,6 +485,37 @@ configuration/specification digest and ownership requirement. Native timing and
 actual CPython/native tool acceptance remain NotRun until their capable PR lanes
 execute; Node-only regressions do not establish a native speedup.
 
+The distinct source-selected `native-bootstrap-role-capabilities-v6` retains
+v5's five SDK/resource decisions and adds one closed boolean `crypto` requirement.
+It derives that requirement from the complete selected root closure and its
+literal applicability prerequisites, not from a claimed producer flag or fixed
+body number. The authentic T-PRD041 root must remain recognized with its declared
+owner, pinned Sigstore inputs and npm 11.16.0 prerequisite; a missing or unknown
+declaration fails closed. Unrecognized verifier/crypto prerequisites retain
+acquisition rather than authorizing omission.
+
+On the current 25-role source inventory, Linux/Windows `body-0` and both Mac
+`body-2` closures require the authentic fixture. The other 21 roles, including
+both genuine Homebrew roles, have no semantic consumer of that fixture. V6 alone
+omits their bundle/trust/npm acquisition, install, version probe and setup
+verification, as well as their fixture directories, exported inputs and
+`native.cryptoFixture` facts. It must not manufacture NotRequired or Passed
+crypto evidence. Required roles keep the real pinned CLI/verifier, owned paths,
+offline trust, exact certificate identity and every authentic positive/negative
+control. Their retained paths must belong to their own producer's bootstrap;
+runtime exports must match those exact pinned inputs.
+
+Bind the sixth boolean and conditional pinned fixture into configuration,
+captured source definitions, component projection, replay and protected
+admission. V5 remains a named historical protocol: its five-field tool objects,
+all-role crypto setup and original configuration/specification/projection
+digests do not acquire v6 semantics. Preserve v4/v3/v2/null and full/R-PRE
+contracts unchanged. All 1610 assertion identities, complete closures, 25
+origins, 13 Mac diagnostics, two real prefix owners, eleven nonallocations,
+SDK decisions and worker allocations remain unchanged. Controlled Node-only
+dispatch/absence tests establish no native elapsed improvement, authentic
+verification success or four-lane under-900-second acceptance.
+
 The PR workflow explicitly allocates 15 shared test-worker slots on Linux and
 Windows, 7 on Apple Silicon, four on both Intel unit hosts and fourteen on Intel
 regression hosts. The two CPU-matched Intel unit jobs completed their measured
@@ -541,6 +572,12 @@ product-scale or hosted performance benchmark.
 
 ### 4.4 Producer output and cancellation
 
+The standalone syntax checker uses one common bounded ready-work policy across
+hosts, limited by available CPUs and the existing 32-slot ceiling. It remains
+serial under an inherited test allocation. Syntax-check failure stops further
+dispatch, awaits every already-started child and preserves the original
+source-order primary error; independent completions release capacity immediately.
+
 The worker emits sanitized incremental records to a unique owned execution
 journal and publishes an incomplete JSON checkpoint before callbacks begin.
 An exclusive output claim prevents another attempt from replacing that path.
@@ -565,6 +602,11 @@ report or an already completed final report; attempt/run identity and digest
 select a new output. Missing final output, interrupted snapshots and journal-only
 recovery cannot pass readiness. A kill before initial publication or an OS/
 filesystem failure may still prevent the first checkpoint.
+For a stopped POSIX command, root closure is not proof that its created group
+has disappeared. Await bounded group settlement before final command completion;
+only `ESRCH` verifies disappearance, while denied, persistent or unknown
+observations stay non-passing. Do not send unverified delayed destructive
+signals after losing the tracked root or observing group disappearance.
 
 Periodic worker replacements reuse `atomicWrite`, including its existing
 100-ms recovery budget for classified Windows sharing conflicts, rather than

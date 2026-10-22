@@ -23,7 +23,9 @@ import { createReadinessGitHubClient } from '../scripts/github-readiness-host.mj
 import { createPrReadinessHost, statusConcurrencyGroup } from '../scripts/pr-observer.mjs';
 import { calculatorFiles, calculatorSelection, calculatorCommandArguments } from '../scripts/pr-calculator.mjs';
 import { validationExecutionGroups, validationGroupProtocol, validationSchedulingPolicyDigest } from '../scripts/test-scheduling.mjs';
-import { nativeToolchain, homebrewToolchain, nativeBootstrapProtocol } from '../scripts/toolchain-baseline.mjs';
+import { nativeToolchain, homebrewToolchain, nativeBootstrapProtocol,
+  nativeBodyBootstrapProtocol } from '../scripts/toolchain-baseline.mjs';
+import { prCryptoFixture } from '../scripts/pr-capabilities.mjs';
 import { nativeBootstrapCapability, nativeSdkRequirements, nativeBootstrapRequirements } from '../scripts/native-bootstrap-capability.mjs';
 
 const repository = 'urmich/ai-sdlc-framework';
@@ -152,6 +154,10 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
       'const validationIntegrityInventory = `{"schemaVersion":1,"tests":{"TestIntegrity":[]}}`\n' +
       'func TestIntegrity(t *testing.T) {}\n' },
   ];
+  if (bootstrapProtocol === nativeBootstrapProtocol) names.push({
+    file: 'test/public-readiness-release-consumer.test.mjs', stage: 'regression', id: 'T-PRD041',
+    name: 'T-PRD041 retained signed fixtures use the actual verifier for payload signature certificate and transparency failures',
+  });
   const files = new Map(reporterPaths.map(file => [file,
     file.endsWith('.yml') ? ci : 'throw new Error("candidate reporter must never execute in the observer");\n']));
   files.set('scripts/toolchain-baseline.mjs',
@@ -168,6 +174,12 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
   for (const [index, { id, file, name }] of names.entries()) {
     files.set(file, `export const validationDeclarations = ${JSON.stringify({
       schemaVersion: 1,
+      ...(file === 'test/public-readiness-release-consumer.test.mjs' ? { applicability: [{
+        names: [name], platforms: ['linux-x64', 'windows-x64', 'macos-arm64', 'macos-x64'],
+        owner: 'consumer-crypto-fixture', reason: 'Controlled source capture; no authentic verifier execution',
+        prerequisites: ['SHA-pinned recorded public Sigstore bundle and public trust root',
+          'Integrity-pinned npm 11.16.0 with its actual bundled verifier'],
+      }] } : {}),
       ...(index === 0 ? { surfaces: [{ coverage: 'fixture-only', paths: surfaces }],
         projects: [{ root: 'test/calculator', files: calculatorFiles, coverage: 'fixture-only',
           owner: 'controlled-observer-fixture', reason: 'Independent namespace; not framework assertion credit',
@@ -379,7 +391,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
     uname: architecture === 'arm64' ? 'arm64' : 'x86_64', translation: '0',
   };
   if (bootstrapProtocol !== null && (component === 'framework' && shard !== null ||
-    bootstrapProtocol === nativeBootstrapProtocol && component === 'homebrew')) {
+    [nativeBodyBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol) && component === 'homebrew')) {
     const capability = nativeBootstrapCapability({ ...bootstrapOptions, role });
     bootstrap.native.bootstrapCapability = capability;
     bootstrap.native.runtimeProvider = { provider: capability.runtimeProvider, executable: bootstrap.native.executables.node,
@@ -425,6 +437,14 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
   if (!resourcesRequired.homebrew) {
     delete bootstrap.native.homebrew;
     bootstrap.reports = bootstrap.reports.filter(report => !report.name.startsWith('brew-'));
+  }
+  if (resourcesRequired.crypto) {
+    const root = `/controlled-fixture/.test-data/bootstrap-${role}/crypto-fixture`;
+    bootstrap.native.cryptoFixture = { bundleSha256: prCryptoFixture.bundle.sha256,
+      trustSha256: prCryptoFixture.trust.sha256, offline: true, verifier: 'npm-11.16.0-bundled-sigstore',
+      paths: { bundleFile: `${root}/public-intoto.sigstore`, toolRoot: `${root}/npm-tool/node_modules/npm`,
+        cachePath: `${root}/offline-trust` } };
+    bootstrap.reports.push(...['crypto-tool-99', 'crypto-tool-100'].map(name => ({ name, complete: true, exitCode: 0 })));
   }
   const context = validateExecutionContext({
     candidateDigest: digest({ revision: revisions.merge, tree: source.sha }),

@@ -4,10 +4,11 @@ export const nativeToolchain = Object.freeze({
 
 export const nativeSdkBootstrapProtocol = 'native-bootstrap-role-capabilities-v3';
 export const nativeUnitBootstrapProtocol = 'native-bootstrap-role-capabilities-v4';
-export const nativeBootstrapProtocol = 'native-bootstrap-role-capabilities-v5';
+export const nativeBodyBootstrapProtocol = 'native-bootstrap-role-capabilities-v5';
+export const nativeBootstrapProtocol = 'native-bootstrap-role-capabilities-v6';
 export const nativeBootstrapProtocols = Object.freeze([
   'native-bootstrap-role-capabilities-v2', nativeSdkBootstrapProtocol, nativeUnitBootstrapProtocol,
-  nativeBootstrapProtocol,
+  nativeBodyBootstrapProtocol, nativeBootstrapProtocol,
 ]);
 
 export const homebrewToolchain = Object.freeze({

@@ -25,10 +25,11 @@ import { buildPlatforms, renderChecksums } from './package-platforms.mjs';
 import { calculatorProjectFiles, calculatorSelection, calculatorCapability, calculatorBaselineCapability, reconcileCalculator,
   calculatorArguments } from './pr-calculator.mjs';
 import { prCryptoFixture } from './pr-capabilities.mjs';
-import { nativeToolchain, nativeBootstrapProtocol, nativeUnitBootstrapProtocol,
+import { nativeToolchain, nativeBootstrapProtocol, nativeBodyBootstrapProtocol, nativeUnitBootstrapProtocol,
   nativeSdkBootstrapProtocol, nativeBootstrapProtocols } from './toolchain-baseline.mjs';
 import { sourceNativeBootstrapProtocol, requireNativeBootstrapCapability, nativeSdkRequirements,
-  nativeSdkContextMatches, nativeBootstrapRequirements, probeNativeSdk } from './native-bootstrap-capability.mjs';
+  nativeSdkContextMatches, nativeBootstrapRequirements, probeNativeSdk,
+  requireNativeCryptoEnvironment } from './native-bootstrap-capability.mjs';
 export { nativeToolchain } from './toolchain-baseline.mjs';
 export { deriveNativeComponentSpecification, nativeComponentSelection,
   projectNativeComponentEvidence, replayNativeComponentEvidence,
@@ -167,25 +168,31 @@ export function nativeConfigurationDigest({ inventory, plan, profile, target = n
     new Set(calculator.files).size === calculator.files.length &&
     calculator.files.every(file => /^test\/calculator\/(?:[^/]+\/)*[^/]+\.test\.(?:js|mjs|cjs)$/u.test(file)),
   'INVENTORY', 'Native calculator capability must preserve its complete independently selected files and assertion count');
-  requireThat(bootstrapTools === null || bootstrapProtocol === nativeBootstrapProtocol &&
-    digest(Object.keys(bootstrapTools).sort()) === digest(['go', 'homebrew', 'ownedPrefix', 'python', 'schema']) &&
+  requireThat(bootstrapTools === null || [nativeBodyBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol) &&
+    digest(Object.keys(bootstrapTools).sort()) === digest([
+      ...(bootstrapProtocol === nativeBootstrapProtocol ? ['crypto'] : []), 'go', 'homebrew', 'ownedPrefix', 'python', 'schema']) &&
     Object.values(bootstrapTools).every(value => typeof value === 'boolean') &&
     (!bootstrapTools.schema || bootstrapTools.python) && bootstrapTools.homebrew === bootstrapTools.ownedPrefix,
-  'INVENTORY', 'Projected bootstrap requirements must preserve the closed source-derived v5 tool capabilities');
+  'INVENTORY', 'Projected bootstrap requirements must preserve the closed source-derived versioned tool capabilities');
+  const roleCapability = bootstrapProtocol !== null && (component === 'framework' && shard !== null ||
+    [nativeBodyBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol) &&
+      component === 'homebrew' && profile === 'pr');
+  const tools = roleCapability ?
+    [nativeUnitBootstrapProtocol, nativeBodyBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol) ?
+      bootstrapTools ?? nativeBootstrapRequirements({ inventory, plan, target, profile, component, shard,
+        protocol: bootstrapProtocol, assignment, shardProtocol }) :
+      nativeSdkRequirements({ target: shard === 'units-1' ? 'macos-x64' : 'linux-x64',
+        profile, component, shard, protocol: bootstrapProtocol }) : null;
   return digest({ nativeToolchain, inventory: inventory.digest, profile,
     ...(component === 'full' ? {} : { component }),
     ...(shard === null ? {} : { frameworkShards: shardProtocol, shard, shardPlanDigest }),
     schedulingPolicy: validationSchedulingPolicyDigest(), selectedWorkersRequest: requested,
     selectionTransport: validationSelectionProtocol,
-    requiredCapabilities: { crypto: prCryptoFixture, calculator,
-      ...(bootstrapProtocol !== null && (component === 'framework' && shard !== null ||
-        bootstrapProtocol === nativeBootstrapProtocol && component === 'homebrew' && profile === 'pr') ?
-        { bootstrapProtocol, ...([nativeSdkBootstrapProtocol, nativeUnitBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol) ?
-          { tools: [nativeUnitBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol) ?
-            bootstrapTools ?? nativeBootstrapRequirements({ inventory, plan, target, profile, component, shard,
-              protocol: bootstrapProtocol, assignment, shardProtocol }) :
-            nativeSdkRequirements({ target: shard === 'units-1' ? 'macos-x64' : 'linux-x64',
-              profile, component, shard, protocol: bootstrapProtocol }) } : {}) } : {}) } });
+    requiredCapabilities: { crypto: bootstrapProtocol === nativeBootstrapProtocol && tools?.crypto === false ?
+      null : prCryptoFixture, calculator,
+      ...(roleCapability ?
+        { bootstrapProtocol, ...([nativeSdkBootstrapProtocol, nativeUnitBootstrapProtocol, nativeBodyBootstrapProtocol,
+          nativeBootstrapProtocol].includes(bootstrapProtocol) ? { tools } : {}) } : {}) } });
 }
 
 export function nativeResourceFacts({ availableParallelism = os.availableParallelism(),
@@ -850,7 +857,7 @@ async function collectExecution({ directory, data, inventory, sources, calculato
   const read = name => data ? Promise.resolve(data[name] ?? null) : readOptional(path.join(directory, name));
   if (bootstrapProtocol !== null) requireNativeBootstrapCapability({
     bootstrap: await read('toolchain.json'), inventory, plan, assignment, target, profile, component, shard, protocol: bootstrapProtocol });
-  if ([nativeUnitBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol) && !nativeBootstrapRequirements({
+  if ([nativeUnitBootstrapProtocol, nativeBodyBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol) && !nativeBootstrapRequirements({
     inventory, plan, assignment, target, profile, component, shard, protocol: bootstrapProtocol,
   }).ownedPrefix) {
     for (const file of ['native-homebrew-prefix-allocation.json', 'native-homebrew-prefix-cleanup.json',
@@ -1587,9 +1594,10 @@ export async function runNativeValidation(options) {
       runId: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT };
     for (const name of ['NODE_AUTH_TOKEN', 'NPM_TOKEN', 'GITHUB_TOKEN', 'GH_TOKEN']) delete environment[name];
     const bootstrap = await readOptional(process.env.SDLC_NATIVE_TOOLCHAIN_REPORT ?? path.join(directory, 'missing-bootstrap.json'));
-    requireNativeBootstrapCapability({ bootstrap, inventory: inputs.inventory, plan: inputs.plan, assignment,
+    const bootstrapCapability = requireNativeBootstrapCapability({ bootstrap, inventory: inputs.inventory, plan: inputs.plan, assignment,
       target, profile, component, shard,
       protocol: inputs.bootstrapProtocol });
+    requireNativeCryptoEnvironment(bootstrapCapability, bootstrap.native.cryptoFixture, environment);
     const resources = nativeResourceFacts();
     requireThat(bootstrap?.status === 'Passed' && bootstrap.target === target &&
       bootstrap.native.node === process.versions.node && bootstrap.native.platform === process.platform &&

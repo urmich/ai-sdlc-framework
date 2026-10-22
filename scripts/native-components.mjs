@@ -9,7 +9,7 @@ import { nativeConfigurationDigest, nativeProducerRole, nativePrPartsForProtocol
   nativeSpecification, nativeFrameworkShardProtocol, requireNativeShardUnitOrder } from './native-validation.mjs';
 import { nativeFrameworkShardProtocols, nativeFourBodyFrameworkShardProtocol } from './native-validation.mjs';
 import { calculatorCapability, calculatorBaselineCapability } from './pr-calculator.mjs';
-import { nativeBootstrapProtocol } from './toolchain-baseline.mjs';
+import { nativeBootstrapProtocol, nativeBodyBootstrapProtocol } from './toolchain-baseline.mjs';
 import { nativeBootstrapRequirements } from './native-bootstrap-capability.mjs';
 
 const projections = new WeakMap();
@@ -110,7 +110,7 @@ export function deriveNativeComponentSpecification({ inventory, testPlan, adapte
     ...(frameworkShards ? { frameworkShards: shardProtocol,
       shardParts: nativePrPartsForProtocol(shardProtocol).filter(part => part.component === 'framework').map(part => ({
         ...part, assignmentDigest: assignments.get(part.target).digest,
-        ...(bootstrapProtocol === nativeBootstrapProtocol ? {
+        ...([nativeBodyBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol) ? {
           bootstrapTools: nativeBootstrapRequirements({ inventory, plan: testPlan, ...part, profile: 'pr',
             protocol: bootstrapProtocol, assignment: assignments.get(part.target) }),
         } : {}),

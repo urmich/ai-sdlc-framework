@@ -283,8 +283,8 @@ export async function main(argv) {
   const { flags } = parseArguments(args);
   const layout = await validateChannelHome({ channelRoot, home: flags.home });
   bindHome(args, layout.home);
-  await verifyTree(root, { expectedPlatform: process.platform, expectedArch: process.arch });
   if (['doctor', 'uninstall'].includes(args[0])) {
+    await verifyTree(root, { expectedPlatform: process.platform, expectedArch: process.arch });
     if (channelOnly) throw new Error('--channel-only applies only to install/update');
     return invokeFramework(root, node, args);
   }

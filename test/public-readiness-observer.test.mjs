@@ -26,10 +26,11 @@ import { calculatorFiles } from '../scripts/pr-calculator.mjs';
 import { deriveNativeComponentSpecification, nativeComponentSelection,
   projectNativeComponentEvidence, replayNativeComponentEvidence } from '../scripts/native-components.mjs';
 import { compileValidationSourceInventory } from '../scripts/validation-inventory.mjs';
-import { nativeBootstrapProtocol, nativeUnitBootstrapProtocol } from '../scripts/toolchain-baseline.mjs';
+import { nativeBootstrapProtocol, nativeBodyBootstrapProtocol, nativeUnitBootstrapProtocol } from '../scripts/toolchain-baseline.mjs';
 
 test('T-PRD021 source-bound role bootstrap preserves all producer origins and thirteen independent Mac cleanups', async t => {
-  for (const protocol of ['native-bootstrap-role-capabilities-v3', nativeUnitBootstrapProtocol, nativeBootstrapProtocol]) {
+  for (const protocol of ['native-bootstrap-role-capabilities-v3', nativeUnitBootstrapProtocol,
+    nativeBodyBootstrapProtocol, nativeBootstrapProtocol]) {
   const f = await observerApiFixture(t, { frameworkShards: true, bootstrapProtocol: protocol,
     nodeArtifactReader: true });
   const { host, client } = f.connect();
@@ -54,8 +55,9 @@ test('T-PRD021 source-bound role bootstrap preserves all producer origins and th
       }
     } else {
       assert.equal(bootstrap.native.homebrew.node.version, '24.20.0');
-      assert.equal(Object.hasOwn(bootstrap.native, 'bootstrapCapability'), protocol === nativeBootstrapProtocol);
-      if (protocol === nativeBootstrapProtocol) {
+      assert.equal(Object.hasOwn(bootstrap.native, 'bootstrapCapability'),
+        [nativeBodyBootstrapProtocol, nativeBootstrapProtocol].includes(protocol));
+      if ([nativeBodyBootstrapProtocol, nativeBootstrapProtocol].includes(protocol)) {
         assert.equal(Object.hasOwn(bootstrap.native, 'go'), false);
         assert.equal(Object.hasOwn(bootstrap.native, 'python'), false);
         assert.equal(Object.hasOwn(bootstrap.native, 'schemaPackages'), false);
@@ -88,12 +90,31 @@ test('T-PRD021 source-bound role bootstrap preserves all producer origins and th
       }
     }
   }
-  assert.equal(prefixes.length, protocol === nativeBootstrapProtocol ? 2 :
+  assert.equal(prefixes.length, [nativeBodyBootstrapProtocol, nativeBootstrapProtocol].includes(protocol) ? 2 :
     protocol === nativeUnitBootstrapProtocol ? 8 : 13);
   assert.equal(new Set(prefixes).size, prefixes.length);
   const retained = host.componentEvidence();
   assert.equal(retained[0].projection.definition.bootstrapProtocol, protocol);
   assert.equal(retained[0].projection.provenance.length, 23);
+  if (protocol === nativeBootstrapProtocol) {
+    const required = [...f.parts.values()].find(part => part.data.get('toolchain.json').native.cryptoFixture);
+    const omitted = [...f.parts.values()].find(part => !part.data.get('toolchain.json').native.cryptoFixture);
+    for (const [part, mutate] of [
+      [required, value => { value.native.cryptoFixture.trustSha256 = '0'.repeat(64); }],
+      [required, value => { value.native.bootstrapCapability.tools.crypto = false; }],
+      [omitted, value => { value.native.cryptoFixture = { status: 'NotRequired' }; }],
+      [omitted, value => { value.native.bootstrapCapability.tools.crypto = 'false'; }],
+    ]) {
+      const original = part.data.get('toolchain.json');
+      const altered = structuredClone(original);
+      mutate(altered);
+      part.data.set('toolchain.json', altered);
+      f.refresh(part.role);
+      assert.notEqual(verdict(await host.snapshot()).status, 'Passed');
+      part.data.set('toolchain.json', original);
+      f.refresh(part.role);
+    }
+  }
   }
 });
 
@@ -509,6 +530,10 @@ test('T-PRD021 versioned twenty-five twenty-four and twenty-part originals requi
     [nativeFourBodyFrameworkShardProtocol, nativeUnitBootstrapProtocol],
     [nativeFrameworkShardProtocol, 'native-bootstrap-role-capabilities-v2'],
     [nativeFrameworkShardProtocol, nativeUnitBootstrapProtocol],
+    [nativeFrameworkShardProtocol, nativeBodyBootstrapProtocol],
+    [nativeFourBodyFrameworkShardProtocol, nativeBodyBootstrapProtocol],
+    [nativePlatformUnitFrameworkShardProtocol, nativeBodyBootstrapProtocol],
+    [nativeLegacyFrameworkShardProtocol, nativeBodyBootstrapProtocol],
     [nativeFrameworkShardProtocol, nativeBootstrapProtocol],
     [nativeFourBodyFrameworkShardProtocol, nativeBootstrapProtocol],
     [nativePlatformUnitFrameworkShardProtocol, nativeBootstrapProtocol],
@@ -542,7 +567,7 @@ test('T-PRD021 versioned twenty-five twenty-four and twenty-part originals requi
       else assert.equal(cleanup.status, 'not-required');
     }
   }
-  const expectedMacCount = bootstrapProtocol === nativeBootstrapProtocol ? 2 :
+  const expectedMacCount = [nativeBodyBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol) ? 2 :
     bootstrapProtocol === nativeUnitBootstrapProtocol ? 8 :
     shardProtocol === nativeFrameworkShardProtocol ? 13 : 12;
   assert.equal(prefixes.length, expectedMacCount);
@@ -642,7 +667,7 @@ test('T-PRD021 versioned twenty-five twenty-four and twenty-part originals requi
     }) });
   assert.equal(replay.evaluation.status, 'Passed');
   assert.equal(replay.currentCredit, 'NotRun', 'Historical shard replay must never grant current-candidate credit');
-  if ([nativeUnitBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol)) {
+  if ([nativeUnitBootstrapProtocol, nativeBodyBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol)) {
     for (const file of ['native-homebrew-prefix-allocation.json', 'native-homebrew-prefix-cleanup.json']) {
       const invented = new Map(refresh.data);
       invented.set(file, { status: 'Passed', prefix: '/opt/abcde' });

@@ -749,7 +749,7 @@ test('T-PRD015 actual pinned Go, Python schema and static validators execute val
   const document = JSON.parse(await fs.readFile(hooks, 'utf8'));
   await fs.writeFile(hooks, JSON.stringify({ ...document, version: 99 }));
   await fs.writeFile(path.join(broken, 'verify-static.mjs'), `
-try { await import('./scripts/check.mjs'); }
+try { const { check } = await import('./scripts/check.mjs'); await check(); }
 catch (error) {
   if (error.code !== 'ERR_ASSERTION') throw error;
   console.error(JSON.stringify({code:error.code,message:error.message,actual:error.actual,expected:error.expected}));
@@ -1582,6 +1582,10 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.equal(Object.values(tools).filter(value => value.python).length, 17);
   assert.equal(Object.values(tools).filter(value => value.schema).length, 4);
   assert.equal(Object.values(tools).filter(value => value.ownedPrefix).length, 2);
+  assert.equal(Object.values(tools).filter(value => value.crypto).length, 4);
+  assert.equal(Object.values(tools).filter(value => value.crypto === false).length, 21);
+  assert.ok(Object.values(tools).every(value =>
+    Object.keys(value).sort().join(',') === 'crypto,go,homebrew,ownedPrefix,python,schema'));
   assert.ok(Object.entries(tools).every(([role, value]) =>
     value.homebrew === value.ownedPrefix && value.ownedPrefix === role.endsWith('-homebrew')));
   for (const key of keys) {

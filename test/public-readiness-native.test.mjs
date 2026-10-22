@@ -34,12 +34,13 @@ import { repositoryRoot, createPlan, parseOptions, run as runTests } from '../sc
 import { discoverDeclarations, compileValidationInventory, compileValidationSourceInventory, validationSourcePaths } from '../scripts/validation-inventory.mjs';
 import { runCalculator, calculatorFiles, calculatorSelection, calculatorArguments,
   calculatorCommandArguments, reconcileCalculator } from '../scripts/pr-calculator.mjs';
-import { fetchPinnedFixture, provisionPrCryptoFixture } from '../scripts/pr-capabilities.mjs';
+import { fetchPinnedFixture, provisionPrCryptoFixture, prCryptoFixture } from '../scripts/pr-capabilities.mjs';
 import { nativeToolchain } from '../scripts/toolchain-baseline.mjs';
-import { nativeBootstrapProtocol, nativeUnitBootstrapProtocol, nativeSdkBootstrapProtocol, homebrewToolchain } from '../scripts/toolchain-baseline.mjs';
+import { nativeBootstrapProtocol as nativeCryptoBootstrapProtocol, nativeBodyBootstrapProtocol as nativeBootstrapProtocol,
+  nativeUnitBootstrapProtocol, nativeSdkBootstrapProtocol, homebrewToolchain } from '../scripts/toolchain-baseline.mjs';
 import { sourceNativeBootstrapProtocol, nativeBootstrapCapability, bootstrapRequestCapability,
   requireNativeBootstrapCapability, nativeSdkRequirements, nativeSdkContextMatches,
-  nativeBootstrapRequirements, probeNativeSdk } from '../scripts/native-bootstrap-capability.mjs';
+  nativeBootstrapRequirements, probeNativeSdk, requireNativeCryptoEnvironment } from '../scripts/native-bootstrap-capability.mjs';
 import { nativeComponentSelection } from '../scripts/native-components.mjs';
 
 test('T-PRD015 refresh SDK dispatch omits unused commands while historical and other roles probe exact tools in order', async () => {
@@ -84,7 +85,7 @@ test('T-PRD015 refresh SDK requirements reject producer downgrades and retain hi
   assert.throws(() => nativeSdkRequirements({ ...request, role: 'macos-arm64-framework-units' }), { code: 'INPUT' });
 });
 
-test('T-PRD015 role bootstrap is source-selected and cannot downgrade full release or historical configurations', () => {
+test('T-PRD015 role bootstrap is source-selected and cannot downgrade full release or historical configurations', async () => {
   const inventory = { complete: true, digest: '1'.repeat(64) };
   const calculator = { namespace: 'calculator', tests: 1, files: ['test/calculator/capability.test.js'] };
   const source = value => [{ file: 'scripts/toolchain-baseline.mjs', contents: value }];
@@ -98,7 +99,9 @@ test('T-PRD015 role bootstrap is source-selected and cannot downgrade full relea
   assert.equal(bootstrapRequestCapability({ target: 'macos-arm64' }), null);
   const request = { target: 'macos-arm64', profile: 'pr', component: 'framework',
     shard: 'units', role: 'macos-arm64-framework-units' };
-  assert.equal(bootstrapRequestCapability(request).homebrew, 'not-required');
+  const selectedInventory = await compileValidationInventory(repositoryRoot);
+  const selectedPlan = await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
+  assert.equal(bootstrapRequestCapability({ ...request, inventory: selectedInventory, plan: selectedPlan }).homebrew, 'not-required');
   for (const change of [{ profile: 'r-pre' }, { component: 'full' }, { component: 'homebrew' },
     { shard: 'body-3' }, { role: 'macos-x64-framework-units' }, { profile: undefined }]) {
     assert.throws(() => bootstrapRequestCapability({ ...request, ...change }), { code: 'INPUT' });
@@ -273,6 +276,10 @@ test('T-PRD015 v4 unit runtime is required while unused SDK schema and prefix ev
 });
 
 test('T-PRD015 genuine Homebrew bootstrap records its capability and installs the complete native bottle closure', async () => {
+  const selectedInventory = await compileValidationInventory(repositoryRoot);
+  const selectedPlan = await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
+  const assignments = new Map(['linux-x64', 'windows-x64', 'macos-arm64', 'macos-x64'].map(target =>
+    [target, nativeFrameworkShardPlan({ inventory: selectedInventory, plan: selectedPlan, target })]));
   for (const target of ['macos-arm64', 'macos-x64']) {
     const architecture = target === 'macos-arm64' ? 'arm64' : 'x64';
     const prefix = '/opt/abcde';
@@ -308,6 +315,7 @@ test('T-PRD015 genuine Homebrew bootstrap records its capability and installs th
         readdir: async file => file === plan.cellar ? [folder(homebrewToolchain.formula)] :
           file === `${plan.cellar}/${homebrewToolchain.formula}` ? [folder(homebrewToolchain.node)] : [],
         readFile: async file => {
+          if (file === `${root}/docs/sdlc/public-readiness/test-plan.md`) return selectedPlan;
           assert.equal(file, `${plan.entries[0].prefix}/INSTALL_RECEIPT.json`);
           assert.ok(calls.includes('brew-node-install'), 'Receipts must follow actual dispatched installation');
           return Buffer.from(JSON.stringify(receipt));
@@ -331,15 +339,15 @@ test('T-PRD015 genuine Homebrew bootstrap records its capability and installs th
       digest: value => digest(value !== null && typeof value === 'object' && !Buffer.isBuffer(value) ?
         JSON.parse(JSON.stringify(value)) : value),
       requireThat, sanitizeExecutionPayload, nativeToolchain, homebrewToolchain,
-      bootstrapRequestCapability, nativeBootstrapRequirements,
+      bootstrapRequestCapability, nativeBootstrapRequirements, requireNativeCryptoEnvironment,
+      compileValidationInventory: async () => selectedInventory,
       homebrewSetupLimits, homebrewBottlePlanSource, AbortController, AbortSignal, Buffer,
       console: { log: () => {} },
       nativeResourceFacts: () => ({ configuredWorkers: 4 }),
       allocateHomebrewPrefix: async () => ({ prefix }),
       recordHomebrewPrefixNotRequired: () => assert.fail('Genuine Homebrew requires its own allocated prefix'),
-      provisionPrCryptoFixture: async () => ({}), prCryptoFixture: {
-        bundle: { sha256: 'b'.repeat(64) }, trust: { sha256: 'c'.repeat(64) },
-      },
+      provisionPrCryptoFixture: () => assert.fail('Genuine Homebrew never acquires the unused crypto fixture'),
+      prCryptoFixture,
       executeValidationCommand: async ({ name }) => {
         calls.push(name);
         assert.doesNotMatch(name, /^(?:go-|python-|schema-)/u);
@@ -373,12 +381,158 @@ test('T-PRD015 genuine Homebrew bootstrap records its capability and installs th
     const retained = JSON.parse(files.get(`${directory}/toolchain.json`).toString('utf8'));
     assert.equal(retained.status, 'Passed');
     assert.deepEqual(requireNativeBootstrapCapability({ ...request, bootstrap: retained, prefix,
-      protocol: nativeBootstrapProtocol }), nativeBootstrapCapability({ ...request, protocol: nativeBootstrapProtocol }));
+      inventory: selectedInventory, plan: selectedPlan, protocol: nativeCryptoBootstrapProtocol }),
+    nativeBootstrapCapability({ ...request, inventory: selectedInventory, plan: selectedPlan, protocol: nativeCryptoBootstrapProtocol }));
+    assert.equal(Object.hasOwn(retained.native, 'cryptoFixture'), false);
+    assert.equal(Object.keys(result).some(name => /^SDLC_NPM_/u.test(name)), false);
+    assert.equal([...files.keys()].some(file => file.includes('/crypto-fixture/')), false);
     assert.equal(files.has(`${directory}/homebrew-bottle-plan.json`), true);
     assert.equal(files.has(`${directory}/homebrew-bottle-receipts.json`), true);
     assert.equal(listeners.size, 0);
   }
+  const roleResults = [];
+  for (const part of nativePrParts.filter(part => part.component === 'framework')) {
+    const request = { ...part, profile: 'pr', protocol: nativeCryptoBootstrapProtocol,
+      inventory: selectedInventory, plan: selectedPlan, assignment: assignments.get(part.target) };
+    const expected = nativeBootstrapRequirements(request);
+    const historical = nativeBootstrapRequirements({ ...request, protocol: nativeBootstrapProtocol });
+    assert.deepEqual(Object.fromEntries(Object.entries(expected).filter(([key]) => key !== 'crypto')), historical);
+    assert.deepEqual(nativeSdkRequirements(request), nativeSdkRequirements({ ...request, protocol: nativeBootstrapProtocol }));
+    const run = await controlledFrameworkBootstrap(request);
+    const fixture = run.report.native.cryptoFixture;
+    assert.equal(run.cryptoCalls, Number(expected.crypto), part.role);
+    assert.equal(Object.hasOwn(run.report.native, 'cryptoFixture'), expected.crypto);
+    assert.equal(run.directories.some(file => file.includes('/crypto-fixture')), expected.crypto);
+    assert.equal(run.report.reports.some(item => /^crypto-/u.test(item.name)), expected.crypto);
+    assert.equal(Object.keys(run.exports).some(name => /^SDLC_NPM_/u.test(name)), expected.crypto);
+    assert.deepEqual(requireNativeBootstrapCapability({ ...request, bootstrap: run.report }),
+      nativeBootstrapCapability(request));
+    requireNativeCryptoEnvironment(nativeBootstrapCapability(request), fixture, run.exports);
+    roleResults.push({ role: part.role, crypto: expected.crypto });
+    for (const mutate of [
+      value => { value.native.bootstrapCapability.tools.crypto = !expected.crypto; },
+      value => { value.native.bootstrapCapability.tools.crypto = 'false'; },
+      value => { value.native.bootstrapCapability.tools.extra = false; },
+      value => { delete value.native.bootstrapCapability.tools.crypto; },
+      value => { value.native.executables.verifier = '/borrowed/npm'; },
+      value => {
+        if (expected.crypto) delete value.native.cryptoFixture;
+        else value.native.cryptoFixture = { status: 'NotRequired' };
+      },
+      value => {
+        if (expected.crypto) value.reports = value.reports.filter(item => !/^crypto-/u.test(item.name));
+        else value.reports.push({ name: 'crypto-tool-99', complete: true, exitCode: 0 });
+      },
+      ...(expected.crypto ? [
+        value => { value.native.cryptoFixture.bundleSha256 = '0'.repeat(64); },
+        value => { value.native.cryptoFixture.trustSha256 = '0'.repeat(64); },
+        value => { value.native.cryptoFixture.verifier = 'ambient'; },
+        value => { value.native.cryptoFixture.paths.toolRoot = '/borrowed/npm'; },
+        value => { value.native.cryptoFixture.paths.bundleFile = '/borrowed/public-intoto.sigstore'; },
+        value => { value.native.cryptoFixture.paths.cachePath = '/borrowed/offline-trust'; },
+      ] : []),
+    ]) {
+      const altered = structuredClone(run.report);
+      mutate(altered);
+      assert.throws(() => requireNativeBootstrapCapability({ ...request, bootstrap: altered }), { code: 'EVIDENCE' });
+    }
+    const forgedTools = { ...expected, crypto: 'false' };
+    assert.throws(() => nativeConfigurationDigest({ ...request, bootstrapProtocol: nativeCryptoBootstrapProtocol,
+      bootstrapTools: forgedTools, shardPlanDigest: request.assignment.digest }), { code: 'INVENTORY' });
+    if (expected.crypto) {
+      for (const change of [
+        values => { delete values.SDLC_NPM_TOOL_ROOT; },
+        values => { values.SDLC_NPM_SIGNED_FIXTURE_SHA256 = '0'.repeat(64); },
+        values => { values.SDLC_NPM_TOOL_ROOT = '/borrowed/npm'; },
+      ]) await assert.rejects(controlledFrameworkBootstrap(request, change), { code: 'EVIDENCE' });
+    } else assert.throws(() => requireNativeCryptoEnvironment(nativeBootstrapCapability(request), undefined,
+      { SDLC_NPM_TOOL_ROOT: '/ambient/npm' }), { code: 'EVIDENCE' });
+  }
+  assert.equal(roleResults.filter(item => item.crypto).length, 4);
+  assert.equal(roleResults.filter(item => !item.crypto).length, 19);
+  const missing = structuredClone(selectedInventory);
+  missing.cases = missing.cases.filter(item => item.applicability.owner !== 'consumer-crypto-fixture');
+  assert.throws(() => nativeBootstrapRequirements({ inventory: missing, plan: selectedPlan, profile: 'pr',
+    target: 'macos-arm64', component: 'homebrew', protocol: nativeCryptoBootstrapProtocol }), { code: 'INVENTORY' });
+  const changed = structuredClone(selectedInventory);
+  const body = nativeFrameworkShardPlan({ inventory: changed, plan: selectedPlan, target: 'linux-x64' })
+    .parts.find(part => part.shard === 'body-1');
+  const root = body.stages.flatMap(stage => stage.cases).find(item => !item.parents.length);
+  root.applicability.prerequisites.push('Unrecognized authentic crypto verifier capability');
+  assert.equal(nativeBootstrapRequirements({ inventory: changed, plan: selectedPlan, profile: 'pr',
+    target: 'linux-x64', component: 'framework', shard: 'body-1', protocol: nativeCryptoBootstrapProtocol }).crypto, true);
 });
+
+async function controlledFrameworkBootstrap(request, changeCrypto) {
+  const root = '/controlled-source';
+  const directory = `${root}/.test-data/bootstrap-${request.role}`;
+  const platform = request.target.startsWith('macos-') ? 'darwin' :
+    request.target === 'windows-x64' ? 'win32' : 'linux';
+  const architecture = request.target === 'macos-arm64' ? 'arm64' : 'x64';
+  const files = new Map();
+  const directories = [];
+  let cryptoCalls = 0;
+  const writeFile = async (file, value) => { assert.equal(files.has(file), false); files.set(file, Buffer.from(value)); };
+  const context = createContext({
+    fs: {
+      mkdir: async file => { directories.push(file); }, readdir: async () => [],
+      lstat: async () => ({ isDirectory: () => true, isSymbolicLink: () => false }),
+      readFile: async file => file.endsWith('/test-plan.md') ? request.plan : 'jsonschema==4.26.0',
+      writeFile, open: async file => ({ writeFile: value => writeFile(file, value),
+        sync: async () => {}, close: async () => {} }),
+    },
+    path: path.posix, os: { release: () => '24.6.0', machine: () => architecture },
+    process: { platform, arch: architecture, versions: { node: nativeToolchain.node }, execPath: '/controlled-actions/node',
+      env: { GITHUB_ACTIONS: 'true', SDLC_NPM_TOOL_ROOT: '/ambient/npm' }, on: () => {}, off: () => {} },
+    repositoryRoot: root, targets: { [request.target]: [platform, architecture] },
+    digest: value => digest(value && typeof value === 'object' && !Buffer.isBuffer(value) ?
+      JSON.parse(JSON.stringify(value)) : value),
+    requireThat, sanitizeExecutionPayload, nativeToolchain, homebrewToolchain, prCryptoFixture,
+    bootstrapRequestCapability, nativeBootstrapRequirements, requireNativeCryptoEnvironment, nativeFrameworkShardPlan,
+    compileValidationInventory: async () => request.inventory, nativeResourceFacts: () => ({ configuredWorkers: 4 }),
+    AbortController, AbortSignal, Buffer, console: { log: () => {} },
+    recordHomebrewPrefixNotRequired: async () => {},
+    allocateHomebrewPrefix: () => assert.fail('No framework role allocates a Homebrew prefix'),
+    schemaPipInstallArguments: () => assert.fail('Controlled schema probe already supplies pinned packages'),
+    executeValidationCommand: async ({ name, args, environment }) => {
+      assert.equal(Object.keys(environment).some(key => /^SDLC_NPM_/u.test(key)), false);
+      const python = '/controlled/python';
+      const values = {
+        'go-root': '/controlled/go', 'go-version': `go version ${nativeToolchain.go} controlled`,
+        'python-identity': JSON.stringify({ executable: python, version: nativeToolchain.python,
+          implementation: 'CPython', machine: architecture === 'arm64' ? 'arm64' : 'x86_64' }),
+        'schema-dependency-probe': '{"jsonschema":"4.26.0"}', 'schema-dependencies-verify': '{"jsonschema":"4.26.0"}',
+        'mac-uname': architecture === 'arm64' ? 'arm64' : 'x86_64', 'mac-translation': '0',
+      };
+      return { complete: true, exitCode: 0, stdout: values[name] ?? '', stderr: '' };
+    },
+    provisionPrCryptoFixture: async ({ root: fixtureRoot, run }) => {
+      cryptoCalls++;
+      directories.push(fixtureRoot);
+      await run('controlled-npm', ['install']);
+      await run('controlled-node', ['--version']);
+      const values = {
+        SDLC_NPM_SIGNED_FIXTURE_BUNDLE: `${fixtureRoot}/public-intoto.sigstore`,
+        SDLC_NPM_SIGNED_FIXTURE_SHA256: prCryptoFixture.bundle.sha256,
+        SDLC_NPM_SIGNED_FIXTURE_CERTIFICATE_IDENTITY: prCryptoFixture.certificateIdentity,
+        SDLC_NPM_SIGNED_FIXTURE_CERTIFICATE_IDENTITY_KIND: prCryptoFixture.certificateIdentityKind,
+        SDLC_NPM_SIGNED_FIXTURE_CERTIFICATE_ISSUER: prCryptoFixture.certificateIssuer,
+        SDLC_NPM_TOOL_ROOT: `${fixtureRoot}/npm-tool/node_modules/npm`,
+        SDLC_NPM_TUF_CACHE: `${fixtureRoot}/offline-trust`,
+        SDLC_NPM_SIGNED_FIXTURE_TRUST_SHA256: prCryptoFixture.trust.sha256,
+      };
+      changeCrypto?.(values);
+      return values;
+    },
+  });
+  for (const fn of [validateBootstrapRequest, nativeBootstrapEnvironment, nativeBootstrapExports]) {
+    context[fn.name] = runInContext(`(${fn.toString()})`, context);
+  }
+  const bootstrap = runInContext(`(${bootstrapNativeToolchain.toString()})`, context);
+  const result = await bootstrap({ target: request.target, outputDir: directory, profile: 'pr',
+    component: 'framework', shard: request.shard, role: request.role });
+  return { report: JSON.parse(files.get(`${directory}/toolchain.json`)), exports: result, cryptoCalls, directories };
+}
 
 const targets = ['linux-x64', 'windows-x64', 'macos-arm64', 'macos-x64'];
 const nativePlatforms = { 'linux-x64': 'linux', 'windows-x64': 'win32',

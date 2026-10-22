@@ -102,6 +102,14 @@ Selected-name/per-file resource declarations include exact worker count,
 optional names, owner and reason. Two-worker callbacks reserve both tokens
 before their deadlines begin; missing aggregate allocation cannot be called
 successful overlap. Resource matching is part of source/configuration evidence.
+Standalone syntax checks use a bounded ready-work pool up to available CPU
+capacity and the existing 32-slot ceiling. An inherited test allocation keeps
+the checker serial rather than multiplying unregistered work. Preserve every
+source check, stop new dispatch after failure, drain all dispatched children and
+report the first failure in original source order. Verify actual parser use,
+capacity reuse, bounded overlap and deterministic error drainage. Explicit
+full-check imports must still reject invalid hook metadata with the original
+assertion identity; importing parser helpers alone does not run the whole CLI.
 
 Runner-fixture assertion failures retain bounded structured diagnostics instead
 of embedding raw subprocess output or inline programs in assertion messages.
@@ -133,6 +141,12 @@ state/start observation; only a strict failure triggers a timestamped later
 diagnostic query. Retain the original error even if diagnostics fail. Later
 absence or zombie state is not evidence of exit at the original return boundary,
 and one-second creation matches do not exclude same-second PID reuse.
+The command runner must settle its originally created POSIX group before
+returning from cancellation, not merely observe root close. Only observed group
+`ESRCH` establishes disappearance; persistent, inaccessible or unknown groups
+remain incomplete failures. The bounded settlement happens before final report
+completion, never as a post-return test grace period. Windows termination and
+original command/test deadlines remain unchanged.
 Observer artifact readers finish before their exact owned scratch directory is
 removed. Use the existing bounded filesystem-cleanup retry policy for classified
 transient sharing conflicts; persistent removal failure remains an error, never
@@ -362,6 +376,11 @@ the original installer or parse error; successful execution must not fabricate
 failure records. This evidence does not waive network/npm denial, any lifecycle
 assertion or a failed native result. Controlled local helper tests do not
 establish actual Mac sandbox or installer acceptance.
+Install/update retains the actual activation routine's fresh source verification
+before mutation without the redundant outer source scan. Staged and activated
+launch checks, doctor/uninstall source checks, path/tamper refusals and installer
+durability remain required. No preverified flag, source cache or larger
+network-boundary deadline substitutes for those checks.
 
 ### 2.3 Test modes and shared procedure contracts
 
@@ -1432,6 +1451,21 @@ leave the case non-passing; a raw optional skip is not an accepted disposition.
 These capabilities are not a prerequisite for the small local sanity gate.
 Metadata/audit-count/unit doubles cannot substitute for actual signature,
 certificate and transparency positives/negatives on the same statement bytes.
+
+Source-selected bootstrap v6 requires acquisition only for closures consuming
+the authentic T-PRD041 root or another declared crypto/verifier prerequisite.
+Current owners are Linux/Windows framework `body-0` and both Mac framework
+`body-2`; all other 21 current PR roles omit the unused setup. Extend existing
+T-PRD015 controlled bootstrap checks to execute the actual bootstrap function
+with side-effect callbacks for all 25 roles, asserting four acquisitions and
+21 genuine absences of calls, directories, reports, facts and exported inputs.
+Required-role missing/altered pins, borrowed verifier paths, forged/nonboolean
+flags and unknown tool fields must fail, while unrecognized crypto prerequisites
+remain required and a missing authentic declaration fails closed.
+Source dispatch, captured-source/protected SDK admission and historical replay
+checks preserve v5/v4/v3/v2/null shapes/digests and all original ownership
+contracts; full/R-PRE and SDK Go/Python requirements are unchanged. These
+Node-only checks are not authentic crypto or native speedup acceptance.
 
 For the authorized description boundary, T-PRD084 uses pure
 `preparePrDescription`/offline CLI first, then exact receipt-bound PR permission,

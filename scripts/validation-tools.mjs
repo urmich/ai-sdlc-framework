@@ -3,6 +3,7 @@ import { open, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { setTimeout as delay } from 'node:timers/promises';
 import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
 import { digest, SdlcError } from '../src/core.mjs';
 import { atomicWrite } from '../src/files.mjs';
@@ -233,6 +234,26 @@ function commandReportBytes(report) {
   return { sanitized, bytes };
 }
 
+async function settleOwnedProcessGroup(pid) {
+  const deadline = performance.now() + 1000;
+  for (;;) {
+    try {
+      if (process.kill(-pid, 0) !== true) {
+        throw Object.assign(new Error('Owned process group termination could not be verified.'),
+          { code: 'STOP_UNVERIFIED' });
+      }
+    } catch (error) {
+      if (error.code === 'ESRCH') return;
+      throw error;
+    }
+    if (performance.now() >= deadline) {
+      throw Object.assign(new Error('Owned process group remains after its bounded termination settlement.'),
+        { code: 'STOP_TIMEOUT' });
+    }
+    await delay(10);
+  }
+}
+
 export async function executeValidationCommand({
   name, command, args, cwd = root, environment = process.env, outputDir, signal,
 }) {
@@ -265,11 +286,13 @@ export async function executeValidationCommand({
     let outputError;
     let cleanupError;
     let child;
+    let childClosed;
     let stopping;
     const cleanup = { requested: false, pid: null, mechanism: null, outcome: 'not-requested',
       survivorsVerified: false, error: null };
     const stop = () => {
-      if (!child?.pid || stopping || child.exitCode !== null || child.signalCode !== null) return;
+      if (!child?.pid || stopping || process.platform === 'win32' &&
+          (child.exitCode !== null || child.signalCode !== null)) return;
       cleanup.requested = true;
       cleanup.pid = child.pid;
       cleanup.mechanism = process.platform === 'win32' ? 'owned-pid-tree' : 'owned-process-group';
@@ -277,11 +300,11 @@ export async function executeValidationCommand({
       retain('command-stop-request', { pid: child.pid, cleanup });
       if (!finalizing) requestCheckpoint('cancelling', { force: true });
       stopping = Promise.resolve().then(async () => {
-        if (child.exitCode !== null || child.signalCode !== null) {
-          cleanup.outcome = 'root-exited-unverified';
-          return;
-        }
         if (process.platform === 'win32') {
+          if (child.exitCode !== null || child.signalCode !== null) {
+            cleanup.outcome = 'root-exited-unverified';
+            return;
+          }
           const killer = spawn(path.join(process.env.SystemRoot, 'System32', 'taskkill.exe'),
             ['/PID', String(child.pid), '/T', '/F'], { stdio: ['ignore', 'ignore', 'pipe'], shell: false });
           cleanup.control = { pid: killer.pid ?? null, exitCode: null, signal: null };
@@ -306,12 +329,20 @@ export async function executeValidationCommand({
           });
           cleanup.outcome = 'reported-stopped';
         } else {
-          try { process.kill(-child.pid, 'SIGTERM'); }
-          catch (error) {
-            if (error.code !== 'ESRCH') throw error;
-            cleanup.outcome = 'target-not-found';
+          if (child.exitCode === null && child.signalCode === null) {
+            try { process.kill(-child.pid, 'SIGTERM'); }
+            catch (error) {
+              if (error.code !== 'ESRCH') throw error;
+              cleanup.outcome = 'target-not-found';
+            }
+            if (cleanup.outcome === 'pending') cleanup.outcome = 'signal-sent';
           }
-          if (cleanup.outcome === 'pending') cleanup.outcome = 'signal-sent';
+          // Root close does not settle descendants whose stdio is detached.
+          await childClosed;
+          await settleOwnedProcessGroup(child.pid);
+          cleanup.outcome = 'group-exited';
+          cleanup.survivorsVerified = true;
+          cleanup.groupExitObservedAt = new Date().toISOString();
         }
       }).catch(async error => {
         cleanupError ??= error;
@@ -492,7 +523,7 @@ export async function executeValidationCommand({
         } catch (error) { outcome = { code: null, signal: null, error }; }
         if (child) {
           report.pid = child.pid ?? null;
-          const closed = new Promise(resolve => {
+          childClosed = new Promise(resolve => {
             let launchError;
             child.once('error', error => { launchError = error; });
             child.once('close', (code, termination) => resolve({ code, signal: termination, error: launchError, closed: true }));
@@ -504,7 +535,7 @@ export async function executeValidationCommand({
           try { retain('command-dispatched', { pid: report.pid }); }
           catch (error) { persistenceError ??= error; stop(); }
           await requestCheckpoint('running', { force: true });
-          outcome = await closed;
+          outcome = await childClosed;
         }
       }
     } finally {
@@ -524,7 +555,6 @@ export async function executeValidationCommand({
     }
     finalizing = true;
     clearTimeout(progressTimer);
-    report.finishedAt = new Date().toISOString();
     report.exitCode = outcome.code;
     report.signal = outcome.signal;
     cleanup.rootExitObserved = outcome.closed === true;
@@ -537,6 +567,7 @@ export async function executeValidationCommand({
       if (observedStop) await observedStop;
       await journal;
     } while (stopping !== observedStop);
+    report.finishedAt = new Date().toISOString();
     const project = () => {
       interrupted ||= signal?.aborted === true;
       report.causes = [

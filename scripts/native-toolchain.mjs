@@ -6,12 +6,13 @@ import { digest, requireThat } from '../src/core.mjs';
 import { sanitizeExecutionPayload } from 'ai-sdlc-framework/evidence';
 import { repositoryRoot } from './test-runner.mjs';
 import { executeValidationCommand } from './validation-tools.mjs';
-import { nativeResourceFacts } from './native-validation.mjs';
+import { nativeResourceFacts, nativeFrameworkShardPlan } from './native-validation.mjs';
 import { nativeToolchain, homebrewToolchain } from './toolchain-baseline.mjs';
 import { allocateHomebrewPrefix, cleanupHomebrewPrefix,
   recordHomebrewPrefixNotRequired } from './native-homebrew-prefix.mjs';
 import { provisionPrCryptoFixture, prCryptoFixture } from './pr-capabilities.mjs';
-import { bootstrapRequestCapability, nativeBootstrapRequirements } from './native-bootstrap-capability.mjs';
+import { bootstrapRequestCapability, nativeBootstrapRequirements,
+  requireNativeCryptoEnvironment } from './native-bootstrap-capability.mjs';
 import { compileValidationInventory } from './validation-inventory.mjs';
 
 export { homebrewToolchain };
@@ -170,12 +171,15 @@ export function requireHomebrewBottleReceipts(plan, receipts) {
 }
 
 export async function bootstrapNativeToolchain(options) {
-  const source = options.component === 'framework' && options.shard?.startsWith('body-') ? {
+  const source = options.profile === 'pr' && ['framework', 'homebrew'].includes(options.component) ? {
     inventory: await compileValidationInventory(repositoryRoot),
     plan: await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8'),
   } : {};
+  if (source.inventory && options.component === 'framework') source.assignment = nativeFrameworkShardPlan({
+    inventory: source.inventory, plan: source.plan, target: options.target,
+  });
   const capability = bootstrapRequestCapability({ ...options, ...source });
-  const tools = nativeBootstrapRequirements({ ...options, ...source, protocol: capability?.protocol ?? null });
+  const tools = capability?.tools ?? nativeBootstrapRequirements({ ...options, ...source, protocol: null });
   const directory = validateBootstrapRequest(options);
   let current = repositoryRoot;
   for (const part of path.relative(repositoryRoot, directory).split(path.sep)) {
@@ -186,6 +190,9 @@ export async function bootstrapNativeToolchain(options) {
   }
   requireThat(!(await fs.readdir(directory)).length, 'HOST', 'Bootstrap owns a new empty directory, never an installed prefix');
   const environment = nativeBootstrapEnvironment(directory);
+  if (capability) for (const name of Object.keys(environment)) {
+    if (/^SDLC_NPM_/u.test(name)) delete environment[name];
+  }
   for (const key of ['HOME', 'COPILOT_HOME', 'TMPDIR', 'GOCACHE', 'GOPATH', 'HOMEBREW_CACHE', 'HOMEBREW_LOGS',
     'APPDATA', 'LOCALAPPDATA', 'PYTHONUSERBASE', 'PYTHONPYCACHEPREFIX', 'PIP_CACHE_DIR', 'PIP_BUILD_TRACKER',
     'PIP_SRC', 'XDG_CACHE_HOME']) {
@@ -392,6 +399,7 @@ export async function bootstrapNativeToolchain(options) {
       }
     }
     selected.GOTOOLCHAIN = 'local';
+    if (tools.crypto !== false) {
     Object.assign(selected, await provisionPrCryptoFixture({
       root: path.join(directory, 'crypto-fixture'), environment,
       run: async (command, args, options = {}) => ({
@@ -399,7 +407,14 @@ export async function bootstrapNativeToolchain(options) {
       }),
     }));
     retained.native.cryptoFixture = { bundleSha256: prCryptoFixture.bundle.sha256,
-      trustSha256: prCryptoFixture.trust.sha256, offline: true, verifier: 'npm-11.16.0-bundled-sigstore' };
+      trustSha256: prCryptoFixture.trust.sha256, offline: true, verifier: 'npm-11.16.0-bundled-sigstore',
+      ...(tools.crypto === true ? { paths: {
+        bundleFile: path.join(directory, 'crypto-fixture', 'public-intoto.sigstore'),
+        toolRoot: path.join(directory, 'crypto-fixture', 'npm-tool', 'node_modules', 'npm'),
+        cachePath: path.join(directory, 'crypto-fixture', 'offline-trust'),
+      } } : {}) };
+    }
+    requireNativeCryptoEnvironment(capability, retained.native.cryptoFixture, selected);
     selected.CGO_ENABLED = '0';
     Object.assign(selected, nativeBootstrapExports(environment));
     selected.SDLC_NATIVE_TOOLCHAIN_REPORT = path.join(directory, 'toolchain.json');
