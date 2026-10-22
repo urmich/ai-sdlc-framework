@@ -1,4 +1,6 @@
 import * as fs from 'node:fs/promises';
+import { frozenDistributionContext } from './frozen-distribution-fixture.mjs';
+import { assertCommittedSourceInputs } from './committed-source-inputs.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
@@ -677,23 +679,10 @@ async function goSources() {
 }
 
 export async function assertCommittedNativeInputs() {
-  const { stdout } = await execute('git', ['ls-tree', '-r', '-z', 'HEAD'],
-    { cwd: repositoryRoot, maxBuffer: 8 * 1024 * 1024 });
-  for (const entry of stdout.split('\0').filter(Boolean)) {
-    const [, mode, oid, file] = /^(\d+) blob ([a-f0-9]+)\t([\s\S]+)$/u.exec(entry) ?? [];
-    if (!file || (!/^(?:test|src|scripts|cmd|packaging|assets|\.github\/(?:workflows|actions))\//u.test(file) &&
-        file !== '.github/release-requirements.txt' &&
-        file !== 'docs/sdlc/public-readiness/test-plan.md' && file !== 'package.json')) continue;
-    requireThat(['100644', '100755'].includes(mode), 'EVIDENCE', 'Validation source must be a committed regular blob');
-    const selected = path.join(repositoryRoot, ...file.split('/'));
-    const stat = await fs.lstat(selected);
-    requireThat(stat.isFile() && !stat.isSymbolicLink(), 'EVIDENCE', 'Validation input cannot be a linked working-tree file');
-    const bytes = await fs.readFile(selected);
-    const actual = createHash(oid.length === 40 ? 'sha1' : 'sha256')
-      .update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
-    requireThat(actual === oid, 'EVIDENCE',
-      `Validation input ${file} differs from its committed bytes; CRLF/filter transformations cannot receive credit`);
-  }
+  await assertCommittedSourceInputs(repositoryRoot, { include: file =>
+    /^(?:test|src|scripts|cmd|packaging|assets|\.github\/(?:workflows|actions))\//u.test(file) ||
+    file === '.github/release-requirements.txt' ||
+    file === 'docs/sdlc/public-readiness/test-plan.md' || file === 'package.json' });
 }
 
 export function nativeGoObservations(sources, reports, target) {
@@ -1592,7 +1581,8 @@ export async function runNativeValidation(options) {
       ...(shard === null ? {} : { frameworkShards: nativeFrameworkShardProtocol, shard }),
       repositoryId: `repository-${process.env.GITHUB_REPOSITORY_ID}`,
       runId: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT };
-    for (const name of ['NODE_AUTH_TOKEN', 'NPM_TOKEN', 'GITHUB_TOKEN', 'GH_TOKEN']) delete environment[name];
+    for (const name of ['NODE_AUTH_TOKEN', 'NPM_TOKEN', 'GITHUB_TOKEN', 'GH_TOKEN',
+      'SDLC_DISTRIBUTION_FIXTURE_CONTEXT']) delete environment[name];
     const bootstrap = await readOptional(process.env.SDLC_NATIVE_TOOLCHAIN_REPORT ?? path.join(directory, 'missing-bootstrap.json'));
     const bootstrapCapability = requireNativeBootstrapCapability({ bootstrap, inventory: inputs.inventory, plan: inputs.plan, assignment,
       target, profile, component, shard,
@@ -1694,6 +1684,7 @@ export async function runNativeValidation(options) {
     environment.SDLC_RELEASE_DIR = path.join(candidateDir, 'assets');
     environment.SDLC_RELEASE_SOURCE_COMMIT = revision;
     environment.SDLC_DISTRIBUTION_TARGETS = 'macos,windows-x64';
+    let fixtureKind = 'published-candidate';
     if (target === 'linux-x64') {
       const privateFixtures = await prepareNativeHostFixtures({
         candidate, candidateDir, scratch,
@@ -1701,11 +1692,16 @@ export async function runNativeValidation(options) {
       });
       environment.SDLC_RELEASE_DIR = privateFixtures.outputDir;
       environment.SDLC_DISTRIBUTION_TARGETS = 'macos,windows-x64,linux-x64';
+      fixtureKind = privateFixtures.kind;
       await writeJson(path.join(directory, 'private-host-fixtures.json'), {
         kind: 'private-test-library-only', sourceCommit: revision,
         payloadSha256: candidate.descriptor.payload.sha256, archives: privateFixtures.archives,
       });
     }
+    environment.SDLC_DISTRIBUTION_FIXTURE_CONTEXT = JSON.stringify(await frozenDistributionContext({
+      directory: environment.SDLC_RELEASE_DIR,
+      targets: environment.SDLC_DISTRIBUTION_TARGETS.split(','), context, kind: fixtureKind,
+    }));
     for (const selected of inputs.stages.filter(stage => stage.name === 'regression')) await stage(selected);
     if (part === undefined || part.procedures.includes('calculator')) {
     const calculator = await runTool({ name: 'calculator-command', command: process.execPath,

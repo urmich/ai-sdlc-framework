@@ -572,6 +572,36 @@ product-scale or hosted performance benchmark.
 
 ### 4.4 Producer output and cancellation
 
+Native fixture setup transports its verified candidate/source/artifact identity
+in a dedicated context, never a reporter control. Only the exact distribution
+test file retains that context through worker preload. Each use freshly checks
+all committed raw blobs, HEAD/tree/index/modes and working-tree additions, a
+complete source snapshot, owned literal release paths and real
+`verifyRelease(rebuild:false)` payload/archive/manifest checks before reuse.
+Invalid supplied input fails explicitly; absent input retains the real build
+path. Setup reuse does not replace dedicated fresh/reproducibility builders,
+native launcher execution or cold-cache builds. Linux's once-built three-target
+private fixtures retain their exact published-byte comparisons and test-only
+identity. Metadata-finalization setup edits only its owned copied metadata.
+Test fixture construction creates a history-independent one-commit snapshot from
+registered index paths and their current bytes/modes; new source files must be
+registered before freeze. It never collects arbitrary untracked private data.
+The dedicated history regression proves representative fixture/beforehook
+execution without the old object or alternates and guards an owned visible
+untracked canary against filesystem access and copying.
+
+The seventeen versioned protocol/bootstrap scenarios stay within their existing
+logical root but execute as whole isolated Node children. Its four-slot
+reservation precedes setup; one existing shared producer and ready pool bound
+dispatch to the smaller of four and the actual caller/broker allocation.
+Each child retains its live SDK verifier/projection objects and owns its fixture
+scratch, including temporary-environment changes. Only source-bound scalar
+completion and actual process/lease identity cross the boundary. Reject
+incomplete or mismatched row closures, stop new dispatch on observed failure,
+drain all started siblings, report the source-order primary error and await
+scratch cleanup before restoring the parent budget. Retain all seventeen rows,
+all original assertions and historical protocol semantics.
+
 The standalone syntax checker uses one common bounded ready-work policy across
 hosts, limited by available CPUs and the existing 32-slot ceiling. It remains
 serial under an inherited test allocation. Syntax-check failure stops further
@@ -1360,6 +1390,12 @@ architecture/version and translation status before channel/home mutation.
 Only membership in the shared Mac architecture list replaces the old single-arch
 comparison; no integrity or native-runtime check is weakened. Existing immutable
 channel versions and their current-launcher rollback state remain available.
+Standalone control processes import the shared lightweight argument parser and
+home resolver instead of loading the complete framework dispatcher and Store
+before invoking the actual CLI. Preserve the CLI parser re-export, selected-home
+defaults, argument/error precedence and every native/source/staging/launch
+verification. The activated framework invocation still loads the real CLI;
+there is no cached verdict or preverified bypass.
 
 Separate `archiveTargets` from `executionPlatforms`: two standalone archives
 versus Linux/Windows/Mac-arm64/Mac-x64 validation lanes. Generic archive-library

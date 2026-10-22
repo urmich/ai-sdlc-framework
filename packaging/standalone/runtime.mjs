@@ -6,9 +6,8 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { canonical } from './archive.mjs';
 import { extractEntries, verifyTree } from './protocol.mjs';
-import { canonicalPath, within } from '../../src/files.mjs';
-import { parseArguments } from '../../src/cli.mjs';
-import { Store } from '../../src/store.mjs';
+import { canonicalPath, resolveCopilotHome, within } from '../../src/files.mjs';
+import { parseArguments } from '../../src/cli-arguments.mjs';
 import { withinNativePath } from '../../src/platform.mjs';
 
 const exists = async file => {
@@ -109,7 +108,7 @@ export function layoutPathsOverlap(channel, home, platform = process.platform) {
 
 export async function validateChannelHome({ channelRoot = defaultRoot(), home } = {}) {
   const channel = await canonicalLayoutPath(channelRoot);
-  const copilot = await canonicalLayoutPath(new Store(home).home);
+  const copilot = await canonicalLayoutPath(resolveCopilotHome(home));
   if (layoutPathsOverlap(channel, copilot)) {
     throw new Error('Channel root and Copilot home must be separate, non-overlapping directories');
   }

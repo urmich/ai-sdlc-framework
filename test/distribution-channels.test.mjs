@@ -29,6 +29,7 @@ import { activateChannel, layoutPathsOverlap, runtimePreflight, validateChannelH
 import { isolatedNpmEnvironment } from './npm-environment.mjs';
 import { createNetworkBoundary, deniedEnvironment, networkAdapter, verifyNetworkNegativeControls } from './distribution-network-boundary.mjs';
 import { processDiagnostic } from '../scripts/validation-tools.mjs';
+import { buildDistributionFixture, prepareDistributionFixture } from '../scripts/frozen-distribution-fixture.mjs';
 
 const execute = promisify(execFile);
 const hostTarget = Object.keys(TARGETS).find(target =>
@@ -47,45 +48,17 @@ const targets = process.env.SDLC_DISTRIBUTION_TARGETS?.split(',') ??
 
 test.before(async () => {
   root = path.resolve('.test-data', `distribution-${randomUUID()}`);
-  await fs.mkdir(path.join(root, 'scratch'), { recursive: true });
   originalTmp = process.env.TMPDIR;
-  process.env.TMPDIR = path.join(root, 'scratch');
   originalCopilotHome = process.env.COPILOT_HOME;
+  const frozen = process.env.SDLC_RELEASE_DIR !== undefined ||
+    process.env.SDLC_DISTRIBUTION_FIXTURE_CONTEXT !== undefined ?
+    await prepareDistributionFixture({ root, targets, windowsLauncher }) : null;
+  await fs.mkdir(path.join(root, 'scratch'), { recursive: true });
+  process.env.TMPDIR = path.join(root, 'scratch');
   process.env.COPILOT_HOME = path.join(root, 'default copilot home');
   environment = await isolatedNpmEnvironment(root);
   environment.TMPDIR = process.env.TMPDIR;
-  payload = await buildPackage({ outputDir: path.join(root, 'npm'), environment });
-  built = await buildPlatforms({ artifact: payload.artifact, outputDir: path.join(root, 'release'),
-    windowsLauncher, environment, targets,
-    sourceCommit: process.env.SDLC_RELEASE_SOURCE_COMMIT });
-  if (process.env.SDLC_RELEASE_DIR) {
-    const candidate = await verifyRelease({ outputDir: process.env.SDLC_RELEASE_DIR, targets, rebuild: false });
-    assert.equal(candidate.descriptor.sourceCommit, built.descriptor.sourceCommit);
-    if (candidate.descriptor.payload.sha256 !== payload.sha256) {
-      const summarize = async artifact => {
-        const bytes = await fs.readFile(artifact);
-        return { size: bytes.length, gzipHeader: bytes.subarray(0, 10).toString('hex'),
-          entries: inventory(readTarGzip(bytes), 'package/') };
-      };
-      const frozen = await summarize(path.join(process.env.SDLC_RELEASE_DIR, candidate.descriptor.payload.filename));
-      const fresh = await summarize(payload.artifact);
-      const frozenEntries = new Map(frozen.entries.map(entry => [entry.path, entry]));
-      const freshEntries = new Map(fresh.entries.map(entry => [entry.path, entry]));
-      const differences = [...new Set([...frozenEntries.keys(), ...freshEntries.keys()])].sort()
-        .filter(name => canonical(frozenEntries.get(name) ?? null) !== canonical(freshEntries.get(name) ?? null))
-        .map(name => ({ path: name, frozen: frozenEntries.get(name) ?? null, fresh: freshEntries.get(name) ?? null }));
-      process.stderr.write(`npm payload mismatch ${JSON.stringify({
-        frozen: { sha256: candidate.descriptor.payload.sha256, size: frozen.size, gzipHeader: frozen.gzipHeader },
-        fresh: { sha256: payload.sha256, size: fresh.size, gzipHeader: fresh.gzipHeader },
-        differenceCount: differences.length, differences: differences.slice(0, 100),
-      })}\n`);
-    }
-    assert.equal(candidate.descriptor.payload.sha256, payload.sha256);
-    for (const archive of built.archives) {
-      assert.equal(candidate.descriptor.files.find(file => file.filename === archive.filename)?.sha256, archive.sha256);
-      archive.artifact = path.join(process.env.SDLC_RELEASE_DIR, archive.filename);
-    }
-  }
+  ({ payload, built } = frozen ?? await prepareDistributionFixture({ root, environment, targets, windowsLauncher }));
   if (hostTarget && targets.includes(archiveTarget(hostTarget))) {
     const archive = built.archives.find(item => item.target === archiveTarget(hostTarget));
     const bytes = await fs.readFile(archive.artifact);
@@ -172,6 +145,15 @@ test('T-51 explicit native CI target must match actual native Node runtime', asy
 });
 
 test('T-51 independent builds reproduce exact npm payload, archives, descriptor and checksum bytes', async () => {
+  // Compilation/reproducibility is the behavior here, never reusable setup.
+  const baseline = process.env.SDLC_RELEASE_DIR !== undefined ?
+    await buildDistributionFixture({
+      root: path.join(root, 'independent baseline'), environment, targets, windowsLauncher }) :
+    { payload, built };
+  await verifyIndependentBuilds(baseline);
+});
+
+async function verifyIndependentBuilds({ payload, built }) {
   const secondPayload = await buildPackage({ outputDir: path.join(root, 'npm second'), environment });
   assert.equal(secondPayload.sha256, payload.sha256);
   const second = await buildPlatforms({ artifact: secondPayload.artifact, outputDir: path.join(root, 'release second'),
@@ -195,7 +177,7 @@ test('T-51 independent builds reproduce exact npm payload, archives, descriptor 
     await assert.rejects(verifyPlatformPackage({ artifact: archive.artifact,
       expectedArch: target.architectures ? 'riscv64' : target.arch === 'x64' ? 'arm64' : 'x64' }), /Wrong platform/u);
   }
-});
+}
 
 test('T-51 ZIP and tar codecs reject duplicates, traversal, truncation, corruption and nonfiles', () => {
   const entries = [{ path: 'LICENSE', data: Buffer.from('fixture\n'), mode: 0o644 },
@@ -477,6 +459,9 @@ test('T-52 anonymous single-asset verification binds the saved prepublication ev
 test('T-51 metadata finalization consumes generator artifact records without circular descriptor inputs', async () => {
   const directory = path.join(root, 'metadata release');
   await fs.cp(built.outputDir, directory, { recursive: true });
+  for (const file of built.descriptor.files.filter(file => file.kind !== 'archive')) {
+    await fs.rm(path.join(directory, file.filename));
+  }
   const file = path.join(root, 'candidate-fixture.yaml');
   const contents = Buffer.from('fixture: generator-contract\n');
   await fs.writeFile(file, contents);

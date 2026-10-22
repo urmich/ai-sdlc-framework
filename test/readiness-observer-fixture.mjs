@@ -736,7 +736,15 @@ function archive(entries) {
 }
 
 export async function observerApiFixture(t, options = {}) {
-  const root = path.join(repositoryRoot, '.test-data', `observer-api-${randomUUID()}`);
+  let parent = path.join(repositoryRoot, '.test-data');
+  if (options.rootParent !== undefined) {
+    const base = await fs.realpath(parent);
+    parent = await fs.realpath(options.rootParent);
+    const relative = path.relative(base, parent);
+    assert.ok(relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative), 'An observer fixture parent must be an owned checkout-local scratch directory');
+  }
+  const root = path.join(parent, `observer-api-${randomUUID()}`);
   const scratch = path.join(root, 'scratch');
   await fs.mkdir(scratch, { recursive: true });
   const previous = Object.fromEntries(['TMPDIR', 'TMP', 'TEMP'].map(name => [name, process.env[name]]));
@@ -747,7 +755,7 @@ export async function observerApiFixture(t, options = {}) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
-    assert.equal(path.dirname(root), path.join(repositoryRoot, '.test-data'));
+    assert.equal(path.dirname(root), parent);
     await fs.rm(root, { recursive: true });
     await assert.rejects(fs.stat(root), { code: 'ENOENT' });
   });

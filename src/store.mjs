@@ -1,8 +1,7 @@
 import path from 'node:path';
-import os from 'node:os';
 import * as fs from 'node:fs/promises';
 import { LIMITS, PHASES, budget, byteSize, choice, digest, id, newId, object, recordLimit, requireThat, safeRecord, text } from './core.mjs';
-import { atomicWrite, canonicalPath, exists, immutableJson, listJson, privateDirectory, readBytes, readJson, readJsonEntries, safePath, updateJson, withLock, writeJson } from './files.mjs';
+import { atomicWrite, canonicalPath, exists, immutableJson, listJson, privateDirectory, readBytes, readJson, readJsonEntries, resolveCopilotHome, safePath, updateJson, withLock, writeJson } from './files.mjs';
 import { bindingKey, identity, sameBinding, validateBinding, validateWorktreeBinding } from './git.mjs';
 import { validateManifest, validateRecord } from './schemas.mjs';
 import { sameNativePath } from './platform.mjs';
@@ -310,8 +309,8 @@ export async function isNonRepositoryWorkspace(cwd, error) {
   return isNonRepositoryFailure(error) && await repositoryMetadataAbsent(cwd);
 }
 export class Store {
-  constructor(home = process.env.COPILOT_HOME || path.join(os.homedir(), '.copilot'), options = {}) {
-    this.home = path.resolve(home);
+  constructor(home = undefined, options = {}) {
+    this.home = resolveCopilotHome(home);
     this.runtime = path.join(this.home, 'sdlc', 'runtime');
     this.clock = options.clock ?? Date;
     this.fault = options.fault ?? (async () => {});

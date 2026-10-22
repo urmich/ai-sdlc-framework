@@ -3,12 +3,28 @@ export const validationDeclarations = {
   "surfaces": [
     {"coverage": "direct", "paths": ["scripts/github-readiness-host.mjs", "scripts/pr-observer.mjs"]},
     {"coverage": "process", "paths": ["scripts/read-validation-artifact.py"]}
-  ]
+  ],
+  "groups": [{
+    "root": "T-PRD021 versioned twenty-five twenty-four and twenty-part originals require exact closures cleanup and protected SDK replay",
+    "minimumSlots": 4
+  }, {
+    "root": "T-PRD021 protocol row pool drains failed children stops dispatch and respects one-slot fallback",
+    "minimumSlots": 2
+  }],
+  "applicability": [{
+    "names": ["T-PRD021 protocol row pool drains failed children stops dispatch and respects one-slot fallback"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "PR-only controlled Node children prove failure drain and overlap before testing a serial fallback; no external tools or credentials.",
+    "prerequisites": ["Aggregate test-worker capacity of at least two"]
+  }]
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { digest } from '../src/core.mjs';
 import { canonical } from '../src/core.mjs';
 import { observerApiFixture, nativeReplayFixture } from './readiness-observer-fixture.mjs';
@@ -27,6 +43,8 @@ import { deriveNativeComponentSpecification, nativeComponentSelection,
   projectNativeComponentEvidence, replayNativeComponentEvidence } from '../scripts/native-components.mjs';
 import { compileValidationSourceInventory } from '../scripts/validation-inventory.mjs';
 import { nativeBootstrapProtocol, nativeBodyBootstrapProtocol, nativeUnitBootstrapProtocol } from '../scripts/toolchain-baseline.mjs';
+import { runProtocolPool, reconcileProtocolRows } from './readiness-protocol-pool.mjs';
+import { protocolPairs } from './readiness-protocol-row.mjs';
 
 test('T-PRD021 source-bound role bootstrap preserves all producer origins and thirteen independent Mac cleanups', async t => {
   for (const protocol of ['native-bootstrap-role-capabilities-v3', nativeUnitBootstrapProtocol,
@@ -522,217 +540,135 @@ test('T-PRD020 logical native latency spans earliest required worker through the
 });
 
 test('T-PRD021 versioned twenty-five twenty-four and twenty-part originals require exact closures cleanup and protected SDK replay', async t => {
-  for (const [shardProtocol, bootstrapProtocol] of [[nativeFrameworkShardProtocol, null],
-    [nativeFourBodyFrameworkShardProtocol, null],
-    [nativePlatformUnitFrameworkShardProtocol, null], [nativeLegacyFrameworkShardProtocol, null],
-    [nativeFourBodyFrameworkShardProtocol, 'native-bootstrap-role-capabilities-v2'],
-    [nativeFrameworkShardProtocol, 'native-bootstrap-role-capabilities-v3'],
-    [nativeFourBodyFrameworkShardProtocol, nativeUnitBootstrapProtocol],
-    [nativeFrameworkShardProtocol, 'native-bootstrap-role-capabilities-v2'],
-    [nativeFrameworkShardProtocol, nativeUnitBootstrapProtocol],
-    [nativeFrameworkShardProtocol, nativeBodyBootstrapProtocol],
-    [nativeFourBodyFrameworkShardProtocol, nativeBodyBootstrapProtocol],
-    [nativePlatformUnitFrameworkShardProtocol, nativeBodyBootstrapProtocol],
-    [nativeLegacyFrameworkShardProtocol, nativeBodyBootstrapProtocol],
-    [nativeFrameworkShardProtocol, nativeBootstrapProtocol],
-    [nativeFourBodyFrameworkShardProtocol, nativeBootstrapProtocol],
-    [nativePlatformUnitFrameworkShardProtocol, nativeBootstrapProtocol],
-    [nativeLegacyFrameworkShardProtocol, nativeBootstrapProtocol]]) {
-  const f = await observerApiFixture(t, { frameworkShards: true, shardProtocol, bootstrapProtocol,
-    ambient: shardProtocol === nativeFrameworkShardProtocol });
-  const expectedCount = nativePrPartsForProtocol(shardProtocol).length;
-  const frameworkCount = expectedCount - 2;
-  assert.equal(f.parts.size, expectedCount);
-  assert.equal(expectedCount, shardProtocol === nativeFrameworkShardProtocol ? 25 :
-    shardProtocol === nativeFourBodyFrameworkShardProtocol ? 24 : 20);
-  const trust = inspectWorkflowTrust([{ file: nativeWorkflowContract.path,
-    contents: f.source.files.get(nativeWorkflowContract.path) }]);
-  assert.equal(trust.complete, true, JSON.stringify(trust.blockers));
-  assert.equal(trust.nativeProtocol, shardProtocol);
-  const dictionary = entries => ({ ...Object.fromEntries(entries),
-    texts: Object.fromEntries([...entries].map(([file, value]) =>
-      [file, typeof value === 'string' ? value : canonical(value)])) });
-  const sourceFiles = [...f.source.files].map(([file, contents]) => ({ file, contents }));
-  const prefixes = [];
-  for (const part of f.parts.values()) {
-    await verifyOriginalNativeRows({ data: dictionary(part.data), raw: part.data.get('execution.json'),
-      specification: part.specification, inventory: f.source.inventory, goSources: f.source.goSources,
-      target: part.target, component: part.component, shard: part.shard, shardProtocol,
-      candidate: f.candidate, sourceFiles, plan: f.source.plan, context: part.context, bootstrapProtocol });
-    if (f.cleanupReports.has(part.role)) {
-      const cleanup = verifyNativeCleanup(dictionary(f.cleanupReports.get(part.role)),
-        { inventory: f.source.inventory, plan: f.source.plan,
-          ...part, bootstrapProtocol, shardProtocol, jobKey: nativePartJobKey(part, shardProtocol) });
-      if (cleanup.prefix) prefixes.push(cleanup.prefix);
-      else assert.equal(cleanup.status, 'not-required');
-    }
-  }
-  const expectedMacCount = [nativeBodyBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol) ? 2 :
-    bootstrapProtocol === nativeUnitBootstrapProtocol ? 8 :
-    shardProtocol === nativeFrameworkShardProtocol ? 13 : 12;
-  assert.equal(prefixes.length, expectedMacCount);
-  assert.equal(new Set(prefixes).size, expectedMacCount);
-  assert.equal(f.cleanupReports.size, shardProtocol === nativeFrameworkShardProtocol ? 13 : 12);
-  const executions = [...f.parts.values()].map(part => ({ ...part,
-    job: f.jobs.find(job => job.name === `native-${part.role}`) }));
-  const unitOrder = verifyNativeShardUnitOrder(executions, { protocol: shardProtocol });
-  if (shardProtocol === nativePlatformUnitFrameworkShardProtocol) {
-    const staggered = executions.map(part => ({ ...part, job: structuredClone(part.job) }));
-    staggered.find(part => part.target === 'macos-x64' && part.shard === 'units').job.completed_at =
-      '2026-10-18T10:01:50.000Z';
-    for (const part of staggered.filter(part => part.target === 'macos-x64' &&
-      part.shard && part.shard !== 'units')) part.job.started_at = '2026-10-18T10:02:00.000Z';
-    assert.equal(verifyNativeShardUnitOrder(staggered, { protocol: shardProtocol }).protocol, shardProtocol);
-    assert.throws(() => verifyNativeShardUnitOrder(staggered, { protocol: nativeLegacyFrameworkShardProtocol }),
-      { code: 'EVIDENCE' });
-  }
-  const framework = executions.filter(part => part.component === 'framework');
-  const definition = deriveNativeComponentSpecification({ inventory: f.source.inventory,
-    testPlan: f.source.plan, goSources: f.source.goSources, frameworkShards: true, shardProtocol, bootstrapProtocol,
-    adapterSourceDigest: digest(f.source.files.get('scripts/native-components.mjs')) });
-  const originals = framework.map(part => ({ target: part.target, role: part.role,
-    text: canonical(part.data.get('execution.json')) }));
-  const nativeEvaluations = framework.map(part => {
-    const original = originals.find(original => original.role === part.role);
-    const raw = JSON.parse(original.text);
-    const normalized = normalizeExecutionReport(original.text, part.context, input => ({
-      verifierId: 'controlled-shard-sdk-facts', reportDigest: input.reportDigest, context: part.context,
-      sourceTime: raw.observedAt, sourceSequence: raw.sequence,
-    }));
-    return { role: part.role, evaluation: evaluateReadiness(part.specification, [normalized], {
-      profile: part.specification.profile, executions: [{ id: part.context.jobRef, context: part.context }],
-      now: '2026-10-18T10:10:00.000Z',
-      policy: { maxAgeMs: 86400000, revisionPolicy: 'exact', verifierIds: ['controlled-shard-sdk-facts'] },
-    }) };
+  const result = await runProtocolPool(t);
+  assert.equal(result.rows.length, 17);
+  t.diagnostic(JSON.stringify({ protocolPool: result }));
+});
+
+test('T-PRD021 protocol row outcomes reject missing duplicate unknown incomplete and source or pair mismatches', () => {
+  const rows = protocolPairs.slice(0, 2);
+  const sourceDigest = digest('controlled-protocol-row-source');
+  const outcomes = rows.map((pair, index) => {
+    const slot = `${index}`.repeat(36);
+    return { index, pair, sourceDigest, groupId: digest({ sourceDigest, index, pair }),
+      status: 'Passed', cleaned: true, pid: 100 + index, slot,
+      lease: { pid: 100 + index, slot, minimumSlots: 1,
+        startedAt: '2026-10-22T10:00:00.000Z', finishedAt: null },
+      finishedAt: '2026-10-22T10:00:01.000Z' };
   });
-  const inputs = { definition, expectedLanes: framework, originals, unitOrder, nativeEvaluations,
-    now: '2026-10-18T10:10:00.000Z', verifyOriginal: input => {
-      const original = originals.find(original => original.role === input.role);
-      const raw = original && JSON.parse(original.text);
-      return raw && input.reportDigest === digest(original.text) ? {
-        verifierId: 'controlled-shard-originals', reportDigest: input.reportDigest, context: raw.context,
-        sourceTime: raw.observedAt, sourceSequence: raw.sequence,
-      } : null;
-    } };
-  const projection = projectNativeComponentEvidence(inputs);
-  assert.equal(projection.evaluation.status, 'Passed');
-  assert.equal(definition.policy.protocol, shardProtocol === nativeFrameworkShardProtocol ?
-    'native-component-projection-shards-v3' : shardProtocol === nativeFourBodyFrameworkShardProtocol ?
-      'native-component-projection-shards-v2' : 'native-component-projection-shards-v1');
-  assert.equal(projection.provenance.length, frameworkCount);
-  assert.ok(projection.originals.every(original =>
-    JSON.parse(original.text).context.native.toolchain.matrix.length === frameworkCount &&
-    JSON.parse(original.text).context.native.kind === 'metadata'));
-  assert.equal(replayNativeComponentEvidence({ ...inputs, bundle: projection.bundle }).evaluation.status, 'Passed');
-  assert.equal(projectNativeComponentEvidence({ ...inputs, originals: originals.slice(0, -1) }).evaluation.status, 'NotRun');
-  assert.equal(projectNativeComponentEvidence({ ...inputs,
-    originals: [...originals.slice(1), originals[1]] }).evaluation.status, 'NotRun');
-  assert.throws(() => projectNativeComponentEvidence({ ...inputs,
-    unitOrder: JSON.parse(JSON.stringify(unitOrder)) }), { code: 'EVIDENCE' });
-  assert.throws(() => projectNativeComponentEvidence({ ...inputs,
-    nativeEvaluations: JSON.parse(JSON.stringify(nativeEvaluations)) }), { code: 'EVIDENCE' });
-  const borrowedFacts = [...nativeEvaluations];
-  borrowedFacts[1] = { ...borrowedFacts[1], evaluation: borrowedFacts[0].evaluation };
-  assert.throws(() => projectNativeComponentEvidence({ ...inputs, nativeEvaluations: borrowedFacts }), { code: 'EVIDENCE' });
-  const changedOriginals = originals.map(original => ({ ...original }));
-  const changedRaw = JSON.parse(changedOriginals[0].text);
-  changedRaw.results[0].detail = 'Different original bytes with the same claimed passing outcome';
-  changedOriginals[0].text = canonical(changedRaw);
-  assert.throws(() => projectNativeComponentEvidence({ ...inputs, originals: changedOriginals,
-    verifyOriginal: input => {
-      const original = changedOriginals.find(original => original.role === input.role);
-      const raw = JSON.parse(original.text);
-      return { verifierId: 'controlled-changed-original', reportDigest: digest(original.text),
-        context: raw.context, sourceTime: raw.observedAt, sourceSequence: raw.sequence };
-    } }), { code: 'EVIDENCE' });
-  const refresh = framework.find(part => part.shard === 'refresh' &&
-    (bootstrapProtocol === null || part.target === 'macos-arm64'));
-  const archived = { schemaVersion: 1, kind: 'native-validation-definition',
-    ...(bootstrapProtocol === null ? {} : { bootstrapProtocol }),
-    target: refresh.target, profile: 'pr', component: 'framework', shard: 'refresh',
-    frameworkShards: shardProtocol, selectedWorkersRequest: null,
-    sourceFiles, plan: f.source.plan, inventory: f.source.inventory, goSources: f.source.goSources,
-    calculatorSources: sourceFiles.filter(source => calculatorFiles.includes(source.file)),
-    specification: refresh.specification,
-    stages: nativeFrameworkShardPlan({ inventory: f.source.inventory, plan: f.source.plan,
-      target: refresh.target, protocol: shardProtocol }).parts.find(part => part.shard === 'refresh').stages,
-    configDigest: refresh.context.configDigest, testSpecDigest: refresh.context.testSpecDigest,
-    inventoryDigest: refresh.context.inventoryDigest,
-    source: { revision: f.revisions.merge, treeSha: f.source.sha, repositoryId: 'repository-17' } };
-  const replay = await replayNativeEvidence({ definition: archived, data: dictionary(refresh.data),
-    candidate: f.candidate, asOf: inputs.now, verifyArchive: input => ({
-      verifierId: 'controlled-current-shard-archive', definitionDigest: input.definitionDigest,
-      reportDigest: input.reportDigest, context: refresh.context,
-      sourceTime: refresh.data.get('execution.json').observedAt, sourceSequence: 1,
-    }) });
-  assert.equal(replay.evaluation.status, 'Passed');
-  assert.equal(replay.currentCredit, 'NotRun', 'Historical shard replay must never grant current-candidate credit');
-  if ([nativeUnitBootstrapProtocol, nativeBodyBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol)) {
-    for (const file of ['native-homebrew-prefix-allocation.json', 'native-homebrew-prefix-cleanup.json']) {
-      const invented = new Map(refresh.data);
-      invented.set(file, { status: 'Passed', prefix: '/opt/abcde' });
-      await assert.rejects(verifyOriginalNativeRows({ data: dictionary(invented),
-        raw: refresh.data.get('execution.json'), specification: refresh.specification,
-        inventory: f.source.inventory, goSources: f.source.goSources, target: refresh.target,
-        component: refresh.component, shard: refresh.shard, shardProtocol, candidate: f.candidate,
-        sourceFiles, plan: f.source.plan, context: refresh.context, bootstrapProtocol }), { code: 'EVIDENCE' });
-    }
+  assert.deepEqual(reconcileProtocolRows(rows, [...outcomes].reverse(), sourceDigest), outcomes);
+  for (const mutate of [
+    values => values.pop(),
+    values => { values[1] = values[0]; },
+    values => { values[1].index = 17; },
+    values => { values[1].pair = protocolPairs[2]; },
+    values => { values[1].sourceDigest = digest('foreign-source'); },
+    values => { values[1].groupId = digest('foreign-group'); },
+    values => { values[1].status = 'NotRun'; },
+    values => { values[1].cleaned = false; },
+    values => { values[1].lease.pid++; },
+    values => { values[1].lease.slot = values[0].slot; },
+    values => { values[1].lease.finishedAt = values[1].finishedAt; },
+    values => { values[1].finishedAt = 'incomplete'; },
+  ]) {
+    const changed = structuredClone(outcomes);
+    mutate(changed);
+    assert.throws(() => reconcileProtocolRows(rows, changed, sourceDigest));
   }
-  if (bootstrapProtocol !== null) {
-    const changed = structuredClone(archived);
-    delete changed.bootstrapProtocol;
-    await assert.rejects(replayNativeEvidence({ definition: changed, data: dictionary(refresh.data),
-      candidate: f.candidate, asOf: inputs.now,
-      verifyArchive: () => { throw new Error('Source capability mismatch must fail before archive verification'); } }),
-    { code: 'EVIDENCE' });
-  }
-  await assert.rejects(replayNativeEvidence({ definition: { ...archived,
-    frameworkShards: shardProtocol === nativeFrameworkShardProtocol ?
-      nativePlatformUnitFrameworkShardProtocol : nativeFrameworkShardProtocol },
-    data: dictionary(refresh.data), candidate: f.candidate, asOf: inputs.now,
-    verifyArchive: () => { throw new Error('Protocol mismatch must fail before archive verification'); } }),
-  { code: 'EVIDENCE' });
-  assert.throws(() => verifyNativeShardUnitOrder(executions, { protocol:
-    shardProtocol === nativeFrameworkShardProtocol ? nativePlatformUnitFrameworkShardProtocol :
-      nativeFrameworkShardProtocol }), { code: 'EVIDENCE' });
-  const borrowed = new Map(refresh.data);
-  const units = framework.find(part => part.target === refresh.target && part.shard === 'units');
-  borrowed.set('unit.json', units.data.get('unit.json'));
-  await assert.rejects(verifyOriginalNativeRows({ data: dictionary(borrowed), raw: refresh.data.get('execution.json'),
-    specification: refresh.specification, inventory: f.source.inventory, goSources: f.source.goSources,
-    target: refresh.target, component: refresh.component, shard: refresh.shard, shardProtocol,
-    candidate: f.candidate, sourceFiles, plan: f.source.plan, context: refresh.context }), { code: 'EVIDENCE' });
-  const cleanup = structuredClone(f.cleanupReports.get('macos-arm64-framework-units'));
-  if (cleanup.has('native-homebrew-prefix-cleanup.json')) cleanup.get('native-homebrew-prefix-cleanup.json').status = 'rolled-back';
-  else cleanup.set('native-homebrew-prefix-cleanup.json', { status: 'removed', prefix: '/opt/abcde' });
-  const macUnits = f.parts.get('macos-arm64-framework-units');
-  assert.throws(() => verifyNativeCleanup(dictionary(cleanup),
-    { ...macUnits, jobKey: nativePartJobKey(macUnits, shardProtocol) }), { code: 'EVIDENCE' });
-  const output = path.join(f.root, 'versioned-parts-retained');
-  const nativeParts = executions.map(part => {
-    const artifact = f.artifacts.get(part.role);
-    const bootstrap = f.artifacts.get(`bootstrap-${part.role}`);
-    const cleanup = f.artifacts.get(`cleanup-${part.role}`);
-    return { target: part.target, component: part.component, role: part.role,
-      ...(part.shard === null ? {} : { shard: part.shard }),
-      jobId: part.job.id, runId: f.run.id, attempt: 1,
-      artifactId: artifact.id, artifactDigest: artifact.digest,
-      bootstrapArtifactId: bootstrap.id, bootstrapArtifactDigest: bootstrap.digest,
-      ...(cleanup ? { cleanupArtifactId: cleanup.id, cleanupArtifactDigest: cleanup.digest } : {}) };
+});
+
+test('T-PRD021 protocol row pool drains failed children stops dispatch and respects one-slot fallback', async t => {
+  const root = path.resolve('.test-data', `protocol-control-${randomUUID()}`);
+  await fs.mkdir(root, { recursive: true });
+  t.after(async () => {
+    await fs.rm(root, { recursive: true });
+    await assert.rejects(fs.stat(root), { code: 'ENOENT' });
   });
-  const sourceArtifacts = nativeParts.filter(part => part.component === 'framework').map(part => ({
-    target: part.target, role: part.role, artifactId: part.artifactId,
-    artifactDigest: part.artifactDigest, jobId: part.jobId, runId: part.runId, attempt: part.attempt,
-  }));
-  await retainObserverResult({ status: 'Passed', results: [] }, output, { componentEvidence: [{
-    prNumber: 1, sourceCommit: f.revisions.merge, projection, nativeParts, sourceArtifacts,
-  }] });
-  const retained = JSON.parse(await fs.readFile(path.join(output, 'observer-result.json'), 'utf8')).components[0];
-  assert.equal(retained.nativeOriginals.length, frameworkCount);
-  assert.equal(new Set(retained.nativeOriginals.map(original => original.filename)).size, frameworkCount);
-  assert.ok(retained.unitOrder.filename.endsWith('-unit-order.json'));
-  assert.equal(f.calls.length, 0, 'No native tools, provider acquisition or Python reader runs in this Node-only regression');
+  await assert.rejects(observerApiFixture(t, { rootParent: path.resolve('.') }),
+    /owned checkout-local scratch directory/u);
+  const budgetUrl = new URL('../scripts/test-budget.mjs', import.meta.url).href;
+  const diagnosticsUrl = new URL('../scripts/validation-tools.mjs', import.meta.url).href;
+  const workerSource = fail => `
+import assert from 'node:assert/strict';
+import * as fs from 'node:fs/promises';
+import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
+import { acquireTestWorker, readTestGroupProcesses } from ${JSON.stringify(budgetUrl)};
+import { processDiagnostic } from ${JSON.stringify(diagnosticsUrl)};
+const [indexText, sourceDigest, scratch, groupId, pairText] = process.argv.slice(2);
+const index = Number(indexText);
+const pair = JSON.parse(pairText);
+const allocation = await acquireTestWorker(1, { groupId });
+const parent = path.dirname(scratch);
+const wait = async predicate => {
+  const deadline = performance.now() + 10000;
+  while (!await predicate()) {
+    assert.ok(performance.now() < deadline, 'Controlled child barrier expired');
+    await delay(10);
   }
+};
+const exists = async file => {
+  try { await fs.stat(file); return true; } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    return false;
+  }
+};
+try {
+  await fs.writeFile(path.join(parent, 'started-' + index), String(process.pid), { flag: 'wx' });
+  if (${fail} && index === 0) {
+    await wait(() => exists(path.join(parent, 'started-1')));
+    await fs.mkdir(path.join(scratch, 'owned-failed-row-residue'));
+    console.error(JSON.stringify(processDiagnostic(new Error('controlled-row-failure'))));
+    process.exitCode = 17;
+  } else {
+    if (${fail}) await wait(async () => !await exists(path.join(parent, 'scratch-0')));
+    assert.deepEqual(await fs.readdir(scratch), []);
+    const [lease] = await readTestGroupProcesses(groupId);
+    console.log(JSON.stringify({ index, pair, sourceDigest, groupId, status: 'Passed',
+      cleaned: true, pid: process.pid, slot: allocation.slot, lease,
+      finishedAt: new Date().toISOString() }));
+  }
+} finally { allocation.close(); }
+`;
+  const failureWorker = path.join(root, 'failure.mjs');
+  const serialWorker = path.join(root, 'serial.mjs');
+  await fs.writeFile(failureWorker, workerSource(true));
+  await fs.writeFile(serialWorker, workerSource(false));
+  let failure;
+  try {
+    await runProtocolPool(t, { workers: 2, worker: pathToFileURL(failureWorker),
+      rows: protocolPairs.slice(0, 4) });
+  } catch (error) { failure = error; }
+  assert.ok(failure, 'The real failing child must fail the controller');
+  t.diagnostic(JSON.stringify({ protocolFailure: failure.protocolPool }));
+  assert.match(failure.message, /Protocol row 0 child failed/u);
+  assert.equal(failure.protocolPool.reports.length, 2, 'Do not dispatch queued rows after failure');
+  const [failed, drained] = failure.protocolPool.reports;
+  assert.equal(failed.index, 0);
+  assert.equal(failed.exitCode, 17);
+  assert.equal(drained.index, 1);
+  assert.equal(drained.exitCode, 0);
+  assert.ok(failure.protocolPool.reports.every(report => report.complete && report.cleanup.rootExitObserved));
+  for (const report of failure.protocolPool.reports) {
+    await assert.rejects(fs.stat(report.command[4]), { code: 'ENOENT' });
+  }
+  assert.equal(JSON.parse(failed.stderr).message, 'controlled-row-failure');
+  assert.ok(Date.parse(failed.finishedAt) >= Date.parse(drained.startedAt),
+    'The two actual owned child processes must overlap');
+  const serial = await runProtocolPool(t, { workers: 1, worker: pathToFileURL(serialWorker),
+    rows: protocolPairs.slice(0, 2) });
+  assert.equal(serial.workers, 1);
+  assert.equal(serial.rows.length, 2);
+  assert.ok(Date.parse(serial.reports[1].startedAt) >= Date.parse(serial.reports[0].finishedAt),
+    'A caller allocation of one must never start a second concurrent row');
+  for (const record of [failure.protocolPool, serial]) {
+    const allocation = record.allocation;
+    assert.ok(allocation.peakActiveWorkers <= allocation.capacity);
+    assert.ok(allocation.peakResidentWorkers <= allocation.residentLimit);
+    assert.ok(allocation.peakProducers <= allocation.producerLimit);
+    assert.ok(allocation.peakControls <= allocation.controlLimit);
+  }
+  t.diagnostic(JSON.stringify({ protocolControl: { failure: failure.protocolPool, serial } }));
 });
 
 test('T-PRD021 acquired native ZIP identities and original outcomes reject forged passing summaries and candidate swaps', async t => {

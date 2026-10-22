@@ -102,6 +102,16 @@ Selected-name/per-file resource declarations include exact worker count,
 optional names, owner and reason. Two-worker callbacks reserve both tokens
 before their deadlines begin; missing aggregate allocation cannot be called
 successful overlap. Resource matching is part of source/configuration evidence.
+The versioned native-protocol regression retains its original root and all
+seventeen complete protocol/bootstrap scenarios. Reserve four root slots before
+setup, then run whole scenarios in isolated children under the existing shared
+producer budget, bounded to four and the actual caller allocation. Environment
+changes, SDK capabilities, original verification, negative controls, projection,
+replay and cleanup remain causal inside each child. Reconcile every source-bound
+row exactly once; unknown, duplicate, missing or incomplete outcomes fail.
+Two PR-only controller regressions cover outcome identity, failure stop/drain
+and serial fallback. Preserve actual child/lease overlap and cleanup evidence;
+this changes neither the 27-assertion critical budget nor native acceptance.
 Standalone syntax checks use a bounded ready-work pool up to available CPU
 capacity and the existing 32-slot ceiling. An inherited test allocation keeps
 the checker serial rather than multiplying unregistered work. Preserve every
@@ -381,6 +391,29 @@ before mutation without the redundant outer source scan. Staged and activated
 launch checks, doctor/uninstall source checks, path/tamper refusals and installer
 durability remain required. No preverified flag, source cache or larger
 network-boundary deadline substitutes for those checks.
+Standalone controllers share the CLI's exact argument parser and home-path
+resolver without loading the full dispatcher or Store. A fresh child with
+poisoned dispatcher/Store modules must retain real argument rejection,
+environment/relative-home resolution and pre-mutation source guards.
+The CLI's existing parser export and Store's selected-home behavior remain
+compatible; this import-graph check is not native installation acceptance.
+Distribution setup may reuse supplied frozen payload/archive bytes only after
+fresh complete committed-source, index, mode, working-tree and snapshot checks,
+owned literal-path checks and real release/payload/manifest verification.
+Missing or stale supplied identity fails rather than rebuilding silently.
+Eight PR-only fixture regressions cover these guards, real beforehook reuse and
+dedicated-context sibling filtering. Preserve actual builder/reproducibility
+cases and the absent-input build path; Linux's once-built private fixtures remain
+test-only. Controlled denied-build versus verified-reuse outcomes do not prove
+an Intel timeout fix or native elapsed improvement.
+Fixture snapshots use only registered Git index paths, including intent-to-add
+source files, never arbitrary untracked workspace data. A one-commit snapshot
+without the historical object or alternates must execute the two representative
+fixture/beforehook roots. Its visible owned untracked private canary must receive
+no filesystem access or copying. This requires neither deeper CI history nor
+access to actual private work-item state.
+Retained beforehook comparison and single-snapshot proof streams use unique per-invocation directories;
+repeated validation must preserve earlier evidence without path collisions.
 
 ### 2.3 Test modes and shared procedure contracts
 

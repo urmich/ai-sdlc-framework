@@ -7,6 +7,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { canonical, digest, newId, parseJson, LIMITS, requireThat } from './core.mjs';
 import { isWindowsDevicePath, sameNativePath, withinNativePath } from './platform.mjs';
 
+export function resolveCopilotHome(home = process.env.COPILOT_HOME || path.join(os.homedir(), '.copilot')) {
+  return path.resolve(home);
+}
+
 export async function exists(file) {
   try { await fs.lstat(file); return true; }
   catch (error) { if (error.code === 'ENOENT') return false; throw error; }

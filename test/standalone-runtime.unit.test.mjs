@@ -1,7 +1,7 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [
-    {"coverage": "direct", "paths": ["packaging/standalone/runtime.mjs", "packaging/standalone/protocol.mjs"]}
+    {"coverage": "direct", "paths": ["packaging/standalone/runtime.mjs", "packaging/standalone/protocol.mjs", "src/cli-arguments.mjs"]}
   ]
 };
 import test from 'node:test';
@@ -9,6 +9,8 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { canonical, tarGzip } from '../packaging/standalone/archive.mjs';
 import { extractEntries, platformEntries, verifyTree } from '../packaging/standalone/protocol.mjs';
@@ -145,5 +147,47 @@ test('real standalone tree verification rejects source, staged and active byte t
   await fs.writeFile(path.join(wrongPlatform, 'unlisted.txt'), 'not in inventory');
   await assert.rejects(verifyTree(wrongPlatform, expectations),
     { message: 'Distribution payload, wrapper inventory or checksum mismatch' });
+  await unchanged(f);
+});
+
+test('standalone runtime parses arguments and resolves owned homes without loading the framework dispatcher or Store', async t => {
+  const f = await fixture(t);
+  await invalidSource(f);
+  const isolated = path.join(f.directory, 'isolated');
+  await fs.mkdir(isolated);
+  for (const directory of ['src', 'packaging/standalone']) {
+    await fs.cp(new URL(`../${directory}/`, import.meta.url), path.join(isolated, directory), { recursive: true });
+  }
+  await fs.writeFile(path.join(isolated, 'src', 'cli.mjs'),
+    'export function parseArguments() {}\nthrow new Error("Forbidden full dispatcher import");\n');
+  await fs.writeFile(path.join(isolated, 'src', 'store.mjs'),
+    'export class Store {}\nthrow new Error("Forbidden Store import");\n');
+  const probe = path.join(isolated, 'probe.mjs');
+  await fs.writeFile(probe, `
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import * as fs from 'node:fs/promises';
+import { main, validateChannelHome } from './packaging/standalone/runtime.mjs';
+const [source, home, channel] = process.argv.slice(2);
+const expected = await fs.realpath(home);
+assert.equal((await validateChannelHome({ channelRoot: channel })).home, expected);
+assert.equal((await validateChannelHome({ channelRoot: channel, home: path.relative(process.cwd(), home) })).home, expected);
+await assert.rejects(validateChannelHome({ channelRoot: home, home }), /non-overlapping/u);
+const args = ['install-channel', '--root', source, '--node', process.execPath, '--',
+  'install', '--channel-root', channel, '--home', home];
+await assert.rejects(main(args), { message: 'Malformed payload manifest' });
+await assert.rejects(main([...args, '--home', home]), { code: 'INPUT', message: 'Duplicate option --home' });
+await assert.rejects(main([...args, '--unknown']), { code: 'INPUT', message: 'Unknown option or missing value: --unknown' });
+console.log('Standalone helper-only import and original guards passed.');
+`);
+  const result = await promisify(execFile)(process.execPath, [probe, f.source, f.home, f.channelRoot],
+    { cwd: isolated, env: { ...process.env, COPILOT_HOME: f.home } })
+    .then(output => ({ code: 0, output }), error => {
+      if (!Number.isInteger(error.code)) throw error;
+      const primary = error.stderr.split(/\r?\n/u).find(line => /^\w*Error(?: \[[A-Z0-9_]+\])?:/u.test(line));
+      return { code: error.code, diagnostic: primary ?? 'Child failed without a primary error line' };
+    });
+  assert.equal(result.code, 0, result.diagnostic);
+  assert.equal(result.output.stdout.trim(), 'Standalone helper-only import and original guards passed.');
   await unchanged(f);
 });
