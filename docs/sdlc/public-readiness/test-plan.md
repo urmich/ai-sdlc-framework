@@ -791,10 +791,11 @@ An incomplete or failed attempt is not a successful full-suite benchmark.
 
 For the next PR measurement, explicitly request the native hosts' observed
 memory-bounded shared worker allocations: Linux/Windows 15, Apple Silicon 7,
-and four CPU-matched slots for Intel Mac framework producers. The Intel unit
-allocation improved its measured barrier. Trial the same regression allocation
-after observed live-lock contention and slow cleanup with fourteen slots;
-do not claim a regression speedup before complete hosted results.
+four CPU-matched slots on both Intel unit hosts and fourteen slots on Intel
+regression hosts. Keep the two-unit topology, case union and all other selected
+allocations unchanged for this comparison: the four-slot regression trial did
+not complete before the cutoff. Do not claim a whole-lane speedup before complete
+hosted results.
 Verify the actual producer's requested/capacity fields and shared
 nested-allocation bounds; the default local gate and 32-slot ceiling do not
 change. Account for the personal-account limit of five concurrent hosted Mac

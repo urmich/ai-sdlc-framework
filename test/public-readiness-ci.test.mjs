@@ -1510,10 +1510,10 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
       const configuredWorkers = ci.jobs[key].env.SDLC_TEST_WORKERS;
       assert.match(configuredWorkers ?? '', /^[1-9]\d*$/u);
       const resources = nativeResourceFacts({ ...host, configuredWorkers });
-      const cpuMatched = part.target === 'macos-x64';
+      const cpuMatched = part.target === 'macos-x64' && key === 'native-units-mi';
       assert.equal(resources.workerCapacity, cpuMatched ? host.availableParallelism :
         Math.min(32, Math.floor(host.totalMemoryBytes / (1024 ** 3))),
-      'Intel framework roles use the CPU-count trial; other hosts retain the observed memory budget');
+      'Intel unit roles use the CPU-count budget; regression hosts use the observed memory budget');
       assert.equal(resources.workerCapacity > host.availableParallelism, !cpuMatched);
       assert.equal(resources.configuredWorkers, configuredWorkers);
       assert.ok(ci.jobs[key].steps.every(step => step.env?.SDLC_TEST_WORKERS === undefined),
