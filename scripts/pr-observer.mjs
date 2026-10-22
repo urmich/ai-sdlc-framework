@@ -18,6 +18,7 @@ import { evaluateApproval, evaluateConversations, reconcilePrReadiness, statusCo
 import { inspectWorkflowPolicy } from './workflow-policy.mjs';
 import { calculatorProjectFiles, calculatorSelection, reconcileCalculator } from './pr-calculator.mjs';
 import { homebrewToolchain } from './toolchain-baseline.mjs';
+import { sourceNativeBootstrapProtocol, requireNativeBootstrapCapability } from './native-bootstrap-capability.mjs';
 import { deriveNativeComponentSpecification, projectNativeComponentEvidence,
   requireNativeComponentProjection } from './native-components.mjs';
 
@@ -241,13 +242,16 @@ export function readTrustedJobContext(job, logs, {
   return normalized;
 }
 
-export function verifyNativeCleanup(data, { target, role, context, jobKey = 'native' }) {
+export function verifyNativeCleanup(data, { target, role, context, jobKey = 'native',
+  component = 'full', shard = null, bootstrapProtocol = null }) {
   const request = data?.['native-homebrew-prefix-request.json'];
   const allocation = data?.['native-homebrew-prefix-allocation.json'];
   const cleanup = data?.['native-homebrew-prefix-cleanup.json'];
   const binding = request?.binding;
   const github = binding?.github;
   const prefix = request?.prefix;
+  const capability = requireNativeBootstrapCapability({ bootstrap: data?.['toolchain.json'],
+    target, profile: 'pr', component, shard, role, protocol: bootstrapProtocol, prefix });
   requireThat(request?.schemaVersion === 1 && request.kind === 'owned-native-homebrew-prefix' &&
     typeof prefix === 'string' && /^\/opt\/[a-f0-9]{5}$/u.test(prefix) &&
     /^[a-f0-9]{64}$/u.test(request.nonce ?? '') &&
@@ -268,7 +272,8 @@ export function verifyNativeCleanup(data, { target, role, context, jobKey = 'nat
     github.RUNNER_ARCH === (context.native.architecture === 'arm64' ? 'ARM64' : 'X64') &&
     data['toolchain.json']?.status === 'Passed' &&
     digest(data['toolchain.json'].native) === digest(context.native.toolchain.bootstrap) &&
-    context.native.toolchain.bootstrap.homebrew?.nodePrefix === `${prefix}/opt/${homebrewToolchain.formula}` &&
+    (capability ? context.native.toolchain.bootstrap.homebrew?.prefix === prefix :
+      context.native.toolchain.bootstrap.homebrew?.nodePrefix === `${prefix}/opt/${homebrewToolchain.formula}`) &&
     typeof data.texts?.['native-homebrew-prefix-request.json'] === 'string' &&
     allocation?.schemaVersion === 1 &&
     allocation.requestDigest === digest(data.texts['native-homebrew-prefix-request.json']) &&
@@ -549,8 +554,10 @@ async function sourceDefinitions(api, sha) {
   const trust = inspectWorkflowTrust([workflow]);
   requireThat(trust.complete, 'EVIDENCE', 'Native producer role/dependency definition differs from the adopted topology');
   const frameworkShards = trust.nativeProtocol !== null;
+  const bootstrapProtocol = sourceNativeBootstrapProtocol([{ file: 'scripts/toolchain-baseline.mjs',
+    contents: await api.file(tree, 'scripts/toolchain-baseline.mjs') }]);
   return { tree, inventory, goSources, requirements, testPlans, files, adapterSource,
-    frameworkShards, shardProtocol: trust.nativeProtocol,
+    frameworkShards, shardProtocol: trust.nativeProtocol, bootstrapProtocol,
     coverage: { repositoryId: 'primary', sourceRevision: sha, requirements, testPlans },
     plan: testPlans.find(plan => plan.artifactId === 'public-readiness').contents };
 }
@@ -609,6 +616,7 @@ export function createPrReadinessHost({
     const paths = new Set([...reporterPaths, ...[...adopted.paths.keys()].filter(file =>
       /^\.github\/actions\//u.test(file) ||
       /^test\/.*\.(?:mjs|js|cjs)$/u.test(file) && !/\.test\.(?:mjs|js|cjs)$/u.test(file))]);
+    if (source.bootstrapProtocol !== null) paths.add('scripts/native-bootstrap-capability.mjs');
     return [...paths].every(file => adopted.paths.get(file)?.sha &&
       source.tree.paths.get(file)?.sha === adopted.paths.get(file).sha);
   }
@@ -779,6 +787,8 @@ export function createPrReadinessHost({
           inventory: source.inventory, plan: source.plan, target, protocol: shardProtocol,
         });
         const toolchain = raw.context.native.toolchain;
+        requireNativeBootstrapCapability({ bootstrap: data['toolchain.json'], target,
+          profile: 'pr', component, shard, role, protocol: source.bootstrapProtocol });
         const expectedResources = native.nativeResourceFacts(facts.resources);
         requireThat(typeof toolchain.go === 'string' && typeof toolchain.python === 'string' &&
           toolchain.bootstrap && data['toolchain.json'].native &&
@@ -794,6 +804,7 @@ export function createPrReadinessHost({
           candidateDigest: digest({ revision: pr.merge_commit_sha, tree: source.tree.treeSha }),
           testSpecDigest: testSpecificationDigest(source.plan),
           configDigest: native.nativeConfigurationDigest({ inventory: source.inventory, profile: 'pr', component, shard, shardProtocol,
+            bootstrapProtocol: source.bootstrapProtocol,
             shardPlanDigest: assignment?.digest ?? null,
             configuredWorkers: expectedResources.configuredWorkers }),
           inventoryDigest: validationInventoryDigest(specification),
@@ -817,6 +828,7 @@ export function createPrReadinessHost({
           goSources: source.goSources, target, component, shard, shardProtocol, candidate: frozen.candidate,
           sourceFiles: source.files, plan: source.plan, context });
         if (cleanupData) verifyNativeCleanup(cleanupData, { target, role, context,
+          component, shard, bootstrapProtocol: source.bootstrapProtocol,
           jobKey: frameworkShards ? native.nativePartJobKey({ target, shard, component }, shardProtocol) : 'native' });
         const rawDigest = digest(data.texts[native.nativeWorkflowContract.reports.execution]);
         const selection = {
@@ -844,7 +856,7 @@ export function createPrReadinessHost({
       const result = native.aggregateNativeReadiness(evaluations, {
         profile: 'pr', components: true, frameworkShards, sourceRevision: pr.merge_commit_sha,
         artifacts: frozen.artifacts, executions, inventory: source.inventory, plan: source.plan,
-        goSources: source.goSources, unitOrder, shardProtocol,
+        goSources: source.goSources, unitOrder, shardProtocol, bootstrapProtocol: source.bootstrapProtocol,
       });
       const laneTimings = nativeLaneTimings(acquired, { frameworkShards, shardProtocol });
       const auxiliaryJobs = [freezes[0], minimumJobs[0]].map(job => ({
@@ -857,7 +869,7 @@ export function createPrReadinessHost({
       const frameworkEvaluations = evaluations.filter(part => part.component !== 'homebrew');
       const definition = deriveNativeComponentSpecification({ inventory: source.inventory,
         testPlan: source.plan, adapterSourceDigest: digest(source.adapterSource.contents),
-        frameworkShards, goSources: source.goSources, shardProtocol });
+        frameworkShards, goSources: source.goSources, shardProtocol, bootstrapProtocol: source.bootstrapProtocol });
       const projection = projectNativeComponentEvidence({ definition, expectedLanes: frameworkExecutions,
         ...(frameworkShards ? { unitOrder, nativeEvaluations: frameworkEvaluations.map(part => ({
           role: part.role, evaluation: part.evaluation,

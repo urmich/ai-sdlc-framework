@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LIMITS, canonical, choice, digest, id, object, recordLimit, requireThat,
+import { LIMITS, canonical, choice, createSummarySanitizer, digest, id, object, recordLimit, requireThat,
   safeRecord, safeSummary } from './core.mjs';
 import { readBytes, readJson, readJsonEntries, safePath } from './files.mjs';
 import { validateRecord } from './schemas.mjs';
@@ -35,7 +35,7 @@ function redactPayloadValue(value) {
     value : `[redacted:${digest(value)}]`;
 }
 function payloadSanitizerState() {
-  return { nodes: 0, parsedBytes: 0, scannedCharacters: 0 };
+  return { nodes: 0, parsedBytes: 0, scannedCharacters: 0, summarize: createSummarySanitizer() };
 }
 function checkPayloadWork(state, depth) {
   requireThat(depth <= 32 && ++state.nodes <= 65536, 'CAPACITY',
@@ -112,14 +112,14 @@ function sanitizePayloadText(value, state = payloadSanitizerState(), depth = 0) 
     /(?<![A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)([ \t]*=[ \t]*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s;&]+)/gu,
     (assignment, name, separator, content) => sensitivePayloadKey(name) ?
       `${name}${separator}${redactPayloadValue(content)}` : assignment);
-  return safeSummary(assignments);
+  return state.summarize(assignments);
 }
 function sanitizeRetainedValue(value, state = payloadSanitizerState(), depth = 0) {
   checkPayloadWork(state, depth);
   if (typeof value === 'string') return sanitizePayloadText(value, state, depth);
   if (Array.isArray(value)) return value.map(item => sanitizeRetainedValue(item, state, depth + 1));
   if (!value || typeof value !== 'object') return value;
-  return safeSummary(Object.fromEntries(Object.entries(value).map(([key, item]) =>
+  return state.summarize(Object.fromEntries(Object.entries(value).map(([key, item]) =>
     [key, sensitivePayloadKey(key) ? redactPayloadValue(item) :
       sanitizeRetainedValue(item, state, depth + 1)])));
 }

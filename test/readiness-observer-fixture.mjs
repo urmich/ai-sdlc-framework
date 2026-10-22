@@ -24,6 +24,7 @@ import { createPrReadinessHost, statusConcurrencyGroup } from '../scripts/pr-obs
 import { calculatorFiles, calculatorSelection, calculatorCommandArguments } from '../scripts/pr-calculator.mjs';
 import { validationExecutionGroups, validationGroupProtocol, validationSchedulingPolicyDigest } from '../scripts/test-scheduling.mjs';
 import { nativeToolchain, homebrewToolchain } from '../scripts/toolchain-baseline.mjs';
+import { nativeBootstrapCapability } from '../scripts/native-bootstrap-capability.mjs';
 
 const repository = 'urmich/ai-sdlc-framework';
 const repositoryId = 17;
@@ -41,6 +42,7 @@ const locations = { 'linux-x64': 'github-linux-x64', 'windows-x64': 'github-wind
 const suffixes = { 'linux-x64': 'LX', 'windows-x64': 'WX', 'macos-arm64': 'MA', 'macos-x64': 'MI' };
 const reporterPaths = [
   '.github/workflows/ci.yml', 'scripts/native-validation.mjs', 'scripts/native-toolchain.mjs',
+  'scripts/native-bootstrap-capability.mjs',
   'scripts/toolchain-baseline.mjs', 'scripts/native-homebrew-prefix.mjs',
   'scripts/validation-tools.mjs', 'scripts/test-runner.mjs', 'scripts/test-worker.mjs',
   'scripts/pr-capabilities.mjs', 'scripts/pr-calculator.mjs', 'scripts/pr-calculator-reporter.mjs',
@@ -123,7 +125,7 @@ function fixturePlan(names, additionalTests = []) {
 }
 
 function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = false, docsOnly = false,
-  narrowedRequiredScope = false, additionalTests = [], producerChange } = {}) {
+  narrowedRequiredScope = false, additionalTests = [], producerChange, bootstrapProtocol = null } = {}) {
   const names = [
     ...unitFiles.map((file, index) => ({ file, stage: 'unit', id: `T-FIX-CANONICAL-${index + 1}`,
       name: `T-FIX-CANONICAL-${index + 1} controlled canonical assertion` })),
@@ -155,6 +157,8 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
   files.set('scripts/toolchain-baseline.mjs',
     `${files.get('scripts/toolchain-baseline.mjs')}export const nativeToolchain = ${JSON.stringify(nativeToolchain)};\n` +
     `export const homebrewToolchain = ${JSON.stringify(homebrewToolchain)};\n`);
+  if (bootstrapProtocol !== null) files.set('scripts/toolchain-baseline.mjs',
+    `${files.get('scripts/toolchain-baseline.mjs')}export const nativeBootstrapProtocol = '${bootstrapProtocol}';\n`);
   files.set('.github/workflows/pr-readiness.yml', writerDefinition());
   files.set('.github/workflows/coverage-metadata.yml', writerDefinition());
   for (const { file, contents } of calculatorSources) files.set(file, contents);
@@ -328,7 +332,7 @@ function bundleFromOriginal(raw, specification, independentlyCapturedContext, as
 function laneData(source, candidate, revisions, target, { prNumber = 1, executionId = runId,
   profile = 'pr', releaseIntentId = 'controlled-release-intent', startTime = epoch,
   previousMetadata = nativeReplayPreviousFixture(), component = 'full', shard = null, frameworkShards = false,
-  shardProtocol = nativeFrameworkShardProtocol } = {}) {
+  shardProtocol = nativeFrameworkShardProtocol, bootstrapProtocol = null } = {}) {
   const role = nativeProducerRole(target, component, shard);
   const assignment = shard === null ? null : nativeFrameworkShardPlan({
     inventory: source.inventory, plan: source.plan, target, protocol: shardProtocol,
@@ -370,12 +374,28 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
       `/opt/${digest(role).slice(0, 5)}/opt/${homebrewToolchain.formula}`,
     uname: architecture === 'arm64' ? 'arm64' : 'x86_64', translation: '0',
   };
+  if (bootstrapProtocol !== null && component === 'framework' && shard !== null) {
+    const capability = nativeBootstrapCapability({ target, profile, component, shard, role, protocol: bootstrapProtocol });
+    bootstrap.native.bootstrapCapability = capability;
+    bootstrap.native.runtimeProvider = { provider: capability.runtimeProvider, executable: bootstrap.native.executables.node,
+      version: nativeToolchain.node, platform: platforms[target], architecture };
+    if (target.startsWith('macos-')) {
+      const prefix = `/opt/${digest(role).slice(0, 5)}`;
+      bootstrap.native.homebrew = { commit: homebrewToolchain.commit, coreCommit: homebrewToolchain.coreCommit,
+        ruby: homebrewToolchain.ruby,
+        rubyExecutable: `${prefix}/Library/Homebrew/vendor/portable-ruby/${homebrewToolchain.ruby}/bin/ruby`,
+        prefix, repository: prefix, nodeProvisioned: false, bottlesProvisioned: false,
+        uname: architecture === 'arm64' ? 'arm64' : 'x86_64', translation: '0' };
+      bootstrap.reports = bootstrap.reports.filter(report => !report.name.startsWith('brew-node-'));
+      bootstrap.reports.push({ name: 'brew-core-identity', complete: true, exitCode: 0 });
+    }
+  }
   const specification = nativeSpecification({ plan: source.plan, inventory: source.inventory,
     goSources: source.goSources, target, profile, component, shard, shardProtocol });
   const context = validateExecutionContext({
     candidateDigest: digest({ revision: revisions.merge, tree: source.sha }),
     testSpecDigest: testSpecificationDigest(source.plan),
-    configDigest: nativeConfigurationDigest({ inventory: source.inventory, profile, component, shard, shardProtocol,
+    configDigest: nativeConfigurationDigest({ inventory: source.inventory, profile, component, shard, shardProtocol, bootstrapProtocol,
       shardPlanDigest: assignment?.digest ?? null }),
     inventoryDigest: validationInventoryDigest(specification),
     sources: [{ repositoryId: `repository-${repositoryId}`, revision: revisions.merge,
@@ -592,7 +612,8 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
 }
 
 function cleanupData(lane, executionId = runId) {
-  const prefix = path.posix.dirname(path.posix.dirname(lane.context.native.toolchain.bootstrap.homebrew.nodePrefix));
+  const brew = lane.context.native.toolchain.bootstrap.homebrew;
+  const prefix = brew.prefix ?? path.posix.dirname(path.posix.dirname(brew.nodePrefix));
   const binding = { schemaVersion: 1, target: lane.target,
     host: { platform: 'darwin', architecture: lane.context.native.architecture,
       machine: lane.target === 'macos-arm64' ? 'arm64' : 'x86_64',
@@ -713,12 +734,13 @@ jobs:
           persist-credentials: false
 `;
   const revisions = { head: 'a'.repeat(40), base: 'b'.repeat(40), merge: 'c'.repeat(40), trusted: 'd'.repeat(40) };
-  const adopted = fixtureSources(ci);
+  const adopted = fixtureSources(ci, { bootstrapProtocol: options.bootstrapProtocol });
   const source = fixtureSources(ci, options);
   const { candidate, entries } = candidateData(revisions.merge);
   const expectedParts = options.frameworkShards ? protocolParts : nativeLegacyPrParts;
   const parts = new Map(expectedParts.map(part => [part.role,
     laneData(source, candidate, revisions, part.target, { ...part, frameworkShards: Boolean(options.frameworkShards), shardProtocol,
+      bootstrapProtocol: options.bootstrapProtocol,
       startTime: epoch + (part.shard && part.shard !== 'units' ? 100000 : 0) })]));
   const lanes = new Map(validationPlatforms.map(target => [target, [...parts.values()].find(part =>
     part.target === target && part.component !== 'homebrew' && (!options.frameworkShards ||

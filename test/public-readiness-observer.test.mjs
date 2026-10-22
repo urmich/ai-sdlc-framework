@@ -26,6 +26,47 @@ import { calculatorFiles } from '../scripts/pr-calculator.mjs';
 import { deriveNativeComponentSpecification, nativeComponentSelection,
   projectNativeComponentEvidence, replayNativeComponentEvidence } from '../scripts/native-components.mjs';
 import { compileValidationSourceInventory } from '../scripts/validation-inventory.mjs';
+import { nativeBootstrapProtocol } from '../scripts/toolchain-baseline.mjs';
+
+test('T-PRD021 source-bound role bootstrap preserves all producer origins and twelve independent Mac cleanups', async t => {
+  const f = await observerApiFixture(t, { frameworkShards: true, bootstrapProtocol: nativeBootstrapProtocol });
+  const { host } = f.connect();
+  assert.equal(verdict(await host.snapshot()).status, 'Passed');
+  assert.equal(f.parts.size, 24);
+  assert.equal(f.cleanupReports.size, 12);
+  const prefixes = [];
+  for (const part of f.parts.values()) {
+    const bootstrap = part.data.get('toolchain.json');
+    if (part.component === 'framework') {
+      assert.equal(bootstrap.native.bootstrapCapability.role, part.role);
+      assert.equal(bootstrap.native.runtimeProvider.provider, 'actions/setup-node');
+      if (part.target.startsWith('macos-')) {
+        assert.equal(bootstrap.native.homebrew.nodeProvisioned, false);
+        assert.equal(Object.hasOwn(bootstrap.native.homebrew, 'nodePrefix'), false);
+      }
+    } else {
+      assert.equal(bootstrap.native.homebrew.node.version, '24.20.0');
+      assert.equal(Object.hasOwn(bootstrap.native, 'bootstrapCapability'), false);
+    }
+    if (f.cleanupReports.has(part.role)) {
+      const entries = f.cleanupReports.get(part.role);
+      const data = { ...Object.fromEntries(entries), texts: Object.fromEntries([...entries]
+        .map(([file, value]) => [file, typeof value === 'string' ? value : canonical(value)])) };
+      const expected = { ...part, bootstrapProtocol: nativeBootstrapProtocol, jobKey: nativePartJobKey(part) };
+      prefixes.push(verifyNativeCleanup(data, expected).prefix);
+      if (part.component === 'framework') {
+        const borrowed = structuredClone(data);
+        borrowed['toolchain.json'].native.homebrew.prefix = '/opt/fffff';
+        assert.throws(() => verifyNativeCleanup(borrowed, expected), { code: 'EVIDENCE' });
+        assert.throws(() => verifyNativeCleanup(data, { ...expected, bootstrapProtocol: null }), { code: 'EVIDENCE' });
+      }
+    }
+  }
+  assert.equal(new Set(prefixes).size, 12);
+  const retained = host.componentEvidence();
+  assert.equal(retained[0].projection.definition.bootstrapProtocol, nativeBootstrapProtocol);
+  assert.equal(retained[0].projection.provenance.length, 22);
+});
 
 test('T-PRD021 native component projection retains four verified original platforms and replays exact source-bound SDK evidence', async t => {
   const f = await observerApiFixture(t);
@@ -420,9 +461,10 @@ test('T-PRD020 logical native latency spans earliest required worker through the
 });
 
 test('T-PRD021 versioned twenty-four and historical twenty-part originals require exact closures cleanup and protected SDK replay', async t => {
-  for (const shardProtocol of [nativeFrameworkShardProtocol, nativePlatformUnitFrameworkShardProtocol,
-    nativeLegacyFrameworkShardProtocol]) {
-  const f = await observerApiFixture(t, { frameworkShards: true, shardProtocol,
+  for (const [shardProtocol, bootstrapProtocol] of [[nativeFrameworkShardProtocol, null],
+    [nativePlatformUnitFrameworkShardProtocol, null], [nativeLegacyFrameworkShardProtocol, null],
+    [nativeFrameworkShardProtocol, nativeBootstrapProtocol]]) {
+  const f = await observerApiFixture(t, { frameworkShards: true, shardProtocol, bootstrapProtocol,
     ambient: shardProtocol === nativeFrameworkShardProtocol });
   const expectedCount = nativePrPartsForProtocol(shardProtocol).length;
   const frameworkCount = expectedCount - 2;
@@ -443,7 +485,7 @@ test('T-PRD021 versioned twenty-four and historical twenty-part originals requir
       target: part.target, component: part.component, shard: part.shard, shardProtocol,
       candidate: f.candidate, sourceFiles, plan: f.source.plan, context: part.context });
     if (f.cleanupReports.has(part.role)) prefixes.push(verifyNativeCleanup(
-      dictionary(f.cleanupReports.get(part.role)), { ...part, jobKey: nativePartJobKey(part, shardProtocol) }).prefix);
+      dictionary(f.cleanupReports.get(part.role)), { ...part, bootstrapProtocol, jobKey: nativePartJobKey(part, shardProtocol) }).prefix);
   }
   assert.equal(prefixes.length, 12);
   assert.equal(new Set(prefixes).size, 12);
@@ -462,7 +504,7 @@ test('T-PRD021 versioned twenty-four and historical twenty-part originals requir
   }
   const framework = executions.filter(part => part.component === 'framework');
   const definition = deriveNativeComponentSpecification({ inventory: f.source.inventory,
-    testPlan: f.source.plan, goSources: f.source.goSources, frameworkShards: true, shardProtocol,
+    testPlan: f.source.plan, goSources: f.source.goSources, frameworkShards: true, shardProtocol, bootstrapProtocol,
     adapterSourceDigest: digest(f.source.files.get('scripts/native-components.mjs')) });
   const originals = framework.map(part => ({ target: part.target, role: part.role,
     text: canonical(part.data.get('execution.json')) }));
@@ -516,8 +558,10 @@ test('T-PRD021 versioned twenty-four and historical twenty-part originals requir
       return { verifierId: 'controlled-changed-original', reportDigest: digest(original.text),
         context: raw.context, sourceTime: raw.observedAt, sourceSequence: raw.sequence };
     } }), { code: 'EVIDENCE' });
-  const refresh = framework.find(part => part.shard === 'refresh');
+  const refresh = framework.find(part => part.shard === 'refresh' &&
+    (bootstrapProtocol === null || part.target === 'macos-arm64'));
   const archived = { schemaVersion: 1, kind: 'native-validation-definition',
+    ...(bootstrapProtocol === null ? {} : { bootstrapProtocol }),
     target: refresh.target, profile: 'pr', component: 'framework', shard: 'refresh',
     frameworkShards: shardProtocol, selectedWorkersRequest: null,
     sourceFiles, plan: f.source.plan, inventory: f.source.inventory, goSources: f.source.goSources,
@@ -536,6 +580,14 @@ test('T-PRD021 versioned twenty-four and historical twenty-part originals requir
     }) });
   assert.equal(replay.evaluation.status, 'Passed');
   assert.equal(replay.currentCredit, 'NotRun', 'Historical shard replay must never grant current-candidate credit');
+  if (bootstrapProtocol !== null) {
+    const changed = structuredClone(archived);
+    delete changed.bootstrapProtocol;
+    await assert.rejects(replayNativeEvidence({ definition: changed, data: dictionary(refresh.data),
+      candidate: f.candidate, asOf: inputs.now,
+      verifyArchive: () => { throw new Error('Source capability mismatch must fail before archive verification'); } }),
+    { code: 'EVIDENCE' });
+  }
   await assert.rejects(replayNativeEvidence({ definition: { ...archived,
     frameworkShards: shardProtocol === nativeFrameworkShardProtocol ?
       nativePlatformUnitFrameworkShardProtocol : nativeFrameworkShardProtocol },

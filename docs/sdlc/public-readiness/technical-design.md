@@ -369,6 +369,32 @@ falling back. Without prepared input, retain the real pinned builder. Actual
 Go tests, vet, native launcher execution and independent cold-cache rebuild
 comparisons remain unchanged.
 
+Within one evidence-sanitization traversal, repeated pure text validation may
+reuse bounded work while preserving every field-specific constraint, secret
+handling rule and byte/node budget. The scope ends with that traversal: no
+origin verification, admission, freshness decision or report verdict is cached
+or shared with a later call.
+
+All platforms use the same deterministic priority and dependency-aware ready
+pool. Schedule the measured native-observer unit tail before shorter fallback
+files instead of leaving it near the end of the unit queue. Preserve explicit
+targeted caller order, complete assertion membership, causal dependencies,
+exclusive resources and shared worker tokens. Hardware-specific timing and
+capacity remain measurements, not a reason to change the test semantics.
+
+The source-bound `native-bootstrap-role-capabilities-v2` declaration selects
+bootstrap requirements from the exact captured role/profile. Current PR
+framework producers use the pinned native Actions Node runtime. Their Mac
+bootstrap still provisions real pinned Homebrew/core/portable Ruby in its own
+owned prefix, but does not pour Homebrew Node or synthesize bottle receipts and
+`nodePrefix` evidence. Genuine Homebrew producers, whole/full validation and
+R-PRE retain complete bottle, Homebrew Node, quality, lifecycle and cleanup
+requirements. Bind the capability into captured definitions, configuration
+digests, protected admission and actual reports. A missing declaration retains
+historical full-bootstrap semantics; mismatches fail rather than downgrade.
+All twenty-four producer origins and twelve distinct Mac cleanup owners remain
+required.
+
 The PR workflow explicitly allocates 15 shared test-worker slots on Linux and
 Windows, 7 on Apple Silicon and 14 on Intel Mac regression hosts. The Intel
 unit host uses four slots, matching its CPU count: the larger unit allocation

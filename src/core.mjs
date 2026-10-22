@@ -343,6 +343,10 @@ export function safeSummary(value) {
   if (!value || typeof value !== 'object') return value;
   return summarizeValue(value, { texts: new Map(), bytes: 0 });
 }
+export function createSummarySanitizer() {
+  const cache = { texts: new Map(), bytes: 0 };
+  return value => summarizeValue(value, cache);
+}
 export function shellArgument(value) {
   if (/^[a-zA-Z0-9._:/\\-]+$/u.test(value)) return value;
   return `'${value.replaceAll("'", process.platform === 'win32' ? "''" : "'\\''")}'`;

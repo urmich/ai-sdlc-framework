@@ -191,14 +191,14 @@ versions and verify their identities, not silently select a different version se
 
 | Tool/input | Required selected version/identity | Case assignment |
 | --- | --- | --- |
-| Test/consumer Node | 24.20.0, native x64 or arm64 as declared above. This is the newest supported LTS release whose selected Homebrew snapshot has the complete ARM/Intel bottle closure, not the newest upstream patch. | T-PRD014 variants, T-PRD038/039 variants, T-PRD060 variants and T-PRD079 variants; all underlying Node assertions. |
+| Test/consumer Node | 24.20.0, native x64 or arm64 as declared above. Current role-capability PR framework producers use the pinned Actions runtime; genuine Homebrew and full/R-PRE cases retain the pinned Homebrew runtime. This is the newest supported LTS release whose selected Homebrew snapshot has the complete ARM/Intel bottle closure, not the newest upstream patch. | T-PRD014 variants, T-PRD038/039 variants, T-PRD060 variants and T-PRD079 variants; all underlying Node assertions. |
 | Minimum supported Node | 22.23.3 on the separate mandatory Linux compatibility job, executing the unchanged 27-assertion sanity selection and static checks. | Product support remains Node >=22. This compatibility result does not substitute for any full native lane or expand the local critical profile. |
 | Local reference Node | Current recorded Windows x64 reference is 25.6.1. This historical developer-host installation is not the selected hosted LTS baseline and is not modified by this work. | L and comparable baseline/candidate runs. Do not compare timings across these runtime versions as a speedup. |
 | Go | 1.27.1 with `GOTOOLCHAIN=local`, `CGO_ENABLED=0`, repository build flags and controlled caches; Windows target `windows/amd64`, `GOAMD64=v1`. | T-PRD015, T-PRD014/079-WX and applicable shared Go assertions on other lanes; `cmd/sdlc-launcher/go.mod` and `packaging/winget/toolchain.json` must agree. |
 | Schema Python | CPython 3.12.10, with native x64/arm64 distributions as applicable. This is the cross-platform validation baseline, not a shipped framework runtime. | T-PRD015 and the applicable schema/manifest assertions within T-PRD014/079 variants. |
 | Schema packages | attrs 25.4.0; jsonschema 4.26.0; jsonschema-specifications 2025.9.1; PyYAML 6.0.3; referencing 0.37.0; rpds-py 0.30.0; typing_extensions 4.15.0. | Actual Python schema validator; match `.github/release-requirements.txt`, not floating package resolution. |
 | WinGet schema | Manifest 1.10.0 at upstream commit `5b62860167520b1503b3880d5a026809eb07c6f4`, with all three SHA-256 pins in `packaging/winget/schema-lock.json`. | T-PRD015, native/cross manifest assertions and Windows consumers; local schema validity is not community acceptance. |
-| Homebrew/Ruby/core | Homebrew commit `99fd9a8eed4ff942c448da0c1f11156302441e4a`, its native portable Ruby 4.0.7, and core commit `0bae42d6d1e59c2c400da252bd64e585e3fe7d58`. Disable API formula installation and auto-update so all dependencies come from that immutable core snapshot. | T-PRD014/079-MA/MI, T-PRD039-MA/MI and actual audit/style/lifecycle assertions. The real `node@24` dependency must resolve to 24.20.0; retain the complete native bottle plan, actual poured receipts and runtime identity. |
+| Homebrew/Ruby/core | Homebrew commit `99fd9a8eed4ff942c448da0c1f11156302441e4a`, its native portable Ruby 4.0.7, and core commit `0bae42d6d1e59c2c400da252bd64e585e3fe7d58`. Disable API formula installation and auto-update so all dependencies come from that immutable core snapshot. | Current PR framework Mac producers retain real pinned Brew/core/Ruby and their own prefix cleanup, without a redundant Node pour. Genuine Homebrew, full/R-PRE, T-PRD039-MA/MI and actual audit/style/lifecycle cases require real `node@24` 24.20.0, complete native bottle plans, actual poured receipts and runtime identity. |
 | Publishing runtime/tooling | Node 24.22.0 x64 and npm CLI 11.16.0, using the existing integrity-pinned CLI-tooling identity, token-free configuration and exact-caller checks. | T-PRD028/031/033 and the actual authorized publisher operation; test consumers remain on their separate Node baseline. No runtime or token fallback is admitted. |
 
 The Node/Python native distributions above were checked against the public
@@ -421,6 +421,16 @@ The existing PR-only purge/live-lock regression populates the real owner file
 deterministically during its bounded read rather than relying on a short sleep.
 Concurrent changes must remain `LOCK_BUSY`, with owner bytes, live exclusion
 and runtime content preserved.
+Pure-text reuse regressions retain fresh origin-verifier calls, expiry and
+mutation checks, secret-key behavior and all byte/node limits; reuse ends at
+the sanitization call boundary. Shared-order regressions verify the measured
+observer tail is scheduled early for implicit hosted selection and actual
+dispatch without changing explicit targeted order or the selected assertion union.
+Role-bootstrap regressions require the captured
+`native-bootstrap-role-capabilities-v2` contract, reject profile/role downgrades
+and forged or borrowed runtime/prefix facts, and retain complete genuine
+Homebrew/full/R-PRE and historical replay requirements. All twelve real Mac
+prefix owners and matching cleanup receipts remain mandatory.
 
 ### 3.2 Existing full selection
 

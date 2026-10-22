@@ -11,6 +11,7 @@ import { nativeToolchain, homebrewToolchain } from './toolchain-baseline.mjs';
 import { allocateHomebrewPrefix, cleanupHomebrewPrefix,
   recordHomebrewPrefixNotRequired } from './native-homebrew-prefix.mjs';
 import { provisionPrCryptoFixture, prCryptoFixture } from './pr-capabilities.mjs';
+import { bootstrapRequestCapability } from './native-bootstrap-capability.mjs';
 
 export { homebrewToolchain };
 export const homebrewBottlePlanSource = `
@@ -168,6 +169,7 @@ export function requireHomebrewBottleReceipts(plan, receipts) {
 }
 
 export async function bootstrapNativeToolchain(options) {
+  const capability = bootstrapRequestCapability(options);
   const directory = validateBootstrapRequest(options);
   let current = repositoryRoot;
   for (const part of path.relative(repositoryRoot, directory).split(path.sep)) {
@@ -242,6 +244,11 @@ export async function bootstrapNativeToolchain(options) {
     retained.native.schemaPackages = packages;
     retained.native.git = await run('git-version', 'git', ['--version']);
     retained.native.executables = { node: process.execPath, go: selected.SDLC_GO, python: selected.SDLC_PYTHON };
+    if (capability) {
+      retained.native.bootstrapCapability = capability;
+      retained.native.runtimeProvider = { provider: capability.runtimeProvider, executable: process.execPath,
+        version: process.versions.node, platform: process.platform, architecture: process.arch };
+    }
     if (process.platform === 'win32') {
       retained.native.powershell = await run('powershell-version', 'powershell.exe',
         ['-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString()']);
@@ -299,6 +306,12 @@ export async function bootstrapNativeToolchain(options) {
       const actualCoreCommit = await run('brew-core-identity', 'git', ['-C', coreRoot, 'rev-parse', 'HEAD']);
       requireThat(actualCoreCommit === homebrewToolchain.coreCommit, 'HOST',
         'The complete Homebrew dependency snapshot must match its selected immutable core commit');
+      if (capability) {
+        retained.native.homebrew = { commit: actualCommit, coreCommit: actualCoreCommit,
+          ruby, rubyExecutable, prefix: brewRoot, repository: brewRoot,
+          nodeProvisioned: false, bottlesProvisioned: false,
+          uname, translation: translated.exitCode === 0 ? '0' : 'unavailable on native Intel' };
+      } else {
       console.log(`Checking native Homebrew bottle eligibility for ${options.target} ` +
         `(limit ${homebrewSetupLimits.preflightMs / 1000}s); source compilation is not permitted.`);
       const probeDirectory = path.join(directory, 'brew-probe');
@@ -358,6 +371,7 @@ export async function bootstrapNativeToolchain(options) {
         formula: homebrewToolchain.formula, ruby, rubyExecutable, node, nodePrefix, bottlePlan,
         bottleReceiptsDigest: digest(bottleReceipts),
         uname, translation: translated.exitCode === 0 ? '0' : 'unavailable on native Intel' };
+      }
     }
     selected.GOTOOLCHAIN = 'local';
     Object.assign(selected, await provisionPrCryptoFixture({
@@ -417,9 +431,13 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   const args = process.argv.slice(2);
   const cleanup = args[0] === '--cleanup';
   if (cleanup) args.shift();
-  requireThat(args.length === 4 && args[0] === '--target' && args[2] === '--output-dir',
-    'INPUT', 'Usage: native-toolchain.mjs [--cleanup] --target PLATFORM --output-dir OWNED_DIRECTORY');
-  const request = { target: args[1], outputDir: args[3] };
+  requireThat((args.length === 4 || !cleanup && args.length === 12 &&
+    args[4] === '--profile' && args[6] === '--component' && args[8] === '--framework-shard' &&
+    args[10] === '--role') && args[0] === '--target' && args[2] === '--output-dir',
+    'INPUT', 'Usage: native-toolchain.mjs [--cleanup] --target PLATFORM --output-dir OWNED_DIRECTORY ' +
+    '[--profile pr --component framework --framework-shard SHARD --role ROLE]');
+  const request = { target: args[1], outputDir: args[3],
+    ...(args.length === 12 ? { profile: args[5], component: args[7], shard: args[9], role: args[11] } : {}) };
   if (cleanup) await cleanupNativeToolchain(request);
   else await bootstrapNativeToolchain(request);
 }

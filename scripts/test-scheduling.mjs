@@ -7,6 +7,7 @@ export const validationGroupProtocol = 'isolated-root-ready-pool-v1';
 
 export const measuredFilePriorities = Object.freeze([
   'observation-retention-refresh.test.mjs', 'observation-retention-regression.test.mjs',
+  'public-readiness-observer.test.mjs',
   'github-operation-results.unit.test.mjs', 'github-existing-consumer-boundaries.unit.test.mjs',
   'github-consumer-policy.unit.test.mjs', 'github-operation-dispatch.unit.test.mjs',
   'github-consumer-source.unit.test.mjs', 'github-consumer-refresh.unit.test.mjs',

@@ -620,20 +620,25 @@ test('T-PRD070 retained content-addressed bundles replay from bytes but never tr
   assert.ok(bundle.objects.every(entry => entry.ref.bytes <= 4 * 1024 * 1024));
   assert.ok(!bundle.manifest.objectRefs.some(ref => ref.sha256 === bundle.manifestRef.sha256));
   const expected = { specification: input.specification, context: input.selection };
-  const replayed = readEvidenceBundle(copy, expected, input.verify);
+  let verifications = 0;
+  const verify = value => { verifications++; return input.verify(value); };
+  const replayed = readEvidenceBundle(copy, expected, verify);
   assert.equal(replayed.evaluation.status, 'Passed');
   assert.equal(replayed.evaluation.counts.required, 130);
+  assert.equal(readEvidenceBundle(copy, expected, verify).evaluation.status, 'Passed');
+  assert.equal(verifications, 2, 'Identical retained bytes still require a fresh origin verification');
   assert.equal(readEvidenceBundle(copy, expected).evaluation.status, 'NotRun');
   assert.equal(readEvidenceBundle(copy, expected).historicalSummary.status, 'Passed');
   const tampered = structuredClone(copy);
   tampered.objects[0].value.schemaVersion = 999;
-  assert.throws(() => readEvidenceBundle(tampered, expected, input.verify), { code: 'DIGEST' });
+  assert.throws(() => readEvidenceBundle(tampered, expected, verify), { code: 'DIGEST' });
   const missing = structuredClone(copy);
   missing.objects.pop();
-  assert.throws(() => readEvidenceBundle(missing, expected, input.verify));
+  assert.throws(() => readEvidenceBundle(missing, expected, verify));
   const expired = structuredClone(expected);
   expired.context.now = '2026-10-19T10:00:00.000Z';
-  assert.equal(readEvidenceBundle(copy, expired, input.verify).evaluation.status, 'NotRun');
+  assert.equal(readEvidenceBundle(copy, expired, verify).evaluation.status, 'NotRun');
+  assert.equal(verifications, 3, 'Expiry is reevaluated after reacquiring original origin proof');
 });
 
 test('T-PRD071 newest incomplete snapshots cannot borrow old passes, and later complete recovery preserves history', () => {

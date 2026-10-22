@@ -1,7 +1,7 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [
-    {"coverage": "direct", "paths": ["scripts/native-validation.mjs", "scripts/native-toolchain.mjs", "scripts/toolchain-baseline.mjs", "scripts/pr-capabilities.mjs", "scripts/pr-calculator.mjs", "scripts/pr-calculator-reporter.mjs", "scripts/native-components.mjs"]}
+    {"coverage": "direct", "paths": ["scripts/native-validation.mjs", "scripts/native-toolchain.mjs", "scripts/toolchain-baseline.mjs", "scripts/native-bootstrap-capability.mjs", "scripts/pr-capabilities.mjs", "scripts/pr-calculator.mjs", "scripts/pr-calculator-reporter.mjs", "scripts/native-components.mjs"]}
   ]
 };
 import test from 'node:test';
@@ -32,6 +32,73 @@ import { runCalculator, calculatorFiles, calculatorSelection, calculatorArgument
   calculatorCommandArguments, reconcileCalculator } from '../scripts/pr-calculator.mjs';
 import { fetchPinnedFixture, provisionPrCryptoFixture } from '../scripts/pr-capabilities.mjs';
 import { nativeToolchain } from '../scripts/toolchain-baseline.mjs';
+import { nativeBootstrapProtocol, homebrewToolchain } from '../scripts/toolchain-baseline.mjs';
+import { sourceNativeBootstrapProtocol, nativeBootstrapCapability, bootstrapRequestCapability,
+  requireNativeBootstrapCapability } from '../scripts/native-bootstrap-capability.mjs';
+
+test('T-PRD015 role bootstrap is source-selected and cannot downgrade full release or historical configurations', () => {
+  const inventory = { complete: true, digest: '1'.repeat(64) };
+  const calculator = { namespace: 'calculator', tests: 1, files: ['test/calculator/capability.test.js'] };
+  const source = value => [{ file: 'scripts/toolchain-baseline.mjs', contents: value }];
+  assert.equal(sourceNativeBootstrapProtocol(source('export const nativeToolchain = {};')), null);
+  assert.equal(sourceNativeBootstrapProtocol(source(`export const nativeBootstrapProtocol = '${nativeBootstrapProtocol}';`)),
+    nativeBootstrapProtocol);
+  for (const text of [`export const nativeBootstrapProtocol = 'unknown';`,
+    `export const nativeBootstrapProtocol = "${nativeBootstrapProtocol}";`]) {
+    assert.throws(() => sourceNativeBootstrapProtocol(source(text)), { code: 'EVIDENCE' });
+  }
+  assert.equal(bootstrapRequestCapability({ target: 'macos-arm64' }), null);
+  const request = { target: 'macos-arm64', profile: 'pr', component: 'framework',
+    shard: 'units', role: 'macos-arm64-framework-units' };
+  assert.equal(bootstrapRequestCapability(request).homebrew, 'pinned-source-and-portable-ruby-without-node');
+  for (const change of [{ profile: 'r-pre' }, { component: 'full' }, { component: 'homebrew' },
+    { shard: 'body-3' }, { role: 'macos-x64-framework-units' }, { profile: undefined }]) {
+    assert.throws(() => bootstrapRequestCapability({ ...request, ...change }), { code: 'INPUT' });
+  }
+  const options = { inventory, calculator, profile: 'pr', component: 'framework', shard: 'units',
+    shardPlanDigest: 'a'.repeat(64) };
+  assert.notEqual(nativeConfigurationDigest(options),
+    nativeConfigurationDigest({ ...options, bootstrapProtocol: nativeBootstrapProtocol }));
+  for (const profile of ['pr', 'r-pre']) assert.equal(
+    nativeConfigurationDigest({ inventory, calculator, profile }),
+    nativeConfigurationDigest({ inventory, calculator, profile, bootstrapProtocol: nativeBootstrapProtocol }));
+});
+
+test('T-PRD015 role bootstrap rejects forged runtime providers borrowed prefixes and invented bottle evidence', () => {
+  const request = { target: 'macos-arm64', profile: 'pr', component: 'framework',
+    shard: 'units', role: 'macos-arm64-framework-units', protocol: nativeBootstrapProtocol };
+  const prefix = '/opt/abcde';
+  const bootstrap = { status: 'Passed', target: request.target, native: {
+    platform: 'darwin', architecture: 'arm64', node: nativeToolchain.node,
+    bootstrapCapability: nativeBootstrapCapability(request),
+    executables: { node: '/hostedtoolcache/node/bin/node' },
+    runtimeProvider: { provider: 'actions/setup-node', executable: '/hostedtoolcache/node/bin/node',
+      version: nativeToolchain.node, platform: 'darwin', architecture: 'arm64' },
+    homebrew: { prefix, repository: prefix, commit: homebrewToolchain.commit, coreCommit: homebrewToolchain.coreCommit,
+      ruby: homebrewToolchain.ruby,
+      rubyExecutable: `${prefix}/Library/Homebrew/vendor/portable-ruby/${homebrewToolchain.ruby}/bin/ruby`,
+      nodeProvisioned: false, bottlesProvisioned: false },
+  }, reports: ['brew-git-identity', 'brew-prefix', 'brew-repository', 'brew-ruby-identity',
+    'brew-ruby-path', 'brew-core-identity'].map(name => ({ name, complete: true, exitCode: 0 })) };
+  assert.deepEqual(requireNativeBootstrapCapability({ ...request, bootstrap, prefix }), bootstrap.native.bootstrapCapability);
+  for (const mutate of [
+    value => { value.native.runtimeProvider.executable = '/other/node'; },
+    value => { value.native.runtimeProvider.architecture = 'x64'; },
+    value => { value.native.homebrew.prefix = '/opt/fffff'; },
+    value => { value.native.homebrew.coreCommit = 'f'.repeat(40); },
+    value => { value.native.homebrew.nodePrefix = `${prefix}/opt/node@24`; },
+    value => { value.native.homebrew.bottleReceiptsDigest = 'a'.repeat(64); },
+    value => { value.native.homebrew.nodeProvisioned = true; },
+    value => { value.reports.pop(); },
+    value => { value.reports.push({ name: 'brew-node-install', complete: true, exitCode: 0 }); },
+  ]) {
+    const changed = structuredClone(bootstrap);
+    mutate(changed);
+    assert.throws(() => requireNativeBootstrapCapability({ ...request, bootstrap: changed, prefix }), { code: 'EVIDENCE' });
+  }
+  assert.throws(() => requireNativeBootstrapCapability({ ...request, bootstrap, protocol: null }), { code: 'EVIDENCE' });
+  assert.throws(() => requireNativeBootstrapCapability({ ...request, bootstrap, component: 'homebrew' }), { code: 'EVIDENCE' });
+});
 
 const targets = ['linux-x64', 'windows-x64', 'macos-arm64', 'macos-x64'];
 const nativePlatforms = { 'linux-x64': 'linux', 'windows-x64': 'win32',

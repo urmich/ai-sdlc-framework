@@ -41,7 +41,7 @@ const bindingDigest = assertion => digest({ id: assertion.id, file: assertion.fi
   applicability: assertion.applicability });
 
 export function deriveNativeComponentSpecification({ inventory, testPlan, adapterSourceDigest,
-  frameworkShards = false, goSources = [], shardProtocol = nativeFrameworkShardProtocol }) {
+  frameworkShards = false, goSources = [], shardProtocol = nativeFrameworkShardProtocol, bootstrapProtocol = null }) {
   requireThat(inventory?.complete === true && /^[a-f0-9]{64}$/u.test(inventory.digest ?? '') &&
     typeof testPlan === 'string' && /^[a-f0-9]{64}$/u.test(adapterSourceDigest ?? ''),
   'INVENTORY', 'Component expectations require complete adopted source, canonical Plan and exact adapter source digest');
@@ -95,6 +95,7 @@ export function deriveNativeComponentSpecification({ inventory, testPlan, adapte
   validationInventoryDigest(specification);
   const calculator = calculatorCapability(inventory);
   const definition = { schemaVersion: 1, policy,
+    ...(bootstrapProtocol === null ? {} : { bootstrapProtocol }),
     adapterSourceDigest, sourceInventoryDigest: inventory.digest, testSpecDigest: testSpecificationDigest(testPlan),
     requiredCaseIds: cases.map(test => test.id), requiredPlatforms: [...validationPlatforms],
     specification, bindings: bindings.sort((a, b) => a.assertionId.localeCompare(b.assertionId, 'en')), blockers,
@@ -155,6 +156,7 @@ function expectedMatrix(expectedLanes, definition) {
       context.native.architecture === target.split('-')[1] &&
       context.testSpecDigest === definition.testSpecDigest && configuredWorkers !== undefined &&
       context.configDigest === nativeConfigurationDigest({
+        bootstrapProtocol: definition.bootstrapProtocol ?? null,
         inventory: { complete: true, digest: definition.sourceInventoryDigest },
         profile: 'pr', component, configuredWorkers, calculator: definition.calculator ?? calculatorBaselineCapability,
         shard, shardPlanDigest: part.assignmentDigest ?? null,

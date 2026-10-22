@@ -4,7 +4,7 @@ export const validationDeclarations = {
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LIMITS, digest, safeSummary } from '../src/core.mjs';
+import { LIMITS, createSummarySanitizer, digest, safeSummary } from '../src/core.mjs';
 import { reduceTestHistory, sanitizeExecutionPayload, validateRetainedPayload } from '../src/validation-evidence.mjs';
 
 function permutations(items) {
@@ -97,6 +97,45 @@ test('T-PRD037 repeated summary text is sanitized once per traversal without reu
     large: safeSummary(large),
     tail: [safeSummary(text), safeSummary(text)],
   });
+});
+
+test('T-PRD037 retained text summaries reuse only identical strings inside one bounded sanitization', () => {
+  const text = 'https://example.invalid/retained-summary/fixture?view=summary';
+  const matchAll = String.prototype.matchAll;
+  let scans = 0;
+  String.prototype.matchAll = function (...args) {
+    if (String(this) === text) scans++;
+    return Reflect.apply(matchAll, this, args);
+  };
+  try {
+    assert.equal(safeSummary(text), text);
+    const once = scans;
+    assert.ok(once > 0);
+    for (let call = 0; call < 2; call++) {
+      scans = 0;
+      assert.doesNotThrow(() => validateRetainedPayload([text, text, text]));
+      assert.equal(scans, once, 'Only pure summary scans are shared, never another invocation');
+    }
+    scans = 0;
+    assert.doesNotThrow(() => validateRetainedPayload({ first: text, nested: { second: text } }));
+    assert.equal(scans, once, 'Ancestor summaries reuse the same invocation-owned text work');
+    const changed = [text, `${text}&token=fixture-private-value`];
+    assert.throws(() => validateRetainedPayload(changed), { code: 'UNSAFE' });
+    assert.throws(() => validateRetainedPayload(Array(65537).fill(text)), { code: 'CAPACITY' });
+    const summarize = createSummarySanitizer();
+    let reads = 0;
+    const source = { get detail() { return ++reads === 1 ? text : `${text}&token=fixture-private-value`; } };
+    const first = summarize(source);
+    assert.equal(reads, 1);
+    first.detail = 'caller mutation';
+    assert.deepEqual(summarize({ detail: text }), { detail: text });
+    const second = summarize(source);
+    assert.equal(reads, 2);
+    assert.doesNotMatch(second.detail, /fixture-private-value/u);
+    assert.match(summarize({ password: text }).password, /^\[redacted:[a-f0-9]{64}\]$/u);
+  } finally {
+    String.prototype.matchAll = matchAll;
+  }
 });
 
 test('T-PRD037 plain summary literals avoid rich-text scans without bypassing sensitive keys or limits', () => {
