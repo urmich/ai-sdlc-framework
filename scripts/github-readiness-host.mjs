@@ -33,6 +33,7 @@ const threadsDocument = `query ReadinessThreads($owner:String!,$name:String!,$nu
 export function createReadinessGitHubClient({
   repository, repositoryId, writerId, token, generation, archiveOrigins = [], fetch = globalThis.fetch,
   python = process.env.SDLC_OBSERVER_PYTHON || process.env.SDLC_PYTHON || 'python3',
+  runArtifactReader = execute,
   scratchDirectory = fileURLToPath(new URL('../.test-data/', import.meta.url)),
 }) {
   requireThat(/^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/u.test(repository) &&
@@ -202,7 +203,11 @@ export function createReadinessGitHubClient({
     requireGitHubCapture(capture, connection);
     return Buffer.from(capture.body);
   }
-  async function artifact(metadata, { kind = 'native' } = {}) {
+  async function artifact(metadata, options = {}) {
+    requireThat(options && Object.getPrototypeOf(options) === Object.prototype &&
+      Object.keys(options).every(key => ['kind', 'ownedPrefix'].includes(key)),
+    'INPUT', 'Artifact inventory options must be closed trusted-caller selections');
+    const { kind = 'native', ownedPrefix = true } = options;
     requireThat(artifactOrigins.has(metadata) && Number.isSafeInteger(metadata.id) &&
       metadata.id > 0 && metadata.expired === false &&
       /^sha256:[a-f0-9]{64}$/u.test(metadata.digest ?? '') &&
@@ -210,7 +215,9 @@ export function createReadinessGitHubClient({
       metadata.size_in_bytes <= 128 * 1024 * 1024,
     'EVIDENCE', 'Native evidence needs a current digest-bound provider artifact');
     requireThat(['native', 'candidate', 'cleanup'].includes(kind), 'INPUT', 'Select a declared data-only artifact format');
-    const key = `${metadata.id}:${metadata.digest}:${kind}`;
+    requireThat(typeof ownedPrefix === 'boolean' && typeof runArtifactReader === 'function',
+      'INPUT', 'Artifact ownership inventory must be an explicit boolean from the adopted source');
+    const key = `${metadata.id}:${metadata.digest}:${kind}:${ownedPrefix}`;
     if (!artifacts.has(key)) artifacts.set(key, (async () => {
       const archive = await bytes(`/actions/artifacts/${metadata.id}/zip`);
       requireThat(digest(archive) === metadata.digest.slice(7), 'DIGEST', 'Downloaded Actions artifact digest mismatch');
@@ -234,7 +241,8 @@ export function createReadinessGitHubClient({
         const reader = fileURLToPath(new URL('./read-validation-artifact.py', import.meta.url));
         let result;
         try {
-          result = await execute(python, ['-I', '-S', '-B', reader, '--archive', zip, '--kind', kind], {
+          result = await runArtifactReader(python, ['-I', '-S', '-B', reader, '--archive', zip, '--kind', kind,
+            ...(kind === 'cleanup' && !ownedPrefix ? ['--owned-prefix', 'false'] : [])], {
             cwd: root, env: { ...process.env, PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1' },
             maxBuffer: 128 * 1024 * 1024, timeout: 120000,
           });

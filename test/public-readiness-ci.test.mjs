@@ -1661,8 +1661,20 @@ with zipfile.ZipFile(sys.argv[2],"w",compression=zipfile.ZIP_DEFLATED) as bundle
     { name: 'execution.json', text: '{"kind":"original-data"}\n' },
     { name: 'readiness-bundle.json', text: '{"kind":"retained-data"}\n' },
   ];
+  const nonallocation = [
+    { name: 'toolchain.json', text: '{"kind":"controlled-bootstrap"}\n' },
+    { name: 'native-homebrew-prefix-request.json',
+      text: '{"schemaVersion":1,"kind":"native-homebrew-prefix-not-required"}\n' },
+  ];
   const cases = [
     ['valid', good],
+    ['valid-prefix-free-cleanup', nonallocation, { kind: 'cleanup', ownedPrefix: false }],
+    ['prefix-free-default-invalid', nonallocation, { kind: 'cleanup' }],
+    ['prefix-free-allocation-invalid', [...nonallocation,
+      { name: 'native-homebrew-prefix-allocation.json', text: '{}' }], { kind: 'cleanup', ownedPrefix: false }],
+    ['prefix-free-removal-invalid', [...nonallocation,
+      { name: 'native-homebrew-prefix-cleanup.json', text: '{}' }], { kind: 'cleanup', ownedPrefix: false }],
+    ['prefix-free-missing-request', [nonallocation[0]], { kind: 'cleanup', ownedPrefix: false }],
     ['valid-stage-journal', [...good, { name: 'regression.json.journal.ndjson',
       text: '{"kind":"diagnostic","text":"' + 'x'.repeat(1000) + '"}\n', repeat: 5000 }]],
     ['oversized-other', [...good, { name: 'other.log', text: 'x', repeat: 4 * 1024 * 1024 + 1 }]],
@@ -1683,14 +1695,19 @@ with zipfile.ZipFile(sys.argv[2],"w",compression=zipfile.ZIP_DEFLATED) as bundle
     ['collision', [...good, { name: 'folder.json', text: '{}' },
       { name: 'folder.json/nested.json', text: '{}' }]],
   ];
-  for (const [name, entries] of cases) {
+  for (const [name, entries, options = {}] of cases) {
     const input = path.join(f.root, `${name}.json`);
     const output = path.join(f.root, `${name}.zip`);
     await fs.writeFile(input, JSON.stringify(entries));
     assert.equal((await f.run(`zip-${name}`, python, ['-I', '-S', '-B', builder, input, output])).exitCode, 0);
     const api = artifactApi(await fs.readFile(output), python);
     const [metadata] = await api.client.list('/actions/runs/101/artifacts?per_page=100', 'artifacts');
-    if (name === 'valid' || name === 'valid-stage-journal') {
+    if (name === 'valid-prefix-free-cleanup') {
+      const result = await api.client.artifact(metadata, options);
+      assert.equal(result['native-homebrew-prefix-request.json'].kind, 'native-homebrew-prefix-not-required');
+      assert.equal(Object.hasOwn(result, 'native-homebrew-prefix-allocation.json'), false);
+      assert.equal(Object.hasOwn(result, 'native-homebrew-prefix-cleanup.json'), false);
+    } else if (name === 'valid' || name === 'valid-stage-journal') {
       const result = await api.client.artifact(metadata);
       assert.deepEqual(result['execution.json'], { kind: 'original-data' });
       assert.equal(result.texts['execution.json'], good[0].text);
@@ -1707,7 +1724,7 @@ with zipfile.ZipFile(sys.argv[2],"w",compression=zipfile.ZIP_DEFLATED) as bundle
       const before = api.calls.length;
       await assert.rejects(api.client.artifact({ ...metadata, verified: true }), { code: 'EVIDENCE' });
       assert.equal(api.calls.length, before, 'Serialized flags cannot become an acquired artifact capability');
-    } else await assert.rejects(api.client.artifact(metadata), { code: 'EVIDENCE' });
+    } else await assert.rejects(api.client.artifact(metadata, options), { code: 'EVIDENCE' });
     assert.ok(api.calls.every(call => call.method === 'GET'));
     await assert.rejects(fs.stat(path.join(f.root, 'escape.json')), { code: 'ENOENT' });
     await assert.rejects(fs.stat(path.join(f.root, 'payload.mjs')), { code: 'ENOENT' });

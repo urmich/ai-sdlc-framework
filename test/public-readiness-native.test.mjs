@@ -33,14 +33,14 @@ import { runCalculator, calculatorFiles, calculatorSelection, calculatorArgument
   calculatorCommandArguments, reconcileCalculator } from '../scripts/pr-calculator.mjs';
 import { fetchPinnedFixture, provisionPrCryptoFixture } from '../scripts/pr-capabilities.mjs';
 import { nativeToolchain } from '../scripts/toolchain-baseline.mjs';
-import { nativeBootstrapProtocol, homebrewToolchain } from '../scripts/toolchain-baseline.mjs';
+import { nativeBootstrapProtocol, nativeSdkBootstrapProtocol, homebrewToolchain } from '../scripts/toolchain-baseline.mjs';
 import { sourceNativeBootstrapProtocol, nativeBootstrapCapability, bootstrapRequestCapability,
   requireNativeBootstrapCapability, nativeSdkRequirements, nativeSdkContextMatches,
-  probeNativeSdk } from '../scripts/native-bootstrap-capability.mjs';
+  nativeBootstrapRequirements, probeNativeSdk } from '../scripts/native-bootstrap-capability.mjs';
 
 test('T-PRD015 refresh SDK dispatch omits unused commands while historical and other roles probe exact tools in order', async () => {
   const request = { target: 'macos-arm64', profile: 'pr', component: 'framework', shard: 'refresh',
-    protocol: nativeBootstrapProtocol };
+    protocol: nativeSdkBootstrapProtocol };
   assert.deepEqual(await probeNativeSdk(request, () => { throw new Error('Unused Go/Python invoked'); }), {});
   for (const change of [{ protocol: null }, { protocol: 'native-bootstrap-role-capabilities-v2' }, { shard: 'units' },
     { target: 'macos-x64', shard: 'units-1' },
@@ -61,7 +61,7 @@ test('T-PRD015 refresh SDK dispatch omits unused commands while historical and o
 
 test('T-PRD015 refresh SDK requirements reject producer downgrades and retain historical full tool identities', () => {
   const request = { target: 'macos-arm64', profile: 'pr', component: 'framework', shard: 'refresh',
-    protocol: nativeBootstrapProtocol };
+    protocol: nativeSdkBootstrapProtocol };
   const actual = { go: `go version ${nativeToolchain.go} darwin/arm64`, python: `Python ${nativeToolchain.python}` };
   assert.deepEqual(nativeSdkRequirements(request), { go: false, python: false });
   assert.equal(nativeSdkContextMatches({}, request), true);
@@ -94,12 +94,12 @@ test('T-PRD015 role bootstrap is source-selected and cannot downgrade full relea
   assert.equal(bootstrapRequestCapability({ target: 'macos-arm64' }), null);
   const request = { target: 'macos-arm64', profile: 'pr', component: 'framework',
     shard: 'units', role: 'macos-arm64-framework-units' };
-  assert.equal(bootstrapRequestCapability(request).homebrew, 'pinned-source-and-portable-ruby-without-node');
+  assert.equal(bootstrapRequestCapability(request).homebrew, 'not-required');
   for (const change of [{ profile: 'r-pre' }, { component: 'full' }, { component: 'homebrew' },
     { shard: 'body-3' }, { role: 'macos-x64-framework-units' }, { profile: undefined }]) {
     assert.throws(() => bootstrapRequestCapability({ ...request, ...change }), { code: 'INPUT' });
   }
-  const options = { inventory, calculator, profile: 'pr', component: 'framework', shard: 'units',
+  const options = { inventory, calculator, target: request.target, profile: 'pr', component: 'framework', shard: 'units',
     shardPlanDigest: 'a'.repeat(64) };
   assert.notEqual(nativeConfigurationDigest(options),
     nativeConfigurationDigest({ ...options, bootstrapProtocol: nativeBootstrapProtocol }));
@@ -110,7 +110,7 @@ test('T-PRD015 role bootstrap is source-selected and cannot downgrade full relea
 
 test('T-PRD015 role bootstrap rejects forged runtime providers borrowed prefixes and invented bottle evidence', () => {
   const request = { target: 'macos-arm64', profile: 'pr', component: 'framework',
-    shard: 'units', role: 'macos-arm64-framework-units', protocol: nativeBootstrapProtocol };
+    shard: 'units', role: 'macos-arm64-framework-units', protocol: nativeSdkBootstrapProtocol };
   const prefix = '/opt/abcde';
   const bootstrap = { status: 'Passed', target: request.target, native: {
     platform: 'darwin', architecture: 'arm64', node: nativeToolchain.node,
@@ -160,6 +160,78 @@ test('T-PRD015 role bootstrap rejects forged runtime providers borrowed prefixes
   }
   assert.throws(() => requireNativeBootstrapCapability({ ...request, bootstrap, protocol: null }), { code: 'EVIDENCE' });
   assert.throws(() => requireNativeBootstrapCapability({ ...request, bootstrap, component: 'homebrew' }), { code: 'EVIDENCE' });
+});
+
+test('T-PRD015 v4 unit runtime is required while unused SDK schema and prefix evidence cannot be invented', async () => {
+  for (const target of ['linux-x64', 'windows-x64', 'macos-arm64', 'macos-x64']) {
+    for (const shard of ['units', ...(target === 'macos-x64' ? ['units-1'] : []), 'refresh']) {
+      const request = { target, profile: 'pr', component: 'framework', shard,
+        protocol: nativeBootstrapProtocol };
+      const python = shard !== 'refresh';
+      assert.deepEqual(nativeBootstrapRequirements(request),
+        { go: false, python, schema: false, homebrew: false, ownedPrefix: false });
+      const calls = [];
+      assert.deepEqual(await probeNativeSdk(request, async command => {
+        calls.push(command.name);
+        return { complete: true, exitCode: 0, stdout: `Python ${nativeToolchain.python}\n` };
+      }), python ? { python: `Python ${nativeToolchain.python}` } : {});
+      assert.deepEqual(calls, python ? ['python-version'] : []);
+      if (python) await assert.rejects(probeNativeSdk(request, async () =>
+        ({ complete: false, exitCode: 1, stdout: '' })), { code: 'HOST' });
+      const platform = target.startsWith('macos-') ? 'darwin' : target === 'windows-x64' ? 'win32' : 'linux';
+      const architecture = target === 'macos-arm64' ? 'arm64' : 'x64';
+      const executable = '/controlled-fixture/python';
+      const bootstrap = { status: 'Passed', target, native: {
+        platform, architecture, node: nativeToolchain.node,
+        bootstrapCapability: nativeBootstrapCapability(request),
+        executables: { node: '/controlled-fixture/node', ...(python ? { python: executable } : {}) },
+        runtimeProvider: { provider: 'actions/setup-node', executable: '/controlled-fixture/node',
+          version: nativeToolchain.node, platform, architecture },
+        ...(python ? { python: { executable, version: nativeToolchain.python,
+          implementation: 'CPython', machine: architecture === 'arm64' ? 'arm64' : 'x86_64' } } : {}),
+      }, reports: python ? [{ name: 'python-identity', complete: true, exitCode: 0 }] : [] };
+      assert.deepEqual(requireNativeBootstrapCapability({ ...request, bootstrap }),
+        bootstrap.native.bootstrapCapability);
+      for (const mutate of [
+        value => { value.native.go = 'NotRequired'; },
+        value => { value.native.schemaPackages = {}; },
+        value => { value.native.homebrew = { prefix: '/opt/abcde' }; },
+        value => { value.native.prefix = '/opt/abcde'; },
+        value => { value.reports.push({ name: 'schema-dependency-probe', complete: true, exitCode: 0 }); },
+        value => { value.reports.push({ name: 'brew-prefix', complete: true, exitCode: 0 }); },
+        ...['go', 'python', 'schema', 'homebrew', 'ownedPrefix'].map(tool => value => {
+          value.native.bootstrapCapability.tools[tool] = 'false';
+        }),
+        value => { value.native.bootstrapCapability.tools.unknown = false; },
+        value => { value.native.bootstrapCapability.role = `${target}-framework-body-0`; },
+        value => { value.native.runtimeProvider.provider = 'producer-claimed'; },
+        value => { value.native.bootstrapCapability.tools.python = !python; },
+        value => {
+          if (python) delete value.native.python;
+          else value.native.python = { status: 'Passed' };
+        },
+      ]) {
+        const changed = structuredClone(bootstrap);
+        mutate(changed);
+        assert.throws(() => requireNativeBootstrapCapability({ ...request, bootstrap: changed }),
+          { code: 'EVIDENCE' });
+      }
+      assert.throws(() => requireNativeBootstrapCapability({ ...request, bootstrap, prefix: '/opt/abcde' }),
+        { code: 'EVIDENCE' });
+    }
+    for (const options of [
+      { profile: 'pr', component: 'framework', shard: 'body-0', protocol: nativeBootstrapProtocol },
+      { profile: 'pr', component: 'homebrew', protocol: nativeBootstrapProtocol },
+      { profile: 'r-pre', component: 'full', protocol: nativeBootstrapProtocol },
+      { profile: 'pr', component: 'framework', shard: 'units', protocol: nativeSdkBootstrapProtocol },
+      { profile: 'pr', component: 'framework', shard: 'refresh', protocol: 'native-bootstrap-role-capabilities-v2' },
+      { profile: 'pr', component: 'full', protocol: null },
+    ]) {
+      const mac = target.startsWith('macos-');
+      assert.deepEqual(nativeBootstrapRequirements({ target, ...options }),
+        { go: true, python: true, schema: true, homebrew: mac, ownedPrefix: mac });
+    }
+  }
 });
 
 const targets = ['linux-x64', 'windows-x64', 'macos-arm64', 'macos-x64'];

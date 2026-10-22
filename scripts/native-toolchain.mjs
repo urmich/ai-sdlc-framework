@@ -11,7 +11,7 @@ import { nativeToolchain, homebrewToolchain } from './toolchain-baseline.mjs';
 import { allocateHomebrewPrefix, cleanupHomebrewPrefix,
   recordHomebrewPrefixNotRequired } from './native-homebrew-prefix.mjs';
 import { provisionPrCryptoFixture, prCryptoFixture } from './pr-capabilities.mjs';
-import { bootstrapRequestCapability, nativeSdkRequirements } from './native-bootstrap-capability.mjs';
+import { bootstrapRequestCapability, nativeBootstrapRequirements } from './native-bootstrap-capability.mjs';
 
 export { homebrewToolchain };
 export const homebrewBottlePlanSource = `
@@ -170,7 +170,7 @@ export function requireHomebrewBottleReceipts(plan, receipts) {
 
 export async function bootstrapNativeToolchain(options) {
   const capability = bootstrapRequestCapability(options);
-  const tools = nativeSdkRequirements({ ...options, protocol: capability?.protocol ?? null });
+  const tools = nativeBootstrapRequirements({ ...options, protocol: capability?.protocol ?? null });
   const directory = validateBootstrapRequest(options);
   let current = repositoryRoot;
   for (const part of path.relative(repositoryRoot, directory).split(path.sep)) {
@@ -226,6 +226,7 @@ export async function bootstrapNativeToolchain(options) {
     requireThat(python.version === nativeToolchain.python && python.implementation === 'CPython' &&
       (process.arch === 'arm64' ? ['arm64', 'aarch64'] : ['AMD64', 'x86_64']).includes(python.machine),
       'HOST', 'The selected native CPython baseline must be available exactly');
+    if (tools.schema) {
     const pythonHome = path.join(directory, 'python');
     await run('schema-python-environment', python.executable, ['-m', 'venv', pythonHome]);
     selected.SDLC_PYTHON = process.platform === 'win32' ?
@@ -246,8 +247,11 @@ export async function bootstrapNativeToolchain(options) {
     const packages = JSON.parse(await run('schema-dependencies-verify', selected.SDLC_PYTHON, probe));
     requireThat(requirements.every(([name, version]) => packages[name] === version),
       'HOST', 'Schema package baseline differs; a different installed version is not accepted');
-    retained.native.python = python;
     retained.native.schemaPackages = packages;
+    } else {
+      selected.SDLC_PYTHON = python.executable;
+    }
+    retained.native.python = python;
     retained.native.executables.python = selected.SDLC_PYTHON;
     }
     retained.native.git = await run('git-version', 'git', ['--version']);
@@ -274,6 +278,7 @@ export async function bootstrapNativeToolchain(options) {
       requireThat(translated.complete && ((translated.exitCode === 0 && translated.stdout.trim() === '0') ||
         (process.arch === 'x64' && translated.exitCode === 1 && translated.stderr.includes('unknown oid'))),
       'HOST', 'Native macOS translation probe is unavailable or indicates Rosetta');
+      if (tools.homebrew) {
       homebrewAllocationRequested = true;
       const { prefix: brewRoot } = await allocateHomebrewPrefix({
         bootstrapDirectory: directory, repositoryRoot, target: options.target, environment, run,
@@ -378,6 +383,7 @@ export async function bootstrapNativeToolchain(options) {
         formula: homebrewToolchain.formula, ruby, rubyExecutable, node, nodePrefix, bottlePlan,
         bottleReceiptsDigest: digest(bottleReceipts),
         uname, translation: translated.exitCode === 0 ? '0' : 'unavailable on native Intel' };
+      }
       }
     }
     selected.GOTOOLCHAIN = 'local';

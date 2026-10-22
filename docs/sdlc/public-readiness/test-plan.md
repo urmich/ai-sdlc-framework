@@ -198,10 +198,10 @@ versions and verify their identities, not silently select a different version se
 | Schema Python | CPython 3.12.10, with native x64/arm64 distributions as applicable. This is the cross-platform validation baseline, not a shipped framework runtime. | T-PRD015 and the applicable schema/manifest assertions within T-PRD014/079 variants. |
 | Schema packages | attrs 25.4.0; jsonschema 4.26.0; jsonschema-specifications 2025.9.1; PyYAML 6.0.3; referencing 0.37.0; rpds-py 0.30.0; typing_extensions 4.15.0. | Actual Python schema validator; match `.github/release-requirements.txt`, not floating package resolution. |
 | WinGet schema | Manifest 1.10.0 at upstream commit `5b62860167520b1503b3880d5a026809eb07c6f4`, with all three SHA-256 pins in `packaging/winget/schema-lock.json`. | T-PRD015, native/cross manifest assertions and Windows consumers; local schema validity is not community acceptance. |
-| Homebrew/Ruby/core | Homebrew commit `99fd9a8eed4ff942c448da0c1f11156302441e4a`, its native portable Ruby 4.0.7, and core commit `0bae42d6d1e59c2c400da252bd64e585e3fe7d58`. Disable API formula installation and auto-update so all dependencies come from that immutable core snapshot. | Current PR framework Mac producers retain real pinned Brew/core/Ruby and their own prefix cleanup, without a redundant Node pour. Genuine Homebrew, full/R-PRE, T-PRD039-MA/MI and actual audit/style/lifecycle cases require real `node@24` 24.20.0, complete native bottle plans, actual poured receipts and runtime identity. |
+| Homebrew/Ruby/core | Homebrew commit `99fd9a8eed4ff942c448da0c1f11156302441e4a`, its native portable Ruby 4.0.7, and core commit `0bae42d6d1e59c2c400da252bd64e585e3fe7d58`. Disable API formula installation and auto-update so all dependencies come from that immutable core snapshot. | V4 PR framework Mac bodies retain real pinned Brew/core/Ruby and their own prefix cleanup, without a redundant Node pour; units and refresh have source-bound nonallocation diagnostics. Historical v3/v2/null retain their original real prefix obligations. Genuine Homebrew, full/R-PRE, T-PRD039-MA/MI and actual audit/style/lifecycle cases require real `node@24` 24.20.0, complete native bottle plans, actual poured receipts and runtime identity. |
 | Publishing runtime/tooling | Node 24.22.0 x64 and npm CLI 11.16.0, using the existing integrity-pinned CLI-tooling identity, token-free configuration and exact-caller checks. | T-PRD028/031/033 and the actual authorized publisher operation; test consumers remain on their separate Node baseline. No runtime or token fallback is admitted. |
 
-The source-selected `native-bootstrap-role-capabilities-v3` refresh-only
+The historical source-selected `native-bootstrap-role-capabilities-v3` refresh-only
 producer retains pinned native Actions Node, Git and its real Mac
 Homebrew/core/portable-Ruby prefix and cleanup, but does not provision or report
 unused Go, CPython or schema packages. Its complete causal refresh root remains
@@ -210,6 +210,25 @@ actual pinned tool/report requirements. Controlled command callbacks and SDK
 capture/replay/admission cases must reject forged omissions and invented
 absent-tool facts without fabricating passing reports. These additional
 T-PRD015 assertions remain PR-only; the finite critical budget stays 27.
+
+The distinct source-selected `native-bootstrap-role-capabilities-v4` keeps pinned
+native CPython runtime on every unit role, including Intel `units-1`, but omits
+unused Go, Python schema packages and Mac Brew/core/Ruby/prefix setup there.
+Refresh also omits unused Brew/prefix setup. All bodies, genuine Homebrew,
+whole/full and R-PRE retain their complete tool requirements. Preserve all
+twenty-five origins and all selected assertions, including the real Python
+consumer and unchanged refresh/exhaustion boundaries.
+
+Require thirteen Mac cleanup diagnostic artifacts: eight independent real
+allocations/removal receipts (six bodies plus two genuine Homebrew producers)
+and five exact role/source/run-bound nonallocation requests without prefix facts
+or allocation/removal receipts. Never mark an omitted resource Passed. Controlled
+callbacks and source capture/replay/protected admission must reject missing
+required Python, nonboolean or unknown capability flags, role downgrades,
+invented omitted tools/schema/prefixes and borrowed ownership. Replay v3/v2/null
+with their original digest shapes and real-owner counts; v4 does not retroactively
+relax their requirements. No hosted timing improvement is established by local
+controlled tests.
 
 The Node/Python native distributions above were checked against the public
 `actions/node-versions` and `actions/python-versions` manifests during Test Design;
@@ -439,8 +458,9 @@ dispatch without changing explicit targeted order or the selected assertion unio
 Role-bootstrap regressions require the captured
 `native-bootstrap-role-capabilities-v2` contract, reject profile/role downgrades
 and forged or borrowed runtime/prefix facts, and retain complete genuine
-Homebrew/full/R-PRE and historical replay requirements. All thirteen real Mac
-prefix owners and matching cleanup receipts remain mandatory.
+Homebrew/full/R-PRE and historical replay requirements. Historical v3/v2/null
+retain all thirteen real Mac prefix owners for the current topology. V4 retains
+thirteen diagnostic artifacts with eight real owners and five nonallocation proofs.
 
 ### 3.2 Existing full selection
 
@@ -876,10 +896,12 @@ partial comparison and do not silently retry to obtain a ratio.
    Homebrew origins under `native-component-projection-shards-v3`; preserve the
    historical v1/v2 projections without relabeling their origins. Reject
    wrong-version or borrowed unit proofs. Do not start waiting regression hosts
-   early to overlap bootstrap. Verify all thirteen distinct Mac prefix allocations
-   and their matching guarded cleanup receipts; count every real wait honestly.
+   early to overlap bootstrap. Historical bootstrap v3/v2/null require all thirteen
+   distinct Mac prefix allocations and matching guarded cleanup receipts. Bootstrap
+   v4 requires eight real owners plus five source-bound nonallocation proofs while
+   retaining all thirteen cleanup diagnostic artifacts; count every real wait honestly.
    Separate jobs use their own native hosts, resource budgets, scratch paths and
-   owned prefixes rather than racing on a shared package-manager installation.
+   owned prefixes where required rather than racing on a shared package-manager installation.
    Controlled negatives must reject six-of-seven Intel parts, either missing,
    failed, stale or wrong-attempt unit origin, a regression starting before
    either unit cleanup completes, duplicated canonical work and borrowed prefix

@@ -29,9 +29,17 @@ import { compileValidationSourceInventory } from '../scripts/validation-inventor
 import { nativeBootstrapProtocol } from '../scripts/toolchain-baseline.mjs';
 
 test('T-PRD021 source-bound role bootstrap preserves all producer origins and thirteen independent Mac cleanups', async t => {
-  const f = await observerApiFixture(t, { frameworkShards: true, bootstrapProtocol: nativeBootstrapProtocol });
-  const { host } = f.connect();
-  assert.equal(verdict(await host.snapshot()).status, 'Passed');
+  for (const protocol of ['native-bootstrap-role-capabilities-v3', nativeBootstrapProtocol]) {
+  const f = await observerApiFixture(t, { frameworkShards: true, bootstrapProtocol: protocol,
+    nodeArtifactReader: true });
+  const { host, client } = f.connect();
+  const observed = verdict(await host.snapshot());
+  assert.equal(observed.status, 'Passed', JSON.stringify(observed.blockers));
+  const metadata = (await client.list(`/actions/runs/${f.run.id}/artifacts?per_page=100`, 'artifacts'))[0];
+  for (const options of [{ kind: 'cleanup', ownedPrefix: 'false' },
+    { kind: 'cleanup', ownedPrefix: 0 }, { kind: 'cleanup', expectedTools: false }]) {
+    await assert.rejects(client.artifact(metadata, options), { code: 'INPUT' });
+  }
   assert.equal(f.parts.size, 25);
   assert.equal(f.cleanupReports.size, 13);
   const prefixes = [];
@@ -40,7 +48,7 @@ test('T-PRD021 source-bound role bootstrap preserves all producer origins and th
     if (part.component === 'framework') {
       assert.equal(bootstrap.native.bootstrapCapability.role, part.role);
       assert.equal(bootstrap.native.runtimeProvider.provider, 'actions/setup-node');
-      if (part.target.startsWith('macos-')) {
+      if (part.target.startsWith('macos-') && bootstrap.native.homebrew) {
         assert.equal(bootstrap.native.homebrew.nodeProvisioned, false);
         assert.equal(Object.hasOwn(bootstrap.native.homebrew, 'nodePrefix'), false);
       }
@@ -52,9 +60,21 @@ test('T-PRD021 source-bound role bootstrap preserves all producer origins and th
       const entries = f.cleanupReports.get(part.role);
       const data = { ...Object.fromEntries(entries), texts: Object.fromEntries([...entries]
         .map(([file, value]) => [file, typeof value === 'string' ? value : canonical(value)])) };
-      const expected = { ...part, bootstrapProtocol: nativeBootstrapProtocol, jobKey: nativePartJobKey(part) };
-      prefixes.push(verifyNativeCleanup(data, expected).prefix);
-      if (part.component === 'framework') {
+      const expected = { ...part, bootstrapProtocol: protocol, jobKey: nativePartJobKey(part) };
+      const checked = verifyNativeCleanup(data, expected);
+      if (checked.prefix) prefixes.push(checked.prefix);
+      else {
+        assert.equal(checked.status, 'not-required');
+        for (const file of ['native-homebrew-prefix-allocation.json', 'native-homebrew-prefix-cleanup.json']) {
+          const invented = structuredClone(data);
+          invented[file] = { status: 'Passed', prefix: '/opt/abcde' };
+          assert.throws(() => verifyNativeCleanup(invented, expected), { code: 'EVIDENCE' });
+        }
+        const foreign = structuredClone(data);
+        foreign['native-homebrew-prefix-request.json'].binding.github.GITHUB_RUN_ATTEMPT = '2';
+        assert.throws(() => verifyNativeCleanup(foreign, expected), { code: 'EVIDENCE' });
+      }
+      if (part.component === 'framework' && checked.prefix) {
         const borrowed = structuredClone(data);
         borrowed['toolchain.json'].native.homebrew.prefix = '/opt/fffff';
         assert.throws(() => verifyNativeCleanup(borrowed, expected), { code: 'EVIDENCE' });
@@ -62,10 +82,12 @@ test('T-PRD021 source-bound role bootstrap preserves all producer origins and th
       }
     }
   }
-  assert.equal(new Set(prefixes).size, 13);
+  assert.equal(prefixes.length, protocol === nativeBootstrapProtocol ? 8 : 13);
+  assert.equal(new Set(prefixes).size, prefixes.length);
   const retained = host.componentEvidence();
-  assert.equal(retained[0].projection.definition.bootstrapProtocol, nativeBootstrapProtocol);
+  assert.equal(retained[0].projection.definition.bootstrapProtocol, protocol);
   assert.equal(retained[0].projection.provenance.length, 23);
+  }
 });
 
 test('T-PRD021 native component projection retains four verified original platforms and replays exact source-bound SDK evidence', async t => {
@@ -476,6 +498,7 @@ test('T-PRD021 versioned twenty-five twenty-four and twenty-part originals requi
     [nativeFourBodyFrameworkShardProtocol, null],
     [nativePlatformUnitFrameworkShardProtocol, null], [nativeLegacyFrameworkShardProtocol, null],
     [nativeFourBodyFrameworkShardProtocol, 'native-bootstrap-role-capabilities-v2'],
+    [nativeFrameworkShardProtocol, 'native-bootstrap-role-capabilities-v3'],
     [nativeFourBodyFrameworkShardProtocol, nativeBootstrapProtocol],
     [nativeFrameworkShardProtocol, 'native-bootstrap-role-capabilities-v2'],
     [nativeFrameworkShardProtocol, nativeBootstrapProtocol]]) {
@@ -500,12 +523,18 @@ test('T-PRD021 versioned twenty-five twenty-four and twenty-part originals requi
       specification: part.specification, inventory: f.source.inventory, goSources: f.source.goSources,
       target: part.target, component: part.component, shard: part.shard, shardProtocol,
       candidate: f.candidate, sourceFiles, plan: f.source.plan, context: part.context, bootstrapProtocol });
-    if (f.cleanupReports.has(part.role)) prefixes.push(verifyNativeCleanup(
-      dictionary(f.cleanupReports.get(part.role)), { ...part, bootstrapProtocol, jobKey: nativePartJobKey(part, shardProtocol) }).prefix);
+    if (f.cleanupReports.has(part.role)) {
+      const cleanup = verifyNativeCleanup(dictionary(f.cleanupReports.get(part.role)),
+        { ...part, bootstrapProtocol, jobKey: nativePartJobKey(part, shardProtocol) });
+      if (cleanup.prefix) prefixes.push(cleanup.prefix);
+      else assert.equal(cleanup.status, 'not-required');
+    }
   }
-  const expectedMacCount = shardProtocol === nativeFrameworkShardProtocol ? 13 : 12;
+  const expectedMacCount = bootstrapProtocol === nativeBootstrapProtocol ? 8 :
+    shardProtocol === nativeFrameworkShardProtocol ? 13 : 12;
   assert.equal(prefixes.length, expectedMacCount);
   assert.equal(new Set(prefixes).size, expectedMacCount);
+  assert.equal(f.cleanupReports.size, shardProtocol === nativeFrameworkShardProtocol ? 13 : 12);
   const executions = [...f.parts.values()].map(part => ({ ...part,
     job: f.jobs.find(job => job.name === `native-${part.role}`) }));
   const unitOrder = verifyNativeShardUnitOrder(executions, { protocol: shardProtocol });
@@ -600,6 +629,17 @@ test('T-PRD021 versioned twenty-five twenty-four and twenty-part originals requi
     }) });
   assert.equal(replay.evaluation.status, 'Passed');
   assert.equal(replay.currentCredit, 'NotRun', 'Historical shard replay must never grant current-candidate credit');
+  if (bootstrapProtocol === nativeBootstrapProtocol) {
+    for (const file of ['native-homebrew-prefix-allocation.json', 'native-homebrew-prefix-cleanup.json']) {
+      const invented = new Map(refresh.data);
+      invented.set(file, { status: 'Passed', prefix: '/opt/abcde' });
+      await assert.rejects(verifyOriginalNativeRows({ data: dictionary(invented),
+        raw: refresh.data.get('execution.json'), specification: refresh.specification,
+        inventory: f.source.inventory, goSources: f.source.goSources, target: refresh.target,
+        component: refresh.component, shard: refresh.shard, shardProtocol, candidate: f.candidate,
+        sourceFiles, plan: f.source.plan, context: refresh.context, bootstrapProtocol }), { code: 'EVIDENCE' });
+    }
+  }
   if (bootstrapProtocol !== null) {
     const changed = structuredClone(archived);
     delete changed.bootstrapProtocol;
@@ -625,7 +665,8 @@ test('T-PRD021 versioned twenty-five twenty-four and twenty-part originals requi
     target: refresh.target, component: refresh.component, shard: refresh.shard, shardProtocol,
     candidate: f.candidate, sourceFiles, plan: f.source.plan, context: refresh.context }), { code: 'EVIDENCE' });
   const cleanup = structuredClone(f.cleanupReports.get('macos-arm64-framework-units'));
-  cleanup.get('native-homebrew-prefix-cleanup.json').status = 'rolled-back';
+  if (cleanup.has('native-homebrew-prefix-cleanup.json')) cleanup.get('native-homebrew-prefix-cleanup.json').status = 'rolled-back';
+  else cleanup.set('native-homebrew-prefix-cleanup.json', { status: 'removed', prefix: '/opt/abcde' });
   const macUnits = f.parts.get('macos-arm64-framework-units');
   assert.throws(() => verifyNativeCleanup(dictionary(cleanup),
     { ...macUnits, jobKey: nativePartJobKey(macUnits, shardProtocol) }), { code: 'EVIDENCE' });

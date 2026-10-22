@@ -161,6 +161,7 @@ function expectedMatrix(expectedLanes, definition) {
       context.native.architecture === target.split('-')[1] &&
       context.testSpecDigest === definition.testSpecDigest && configuredWorkers !== undefined &&
       context.configDigest === nativeConfigurationDigest({
+        target,
         bootstrapProtocol: definition.bootstrapProtocol ?? null,
         inventory: { complete: true, digest: definition.sourceInventoryDigest },
         profile: 'pr', component, configuredWorkers, calculator: definition.calculator ?? calculatorBaselineCapability,

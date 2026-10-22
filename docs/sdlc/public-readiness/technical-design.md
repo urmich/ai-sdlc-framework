@@ -350,8 +350,10 @@ Bind the current SDK component projection to
 `native-component-projection-shards-v1` and `native-component-projection-shards-v2`
 for their historical topologies and reject
 cross-version producer counts or borrowed origins.
-All thirteen Mac producer prefixes require distinct owned allocation and matching
-guarded cleanup; no producer may borrow another's receipt.
+Under historical bootstrap v3/v2/null, all thirteen Mac producer prefixes require
+distinct owned allocation and matching guarded cleanup. Bootstrap v4 instead
+requires eight real owners and five nonallocation proofs across thirteen
+diagnostic artifacts, as specified below; no producer may borrow another's receipt.
 Keep default whole-native execution and release prepublication compatible.
 The required logical lane span remains under fifteen minutes from its earliest
 required unit/framework/Homebrew worker start through its last evidence/cleanup
@@ -393,15 +395,15 @@ targeted caller order, complete assertion membership, causal dependencies,
 exclusive resources and shared worker tokens. Hardware-specific timing and
 capacity remain measurements, not a reason to change the test semantics.
 
-The source-bound `native-bootstrap-role-capabilities-v3` declaration selects
-bootstrap requirements from the exact captured role/profile. Current PR
+The historical source-bound `native-bootstrap-role-capabilities-v3` declaration selects
+bootstrap requirements from the exact captured role/profile. Its PR
 framework producers use the pinned native Actions Node runtime. Their Mac
 bootstrap still provisions real pinned Homebrew/core/portable Ruby in its own
 owned prefix, but does not pour Homebrew Node or synthesize bottle receipts and
 `nodePrefix` evidence. The refresh-only producer's complete source-selected
 root uses Node, Git and filesystem operations, so v3 omits unused Go, CPython
 and schema acquisition, facts and version reports for that role only. All
-other roles retain their actual pinned Go/Python requirements. Genuine Homebrew
+other v3 roles retain their actual pinned Go/Python requirements. Genuine Homebrew
 producers, whole/full validation and R-PRE retain complete bottle, Homebrew Node,
 quality, lifecycle and cleanup requirements. Historical v2 retains actual Go/Python
 requirements for refresh, and a missing declaration retains full-bootstrap
@@ -409,8 +411,28 @@ semantics. Bind the capability and required tool inventory into captured
 definitions, configuration digests, protected admission and actual reports.
 Missing required reports, invented absent-tool facts and role/protocol
 mismatches fail rather than downgrade.
-All twenty-five producer origins and thirteen distinct Mac cleanup owners remain
-required.
+V3 retains all twenty-five producer origins and thirteen distinct Mac cleanup
+owners. V2 and null declarations retain their original topology and requirements.
+
+The distinct `native-bootstrap-role-capabilities-v4` contract keeps the same
+twenty-five origins, twenty-three framework parts and two genuine Homebrew parts.
+Every unit producer retains real pinned native CPython for standard-library
+consumer execution, including conservative provisioning on unit partitions that
+do not currently call Python. Unit producers omit unused Go, Python schema
+packages and Mac Homebrew/core/Ruby/prefix acquisition. Refresh retains Node,
+Git and filesystem execution without those unused tools or a prefix. Body,
+genuine Homebrew, whole/full and R-PRE requirements are unchanged.
+
+V4's closed boolean tool requirements are derived from captured source protocol
+and the validated role, bound into configuration, SDK capture/replay and protected
+admission. Required Python runtime facts and original probes remain mandatory;
+omitted tool/schema/prefix facts and receipts must be absent, never synthesized
+as Passed. All thirteen Mac cleanup diagnostic artifacts and steps remain:
+eight own real distinct prefixes (six bodies and two genuine Homebrew producers),
+while five carry exact source/run/role-bound nonallocation requests without
+allocation or removal receipts. Historical v3/v2/null digests and real ownership
+requirements do not acquire this exception. No assertion, causal root, stress
+boundary, shard assignment or worker policy changes with this setup optimization.
 
 The PR workflow explicitly allocates 15 shared test-worker slots on Linux and
 Windows, 7 on Apple Silicon, four on both Intel unit hosts and fourteen on Intel

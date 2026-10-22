@@ -8,7 +8,7 @@ import { testSpecificationDigest } from '../src/artifacts.mjs';
 import { prepareCoverage, renderCoverageSection } from '../src/coverage.mjs';
 import { normalizeExecutionReport, evaluateReadiness, createEvidenceBundle,
   validateExecutionContext, validationInventoryDigest } from 'ai-sdlc-framework/evidence';
-import { zip, canonical as releaseCanonical } from '../packaging/standalone/archive.mjs';
+import { zip, readZip, canonical as releaseCanonical } from '../packaging/standalone/archive.mjs';
 import { renderManifests } from '../packaging/winget/generate.mjs';
 import { renderChecksums } from '../scripts/package-platforms.mjs';
 import { archiveRecord } from '../scripts/release-bundle.mjs';
@@ -24,7 +24,7 @@ import { createPrReadinessHost, statusConcurrencyGroup } from '../scripts/pr-obs
 import { calculatorFiles, calculatorSelection, calculatorCommandArguments } from '../scripts/pr-calculator.mjs';
 import { validationExecutionGroups, validationGroupProtocol, validationSchedulingPolicyDigest } from '../scripts/test-scheduling.mjs';
 import { nativeToolchain, homebrewToolchain } from '../scripts/toolchain-baseline.mjs';
-import { nativeBootstrapCapability, nativeSdkRequirements } from '../scripts/native-bootstrap-capability.mjs';
+import { nativeBootstrapCapability, nativeSdkRequirements, nativeBootstrapRequirements } from '../scripts/native-bootstrap-capability.mjs';
 
 const repository = 'urmich/ai-sdlc-framework';
 const repositoryId = 17;
@@ -339,6 +339,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
   });
   const part = assignment?.parts.find(part => part.shard === shard);
   const tools = nativeSdkRequirements({ target, profile, component, shard, protocol: bootstrapProtocol });
+  const resourcesRequired = nativeBootstrapRequirements({ target, profile, component, shard, protocol: bootstrapProtocol });
   const at = seconds => new Date(startTime + seconds * 1000).toISOString();
   const commandReport = (name, target, context, args, start, finish, stdout = '') =>
     commandRecord(name, target, context, args, start, finish, stdout, at);
@@ -404,10 +405,19 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
     delete bootstrap.native.executables.python;
     bootstrap.reports = bootstrap.reports.filter(report => !/^(?:python-|schema-)/u.test(report.name));
   }
+  if (!resourcesRequired.schema) {
+    delete bootstrap.native.schemaPackages;
+    bootstrap.reports = bootstrap.reports.filter(report => !report.name.startsWith('schema-'));
+    if (tools.python) bootstrap.native.executables.python = bootstrap.native.python.executable;
+  }
+  if (!resourcesRequired.homebrew) {
+    delete bootstrap.native.homebrew;
+    bootstrap.reports = bootstrap.reports.filter(report => !report.name.startsWith('brew-'));
+  }
   const context = validateExecutionContext({
     candidateDigest: digest({ revision: revisions.merge, tree: source.sha }),
     testSpecDigest: testSpecificationDigest(source.plan),
-    configDigest: nativeConfigurationDigest({ inventory: source.inventory, profile, component, shard, shardProtocol, bootstrapProtocol,
+    configDigest: nativeConfigurationDigest({ inventory: source.inventory, profile, target, component, shard, shardProtocol, bootstrapProtocol,
       shardPlanDigest: assignment?.digest ?? null }),
     inventoryDigest: validationInventoryDigest(specification),
     sources: [{ repositoryId: `repository-${repositoryId}`, revision: revisions.merge,
@@ -626,7 +636,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
 
 function cleanupData(lane, executionId = runId) {
   const brew = lane.context.native.toolchain.bootstrap.homebrew;
-  const prefix = brew.prefix ?? path.posix.dirname(path.posix.dirname(brew.nodePrefix));
+  const prefix = brew ? brew.prefix ?? path.posix.dirname(path.posix.dirname(brew.nodePrefix)) : undefined;
   const binding = { schemaVersion: 1, target: lane.target,
     host: { platform: 'darwin', architecture: lane.context.native.architecture,
       machine: lane.target === 'macos-arm64' ? 'arm64' : 'x86_64',
@@ -641,6 +651,11 @@ function cleanupData(lane, executionId = runId) {
     repositoryRoot: '/controlled-fixture/source',
     bootstrapDirectory: `/controlled-fixture/source/.test-data/bootstrap-${lane.role}`,
     binding, prefix, nonce: digest(lane.role) };
+  if (!brew) return new Map([
+    ['toolchain.json', lane.data.get('toolchain.json')],
+    ['native-homebrew-prefix-request.json', { schemaVersion: 1, kind: 'native-homebrew-prefix-not-required',
+      repositoryRoot: request.repositoryRoot, bootstrapDirectory: request.bootstrapDirectory, binding }],
+  ]);
   const requestDigest = digest(canonical(request));
   const prefixIdentity = { device: '1', inode: lane.role, created: '1', uid: 501, gid: 20 };
   return new Map([
@@ -961,11 +976,31 @@ jobs:
     throw new Error(`Unexpected controlled provider route ${route}`);
   };
   const connect = () => {
+    const runArtifactReader = options.nodeArtifactReader ? async (command, args) => {
+      assert.equal(args[0], '-I');
+      const kind = args[args.indexOf('--kind') + 1];
+      const ownedPrefix = !args.includes('--owned-prefix');
+      const entries = readZip(await fs.readFile(args[args.indexOf('--archive') + 1]));
+      const texts = Object.fromEntries(entries.filter(entry => kind !== 'candidate' ||
+        ['context.json', 'assets/release-descriptor.json', 'assets/SHA256SUMS'].includes(entry.path))
+        .map(entry => [entry.path, entry.data.toString('utf8')]));
+      if (kind === 'cleanup') {
+        assert.ok(Object.hasOwn(texts, 'toolchain.json') &&
+          Object.hasOwn(texts, 'native-homebrew-prefix-request.json'));
+        for (const name of ['native-homebrew-prefix-allocation.json', 'native-homebrew-prefix-cleanup.json']) {
+          assert.equal(Object.hasOwn(texts, name), ownedPrefix);
+        }
+      }
+      return { stdout: JSON.stringify({ texts, files: entries.map(entry => ({
+        filename: entry.path, size: entry.data.length, sha256: digest(entry.data),
+      })) }) };
+    } : undefined;
     const client = createReadinessGitHubClient({ repository, repositoryId, writerId,
       token: 'controlled-fixture-ephemeral-token', generation: 'observer-integration-fixture',
       scratchDirectory: scratch,
       python: process.env.SDLC_OBSERVER_PYTHON || process.env.SDLC_PYTHON ||
-        (process.platform === 'win32' ? 'python' : 'python3'), fetch });
+        (process.platform === 'win32' ? 'python' : 'python3'), fetch,
+      ...(runArtifactReader ? { runArtifactReader } : {}) });
     return { client, ...createPrReadinessHost({ api: client, defaultRevision: revisions.trusted,
       writerId, now: () => epoch + 10 * 60 * 1000,
       detailsUrl: `https://github.com/${repository}/actions/runs/999/attempts/1` }) };

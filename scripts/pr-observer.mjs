@@ -19,7 +19,7 @@ import { inspectWorkflowPolicy } from './workflow-policy.mjs';
 import { calculatorProjectFiles, calculatorSelection, reconcileCalculator } from './pr-calculator.mjs';
 import { homebrewToolchain } from './toolchain-baseline.mjs';
 import { sourceNativeBootstrapProtocol, requireNativeBootstrapCapability,
-  nativeSdkContextMatches } from './native-bootstrap-capability.mjs';
+  nativeSdkContextMatches, nativeBootstrapRequirements } from './native-bootstrap-capability.mjs';
 import { deriveNativeComponentSpecification, projectNativeComponentEvidence,
   requireNativeComponentProjection } from './native-components.mjs';
 
@@ -256,9 +256,9 @@ export function verifyNativeCleanup(data, { target, role, context, jobKey = 'nat
   const prefix = request?.prefix;
   const capability = requireNativeBootstrapCapability({ bootstrap: data?.['toolchain.json'],
     target, profile: 'pr', component, shard, role, protocol: bootstrapProtocol, prefix });
-  requireThat(request?.schemaVersion === 1 && request.kind === 'owned-native-homebrew-prefix' &&
-    typeof prefix === 'string' && /^\/opt\/[a-f0-9]{5}$/u.test(prefix) &&
-    /^[a-f0-9]{64}$/u.test(request.nonce ?? '') &&
+  const resources = nativeBootstrapRequirements({ target, profile: 'pr', component, shard, role,
+    protocol: bootstrapProtocol });
+  requireThat(request?.schemaVersion === 1 &&
     request.repositoryRoot === `${github?.GITHUB_WORKSPACE}/source` &&
     request.bootstrapDirectory === `${request.repositoryRoot}/.test-data/bootstrap-${role}` &&
     binding?.target === target && binding.host?.platform === 'darwin' &&
@@ -275,7 +275,24 @@ export function verifyNativeCleanup(data, { target, role, context, jobKey = 'nat
     github.RUNNER_ENVIRONMENT === 'github-hosted' && github.RUNNER_OS === 'macOS' &&
     github.RUNNER_ARCH === (context.native.architecture === 'arm64' ? 'ARM64' : 'X64') &&
     data['toolchain.json']?.status === 'Passed' &&
-    digest(data['toolchain.json'].native) === digest(context.native.toolchain.bootstrap) &&
+    digest(data['toolchain.json'].native) === digest(context.native.toolchain.bootstrap),
+  'EVIDENCE', 'Mac resource diagnostics differ from their own bootstrap, source or run attempt');
+  if (!resources.ownedPrefix) {
+    const expected = { schemaVersion: 1, kind: 'native-homebrew-prefix-not-required',
+      repositoryRoot: request.repositoryRoot, bootstrapDirectory: request.bootstrapDirectory, binding };
+    requireThat(digest(request) === digest(expected) &&
+      typeof data.texts?.['native-homebrew-prefix-request.json'] === 'string' &&
+      digest(JSON.parse(data.texts['native-homebrew-prefix-request.json'])) === digest(expected) &&
+      !Object.hasOwn(data, 'native-homebrew-prefix-allocation.json') &&
+      !Object.hasOwn(data, 'native-homebrew-prefix-cleanup.json') &&
+      !Object.hasOwn(data.texts, 'native-homebrew-prefix-allocation.json') &&
+      !Object.hasOwn(data.texts, 'native-homebrew-prefix-cleanup.json'),
+    'EVIDENCE', 'Prefix-free roles require source-bound nonallocation proof, not allocated or borrowed prefix facts');
+    return { role, status: 'not-required' };
+  }
+  requireThat(request.kind === 'owned-native-homebrew-prefix' &&
+    typeof prefix === 'string' && /^\/opt\/[a-f0-9]{5}$/u.test(prefix) &&
+    /^[a-f0-9]{64}$/u.test(request.nonce ?? '') &&
     (capability ? context.native.toolchain.bootstrap.homebrew?.prefix === prefix :
       context.native.toolchain.bootstrap.homebrew?.nodePrefix === `${prefix}/opt/${homebrewToolchain.formula}`) &&
     typeof data.texts?.['native-homebrew-prefix-request.json'] === 'string' &&
@@ -767,7 +784,9 @@ export function createPrReadinessHost({
         if (target.startsWith('macos-')) {
           cleanupMetadata = artifactFor(
             `${native.nativeWorkflowContract.cleanupArtifactPrefix}${role}-${run.id}-${run.run_attempt}`);
-          cleanupData = await api.artifact(cleanupMetadata, { kind: 'cleanup' });
+          cleanupData = await api.artifact(cleanupMetadata, { kind: 'cleanup',
+            ownedPrefix: nativeBootstrapRequirements({ target, profile: 'pr', component, shard, role,
+              protocol: source.bootstrapProtocol }).ownedPrefix });
         }
         acquired.push({ target, component, role, shard, job, facts, metadata, data,
           bootstrapMetadata, cleanupMetadata, cleanupData });
@@ -807,7 +826,7 @@ export function createPrReadinessHost({
         const context = validateExecutionContext({
           candidateDigest: digest({ revision: pr.merge_commit_sha, tree: source.tree.treeSha }),
           testSpecDigest: testSpecificationDigest(source.plan),
-          configDigest: native.nativeConfigurationDigest({ inventory: source.inventory, profile: 'pr', component, shard, shardProtocol,
+          configDigest: native.nativeConfigurationDigest({ inventory: source.inventory, profile: 'pr', target, component, shard, shardProtocol,
             bootstrapProtocol: source.bootstrapProtocol,
             shardPlanDigest: assignment?.digest ?? null,
             configuredWorkers: expectedResources.configuredWorkers }),
@@ -853,9 +872,12 @@ export function createPrReadinessHost({
       const unitOrder = frameworkShards ? native.verifyNativeShardUnitOrder(executions.map(part => ({
         ...part, job: acquired.find(original => original.role === part.context.jobRef.slice('native-'.length)).job,
       })), { protocol: shardProtocol }) : null;
-      const prefixes = acquired.filter(part => part.cleanupData).map(part =>
-        part.cleanupData['native-homebrew-prefix-request.json'].prefix);
-      requireThat(new Set(prefixes).size === prefixes.length, 'EVIDENCE',
+      const prefixParts = expectedParts.filter(part => part.target.startsWith('macos-') &&
+        nativeBootstrapRequirements({ ...part, profile: 'pr', protocol: source.bootstrapProtocol }).ownedPrefix);
+      const prefixes = acquired.filter(part => prefixParts.some(expected => expected.role === part.role)).map(part =>
+        part.cleanupData?.['native-homebrew-prefix-request.json']?.prefix);
+      requireThat(prefixes.every(prefix => typeof prefix === 'string') &&
+        prefixes.length === prefixParts.length && new Set(prefixes).size === prefixes.length, 'EVIDENCE',
         'Every required Mac producer must retain its own distinct guarded prefix allocation');
       const result = native.aggregateNativeReadiness(evaluations, {
         profile: 'pr', components: true, frameworkShards, sourceRevision: pr.merge_commit_sha,

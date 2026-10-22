@@ -1,5 +1,6 @@
 import { digest, requireThat } from '../src/core.mjs';
-import { nativeBootstrapProtocol, nativeBootstrapProtocols, nativeToolchain, homebrewToolchain } from './toolchain-baseline.mjs';
+import { nativeBootstrapProtocol, nativeSdkBootstrapProtocol, nativeBootstrapProtocols,
+  nativeToolchain, homebrewToolchain } from './toolchain-baseline.mjs';
 
 export function sourceNativeBootstrapProtocol(sourceFiles) {
   const sources = sourceFiles.filter(source => source.file === 'scripts/toolchain-baseline.mjs');
@@ -23,10 +24,16 @@ export function nativeBootstrapCapability({ target, profile, component, shard = 
     profile === 'pr' && component === 'framework' && shards.includes(shard) &&
     role === `${target}-framework-${shard}`, 'INPUT',
   'Role-specific bootstrap requires the exact source-selected PR framework producer');
+  const light = shard === 'refresh' || shard === 'units' || shard === 'units-1';
+  const tools = protocol === nativeBootstrapProtocol ? {
+    go: !light, python: shard !== 'refresh', schema: !light,
+    homebrew: mac && !light, ownedPrefix: mac && !light,
+  } : protocol === nativeSdkBootstrapProtocol ? { go: shard !== 'refresh', python: shard !== 'refresh' } : null;
   return { protocol, target, profile, component, shard, role,
     runtimeProvider: 'actions/setup-node', node: nativeToolchain.node,
-    homebrew: mac ? 'pinned-source-and-portable-ruby-without-node' : 'not-applicable',
-    ...(protocol === nativeBootstrapProtocol ? { tools: { go: shard !== 'refresh', python: shard !== 'refresh' } } : {}) };
+    homebrew: mac ? protocol === nativeBootstrapProtocol && light ? 'not-required' :
+      'pinned-source-and-portable-ruby-without-node' : 'not-applicable',
+    ...(tools ? { tools } : {}) };
 }
 
 export function nativeSdkRequirements(options) {
@@ -34,7 +41,18 @@ export function nativeSdkRequirements(options) {
   requireThat(protocol === null || nativeBootstrapProtocols.includes(protocol),
     'INPUT', 'SDK requirements need an exact supported source bootstrap protocol');
   if (protocol === null || component !== 'framework' || shard === null) return { go: true, python: true };
-  return nativeBootstrapCapability(options).tools ?? { go: true, python: true };
+  const tools = nativeBootstrapCapability(options).tools;
+  return tools ? { go: tools.go, python: tools.python } : { go: true, python: true };
+}
+
+export function nativeBootstrapRequirements(options) {
+  const { protocol = null, component = 'full', shard = null, target } = options;
+  const sdk = nativeSdkRequirements(options);
+  if (protocol === nativeBootstrapProtocol && component === 'framework' && shard !== null) {
+    return nativeBootstrapCapability(options).tools;
+  }
+  const mac = ['macos-arm64', 'macos-x64'].includes(target);
+  return { ...sdk, schema: sdk.python, homebrew: mac, ownedPrefix: mac };
 }
 
 export function nativeSdkContextMatches(toolchain, options) {
@@ -98,7 +116,29 @@ export function requireNativeBootstrapCapability({ bootstrap, target, profile, c
         (tool === 'go' ? /^(?:go-root|go-version)$/u : /^(?:python-|schema-)/u).test(report.name)),
     'EVIDENCE', 'Unused SDK capabilities must be absent, not represented by fabricated tool facts');
   }
-  if (platform === 'darwin') {
+  if (protocol === nativeBootstrapProtocol) {
+    const resources = nativeBootstrapRequirements({ target, profile, component, shard, role, protocol });
+    if (resources.python) requireThat(
+      native.python?.version === nativeToolchain.python && native.python.implementation === 'CPython' &&
+      typeof native.executables.python === 'string' && native.executables.python.length > 0 &&
+      typeof native.python.executable === 'string' &&
+      (resources.schema || native.python.executable === native.executables.python) &&
+      (architecture === 'arm64' ? ['arm64', 'aarch64'] : ['AMD64', 'x86_64']).includes(native.python.machine) &&
+      bootstrap.reports.filter(report => report.name === 'python-identity' &&
+        report.complete === true && report.exitCode === 0).length === 1,
+    'EVIDENCE', 'Required pinned native CPython runtime identity is missing or invalid');
+    if (!resources.schema) requireThat(!Object.hasOwn(native, 'schemaPackages') &&
+      !bootstrap.reports.some(report => /^schema-/u.test(report.name)),
+    'EVIDENCE', 'Unused schema facts and acquisition reports must be absent');
+    if (!resources.homebrew) requireThat(!Object.hasOwn(native, 'homebrew') &&
+      !['prefix', 'ownedPrefix', 'ruby', 'allocation', 'cleanup'].some(key => Object.hasOwn(native, key)) &&
+      !Object.keys(native.executables).some(key => /brew|ruby|prefix/iu.test(key)) &&
+      !bootstrap.reports.some(report => /^brew-/u.test(report.name)) && prefix === undefined,
+    'EVIDENCE', 'Prefix-free bootstrap cannot borrow or invent Homebrew, Ruby or prefix evidence');
+  }
+  if (platform === 'darwin' && nativeBootstrapRequirements({
+    target, profile, component, shard, role, protocol,
+  }).homebrew) {
     const brew = native.homebrew;
     const owned = prefix ?? brew?.prefix;
     requireThat(typeof owned === 'string' && /^\/opt\/[a-f0-9]{5}$/u.test(owned) &&

@@ -25,9 +25,9 @@ import { buildPlatforms, renderChecksums } from './package-platforms.mjs';
 import { calculatorProjectFiles, calculatorSelection, calculatorCapability, calculatorBaselineCapability, reconcileCalculator,
   calculatorArguments } from './pr-calculator.mjs';
 import { prCryptoFixture } from './pr-capabilities.mjs';
-import { nativeToolchain, nativeBootstrapProtocol, nativeBootstrapProtocols } from './toolchain-baseline.mjs';
+import { nativeToolchain, nativeBootstrapProtocol, nativeSdkBootstrapProtocol, nativeBootstrapProtocols } from './toolchain-baseline.mjs';
 import { sourceNativeBootstrapProtocol, requireNativeBootstrapCapability, nativeSdkRequirements,
-  nativeSdkContextMatches, probeNativeSdk } from './native-bootstrap-capability.mjs';
+  nativeSdkContextMatches, nativeBootstrapRequirements, probeNativeSdk } from './native-bootstrap-capability.mjs';
 export { nativeToolchain } from './toolchain-baseline.mjs';
 export { deriveNativeComponentSpecification, nativeComponentSelection,
   projectNativeComponentEvidence, replayNativeComponentEvidence,
@@ -144,7 +144,7 @@ const canonicalIds = (target, profile) => [
 ];
 const safe = value => sanitizeExecutionPayload(Buffer.from(JSON.stringify(value)));
 
-export function nativeConfigurationDigest({ inventory, profile, configuredWorkers = null,
+export function nativeConfigurationDigest({ inventory, profile, target = null, configuredWorkers = null,
   calculator = calculatorCapability(inventory), component = 'full', shard = null, shardPlanDigest = null,
   shardProtocol = nativeFrameworkShardProtocol, bootstrapProtocol = null }) {
   requireThat(bootstrapProtocol === null || nativeBootstrapProtocols.includes(bootstrapProtocol),
@@ -173,9 +173,11 @@ export function nativeConfigurationDigest({ inventory, profile, configuredWorker
     selectionTransport: validationSelectionProtocol,
     requiredCapabilities: { crypto: prCryptoFixture, calculator,
       ...(bootstrapProtocol !== null && component === 'framework' && shard !== null ?
-        { bootstrapProtocol, ...(bootstrapProtocol === nativeBootstrapProtocol ?
-          { tools: nativeSdkRequirements({ target: shard === 'units-1' ? 'macos-x64' : 'linux-x64',
-            profile, component, shard, protocol: bootstrapProtocol }) } : {}) } : {}) } });
+        { bootstrapProtocol, ...([nativeSdkBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol) ?
+          { tools: bootstrapProtocol === nativeBootstrapProtocol ?
+            nativeBootstrapRequirements({ target, profile, component, shard, protocol: bootstrapProtocol }) :
+            nativeSdkRequirements({ target: shard === 'units-1' ? 'macos-x64' : 'linux-x64',
+              profile, component, shard, protocol: bootstrapProtocol }) } : {}) } : {}) } });
 }
 
 export function nativeResourceFacts({ availableParallelism = os.availableParallelism(),
@@ -442,7 +444,7 @@ export function aggregateNativeReadiness(evaluations, { profile, sourceRevision,
       const assignment = shard === null ? null : nativeFrameworkShardPlan({ inventory, plan, target, protocol: shardProtocol });
       requireThat(actual.inventoryDigest === validationInventoryDigest(specification) &&
         actual.testSpecDigest === testSpecificationDigest(plan) &&
-        actual.configDigest === nativeConfigurationDigest({ inventory, profile, component, shard, shardProtocol, bootstrapProtocol,
+        actual.configDigest === nativeConfigurationDigest({ inventory, profile, target, component, shard, shardProtocol, bootstrapProtocol,
           shardPlanDigest: assignment?.digest ?? null,
           configuredWorkers: actual.native.toolchain.resources.configuredWorkers }),
       'EVIDENCE', 'Expected shard context differs from independently derived complete source/specification/assignment');
@@ -838,6 +840,15 @@ async function collectExecution({ directory, data, inventory, sources, calculato
   const read = name => data ? Promise.resolve(data[name] ?? null) : readOptional(path.join(directory, name));
   if (bootstrapProtocol !== null) requireNativeBootstrapCapability({
     bootstrap: await read('toolchain.json'), target, profile, component, shard, protocol: bootstrapProtocol });
+  if (bootstrapProtocol === nativeBootstrapProtocol && !nativeBootstrapRequirements({
+    target, profile, component, shard, protocol: bootstrapProtocol,
+  }).ownedPrefix) {
+    for (const file of ['native-homebrew-prefix-allocation.json', 'native-homebrew-prefix-cleanup.json',
+      'native-homebrew.json']) {
+      requireThat(await read(file) === null, 'EVIDENCE',
+        'Prefix-free original execution cannot contain invented Homebrew or ownership receipts');
+    }
+  }
   const frozen = await read('candidate-verification.json');
   if (part) {
     const names = data ? Object.keys(data) : await fs.readdir(directory);
@@ -1285,7 +1296,7 @@ function compileNativeDefinition({ target, profile, sourceFiles, selectedWorkers
     ...(bootstrapProtocol === null ? {} : { bootstrapProtocol }),
     stages: assignment ? assignment.parts.find(part => part.shard === shard).stages :
       component === 'homebrew' ? [] : nativeStageSelections(inventory, plan),
-    configDigest: nativeConfigurationDigest({ inventory, profile, component, shard, shardProtocol, bootstrapProtocol,
+    configDigest: nativeConfigurationDigest({ inventory, profile, target, component, shard, shardProtocol, bootstrapProtocol,
       shardPlanDigest: assignment?.digest ?? null, configuredWorkers: selectedWorkersRequest }),
     testSpecDigest: testSpecificationDigest(plan), inventoryDigest: validationInventoryDigest(specification) };
 }
@@ -1477,7 +1488,7 @@ export async function verifyNativeEvidence({ target, profile, candidateDir, evid
     artifacts: nativeArtifacts(candidate), bootstrapProtocol: inputs.bootstrapProtocol }) &&
     context.candidateDigest === digest({ revision: expectedSourceCommit, tree }) &&
     context.testSpecDigest === testSpecificationDigest(inputs.plan) &&
-    context.configDigest === nativeConfigurationDigest({ inventory: inputs.inventory, profile, component, shard, shardProtocol,
+    context.configDigest === nativeConfigurationDigest({ inventory: inputs.inventory, profile, target, component, shard, shardProtocol,
       bootstrapProtocol: inputs.bootstrapProtocol,
       shardPlanDigest: assignment?.digest ?? null,
       configuredWorkers: process.env.SDLC_TEST_WORKERS ?? null }) &&
@@ -1569,7 +1580,7 @@ export async function runNativeValidation(options) {
       bootstrap.native.resources && digest(bootstrap.native.resources) === digest(resources),
     'HOST', 'Required native toolchain bootstrap did not establish this actual host/resource allocation');
     if (shard !== null) Object.assign(commandContext, {
-      configDigest: nativeConfigurationDigest({ inventory: inputs.inventory, profile, component, shard,
+      configDigest: nativeConfigurationDigest({ inventory: inputs.inventory, profile, target, component, shard,
         bootstrapProtocol: inputs.bootstrapProtocol,
         shardPlanDigest: assignment.digest, configuredWorkers: resources.configuredWorkers }),
       inventoryDigest: validationInventoryDigest(inputs.specification),
@@ -1582,7 +1593,7 @@ export async function runNativeValidation(options) {
     const tree = (await git(['rev-parse', 'HEAD^{tree}'])).stdout.trim();
     context = validateExecutionContext({
       candidateDigest: digest({ revision, tree }), testSpecDigest: testSpecificationDigest(inputs.plan),
-      configDigest: nativeConfigurationDigest({ inventory: inputs.inventory, profile, component, shard,
+      configDigest: nativeConfigurationDigest({ inventory: inputs.inventory, profile, target, component, shard,
         bootstrapProtocol: inputs.bootstrapProtocol,
         shardPlanDigest: assignment?.digest ?? null,
         configuredWorkers: resources.configuredWorkers }),

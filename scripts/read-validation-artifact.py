@@ -18,7 +18,9 @@ NATIVE_STAGE_JOURNALS = frozenset(
 )
 
 
-def read_results(archive, kind="native"):
+def read_results(archive, kind="native", owned_prefix=True):
+    if type(owned_prefix) is not bool:
+        raise ValueError("Owned-prefix selection must be a boolean from the trusted caller")
     if archive.is_symlink() or not archive.is_file() or archive.stat().st_size > MAX_ARCHIVE:
         raise ValueError("Result archive must be a bounded regular file")
     selected = {}
@@ -78,12 +80,19 @@ def read_results(archive, kind="native"):
     required = ({"execution.json", "readiness-bundle.json"} if kind == "native" else
                 {"toolchain.json", "native-homebrew-prefix-request.json",
                  "native-homebrew-prefix-allocation.json", "native-homebrew-prefix-cleanup.json"}
-                if kind == "cleanup" else
+                if kind == "cleanup" and owned_prefix else
+                {"toolchain.json", "native-homebrew-prefix-request.json"} if kind == "cleanup" else
                 {"context.json", "assets/release-descriptor.json", "assets/SHA256SUMS"})
     if not required.issubset(selected):
         raise ValueError("Required owned-prefix cleanup and bootstrap originals are missing"
                          if kind == "cleanup" else
                          "Required original execution and readiness bundle are missing")
+    if kind == "cleanup" and not owned_prefix:
+        request = json.loads(selected["native-homebrew-prefix-request.json"])
+        if (request.get("kind") != "native-homebrew-prefix-not-required"
+                or "native-homebrew-prefix-allocation.json" in selected
+                or "native-homebrew-prefix-cleanup.json" in selected):
+            raise ValueError("Prefix-free diagnostics cannot contain allocation or removal receipts")
     return {"texts": selected, "files": fingerprints}
 
 
@@ -91,7 +100,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--archive", required=True, type=Path)
     parser.add_argument("--kind", choices=("native", "candidate", "cleanup"), default="native")
+    parser.add_argument("--owned-prefix", choices=("true", "false"), default="true")
     args = parser.parse_args()
     if sys.version_info[:3] != (3, 12, 10):
         raise RuntimeError("The trusted result reader requires CPython 3.12.10")
-    print(json.dumps(read_results(args.archive, args.kind), separators=(",", ":")))
+    print(json.dumps(read_results(args.archive, args.kind, args.owned_prefix == "true"), separators=(",", ":")))
