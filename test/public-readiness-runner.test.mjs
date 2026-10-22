@@ -203,7 +203,8 @@ async function runnerFixture(t, { riskBoundaries = false, timedUnit = false, blo
     await fs.copyFile(path.join(repositoryRoot, 'test', 'helpers.mjs'), path.join(root, 'test', 'helpers.mjs'));
   }
   await Promise.all(['test-runner.mjs', 'test-worker.mjs', 'test-profiles.mjs', 'validation-inventory.mjs',
-    'test-scheduling.mjs', 'test-budget.mjs', 'test-budget-worker.mjs', 'test-local-evidence.mjs'].map(file =>
+    'test-scheduling.mjs', 'test-budget.mjs', 'test-budget-worker.mjs', 'frozen-fixture-transport.mjs',
+    'test-local-evidence.mjs'].map(file =>
     fs.copyFile(path.join(repositoryRoot, 'scripts', file), path.join(root, 'scripts', file))));
   const planDirectory = path.join(root, 'docs', 'sdlc', 'public-readiness');
   await fs.mkdir(planDirectory, { recursive: true });
