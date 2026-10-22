@@ -84,6 +84,10 @@ async function preparePurgeLock(file) {
   let owner;
   try { owner = await readJson(file, { optional: true, limit: 2048 }); }
   catch (error) {
+    if (error.code === 'STALE') {
+      throw new SdlcError('LOCK_BUSY',
+        'Install lock changed while reading its owner');
+    }
     if (!['JSON', 'CAPACITY'].includes(error.code)) throw error;
   }
   const valid = owner?.host &&

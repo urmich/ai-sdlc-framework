@@ -38,22 +38,34 @@ const platforms = { 'linux-x64': 'linux', 'windows-x64': 'win32',
 const locations = { 'linux-x64': 'github-linux-x64', 'windows-x64': 'github-windows-x64',
   'macos-arm64': 'github-macos-arm64', 'macos-x64': 'github-macos-x64' };
 export const nativeLegacyFrameworkShardProtocol = 'native-framework-shards-v1';
-export const nativeFrameworkShardProtocol = 'native-framework-shards-v2-platform-units';
+export const nativePlatformUnitFrameworkShardProtocol = 'native-framework-shards-v2-platform-units';
+export const nativeFrameworkShardProtocol = 'native-framework-shards-v3-four-body-platform-units';
+export const nativeFrameworkShardProtocols = Object.freeze([
+  nativeLegacyFrameworkShardProtocol, nativePlatformUnitFrameworkShardProtocol, nativeFrameworkShardProtocol,
+]);
 export const nativeLegacyPrParts = Object.freeze(validationPlatforms.flatMap(target =>
   (target.startsWith('macos-') ? ['framework', 'homebrew'] : ['full'])
     .map(component => Object.freeze({ target, component, role: nativeProducerRole(target, component) }))));
-export const nativePrParts = Object.freeze(validationPlatforms.flatMap(target => [
-  ...nativeFrameworkShardNames(target).map(shard => Object.freeze({
-    target, component: 'framework', shard, role: nativeProducerRole(target, 'framework', shard),
-  })),
-  ...(target.startsWith('macos-') ? [Object.freeze({
-    target, component: 'homebrew', role: nativeProducerRole(target, 'homebrew'),
-  })] : []),
-]));
+export const nativePrParts = nativePrPartsForProtocol();
 
-export function nativeFrameworkShardNames(target) {
-  requireThat(validationPlatforms.includes(target), 'INPUT', 'Select an exact native shard target');
-  return ['units', 'refresh', ...Array.from({ length: target.startsWith('macos-') ? 3 : 2 },
+export function nativePrPartsForProtocol(protocol = nativeFrameworkShardProtocol) {
+  requireThat(nativeFrameworkShardProtocols.includes(protocol), 'INPUT', 'Select a supported native shard protocol');
+  return Object.freeze(validationPlatforms.flatMap(target => [
+    ...nativeFrameworkShardNames(target, protocol).map(shard => Object.freeze({
+      target, component: 'framework', shard, role: nativeProducerRole(target, 'framework', shard),
+    })),
+    ...(target.startsWith('macos-') ? [Object.freeze({
+      target, component: 'homebrew', role: nativeProducerRole(target, 'homebrew'),
+    })] : []),
+  ]));
+}
+
+export function nativeFrameworkShardNames(target, protocol = nativeFrameworkShardProtocol) {
+  requireThat(validationPlatforms.includes(target) && nativeFrameworkShardProtocols.includes(protocol),
+    'INPUT', 'Select an exact native shard target and supported protocol');
+  return ['units', 'refresh', ...Array.from({
+    length: target.startsWith('macos-') ? 3 : protocol === nativeFrameworkShardProtocol ? 4 : 2,
+  },
     (_, index) => `body-${index}`)];
 }
 
@@ -66,7 +78,7 @@ export function nativeProducerRole(target, component = 'full', shard = null) {
 }
 
 export function nativePartJobKey({ target, shard = null, component }, protocol = nativeFrameworkShardProtocol) {
-  requireThat([nativeFrameworkShardProtocol, nativeLegacyFrameworkShardProtocol].includes(protocol),
+  requireThat(nativeFrameworkShardProtocols.includes(protocol),
     'INPUT', 'Select an explicit supported native framework topology');
   if (component === 'homebrew') return 'native-homebrew';
   const suffix = protocol === nativeLegacyFrameworkShardProtocol || shard === null || target === 'linux-x64' ?
@@ -129,7 +141,7 @@ export function nativeConfigurationDigest({ inventory, profile, configuredWorker
   requireThat(shard === null ? shardPlanDigest === null :
     profile === 'pr' && component === 'framework' && typeof shard === 'string' &&
       /^[a-f0-9]{64}$/u.test(shardPlanDigest ?? '') &&
-      [nativeFrameworkShardProtocol, nativeLegacyFrameworkShardProtocol].includes(shardProtocol), 'INVENTORY',
+      nativeFrameworkShardProtocols.includes(shardProtocol), 'INVENTORY',
   'Native shard configuration requires its independently derived complete assignment');
   const requested = configuredWorkers === null ? null : String(configuredWorkers);
   requireThat(requested === null || /^[1-9]\d*$/u.test(requested) && Number(requested) <= 32,
@@ -168,6 +180,9 @@ export function nativeSpecification({ plan, inventory, goSources, target, profil
   shardProtocol = nativeFrameworkShardProtocol }) {
   requireThat(validationPlatforms.includes(target) && ['pr', 'r-pre'].includes(profile) && inventory.complete,
     'INVENTORY', 'Native validation requires the complete declared inventory and an explicit profile/platform');
+  requireThat(shard === null || nativeFrameworkShardProtocols.includes(shardProtocol) &&
+    nativeFrameworkShardNames(target, shardProtocol).includes(shard), 'INPUT',
+  'Native shard selection must belong to its explicit versioned topology');
   const role = nativeProducerRole(target, component, shard);
   requireThat(component === 'full' || profile === 'pr', 'INPUT', 'Partial native components are PR-only');
   if (shard !== null) return nativeFrameworkShardSpecification({ plan, inventory, goSources, target, shard, shardProtocol });
@@ -204,7 +219,7 @@ export function nativeSpecification({ plan, inventory, goSources, target, profil
 export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = nativeFrameworkShardProtocol }) {
   requireThat(inventory.complete && validationPlatforms.includes(target),
     'INVENTORY', 'Framework shards need the complete independently declared native inventory');
-  requireThat([nativeFrameworkShardProtocol, nativeLegacyFrameworkShardProtocol].includes(protocol),
+  requireThat(nativeFrameworkShardProtocols.includes(protocol),
     'INVENTORY', 'Unknown native framework prerequisite topology');
   const stages = nativeStageSelections(inventory, plan);
   const regression = stages.find(stage => stage.name === 'regression');
@@ -223,7 +238,7 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
   const bodyFiles = new Set(bodyCases.map(test => test.file));
   const partitions = partitionValidationInventory({ ...inventory, cases: bodyCases,
     files: inventory.files.filter(file => bodyFiles.has(file.file)) },
-  target.startsWith('macos-') ? 3 : 2);
+  nativeFrameworkShardNames(target, protocol).length - 2);
   const roots = validationExecutionGroups(inventory, {
     files: regression.files, pattern: regression.selectorName, preserveOrder: true,
   });
@@ -234,7 +249,7 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
   requireThat(toolRoot && toolPartition, 'INVENTORY',
     'The actual Go/Python/schema/launcher causal root must be assigned intact to one body');
   const toolShard = `body-${toolPartition.index}`;
-  const parts = nativeFrameworkShardNames(target).map(shard => {
+  const parts = nativeFrameworkShardNames(target, protocol).map(shard => {
     const selected = shard === 'units' ? stages.filter(stage => stage.name !== 'regression') :
       [{ ...regression, cases: shard === 'refresh' ?
         regression.cases.filter(test => refreshIds.has(test.id)) :
@@ -372,7 +387,7 @@ export function aggregateNativeReadiness(evaluations, { profile, sourceRevision,
     'INPUT', 'Native component composition is explicit and PR-only');
   requireThat(typeof frameworkShards === 'boolean' && (!frameworkShards || components && profile === 'pr'),
     'INPUT', 'Framework shard aggregation is explicit and PR-only');
-  const parts = frameworkShards ? nativePrParts : components ? nativeLegacyPrParts : validationPlatforms.map(target => ({
+  const parts = frameworkShards ? nativePrPartsForProtocol(shardProtocol) : components ? nativeLegacyPrParts : validationPlatforms.map(target => ({
     target, component: 'full', role: target,
   }));
   requireThat(Array.isArray(evaluations) && ['pr', 'r-pre'].includes(profile) && /^[a-f0-9]{40}$/u.test(sourceRevision) &&
@@ -464,13 +479,14 @@ export function requireNativeShardUnitOrder(proof, executions, protocol = native
   return proof;
 }
 export function verifyNativeShardUnitOrder(parts, { protocol = nativeFrameworkShardProtocol } = {}) {
-  requireThat([nativeFrameworkShardProtocol, nativeLegacyFrameworkShardProtocol].includes(protocol),
+  requireThat(nativeFrameworkShardProtocols.includes(protocol),
     'EVIDENCE', 'Unknown native unit-order proof protocol');
-  requireThat(Array.isArray(parts) && parts.length === nativePrParts.length &&
-    new Set(parts.map(part => nativeProducerRole(part.target, part.component, part.shard))).size === nativePrParts.length &&
-    new Set(parts.map(part => part.job?.id)).size === nativePrParts.length,
+  const expectedParts = nativePrPartsForProtocol(protocol);
+  requireThat(Array.isArray(parts) && parts.length === expectedParts.length &&
+    new Set(parts.map(part => nativeProducerRole(part.target, part.component, part.shard))).size === expectedParts.length &&
+    new Set(parts.map(part => part.job?.id)).size === expectedParts.length,
   'EVIDENCE', 'Unit ordering requires all exact independently acquired producer parts');
-  const selected = nativePrParts.map(expected => {
+  const selected = expectedParts.map(expected => {
     const part = parts.find(part => part.target === expected.target && part.component === expected.component &&
       (part.shard ?? null) === (expected.shard ?? null));
     requireThat(part, 'EVIDENCE', 'A required unit-order producer is missing');
@@ -1242,7 +1258,7 @@ export async function replayNativeEvidence({ definition, data, candidate, asOf, 
     Object.keys(definition).every(field => fields.includes(field)) &&
     definition.schemaVersion === 1 && definition.kind === 'native-validation-definition' &&
     (definition.shard === undefined ? definition.frameworkShards === undefined :
-      [nativeFrameworkShardProtocol, nativeLegacyFrameworkShardProtocol].includes(definition.frameworkShards)) &&
+      nativeFrameworkShardProtocols.includes(definition.frameworkShards)) &&
     validationPlatforms.includes(definition.target) && ['pr', 'r-pre'].includes(definition.profile) &&
     /^[a-f0-9]{40}$/u.test(definition.source?.revision ?? '') &&
     /^[a-f0-9]{40}$/u.test(definition.source?.treeSha ?? '') &&

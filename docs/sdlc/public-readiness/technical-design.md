@@ -313,10 +313,10 @@ Keep receipt validation, real backups, copy verification, locks, durable state
 transitions and all channel, hook and quality commands unchanged. No captured
 dependency state is cached across mutation phases.
 
-For ordinary PR validation, use twenty independently required native producer
+For ordinary PR validation, use twenty-four independently required native producer
 parts consuming the same frozen candidate. Each platform has one unit producer
 and one producer containing the entire unchanged 550-refresh root. Partition
-the remaining root closures across two Linux/Windows body producers and three
+the remaining root closures across four Linux/Windows body producers and three
 body producers per Mac architecture; each Mac also retains its real Homebrew
 producer. Separate hosts add actual execution capacity rather than multiplying
 one host's worker budget. Preserve every original root and descendant identity,
@@ -327,14 +327,20 @@ observed part results. Require source-, platform-, job-, run- and attempt-bound
 unit evidence before regression shards execute. Independently verify every
 part's SDK context, complete assertion union and allocated-prefix cleanup;
 missing, duplicated, overlapping or swapped parts cannot produce completeness.
-The source-adopted `native-framework-shards-v2-platform-units` protocol uses four
+The source-adopted `native-framework-shards-v3-four-body-platform-units` protocol uses four
 explicit platform-specific unit-to-regression job groups. A platform's unit
 producer must complete successfully, including retention and cleanup, before
 its own regression jobs start. Unrelated unit producers may finish later, but
-overall completeness still requires every one of the twenty parts. No waiting
+overall completeness still requires every one of the twenty-four parts. No waiting
 regression host is started early merely to overlap provisioning.
-Preserve the original `native-framework-shards-v1` global-barrier proof and
-archive semantics; a new protocol must not relabel its older evidence.
+Preserve the original `native-framework-shards-v1` global-barrier and
+`native-framework-shards-v2-platform-units` twenty-part proof and archive
+semantics; a new protocol must not relabel older evidence or reinterpret its
+eighteen framework producers as the current twenty-two.
+Bind the current SDK component projection to
+`native-component-projection-shards-v2`; retain
+`native-component-projection-shards-v1` for its historical topology and reject
+cross-version producer counts or borrowed origins.
 All twelve Mac producer prefixes require distinct owned allocation and matching
 guarded cleanup; no producer may borrow another's receipt.
 Keep default whole-native execution and release prepublication compatible.
@@ -349,6 +355,10 @@ build. Keep transactions, durability flushes, lock races, archival and cleanup
 real. Any runtime optimization of repeated reads/indexing must preserve revision,
 containment, invalidation and crash guarantees and receive its affected regression
 coverage. Do not add a test-only switch disabling fsync or reducing stress limits.
+When a purge lock's owner file changes during its bounded read, treat the
+unresolved concurrent owner as `LOCK_BUSY`, not as permission to remove the lock.
+Preserve owner bytes and runtime contents without retrying or weakening the
+lock's durability and exclusion guarantees.
 Setup-only Windows-launcher consumers may copy the already source-verified
 frozen native candidate. Require its exported byte digest, matching execution
 source and owned regular-file paths; read and hash each input again and write
@@ -367,8 +377,15 @@ ceiling; nested producers still share that one host allocation, with all
 dependency, exclusive-resource and resident-process bounds unchanged.
 The personal-account hosted Mac ceiling is five simultaneous jobs, shared by
 both architectures; adding queued Mac shards is not additional execution capacity.
+The four-body Linux/Windows matrices can provide five regression hosts per
+platform while at most five Mac hosts run, fitting fifteen native jobs within
+the conservative twenty-job standard personal allowance. Use standard runners
+in this public repository without paid larger runners or a billing change.
 If any required complete lane remains active at 16 minutes, cancel that attempt
 and revise the measured bottleneck rather than waiting for a late green result.
+Reject a non-improving iteration as an unsuccessful optimization and revise its
+measured critical path; neither a configured allocation nor a passing local
+regression demonstrates a hosted speedup.
 
 The agent/maintainer may explicitly select affected local families for debugging
 from the actual dependency trace; no automatic impact-map implementation is

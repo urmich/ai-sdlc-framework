@@ -6,6 +6,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import * as fs from 'node:fs/promises';
+import fsPromises from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { execFile } from 'node:child_process';
@@ -377,18 +379,45 @@ test('T-46 purge recovers invalid locks and unlinks runtime redirects without fo
 test('T-46 purge does not steal a newly populated live lock', async t => {
   const f = await fixture(t, { initialize: false });
   const lock = path.join(f.home, '.ai-sdlc-framework.install.lock');
-  await fs.writeFile(lock, '');
-  const writer = delay(20).then(() => fs.writeFile(lock, JSON.stringify({
+  const content = path.join(f.store.runtime, 'live-owner.json');
+  const owner = JSON.stringify({
     host: os.hostname(),
     pid: process.pid,
     token: 'live-owner',
-  })));
-  await assert.rejects(uninstall(f.store, { purge: true }),
-    { code: 'LOCK_BUSY' });
-  await writer;
-  assert.equal(JSON.parse(await fs.readFile(lock, 'utf8')).token,
-    'live-owner');
-  await fs.unlink(lock);
+  });
+  await fs.writeFile(content, '{"preserve":true}\n');
+  await fs.writeFile(lock, '');
+  const open = fsPromises.open;
+  let populated = false;
+  const mocked = t.mock.method(fsPromises, 'open', async (file, ...options) => {
+    const handle = await open(file, ...options);
+    if (file === lock && !populated) {
+      const read = handle.read.bind(handle);
+      t.mock.method(handle, 'read', async (...readOptions) => {
+        if (!populated) {
+          populated = true;
+          await fs.writeFile(lock, owner);
+        }
+        return read(...readOptions);
+      });
+    }
+    return handle;
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(uninstall(f.store, { purge: true }),
+      { code: 'LOCK_BUSY' });
+    assert.equal(populated, true);
+    assert.equal(await fs.readFile(lock, 'utf8'), owner);
+    await assert.rejects(uninstall(f.store, { purge: true }),
+      { code: 'LOCK_BUSY' });
+    assert.equal(await fs.readFile(lock, 'utf8'), owner);
+    assert.equal(await fs.readFile(content, 'utf8'), '{"preserve":true}\n');
+  } finally {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+    await fs.unlink(lock);
+  }
 });
 test('T-46 purge validates every parent before removing any owned content', async t => {
   const f = await fixture(t, { initialize: false });

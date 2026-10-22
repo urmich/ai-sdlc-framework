@@ -21,7 +21,8 @@ import { aggregateNativeReadiness, nativeArtifacts, nativeSpecification, nativeG
   deriveNativeComponentSpecification, writeNativeHomebrewReport,
   nativePrParts, nativeLegacyPrParts, nativeProducerRole,
   nativeFrameworkShardPlan, verifyNativeShardUnitOrder,
-  nativeFrameworkShardProtocol, nativeLegacyFrameworkShardProtocol } from '../scripts/native-validation.mjs';
+  nativeFrameworkShardProtocol, nativeLegacyFrameworkShardProtocol,
+  nativePlatformUnitFrameworkShardProtocol, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
 import { observerApiFixture } from './readiness-observer-fixture.mjs';
 import { validateBootstrapRequest } from '../scripts/native-toolchain.mjs';
 import { reconcileGoExecution, executeValidationCommand, validationCommandArguments } from '../scripts/validation-tools.mjs';
@@ -452,19 +453,25 @@ test('T-PRD016 six PR producer parts require both exact Mac originals and reject
   }
 });
 
-test('T-PRD016 twenty native shard selections preserve complete root unions and require protected actual unit ordering', async t => {
+test('T-PRD016 twenty-four native shard selections preserve complete root unions and require protected actual unit ordering', async t => {
   const f = await observerApiFixture(t, { frameworkShards: true });
-  assert.equal(f.parts.size, 20);
+  assert.equal(f.parts.size, 24);
   const request = { target: 'linux-x64', profile: 'pr', component: 'framework', shard: 'units',
     candidateDir: '.test-data/shard-candidate', evidenceDir: '.test-data/shard-evidence' };
   const environment = { EXPECTED_SOURCE_COMMIT: f.revisions.merge,
     EXPECTED_DESCRIPTOR_SHA256: 'a'.repeat(64), EXPECTED_CHECKSUMS_SHA256: 'b'.repeat(64) };
   assert.equal(validateNativeRequest(request, environment).shard, 'units');
-  for (const delta of [{ shard: 'body-2' }, { shard: '' }, { component: 'full' },
+  for (const delta of [{ shard: 'body-4' }, { shard: '' }, { component: 'full' },
     { component: 'homebrew' }, { profile: 'r-pre' }, { phase: 'candidate' }, { buildCandidate: true }]) {
     assert.throws(() => validateNativeRequest({ ...request, ...delta }, environment), { code: 'INPUT' });
   }
   assert.equal(parseNativeOptions(['--framework-shard', 'body-1']).shard, 'body-1');
+  assert.equal(validateNativeRequest({ ...request, shard: 'body-3' }, environment).shard, 'body-3');
+  for (const shardProtocol of [nativeLegacyFrameworkShardProtocol, nativePlatformUnitFrameworkShardProtocol]) {
+    assert.throws(() => nativeSpecification({ plan: f.source.plan, inventory: f.source.inventory,
+      goSources: f.source.goSources, target: 'linux-x64', profile: 'pr',
+      component: 'framework', shard: 'body-3', shardProtocol }), { code: 'INPUT' });
+  }
   for (const target of targets) {
     const assignment = nativeFrameworkShardPlan({ inventory: f.source.inventory, plan: f.source.plan, target });
     const selected = assignment.parts.flatMap(part => part.assertionIds);
@@ -472,14 +479,20 @@ test('T-PRD016 twenty native shard selections preserve complete root unions and 
     assert.equal(new Set(selected).size, selected.length);
     assert.equal(assignment.parts.filter(part => part.go).length, 1);
     assert.equal(assignment.parts.find(part => part.shard === 'refresh').assertionIds.length, 1);
-    assert.equal(assignment.parts.length, target.startsWith('macos-') ? 5 : 4);
+    assert.equal(assignment.parts.length, target.startsWith('macos-') ? 5 : 6);
     assert.ok(assignment.parts.filter(part => part.shard.startsWith('body-')).every(part => part.assertionIds.length));
     assert.ok(assignment.parts.every(part => digest(part.prerequisites) === digest(part.shard === 'units' ?
       [] : [nativeProducerRole(target, 'framework', 'units')])));
     const global = nativeFrameworkShardPlan({ inventory: f.source.inventory, plan: f.source.plan,
       target, protocol: nativeLegacyFrameworkShardProtocol });
+    const previous = nativeFrameworkShardPlan({ inventory: f.source.inventory, plan: f.source.plan,
+      target, protocol: nativePlatformUnitFrameworkShardProtocol });
     assert.notEqual(global.digest, assignment.digest);
-    assert.deepEqual(global.parts.map(part => part.assertionIds), assignment.parts.map(part => part.assertionIds));
+    assert.deepEqual(global.parts.map(part => part.assertionIds), previous.parts.map(part => part.assertionIds));
+    assert.equal(previous.parts.length, target.startsWith('macos-') ? 5 : 4);
+    assert.deepEqual(global.parts.flatMap(part => part.assertionIds).sort(), [...selected].sort());
+    assert.ok(previous.parts.every(part => digest(part.prerequisites) === digest(part.shard === 'units' ?
+      [] : [nativeProducerRole(target, 'framework', 'units')])));
     assert.ok(global.parts.filter(part => part.shard !== 'units').every(part => part.prerequisites.length === 4));
   }
   const executions = [...f.parts.values()].map(part => ({
@@ -513,9 +526,13 @@ test('T-PRD016 twenty native shard selections preserve complete root unions and 
   assert.equal(aggregateNativeReadiness(swapped, expected).status, 'NotRun');
   assert.throws(() => aggregateNativeReadiness(evaluations,
     { ...expected, unitOrder: JSON.parse(JSON.stringify(unitOrder)) }), { code: 'EVIDENCE' });
-  const globalProof = verifyNativeShardUnitOrder(executions, { protocol: nativeLegacyFrameworkShardProtocol });
-  assert.throws(() => aggregateNativeReadiness(evaluations, { ...expected, unitOrder: globalProof }),
+  assert.throws(() => verifyNativeShardUnitOrder(executions, { protocol: nativeLegacyFrameworkShardProtocol }),
     { code: 'EVIDENCE' });
+  assert.throws(() => verifyNativeShardUnitOrder(executions, { protocol: nativePlatformUnitFrameworkShardProtocol }),
+    { code: 'EVIDENCE' });
+  assert.throws(() => aggregateNativeReadiness(evaluations, { ...expected,
+    shardProtocol: nativePlatformUnitFrameworkShardProtocol }),
+    { code: 'INPUT' });
   const staggered = executions.map(part => ({ ...part, job: structuredClone(part.job) }));
   const intelUnit = staggered.find(part => part.target === 'macos-x64' && part.shard === 'units');
   intelUnit.job.completed_at = '2026-10-18T10:01:50.000Z';
@@ -542,6 +559,8 @@ test('T-PRD016 twenty native shard selections preserve complete root unions and 
   const duplicateJobs = executions.map(part => ({ ...part, job: structuredClone(part.job) }));
   duplicateJobs[1].job.id = duplicateJobs[0].job.id;
   assert.throws(() => verifyNativeShardUnitOrder(duplicateJobs), { code: 'EVIDENCE' });
+  assert.equal(nativePrPartsForProtocol(nativeLegacyFrameworkShardProtocol).length, 20);
+  assert.equal(nativePrPartsForProtocol(nativePlatformUnitFrameworkShardProtocol).length, 20);
   assert.equal(f.calls.length, 0, 'No provider, native toolchain or Python execution is needed for this controlled proof');
 });
 

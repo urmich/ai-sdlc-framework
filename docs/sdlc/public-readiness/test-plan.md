@@ -417,6 +417,10 @@ variables remain isolated, and reporter context alone cannot supply it.
 The actual pinned Go tests/vet, native launcher
 execution and two independent cold-cache rebuilds stay required on capable PR
 runners; only setup-only consumers reuse the verified frozen candidate.
+The existing PR-only purge/live-lock regression populates the real owner file
+deterministically during its bounded read rather than relying on a short sleep.
+Concurrent changes must remain `LOCK_BUSY`, with owner bytes, live exclusion
+and runtime content preserved.
 
 ### 3.2 Existing full selection
 
@@ -818,21 +822,26 @@ partial comparison and do not silently retry to obtain a ratio.
 1. With scoped push/PR authority, use the exact candidate selected for validation and a clean
    controlled contribution without local result files. Observe initial PR and
    new head updates; retain exact candidate/source, workflow and attempt.
-2. Confirm all four logical native lanes and all twenty required producer parts
+2. Confirm all four logical native lanes and all twenty-four required producer parts
    start with their own prerequisites. Each platform has a unit producer and an
    independently required producer for the unchanged, causally ordered
    550-refresh root. The remaining complete root closures are partitioned across
-   two body producers on Linux/Windows and three on each Mac architecture.
+   four body producers on Linux/Windows and three on each Mac architecture.
    Each Mac lane also requires its genuine Homebrew producer. No part alone
    completes a platform. Native unit evidence must complete before that
    platform's regression shards execute; another platform or attempt cannot
    supply the prerequisite. Include the unit barrier, every part's provisioning,
    evidence retention and cleanup in the whole-lane elapsed time.
-   For `native-framework-shards-v2-platform-units`, require each platform's
+   For `native-framework-shards-v3-four-body-platform-units`, require each platform's
    actual unit job to finish successfully, including evidence and cleanup,
    before its own regression jobs start. Other platforms' unit jobs may finish
-   later; all twenty successful parts still remain mandatory for completeness.
-   Keep `native-framework-shards-v1` global-barrier replay distinct and reject
+   later; all twenty-four successful parts still remain mandatory for completeness.
+   Keep `native-framework-shards-v1` global-barrier and
+   `native-framework-shards-v2-platform-units` twenty-part replay distinct,
+   including their eighteen framework SDK origins. The current topology requires
+   twenty-two framework origins and two genuine Homebrew origins under
+   `native-component-projection-shards-v2`; preserve the historical v1 projection
+   without relabeling its origins. Reject
    wrong-version or borrowed unit proofs. Do not start waiting regression hosts
    early to overlap bootstrap. Verify all twelve distinct Mac prefix allocations
    and their matching guarded cleanup receipts; count every real wait honestly.

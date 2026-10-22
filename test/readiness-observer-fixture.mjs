@@ -14,9 +14,9 @@ import { renderChecksums } from '../scripts/package-platforms.mjs';
 import { archiveRecord } from '../scripts/release-bundle.mjs';
 import { compileValidationSourceInventory, validationPlatforms, validationSourcePaths } from '../scripts/validation-inventory.mjs';
 import { nativeSpecification, nativeConfigurationDigest, nativeArtifacts, nativeGoObservations,
-  nativeWorkflowContract, nativeStageSelections, nativeProducerRole, nativePrParts } from '../scripts/native-validation.mjs';
+  nativeWorkflowContract, nativeStageSelections, nativeProducerRole } from '../scripts/native-validation.mjs';
 import { nativeLegacyPrParts, nativeFrameworkShardPlan, nativeFrameworkShardProtocol,
-  nativeLegacyFrameworkShardProtocol, nativePartJobKey } from '../scripts/native-validation.mjs';
+  nativeLegacyFrameworkShardProtocol, nativePartJobKey, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
 import { nativeResourceFacts } from '../scripts/native-validation.mjs';
 import { repositoryRoot, unitFiles } from '../scripts/test-runner.mjs';
 import { createReadinessGitHubClient } from '../scripts/github-readiness-host.mjs';
@@ -139,6 +139,8 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
       name: 'T-PRD015 actual pinned Go, Python schema and static validators execute valid and invalid owned inputs' },
     { file: 'test/observer-shard-body.test.mjs', stage: 'regression', id: 'T-FIX-BODY',
       name: 'T-FIX-BODY controlled independent regression body' },
+    { file: 'test/observer-shard-extra.test.mjs', stage: 'regression', id: 'T-FIX-EXTRA',
+      name: 'T-FIX-EXTRA controlled fourth independent regression body' },
   ];
   const goSources = [
     { file: 'main_test.go', contents: 'package main\nimport "testing"\n' +
@@ -670,22 +672,30 @@ export async function observerApiFixture(t, options = {}) {
   if (ambient) assert.equal(path.resolve(os.tmpdir()), scratch, 'SDK artifact scratch must stay inside this owned checkout root');
   const currentCi = await fs.readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
   const shardProtocol = options.shardProtocol ?? nativeFrameworkShardProtocol;
-  const globalCi = `name: CI\non: pull_request\npermissions: {contents: read}\njobs:\n` +
-    ['native-units', 'native', 'native-homebrew'].map(key => `  ${key}:
-    needs: ${JSON.stringify(['intent', 'source', ...(key === 'native' ? ['native-units'] : [])])}
+  const protocolParts = nativePrPartsForProtocol(shardProtocol);
+  const protocolKeys = [...new Set(protocolParts.map(part => nativePartJobKey(part, shardProtocol)))];
+  const historicalCi = `name: CI\non: pull_request\npermissions: {contents: read}\njobs:\n` +
+    protocolKeys.map(key => {
+      const part = protocolParts.find(part => nativePartJobKey(part, shardProtocol) === key);
+      return `  ${key}:
+    needs: ${JSON.stringify(['intent', 'source', ...(part.shard && part.shard !== 'units' ?
+    [nativePartJobKey({ ...part, shard: 'units' }, shardProtocol)] : [])])}
     timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
-        include: ${JSON.stringify(nativePrParts.filter(part =>
-    nativePartJobKey(part, nativeLegacyFrameworkShardProtocol) === key).map(part =>
+        include: ${JSON.stringify(protocolParts.filter(part =>
+    nativePartJobKey(part, shardProtocol) === key).map(part =>
     ({ ...part, os: labels[part.target], architecture: part.target.split('-')[1] })))}
     steps:
       - uses: ${checkoutPin}
         with:
           persist-credentials: false
-`).join('');
-  const ci = options.frameworkShards ? shardProtocol === nativeLegacyFrameworkShardProtocol ? globalCi : currentCi : `name: CI
+`;
+    }).join('') + (shardProtocol === nativeLegacyFrameworkShardProtocol ? '' :
+      `  producer-summary:\n    permissions: {}\n    needs: ${JSON.stringify(['intent', 'minimum-node', 'source', ...protocolKeys])}\n` +
+      '    steps:\n      - run: echo "Controlled historical summary; never execute"\n');
+  const ci = options.frameworkShards ? shardProtocol === nativeFrameworkShardProtocol ? currentCi : historicalCi : `name: CI
 on: pull_request
 permissions:
   contents: read
@@ -706,7 +716,7 @@ jobs:
   const adopted = fixtureSources(ci);
   const source = fixtureSources(ci, options);
   const { candidate, entries } = candidateData(revisions.merge);
-  const expectedParts = options.frameworkShards ? nativePrParts : nativeLegacyPrParts;
+  const expectedParts = options.frameworkShards ? protocolParts : nativeLegacyPrParts;
   const parts = new Map(expectedParts.map(part => [part.role,
     laneData(source, candidate, revisions, part.target, { ...part, frameworkShards: Boolean(options.frameworkShards), shardProtocol,
       startTime: epoch + (part.shard && part.shard !== 'units' ? 100000 : 0) })]));

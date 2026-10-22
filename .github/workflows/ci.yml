@@ -380,6 +380,18 @@ jobs:
             role: linux-x64-framework-body-1
             os: ubuntu-24.04
             architecture: x64
+          - target: linux-x64
+            component: framework
+            shard: body-2
+            role: linux-x64-framework-body-2
+            os: ubuntu-24.04
+            architecture: x64
+          - target: linux-x64
+            component: framework
+            shard: body-3
+            role: linux-x64-framework-body-3
+            os: ubuntu-24.04
+            architecture: x64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 360
     env:
@@ -632,6 +644,8 @@ jobs:
           - { target: windows-x64, component: framework, shard: refresh, role: windows-x64-framework-refresh, os: windows-2022, architecture: x64 }
           - { target: windows-x64, component: framework, shard: body-0, role: windows-x64-framework-body-0, os: windows-2022, architecture: x64 }
           - { target: windows-x64, component: framework, shard: body-1, role: windows-x64-framework-body-1, os: windows-2022, architecture: x64 }
+          - { target: windows-x64, component: framework, shard: body-2, role: windows-x64-framework-body-2, os: windows-2022, architecture: x64 }
+          - { target: windows-x64, component: framework, shard: body-3, role: windows-x64-framework-body-3, os: windows-2022, architecture: x64 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 360
     env:
@@ -1324,7 +1338,7 @@ jobs:
           fi
           test "$REQUIRES_NATIVE" = true
           test "$MINIMUM_NODE_RESULT" = success
-          printf 'Source freeze: %s\nFour logical lanes / twenty required native producer parts: %s\n' "$SOURCE_RESULT" "$NATIVE_RESULT"
+          printf 'Source freeze: %s\nFour logical lanes / twenty-four required native producer parts: %s\n' "$SOURCE_RESULT" "$NATIVE_RESULT"
           printf 'Provider-verified framework/validation is evaluated independently by the trusted observer.\n'
           test "$SOURCE_RESULT" = success
           for result in "${results[@]}"; do test "$result" = success; done

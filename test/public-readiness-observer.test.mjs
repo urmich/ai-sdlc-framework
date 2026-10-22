@@ -18,7 +18,8 @@ import { readTrustedMinimumNodeJob, renderObserverSummary, retainObserverResult,
 import { nativeStageSelections, nativeConfigurationDigest, replayNativeEvidence,
   validateNativePreviousLifecycle, nativeWorkflowContract, nativeSpecification,
   verifyNativeShardUnitOrder, nativePartJobKey, nativeFrameworkShardProtocol,
-  nativeLegacyFrameworkShardProtocol, nativeFrameworkShardPlan } from '../scripts/native-validation.mjs';
+  nativeLegacyFrameworkShardProtocol, nativeFrameworkShardPlan,
+  nativePlatformUnitFrameworkShardProtocol, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
 import { testSpecificationDigest } from '../src/artifacts.mjs';
 import { validationInventoryDigest, normalizeExecutionReport, evaluateReadiness } from 'ai-sdlc-framework/evidence';
 import { calculatorFiles } from '../scripts/pr-calculator.mjs';
@@ -279,23 +280,23 @@ test('T-PRD016 API-only native admission composes six producer parts and four co
   f.assertReadOnly();
 });
 
-test('T-PRD016 API-only twenty-part admission restores every current native shard and twelve guarded cleanups', async t => {
+test('T-PRD016 API-only twenty-four-part admission restores every current native shard and twelve guarded cleanups', async t => {
   const f = await observerApiFixture(t, { frameworkShards: true });
   const { host } = f.connect();
   const snapshot = await host.snapshot();
   assert.equal(verdict(snapshot).status, 'Passed', JSON.stringify(verdict(snapshot).blockers));
   const retained = host.componentEvidence()[0];
-  assert.equal(retained.nativeParts.length, 20);
+  assert.equal(retained.nativeParts.length, 24);
   assert.equal(retained.nativeParts.filter(part => part.cleanupArtifactId).length, 12);
-  assert.equal(retained.sourceArtifacts.length, 18);
-  assert.equal(retained.projection.provenance.length, 18);
+  assert.equal(retained.sourceArtifacts.length, 22);
+  assert.equal(retained.projection.provenance.length, 22);
   assert.ok(retained.laneTimings.every(lane => lane.durationMs === 180000));
   const output = path.join(f.root, 'current-api-retained');
   await retainObserverResult({ status: 'Passed', results: [] }, output, { componentEvidence: [retained] });
   const saved = JSON.parse(await fs.readFile(path.join(output, 'observer-result.json'), 'utf8')).components[0];
-  assert.equal(saved.nativeOriginals.length, 18);
-  assert.equal(saved.nativeParts.length, 20);
-  assert.equal(new Set(saved.nativeOriginals.map(original => original.filename)).size, 18);
+  assert.equal(saved.nativeOriginals.length, 22);
+  assert.equal(saved.nativeParts.length, 24);
+  assert.equal(new Set(saved.nativeOriginals.map(original => original.filename)).size, 22);
   assert.ok(saved.unitOrder);
   const part = f.jobs.find(job => job.name === 'native-macos-arm64-framework-units');
   part.steps.find(step => step.name === 'Remove owned short Homebrew prefix').conclusion = 'skipped';
@@ -418,10 +419,15 @@ test('T-PRD020 logical native latency spans earliest required worker through the
   assert.throws(() => nativeLaneTimings(parts.slice(0, -1), { frameworkShards: false }), { code: 'EVIDENCE' });
 });
 
-test('T-PRD021 twenty-part originals require exact selected closures cleanup and protected multi-origin SDK composition', async t => {
-  for (const shardProtocol of [nativeFrameworkShardProtocol, nativeLegacyFrameworkShardProtocol]) {
+test('T-PRD021 versioned twenty-four and historical twenty-part originals require exact closures cleanup and protected SDK replay', async t => {
+  for (const shardProtocol of [nativeFrameworkShardProtocol, nativePlatformUnitFrameworkShardProtocol,
+    nativeLegacyFrameworkShardProtocol]) {
   const f = await observerApiFixture(t, { frameworkShards: true, shardProtocol,
     ambient: shardProtocol === nativeFrameworkShardProtocol });
+  const expectedCount = nativePrPartsForProtocol(shardProtocol).length;
+  const frameworkCount = expectedCount - 2;
+  assert.equal(f.parts.size, expectedCount);
+  assert.equal(expectedCount, shardProtocol === nativeFrameworkShardProtocol ? 24 : 20);
   const trust = inspectWorkflowTrust([{ file: nativeWorkflowContract.path,
     contents: f.source.files.get(nativeWorkflowContract.path) }]);
   assert.equal(trust.complete, true, JSON.stringify(trust.blockers));
@@ -444,6 +450,16 @@ test('T-PRD021 twenty-part originals require exact selected closures cleanup and
   const executions = [...f.parts.values()].map(part => ({ ...part,
     job: f.jobs.find(job => job.name === `native-${part.role}`) }));
   const unitOrder = verifyNativeShardUnitOrder(executions, { protocol: shardProtocol });
+  if (shardProtocol === nativePlatformUnitFrameworkShardProtocol) {
+    const staggered = executions.map(part => ({ ...part, job: structuredClone(part.job) }));
+    staggered.find(part => part.target === 'macos-x64' && part.shard === 'units').job.completed_at =
+      '2026-10-18T10:01:50.000Z';
+    for (const part of staggered.filter(part => part.target === 'macos-x64' &&
+      part.shard && part.shard !== 'units')) part.job.started_at = '2026-10-18T10:02:00.000Z';
+    assert.equal(verifyNativeShardUnitOrder(staggered, { protocol: shardProtocol }).protocol, shardProtocol);
+    assert.throws(() => verifyNativeShardUnitOrder(staggered, { protocol: nativeLegacyFrameworkShardProtocol }),
+      { code: 'EVIDENCE' });
+  }
   const framework = executions.filter(part => part.component === 'framework');
   const definition = deriveNativeComponentSpecification({ inventory: f.source.inventory,
     testPlan: f.source.plan, goSources: f.source.goSources, frameworkShards: true, shardProtocol,
@@ -474,9 +490,9 @@ test('T-PRD021 twenty-part originals require exact selected closures cleanup and
     } };
   const projection = projectNativeComponentEvidence(inputs);
   assert.equal(projection.evaluation.status, 'Passed');
-  assert.equal(projection.provenance.length, 18);
+  assert.equal(projection.provenance.length, frameworkCount);
   assert.ok(projection.originals.every(original =>
-    JSON.parse(original.text).context.native.toolchain.matrix.length === 18 &&
+    JSON.parse(original.text).context.native.toolchain.matrix.length === frameworkCount &&
     JSON.parse(original.text).context.native.kind === 'metadata'));
   assert.equal(replayNativeComponentEvidence({ ...inputs, bundle: projection.bundle }).evaluation.status, 'Passed');
   assert.equal(projectNativeComponentEvidence({ ...inputs, originals: originals.slice(0, -1) }).evaluation.status, 'NotRun');
@@ -520,6 +536,15 @@ test('T-PRD021 twenty-part originals require exact selected closures cleanup and
     }) });
   assert.equal(replay.evaluation.status, 'Passed');
   assert.equal(replay.currentCredit, 'NotRun', 'Historical shard replay must never grant current-candidate credit');
+  await assert.rejects(replayNativeEvidence({ definition: { ...archived,
+    frameworkShards: shardProtocol === nativeFrameworkShardProtocol ?
+      nativePlatformUnitFrameworkShardProtocol : nativeFrameworkShardProtocol },
+    data: dictionary(refresh.data), candidate: f.candidate, asOf: inputs.now,
+    verifyArchive: () => { throw new Error('Protocol mismatch must fail before archive verification'); } }),
+  { code: 'EVIDENCE' });
+  assert.throws(() => verifyNativeShardUnitOrder(executions, { protocol:
+    shardProtocol === nativeFrameworkShardProtocol ? nativePlatformUnitFrameworkShardProtocol :
+      nativeFrameworkShardProtocol }), { code: 'EVIDENCE' });
   const borrowed = new Map(refresh.data);
   const units = framework.find(part => part.target === refresh.target && part.shard === 'units');
   borrowed.set('unit.json', units.data.get('unit.json'));
@@ -532,7 +557,7 @@ test('T-PRD021 twenty-part originals require exact selected closures cleanup and
   const macUnits = f.parts.get('macos-arm64-framework-units');
   assert.throws(() => verifyNativeCleanup(dictionary(cleanup),
     { ...macUnits, jobKey: nativePartJobKey(macUnits, shardProtocol) }), { code: 'EVIDENCE' });
-  const output = path.join(f.root, 'twenty-part-retained');
+  const output = path.join(f.root, 'versioned-parts-retained');
   const nativeParts = executions.map(part => {
     const artifact = f.artifacts.get(part.role);
     const bootstrap = f.artifacts.get(`bootstrap-${part.role}`);
@@ -552,8 +577,8 @@ test('T-PRD021 twenty-part originals require exact selected closures cleanup and
     prNumber: 1, sourceCommit: f.revisions.merge, projection, nativeParts, sourceArtifacts,
   }] });
   const retained = JSON.parse(await fs.readFile(path.join(output, 'observer-result.json'), 'utf8')).components[0];
-  assert.equal(retained.nativeOriginals.length, 18);
-  assert.equal(new Set(retained.nativeOriginals.map(original => original.filename)).size, 18);
+  assert.equal(retained.nativeOriginals.length, frameworkCount);
+  assert.equal(new Set(retained.nativeOriginals.map(original => original.filename)).size, frameworkCount);
   assert.ok(retained.unitOrder.filename.endsWith('-unit-order.json'));
   assert.equal(f.calls.length, 0, 'No native tools, provider acquisition or Python reader runs in this Node-only regression');
   }

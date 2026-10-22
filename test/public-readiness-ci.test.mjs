@@ -1452,7 +1452,7 @@ function contextProof() {
     expectedMerge: body.mergeSha, prNumber: 1 } };
 }
 
-test('T-PRD020 actual CI schedules twenty producer parts behind a complete unit barrier and distinguishes edited base retargets', async () => {
+test('T-PRD020 actual CI schedules twenty-four producer parts behind a complete unit barrier and distinguishes edited base retargets', async () => {
   const workflows = await readWorkflowPolicySources(repositoryRoot);
   const result = inspectWorkflowTrust(workflows);
   assert.equal(result.complete, true, JSON.stringify(result.blockers));
@@ -1478,7 +1478,12 @@ test('T-PRD020 actual CI schedules twenty producer parts behind a complete unit 
   assert.equal(ci.jobs.native.strategy['fail-fast'], false);
   assert.equal(ci.jobs.native['timeout-minutes'], 360);
   assert.equal(ci.jobs.native.name, 'native-${{ matrix.role }}');
-  assert.equal(parts.length, 20);
+  assert.equal(parts.length, 24);
+  for (const target of ['linux-x64', 'windows-x64']) {
+    assert.equal(parts.filter(part => part.target === target).length, 6);
+    assert.equal(parts.filter(part => part.target === target && part.shard.startsWith('body-')).length, 4);
+  }
+  assert.equal(parts.filter(part => part.target.startsWith('macos-')).length, 12);
   for (const key of keys) {
     assert.ok(ci.jobs[key].strategy.matrix.include.every(part => nativePartJobKey(part) === key));
     assert.equal(ci.jobs[key]['timeout-minutes'], 360);

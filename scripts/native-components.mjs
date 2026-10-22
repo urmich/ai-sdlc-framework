@@ -5,9 +5,9 @@ import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
   requireReadinessEvaluation } from 'ai-sdlc-framework/evidence';
 import { validationPlatforms } from './validation-inventory.mjs';
 // The shared native configuration recipe is invoked only after module initialization.
-import { nativeConfigurationDigest, nativeProducerRole, nativePrParts, nativeFrameworkShardPlan,
+import { nativeConfigurationDigest, nativeProducerRole, nativePrPartsForProtocol, nativeFrameworkShardPlan,
   nativeSpecification, nativeFrameworkShardProtocol, requireNativeShardUnitOrder } from './native-validation.mjs';
-import { nativeLegacyFrameworkShardProtocol } from './native-validation.mjs';
+import { nativeFrameworkShardProtocols } from './native-validation.mjs';
 import { calculatorCapability, calculatorBaselineCapability } from './pr-calculator.mjs';
 
 const projections = new WeakMap();
@@ -28,6 +28,12 @@ const shardPolicy = Object.freeze({ ...nativeComponentPolicy,
   protocol: 'native-component-projection-shards-v1', profile: 'pr-components-shards-v1',
   origins: 'all-eighteen-original-native-framework-executions',
   verifierId: 'github-native-component-projection-shards-v1' });
+const fourBodyShardPolicy = Object.freeze({ ...shardPolicy,
+  protocol: 'native-component-projection-shards-v2', profile: 'pr-components-shards-v2',
+  origins: 'all-twenty-two-original-native-framework-executions',
+  verifierId: 'github-native-component-projection-shards-v2' });
+const componentPolicy = protocol => !protocol ? nativeComponentPolicy :
+  protocol === nativeFrameworkShardProtocol ? fourBodyShardPolicy : shardPolicy;
 const sourceTimes = values => [...values].sort((a, b) => Date.parse(a) - Date.parse(b));
 const prefix = name => /^(T-[A-Z0-9]+(?:-[A-Z0-9]+)*)(?:\s|$)/u.exec(name)?.[1];
 const bindingDigest = assertion => digest({ id: assertion.id, file: assertion.file,
@@ -40,9 +46,9 @@ export function deriveNativeComponentSpecification({ inventory, testPlan, adapte
     typeof testPlan === 'string' && /^[a-f0-9]{64}$/u.test(adapterSourceDigest ?? ''),
   'INVENTORY', 'Component expectations require complete adopted source, canonical Plan and exact adapter source digest');
   requireThat(typeof frameworkShards === 'boolean' && (!frameworkShards || goSources.length > 0 &&
-    [nativeFrameworkShardProtocol, nativeLegacyFrameworkShardProtocol].includes(shardProtocol)),
+    nativeFrameworkShardProtocols.includes(shardProtocol)),
     'INVENTORY', 'Shard component expectations require exact complete Go source definitions');
-  const policy = frameworkShards ? shardPolicy : nativeComponentPolicy;
+  const policy = componentPolicy(frameworkShards ? shardProtocol : null);
   const assignments = frameworkShards ? new Map(validationPlatforms.map(target =>
     [target, nativeFrameworkShardPlan({ inventory, plan: testPlan, target, protocol: shardProtocol })])) : null;
   const tests = parseTestPlan(testPlan).filter(test => !test.outOfScope &&
@@ -94,7 +100,7 @@ export function deriveNativeComponentSpecification({ inventory, testPlan, adapte
     specification, bindings: bindings.sort((a, b) => a.assertionId.localeCompare(b.assertionId, 'en')), blockers,
     ...(digest(calculator) === digest(calculatorBaselineCapability) ? {} : { calculator }),
     ...(frameworkShards ? { frameworkShards: shardProtocol,
-      shardParts: nativePrParts.filter(part => part.component === 'framework').map(part => ({
+      shardParts: nativePrPartsForProtocol(shardProtocol).filter(part => part.component === 'framework').map(part => ({
         ...part, assignmentDigest: assignments.get(part.target).digest,
         inventoryDigest: validationInventoryDigest(nativeSpecification({
           plan: testPlan, inventory, goSources, ...part, profile: 'pr', shardProtocol,
@@ -108,14 +114,15 @@ function checkDefinition(definition) {
     'EVIDENCE', 'Component projection requires its independently derived definition');
   const { adapterDefinitionDigest, ...inputs } = definition;
   requireThat(digest(inputs) === adapterDefinitionDigest &&
-    digest(definition.policy) === digest(definition.frameworkShards ? shardPolicy : nativeComponentPolicy), 'EVIDENCE',
+    digest(definition.policy) === digest(componentPolicy(definition.frameworkShards)), 'EVIDENCE',
   'Component adapter definition differs from its independently derived source-bound identity');
   validationInventoryDigest(definition.specification);
   requireThat(definition.frameworkShards === undefined ||
-    [nativeFrameworkShardProtocol, nativeLegacyFrameworkShardProtocol].includes(definition.frameworkShards) &&
-    Array.isArray(definition.shardParts) && definition.shardParts.length === 18 &&
-    new Set(definition.shardParts.map(part => part.role)).size === 18 &&
-    nativePrParts.filter(part => part.component === 'framework').every(expected =>
+    nativeFrameworkShardProtocols.includes(definition.frameworkShards) &&
+    Array.isArray(definition.shardParts) &&
+    definition.shardParts.length === nativePrPartsForProtocol(definition.frameworkShards).length - 2 &&
+    new Set(definition.shardParts.map(part => part.role)).size === definition.shardParts.length &&
+    nativePrPartsForProtocol(definition.frameworkShards).filter(part => part.component === 'framework').every(expected =>
       definition.shardParts.some(part => part.target === expected.target && part.component === expected.component &&
         part.shard === expected.shard && part.role === expected.role &&
         /^[a-f0-9]{64}$/u.test(part.assignmentDigest ?? '') && /^[a-f0-9]{64}$/u.test(part.inventoryDigest ?? ''))),
