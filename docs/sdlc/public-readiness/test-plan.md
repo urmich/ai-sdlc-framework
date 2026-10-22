@@ -201,6 +201,16 @@ versions and verify their identities, not silently select a different version se
 | Homebrew/Ruby/core | Homebrew commit `99fd9a8eed4ff942c448da0c1f11156302441e4a`, its native portable Ruby 4.0.7, and core commit `0bae42d6d1e59c2c400da252bd64e585e3fe7d58`. Disable API formula installation and auto-update so all dependencies come from that immutable core snapshot. | Current PR framework Mac producers retain real pinned Brew/core/Ruby and their own prefix cleanup, without a redundant Node pour. Genuine Homebrew, full/R-PRE, T-PRD039-MA/MI and actual audit/style/lifecycle cases require real `node@24` 24.20.0, complete native bottle plans, actual poured receipts and runtime identity. |
 | Publishing runtime/tooling | Node 24.22.0 x64 and npm CLI 11.16.0, using the existing integrity-pinned CLI-tooling identity, token-free configuration and exact-caller checks. | T-PRD028/031/033 and the actual authorized publisher operation; test consumers remain on their separate Node baseline. No runtime or token fallback is admitted. |
 
+The source-selected `native-bootstrap-role-capabilities-v3` refresh-only
+producer retains pinned native Actions Node, Git and its real Mac
+Homebrew/core/portable-Ruby prefix and cleanup, but does not provision or report
+unused Go, CPython or schema packages. Its complete causal refresh root remains
+unchanged. All other roles and historical v2/null declarations retain their
+actual pinned tool/report requirements. Controlled command callbacks and SDK
+capture/replay/admission cases must reject forged omissions and invented
+absent-tool facts without fabricating passing reports. These additional
+T-PRD015 assertions remain PR-only; the finite critical budget stays 27.
+
 The Node/Python native distributions above were checked against the public
 `actions/node-versions` and `actions/python-versions` manifests during Test Design;
 the Ruby version is declared by the pinned Homebrew commit. Availability metadata

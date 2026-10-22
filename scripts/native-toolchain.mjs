@@ -11,7 +11,7 @@ import { nativeToolchain, homebrewToolchain } from './toolchain-baseline.mjs';
 import { allocateHomebrewPrefix, cleanupHomebrewPrefix,
   recordHomebrewPrefixNotRequired } from './native-homebrew-prefix.mjs';
 import { provisionPrCryptoFixture, prCryptoFixture } from './pr-capabilities.mjs';
-import { bootstrapRequestCapability } from './native-bootstrap-capability.mjs';
+import { bootstrapRequestCapability, nativeSdkRequirements } from './native-bootstrap-capability.mjs';
 
 export { homebrewToolchain };
 export const homebrewBottlePlanSource = `
@@ -170,6 +170,7 @@ export function requireHomebrewBottleReceipts(plan, receipts) {
 
 export async function bootstrapNativeToolchain(options) {
   const capability = bootstrapRequestCapability(options);
+  const tools = nativeSdkRequirements({ ...options, protocol: capability?.protocol ?? null });
   const directory = validateBootstrapRequest(options);
   let current = repositoryRoot;
   for (const part of path.relative(repositoryRoot, directory).split(path.sep)) {
@@ -209,10 +210,16 @@ export async function bootstrapNativeToolchain(options) {
   let homebrewAllocationRequested = false;
   try {
     retained.native.resources = nativeResourceFacts();
+    retained.native.executables = { node: process.execPath };
+    if (tools.go) {
     const goRoot = await run('go-root', process.env.SDLC_GO || 'go', ['env', 'GOROOT']);
     selected.SDLC_GO = path.join(goRoot, 'bin', process.platform === 'win32' ? 'go.exe' : 'go');
     const go = await run('go-version', selected.SDLC_GO, ['version']);
     requireThat(go.split(/\s+/u)[2] === nativeToolchain.go, 'HOST', 'The selected Go pin is unavailable; no toolchain download fallback is allowed');
+    retained.native.go = go;
+    retained.native.executables.go = selected.SDLC_GO;
+    }
+    if (tools.python) {
     const pythonCommand = process.env.SDLC_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
     const python = JSON.parse(await run('python-identity', pythonCommand, ['-c',
       'import sys,json,platform; print(json.dumps({"executable":sys.executable,"version":platform.python_version(),"implementation":platform.python_implementation(),"machine":platform.machine()}))']));
@@ -239,11 +246,11 @@ export async function bootstrapNativeToolchain(options) {
     const packages = JSON.parse(await run('schema-dependencies-verify', selected.SDLC_PYTHON, probe));
     requireThat(requirements.every(([name, version]) => packages[name] === version),
       'HOST', 'Schema package baseline differs; a different installed version is not accepted');
-    retained.native.go = go;
     retained.native.python = python;
     retained.native.schemaPackages = packages;
+    retained.native.executables.python = selected.SDLC_PYTHON;
+    }
     retained.native.git = await run('git-version', 'git', ['--version']);
-    retained.native.executables = { node: process.execPath, go: selected.SDLC_GO, python: selected.SDLC_PYTHON };
     if (capability) {
       retained.native.bootstrapCapability = capability;
       retained.native.runtimeProvider = { provider: capability.runtimeProvider, executable: process.execPath,

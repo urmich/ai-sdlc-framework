@@ -2,7 +2,10 @@ export const nativeToolchain = Object.freeze({
   node: '24.20.0', go: 'go1.27.1', python: '3.12.10',
 });
 
-export const nativeBootstrapProtocol = 'native-bootstrap-role-capabilities-v2';
+export const nativeBootstrapProtocol = 'native-bootstrap-role-capabilities-v3';
+export const nativeBootstrapProtocols = Object.freeze([
+  'native-bootstrap-role-capabilities-v2', nativeBootstrapProtocol,
+]);
 
 export const homebrewToolchain = Object.freeze({
   commit: '99fd9a8eed4ff942c448da0c1f11156302441e4a',

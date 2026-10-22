@@ -264,6 +264,7 @@ export function unsafeSummaryContent(value) {
 // Text markers require punctuation; object-key redaction still precedes value traversal.
 const richSummaryText = /[^A-Za-z0-9 ]/u;
 function safeSummaryText(value) {
+  if (!/[\[{]/u.test(value)) return redactTextUrls(value);
   if (/^\s*[\[{]/u.test(value)) {
     try {
       const parsed = JSON.parse(value);

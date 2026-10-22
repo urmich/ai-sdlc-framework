@@ -18,7 +18,8 @@ import { evaluateApproval, evaluateConversations, reconcilePrReadiness, statusCo
 import { inspectWorkflowPolicy } from './workflow-policy.mjs';
 import { calculatorProjectFiles, calculatorSelection, reconcileCalculator } from './pr-calculator.mjs';
 import { homebrewToolchain } from './toolchain-baseline.mjs';
-import { sourceNativeBootstrapProtocol, requireNativeBootstrapCapability } from './native-bootstrap-capability.mjs';
+import { sourceNativeBootstrapProtocol, requireNativeBootstrapCapability,
+  nativeSdkContextMatches } from './native-bootstrap-capability.mjs';
 import { deriveNativeComponentSpecification, projectNativeComponentEvidence,
   requireNativeComponentProjection } from './native-components.mjs';
 
@@ -370,6 +371,7 @@ export function verifyFrozenCandidateData(data, sourceRevision) {
 export async function verifyOriginalNativeRows({
   data, raw, specification, inventory, goSources, target, candidate, sourceFiles, plan, context,
   component = 'full', shard = null, shardProtocol = native.nativeFrameworkShardProtocol,
+  bootstrapProtocol = null,
 }) {
   requireThat(Array.isArray(raw.results) && raw.results.every(row => row &&
     Object.getPrototypeOf(row) === Object.prototype), 'EVIDENCE',
@@ -381,7 +383,7 @@ export async function verifyOriginalNativeRows({
       inventory, plan, goSources, target, profile: 'pr', component, shard, shardProtocol,
     })), 'EVIDENCE', 'Native shard specification differs from the independently derived assignment');
     const calculatorSources = sourceFiles.filter(source => calculatorProjectFiles(inventory).includes(source.file));
-    const reconstructed = await native.reconcileNativeEvidenceData({ data, inventory, plan, shardProtocol,
+    const reconstructed = await native.reconcileNativeEvidenceData({ data, inventory, plan, shardProtocol, bootstrapProtocol,
       sources: goSources, calculatorSources, target, component, shard, candidate,
       stages: part.stages, context, specification, startedAt: raw.startedAt });
     requireThat(reconstructed.raw.complete && reconstructed.raw.exitCode === 0 &&
@@ -790,14 +792,13 @@ export function createPrReadinessHost({
         requireNativeBootstrapCapability({ bootstrap: data['toolchain.json'], target,
           profile: 'pr', component, shard, role, protocol: source.bootstrapProtocol });
         const expectedResources = native.nativeResourceFacts(facts.resources);
-        requireThat(typeof toolchain.go === 'string' && typeof toolchain.python === 'string' &&
+        requireThat(nativeSdkContextMatches(toolchain, {
+          target, profile: 'pr', component, shard, protocol: source.bootstrapProtocol }) &&
           toolchain.bootstrap && data['toolchain.json'].native &&
           toolchain.resources && data['toolchain.json'].native.resources &&
           digest(toolchain.resources) === digest(expectedResources) &&
           digest(data['toolchain.json'].native.resources) === digest(expectedResources) &&
           toolchain.node === native.nativeToolchain.node &&
-          toolchain.go.startsWith(`go version ${native.nativeToolchain.go} `) &&
-          toolchain.python === `Python ${native.nativeToolchain.python}` &&
           digest(toolchain.bootstrap) === digest(data['toolchain.json'].native),
         'EVIDENCE', 'Native tool identities differ from their actual adopted bootstrap records');
         const context = validateExecutionContext({
@@ -826,7 +827,7 @@ export function createPrReadinessHost({
         'EVIDENCE', 'Original execution times do not belong to this actual job');
         await verifyOriginalNativeRows({ data, raw, specification, inventory: source.inventory,
           goSources: source.goSources, target, component, shard, shardProtocol, candidate: frozen.candidate,
-          sourceFiles: source.files, plan: source.plan, context });
+          sourceFiles: source.files, plan: source.plan, context, bootstrapProtocol: source.bootstrapProtocol });
         if (cleanupData) verifyNativeCleanup(cleanupData, { target, role, context,
           component, shard, bootstrapProtocol: source.bootstrapProtocol,
           jobKey: frameworkShards ? native.nativePartJobKey({ target, shard, component }, shardProtocol) : 'native' });

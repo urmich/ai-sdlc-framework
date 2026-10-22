@@ -463,6 +463,7 @@ test('T-PRD020 logical native latency spans earliest required worker through the
 test('T-PRD021 versioned twenty-four and historical twenty-part originals require exact closures cleanup and protected SDK replay', async t => {
   for (const [shardProtocol, bootstrapProtocol] of [[nativeFrameworkShardProtocol, null],
     [nativePlatformUnitFrameworkShardProtocol, null], [nativeLegacyFrameworkShardProtocol, null],
+    [nativeFrameworkShardProtocol, 'native-bootstrap-role-capabilities-v2'],
     [nativeFrameworkShardProtocol, nativeBootstrapProtocol]]) {
   const f = await observerApiFixture(t, { frameworkShards: true, shardProtocol, bootstrapProtocol,
     ambient: shardProtocol === nativeFrameworkShardProtocol });
@@ -483,7 +484,7 @@ test('T-PRD021 versioned twenty-four and historical twenty-part originals requir
     await verifyOriginalNativeRows({ data: dictionary(part.data), raw: part.data.get('execution.json'),
       specification: part.specification, inventory: f.source.inventory, goSources: f.source.goSources,
       target: part.target, component: part.component, shard: part.shard, shardProtocol,
-      candidate: f.candidate, sourceFiles, plan: f.source.plan, context: part.context });
+      candidate: f.candidate, sourceFiles, plan: f.source.plan, context: part.context, bootstrapProtocol });
     if (f.cleanupReports.has(part.role)) prefixes.push(verifyNativeCleanup(
       dictionary(f.cleanupReports.get(part.role)), { ...part, bootstrapProtocol, jobKey: nativePartJobKey(part, shardProtocol) }).prefix);
   }

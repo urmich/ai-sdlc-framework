@@ -24,7 +24,7 @@ import { createPrReadinessHost, statusConcurrencyGroup } from '../scripts/pr-obs
 import { calculatorFiles, calculatorSelection, calculatorCommandArguments } from '../scripts/pr-calculator.mjs';
 import { validationExecutionGroups, validationGroupProtocol, validationSchedulingPolicyDigest } from '../scripts/test-scheduling.mjs';
 import { nativeToolchain, homebrewToolchain } from '../scripts/toolchain-baseline.mjs';
-import { nativeBootstrapCapability } from '../scripts/native-bootstrap-capability.mjs';
+import { nativeBootstrapCapability, nativeSdkRequirements } from '../scripts/native-bootstrap-capability.mjs';
 
 const repository = 'urmich/ai-sdlc-framework';
 const repositoryId = 17;
@@ -338,6 +338,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
     inventory: source.inventory, plan: source.plan, target, protocol: shardProtocol,
   });
   const part = assignment?.parts.find(part => part.shard === shard);
+  const tools = nativeSdkRequirements({ target, profile, component, shard, protocol: bootstrapProtocol });
   const at = seconds => new Date(startTime + seconds * 1000).toISOString();
   const commandReport = (name, target, context, args, start, finish, stdout = '') =>
     commandRecord(name, target, context, args, start, finish, stdout, at);
@@ -392,6 +393,17 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
   }
   const specification = nativeSpecification({ plan: source.plan, inventory: source.inventory,
     goSources: source.goSources, target, profile, component, shard, shardProtocol });
+  if (!tools.go) {
+    delete bootstrap.native.go;
+    delete bootstrap.native.executables.go;
+    bootstrap.reports = bootstrap.reports.filter(report => !['go-root', 'go-version'].includes(report.name));
+  }
+  if (!tools.python) {
+    delete bootstrap.native.python;
+    delete bootstrap.native.schemaPackages;
+    delete bootstrap.native.executables.python;
+    bootstrap.reports = bootstrap.reports.filter(report => !/^(?:python-|schema-)/u.test(report.name));
+  }
   const context = validateExecutionContext({
     candidateDigest: digest({ revision: revisions.merge, tree: source.sha }),
     testSpecDigest: testSpecificationDigest(source.plan),
@@ -404,7 +416,8 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
     mode: 'automated', owner: 'provider',
     native: { kind: 'native', platform: platforms[target], architecture,
       image: `${ImageOS}/${ImageVersion}`, toolchain: {
-        node: nativeToolchain.node, go, python: 'Python 3.12.10', os: 'controlled-provider-OS',
+        node: nativeToolchain.node, ...(tools.go ? { go } : {}),
+        ...(tools.python ? { python: 'Python 3.12.10' } : {}), os: 'controlled-provider-OS',
         machine: architecture, git: 'git version 2.49.0 controlled fixture', bootstrap: bootstrap.native,
         resources } },
     producer: { provider: 'github', connection: 'repository-ci', scopeRef: `repository:${repositoryId}`,
@@ -509,8 +522,8 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
   const pythonVersion = commandReport('python-version', target, smallContext,
     ['--version'], 6.2, 6.3, 'Python 3.12.10\n');
   pythonVersion.command[0] = bootstrap.native.executables.python;
-  data.set('go-version.json', goVersion);
-  data.set('python-version.json', pythonVersion);
+  if (tools.go) data.set('go-version.json', goVersion);
+  if (tools.python) data.set('python-version.json', pythonVersion);
   const calculatorExpected = calculatorSelection(source.inventory);
   const calculatorEvents = calculatorExpected.map(test => ({
     type: 'test:pass', data: { file: `/controlled-fixture/source/${test.file}`,

@@ -374,6 +374,8 @@ reuse bounded work while preserving every field-specific constraint, secret
 handling rule and byte/node budget. The scope ends with that traversal: no
 origin verification, admission, freshness decision or report verdict is cached
 or shared with a later call.
+Text without literal object/array fragment delimiters avoids duplicate fragment
+discovery, while retaining the existing scalar redaction and validation path.
 
 All platforms use the same deterministic priority and dependency-aware ready
 pool. Schedule the measured native-observer unit tail before shorter fallback
@@ -382,16 +384,22 @@ targeted caller order, complete assertion membership, causal dependencies,
 exclusive resources and shared worker tokens. Hardware-specific timing and
 capacity remain measurements, not a reason to change the test semantics.
 
-The source-bound `native-bootstrap-role-capabilities-v2` declaration selects
+The source-bound `native-bootstrap-role-capabilities-v3` declaration selects
 bootstrap requirements from the exact captured role/profile. Current PR
 framework producers use the pinned native Actions Node runtime. Their Mac
 bootstrap still provisions real pinned Homebrew/core/portable Ruby in its own
 owned prefix, but does not pour Homebrew Node or synthesize bottle receipts and
-`nodePrefix` evidence. Genuine Homebrew producers, whole/full validation and
-R-PRE retain complete bottle, Homebrew Node, quality, lifecycle and cleanup
-requirements. Bind the capability into captured definitions, configuration
-digests, protected admission and actual reports. A missing declaration retains
-historical full-bootstrap semantics; mismatches fail rather than downgrade.
+`nodePrefix` evidence. The refresh-only producer's complete source-selected
+root uses Node, Git and filesystem operations, so v3 omits unused Go, CPython
+and schema acquisition, facts and version reports for that role only. All
+other roles retain their actual pinned Go/Python requirements. Genuine Homebrew
+producers, whole/full validation and R-PRE retain complete bottle, Homebrew Node,
+quality, lifecycle and cleanup requirements. Historical v2 retains actual Go/Python
+requirements for refresh, and a missing declaration retains full-bootstrap
+semantics. Bind the capability and required tool inventory into captured
+definitions, configuration digests, protected admission and actual reports.
+Missing required reports, invented absent-tool facts and role/protocol
+mismatches fail rather than downgrade.
 All twenty-four producer origins and twelve distinct Mac cleanup owners remain
 required.
 

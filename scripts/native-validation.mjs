@@ -25,8 +25,9 @@ import { buildPlatforms, renderChecksums } from './package-platforms.mjs';
 import { calculatorProjectFiles, calculatorSelection, calculatorCapability, calculatorBaselineCapability, reconcileCalculator,
   calculatorArguments } from './pr-calculator.mjs';
 import { prCryptoFixture } from './pr-capabilities.mjs';
-import { nativeToolchain, nativeBootstrapProtocol } from './toolchain-baseline.mjs';
-import { sourceNativeBootstrapProtocol, requireNativeBootstrapCapability } from './native-bootstrap-capability.mjs';
+import { nativeToolchain, nativeBootstrapProtocol, nativeBootstrapProtocols } from './toolchain-baseline.mjs';
+import { sourceNativeBootstrapProtocol, requireNativeBootstrapCapability, nativeSdkRequirements,
+  nativeSdkContextMatches, probeNativeSdk } from './native-bootstrap-capability.mjs';
 export { nativeToolchain } from './toolchain-baseline.mjs';
 export { deriveNativeComponentSpecification, nativeComponentSelection,
   projectNativeComponentEvidence, replayNativeComponentEvidence,
@@ -135,7 +136,7 @@ const safe = value => sanitizeExecutionPayload(Buffer.from(JSON.stringify(value)
 export function nativeConfigurationDigest({ inventory, profile, configuredWorkers = null,
   calculator = calculatorCapability(inventory), component = 'full', shard = null, shardPlanDigest = null,
   shardProtocol = nativeFrameworkShardProtocol, bootstrapProtocol = null }) {
-  requireThat(bootstrapProtocol === null || bootstrapProtocol === nativeBootstrapProtocol,
+  requireThat(bootstrapProtocol === null || nativeBootstrapProtocols.includes(bootstrapProtocol),
     'INVENTORY', 'Native configuration requires a supported source-selected bootstrap protocol');
   requireThat(inventory.complete && /^[a-f0-9]{64}$/u.test(inventory.digest) &&
     ['pr', 'r-pre'].includes(profile) && ['full', 'framework', 'homebrew'].includes(component) &&
@@ -161,7 +162,8 @@ export function nativeConfigurationDigest({ inventory, profile, configuredWorker
     selectionTransport: validationSelectionProtocol,
     requiredCapabilities: { crypto: prCryptoFixture, calculator,
       ...(bootstrapProtocol !== null && component === 'framework' && shard !== null ?
-        { bootstrapProtocol } : {}) } });
+        { bootstrapProtocol, ...(bootstrapProtocol === nativeBootstrapProtocol ?
+          { tools: nativeSdkRequirements({ target: 'linux-x64', profile, component, shard, protocol: bootstrapProtocol }) } : {}) } : {}) } });
 }
 
 export function nativeResourceFacts({ availableParallelism = os.availableParallelism(),
@@ -361,7 +363,8 @@ export async function prepareNativeHostFixtures({ candidate, candidateDir, scrat
   return { ...selected, kind: 'private-test-library-only' };
 }
 
-function nativeContextMatches(context, { target, profile, sourceRevision, artifacts, component = 'full', shard = null }) {
+function nativeContextMatches(context, { target, profile, sourceRevision, artifacts, component = 'full', shard = null,
+  bootstrapProtocol = null }) {
   const resources = context.native.toolchain.resources;
   let validResources = false;
   if (resources && typeof resources === 'object') {
@@ -373,8 +376,7 @@ function nativeContextMatches(context, { target, profile, sourceRevision, artifa
     context.native.kind === 'native' && context.native.platform === platforms[target] &&
     context.native.architecture === (target === 'macos-arm64' ? 'arm64' : 'x64') &&
     context.native.toolchain.node === nativeToolchain.node &&
-    /^go version go1\.27\.1 /u.test(context.native.toolchain.go ?? '') &&
-    context.native.toolchain.python === `Python ${nativeToolchain.python}` &&
+    nativeSdkContextMatches(context.native.toolchain, { target, profile, component, shard, protocol: bootstrapProtocol }) &&
     context.location === locations[target] && context.owner === 'provider' &&
     context.mode === 'automated' && context.environment === 'local' &&
     context.producer.provider === 'github' && context.producer.connection === 'repository-ci' &&
@@ -410,7 +412,7 @@ export function aggregateNativeReadiness(evaluations, { profile, sourceRevision,
   'INPUT', 'Native aggregation needs every independently expected producer part and the complete frozen artifact set');
   const expected = new Map(executions.map(({ target, context, component = 'full', shard = null }) => {
     const actual = validateExecutionContext(context);
-    requireThat(nativeContextMatches(actual, { target, profile, sourceRevision, artifacts, component, shard }),
+    requireThat(nativeContextMatches(actual, { target, profile, sourceRevision, artifacts, component, shard, bootstrapProtocol }),
       'EVIDENCE', 'Expected native execution does not match source, artifacts, platform or baseline');
     if (frameworkShards) {
       const specification = nativeSpecification({ plan, inventory, goSources, target, profile, component, shard, shardProtocol });
@@ -927,6 +929,12 @@ async function collectExecution({ directory, data, inventory, sources, calculato
     ['go-version', ['version'], context.native.toolchain.go],
     ['python-version', ['--version'], context.native.toolchain.python],
   ]) {
+    const tools = nativeSdkRequirements({ target, profile, component, shard, protocol: bootstrapProtocol });
+    if (!tools[name === 'go-version' ? 'go' : 'python']) {
+      requireThat(await read(`${name}.json`) === null, 'EVIDENCE',
+        'Refresh-only SDK reports must be absent, never fabricated');
+      continue;
+    }
     const report = await read(`${name}.json`);
     if (!commandMatches(report, args, smallContext, {
       before: originalStages[0]?.startedAt ?? (component === 'homebrew' ? frozen?.observedAt : undefined),
@@ -1305,7 +1313,8 @@ export async function replayNativeEvidence({ definition, data, candidate, asOf, 
   requireThat(nativeContextMatches(context, { target: definition.target, profile: definition.profile,
     component: definition.component,
     shard: definition.shard,
-    sourceRevision: definition.source.revision, artifacts: nativeArtifacts(candidate) }) &&
+    sourceRevision: definition.source.revision, artifacts: nativeArtifacts(candidate),
+    bootstrapProtocol: inputs.bootstrapProtocol ?? null }) &&
     context.candidateDigest === digest({ revision: definition.source.revision, tree: definition.source.treeSha }) &&
     context.sources[0].contentDigest === digest(definition.source.treeSha) &&
     context.sources[0].repositoryId === definition.source.repositoryId &&
@@ -1441,7 +1450,7 @@ export async function verifyNativeEvidence({ target, profile, candidateDir, evid
   'EVIDENCE', 'Original native toolchain/host bootstrap is missing or differs');
   const tree = (await execute('git', ['rev-parse', `${expectedSourceCommit}^{tree}`], { cwd: repositoryRoot })).stdout.trim();
   requireThat(nativeContextMatches(context, { target, profile, component, shard, sourceRevision: expectedSourceCommit,
-    artifacts: nativeArtifacts(candidate) }) &&
+    artifacts: nativeArtifacts(candidate), bootstrapProtocol: inputs.bootstrapProtocol }) &&
     context.candidateDigest === digest({ revision: expectedSourceCommit, tree }) &&
     context.testSpecDigest === testSpecificationDigest(inputs.plan) &&
     context.configDigest === nativeConfigurationDigest({ inventory: inputs.inventory, profile, component, shard, shardProtocol,
@@ -1545,14 +1554,7 @@ export async function runNativeValidation(options) {
     await writeJson(path.join(directory, 'toolchain.json'), bootstrap);
     const runTool = options => executeValidationCommand({ outputDir: directory, environment,
       signal: cancellation.signal, ...options });
-    const actualGo = await runTool({ name: 'go-version', command: process.env.SDLC_GO || 'go', args: ['version'] });
-    const actualPython = await runTool({ name: 'python-version',
-      command: process.env.SDLC_PYTHON || (process.platform === 'win32' ? 'python' : 'python3'), args: ['--version'] });
-    requireThat(actualGo.complete && actualGo.exitCode === 0 &&
-      actualGo.stdout.trim().split(/\s+/u)[2] === nativeToolchain.go &&
-      actualPython.complete && actualPython.exitCode === 0 &&
-      actualPython.stdout.trim() === `Python ${nativeToolchain.python}`,
-    'HOST', 'Native toolchain baseline differs from the Test Plan');
+    const sdk = await probeNativeSdk({ target, profile, component, shard, protocol: inputs.bootstrapProtocol }, runTool);
     const tree = (await git(['rev-parse', 'HEAD^{tree}'])).stdout.trim();
     context = validateExecutionContext({
       candidateDigest: digest({ revision, tree }), testSpecDigest: testSpecificationDigest(inputs.plan),
@@ -1566,7 +1568,7 @@ export async function runNativeValidation(options) {
       environment: 'local', location: locations[target], mode: 'automated', owner: 'provider',
       native: { kind: 'native', platform: process.platform, architecture: process.arch,
         image: `${process.env.ImageOS}/${process.env.ImageVersion}`, toolchain: {
-          node: process.versions.node, go: actualGo.stdout.trim(), python: actualPython.stdout.trim(),
+          node: process.versions.node, ...sdk,
           os: os.release(), machine: os.machine(), git: (await git(['--version'])).stdout.trim(),
           bootstrap: bootstrap.native, resources,
         } },

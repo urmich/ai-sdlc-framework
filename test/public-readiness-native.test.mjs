@@ -34,7 +34,49 @@ import { fetchPinnedFixture, provisionPrCryptoFixture } from '../scripts/pr-capa
 import { nativeToolchain } from '../scripts/toolchain-baseline.mjs';
 import { nativeBootstrapProtocol, homebrewToolchain } from '../scripts/toolchain-baseline.mjs';
 import { sourceNativeBootstrapProtocol, nativeBootstrapCapability, bootstrapRequestCapability,
-  requireNativeBootstrapCapability } from '../scripts/native-bootstrap-capability.mjs';
+  requireNativeBootstrapCapability, nativeSdkRequirements, nativeSdkContextMatches,
+  probeNativeSdk } from '../scripts/native-bootstrap-capability.mjs';
+
+test('T-PRD015 refresh SDK dispatch omits unused commands while historical and other roles probe exact tools in order', async () => {
+  const request = { target: 'macos-arm64', profile: 'pr', component: 'framework', shard: 'refresh',
+    protocol: nativeBootstrapProtocol };
+  assert.deepEqual(await probeNativeSdk(request, () => { throw new Error('Unused Go/Python invoked'); }), {});
+  for (const change of [{ protocol: null }, { protocol: 'native-bootstrap-role-capabilities-v2' }, { shard: 'units' },
+    { shard: 'body-0' }, { component: 'full', shard: null }, { component: 'homebrew', shard: null }]) {
+    const calls = [];
+    const facts = await probeNativeSdk({ ...request, ...change }, async command => {
+      calls.push({ name: command.name, args: command.args });
+      return { complete: true, exitCode: 0, stdout: command.name === 'go-version' ?
+        `go version ${nativeToolchain.go} darwin/arm64\n` : `Python ${nativeToolchain.python}\n` };
+    });
+    assert.deepEqual(calls, [{ name: 'go-version', args: ['version'] }, { name: 'python-version', args: ['--version'] }]);
+    assert.equal(facts.python, `Python ${nativeToolchain.python}`);
+    await assert.rejects(probeNativeSdk({ ...request, ...change }, async () => ({
+      complete: true, exitCode: 0, stdout: 'NotRequired',
+    })), { code: 'HOST' });
+  }
+});
+
+test('T-PRD015 refresh SDK requirements reject producer downgrades and retain historical full tool identities', () => {
+  const request = { target: 'macos-arm64', profile: 'pr', component: 'framework', shard: 'refresh',
+    protocol: nativeBootstrapProtocol };
+  const actual = { go: `go version ${nativeToolchain.go} darwin/arm64`, python: `Python ${nativeToolchain.python}` };
+  assert.deepEqual(nativeSdkRequirements(request), { go: false, python: false });
+  assert.equal(nativeSdkContextMatches({}, request), true);
+  assert.equal(nativeSdkContextMatches(actual, request), false);
+  for (const protocol of [null, 'native-bootstrap-role-capabilities-v2']) {
+    assert.deepEqual(nativeSdkRequirements({ ...request, protocol }), { go: true, python: true });
+    assert.equal(nativeSdkContextMatches({}, { ...request, protocol }), false);
+    assert.equal(nativeSdkContextMatches(actual, { ...request, protocol }), true);
+  }
+  for (const shard of ['units', 'body-0', 'body-1', 'body-2']) {
+    assert.equal(nativeSdkContextMatches({}, { ...request, shard }), false);
+    assert.equal(nativeSdkContextMatches(actual, { ...request, shard }), true);
+  }
+  assert.throws(() => nativeSdkRequirements({ ...request, protocol: 'producer-not-required' }), { code: 'INPUT' });
+  assert.throws(() => nativeSdkRequirements({ ...request, profile: 'r-pre' }), { code: 'INPUT' });
+  assert.throws(() => nativeSdkRequirements({ ...request, role: 'macos-arm64-framework-units' }), { code: 'INPUT' });
+});
 
 test('T-PRD015 role bootstrap is source-selected and cannot downgrade full release or historical configurations', () => {
   const inventory = { complete: true, digest: '1'.repeat(64) };
@@ -81,7 +123,25 @@ test('T-PRD015 role bootstrap rejects forged runtime providers borrowed prefixes
   }, reports: ['brew-git-identity', 'brew-prefix', 'brew-repository', 'brew-ruby-identity',
     'brew-ruby-path', 'brew-core-identity'].map(name => ({ name, complete: true, exitCode: 0 })) };
   assert.deepEqual(requireNativeBootstrapCapability({ ...request, bootstrap, prefix }), bootstrap.native.bootstrapCapability);
+  const refreshRequest = { ...request, shard: 'refresh', role: 'macos-arm64-framework-refresh' };
+  const refresh = structuredClone(bootstrap);
+  refresh.native.bootstrapCapability = nativeBootstrapCapability(refreshRequest);
+  assert.deepEqual(requireNativeBootstrapCapability({ ...refreshRequest, bootstrap: refresh, prefix }),
+    refresh.native.bootstrapCapability);
   for (const mutate of [
+    value => { value.native.go = 'NotRequired'; },
+    value => { value.native.python = { status: 'Passed' }; },
+    value => { value.reports.push({ name: 'go-version', complete: true, exitCode: 0 }); },
+    value => { value.reports.pop(); },
+  ]) {
+    const changed = structuredClone(refresh);
+    mutate(changed);
+    assert.throws(() => requireNativeBootstrapCapability({ ...refreshRequest, bootstrap: changed, prefix }),
+      { code: 'EVIDENCE' });
+  }
+  for (const mutate of [
+    value => { value.native.bootstrapCapability.tools.go = false; },
+    value => { value.native.bootstrapCapability.tools.python = false; },
     value => { value.native.runtimeProvider.executable = '/other/node'; },
     value => { value.native.runtimeProvider.architecture = 'x64'; },
     value => { value.native.homebrew.prefix = '/opt/fffff'; },

@@ -208,6 +208,47 @@ test('T-PRD037 decoded JWT non-object headers avoid JSON parsing without changin
   assert.equal(safeSummary(oversized), `[redacted:${digest(oversized)}]`);
 });
 
+test('T-PRD037 punctuation-only diagnostics skip fragment discovery but retain scalar redaction', () => {
+  const jwt = `${Buffer.from('{"alg":"HS256"}').toString('base64url')}.opaque.payload`;
+  const examples = [
+    ['test/public-readiness-observer.test.mjs:810 (linux-x64)', null],
+    ['worker\'s "visible" diagnostic — complete', null],
+    ['password=fixture-private-value; visible tail',
+      `password=[redacted:${digest('fixture-private-value')}]; visible tail`],
+    [`worker returned ${jwt}`, `worker returned [redacted:${digest(jwt)}]`],
+    ['ghp_' + 'a'.repeat(32), `[redacted:${digest('ghp_' + 'a'.repeat(32))}]`],
+    ['https://example.invalid/run?token=fixture-private-value&view=public',
+      'https://example.invalid/run?token=[redacted]&view=public'],
+  ];
+  const matchAll = String.prototype.matchAll;
+  for (const [source, expected] of examples) {
+    let assignmentScans = 0;
+    String.prototype.matchAll = function (expression) {
+      if (String(this) === source && expression.source.includes('rawPrompt')) assignmentScans++;
+      return Reflect.apply(matchAll, this, [expression]);
+    };
+    try {
+      assert.equal(safeSummary(source), expected ?? source);
+      assert.equal(assignmentScans, 1, 'No duplicate assignment scan for fragment discovery');
+    } finally {
+      String.prototype.matchAll = matchAll;
+    }
+  }
+  const encoded = 'capture {"password":"fixture-private-value"} end';
+  assert.doesNotMatch(safeSummary(encoded), /fixture-private-value/u);
+  assert.doesNotMatch(safeSummary('capture {"\\u0070assword":"fixture-private-value"} end'),
+    /fixture-private-value/u);
+  for (const fragment of [
+    "log{'AWS_SECRET_ACCESS_KEY':'fixture-private-value'}end",
+    'log{"AWS_SECRET_ACCESS_KEY":\'fixture-private-value\'}end',
+    'capture {"AWS_SECRET_ACCESS_KEY":"unterminated',
+  ]) {
+    assert.throws(() => sanitizeExecutionPayload(Buffer.from(JSON.stringify({ log: fragment }))),
+      { code: 'UNSAFE' });
+  }
+  assert.throws(() => sanitizeExecutionPayload(Buffer.from([0xff, 0xfe])), { code: 'UNSAFE' });
+});
+
 test('T-PRD037 JWT diagnostics and signed query links are sanitized without changing case outcomes', () => {
   const jwt = [
     JSON.stringify({ alg: 'HS256', typ: 'JWT' }),
