@@ -259,6 +259,8 @@ export function unsafeSummaryContent(value) {
     sensitiveKey.test(key) ||
     unsafeSummaryContent(item));
 }
+// Text markers require punctuation; object-key redaction still precedes value traversal.
+const richSummaryText = /[^A-Za-z0-9 ]/u;
 function safeSummaryText(value) {
   if (/^\s*[\[{]/u.test(value)) {
     try {
@@ -311,6 +313,7 @@ const summaryTextCacheEntries = 256;
 const summaryTextCacheBytes = 64 * 1024;
 function summarizeValue(value, cache) {
   if (typeof value === 'string') {
+    if (!richSummaryText.test(value)) return value;
     const cached = cache.texts.get(value);
     if (cached !== undefined) return cached;
     const sanitized = safeSummaryText(value);
@@ -334,7 +337,7 @@ function summarizeValue(value, cache) {
       summarizeValue(item, cache)]));
 }
 export function safeSummary(value) {
-  if (typeof value === 'string') return safeSummaryText(value);
+  if (typeof value === 'string') return richSummaryText.test(value) ? safeSummaryText(value) : value;
   if (!value || typeof value !== 'object') return value;
   return summarizeValue(value, { texts: new Map(), bytes: 0 });
 }

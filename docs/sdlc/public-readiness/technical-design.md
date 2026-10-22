@@ -276,6 +276,11 @@ fast path and every redaction rule, and never cache objects, evidence or current
 eligibility. Retained-payload node, depth, byte and decoded-work budgets still run
 independently. The PR-only regression observes actual parsing work and checks
 fresh calls, sensitive keys, high-cardinality input and oversized-text fallback.
+ASCII alphanumeric/space-only values cannot match the existing scalar text
+redaction markers, so return them unchanged before rich-text scans or text-map
+lookup. Sensitive object keys still redact their values first. Punctuation,
+control characters and non-ASCII input retain the exact existing text pipeline;
+retained-payload structure, decode and byte budgets remain independent.
 
 After fresh binding validation, issue the independent candidate Git reads
 together: three index/diff/untracked queries for a dispatch stamp and those

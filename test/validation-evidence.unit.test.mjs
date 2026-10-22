@@ -4,7 +4,7 @@ export const validationDeclarations = {
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { safeSummary } from '../src/core.mjs';
+import { LIMITS, safeSummary } from '../src/core.mjs';
 import { reduceTestHistory, sanitizeExecutionPayload, validateRetainedPayload } from '../src/validation-evidence.mjs';
 
 function permutations(items) {
@@ -97,6 +97,41 @@ test('T-PRD037 repeated summary text is sanitized once per traversal without reu
     large: safeSummary(large),
     tail: [safeSummary(text), safeSummary(text)],
   });
+});
+
+test('T-PRD037 plain summary literals avoid rich-text scans without bypassing sensitive keys or limits', () => {
+  const literals = ['', 'Passed', 'NotRun', 'provider', 'linux', 'x64',
+    'Original behavior remains observable', 'a'.repeat(64)];
+  const selected = new Set(literals);
+  const matchAll = String.prototype.matchAll;
+  let scans = 0;
+  String.prototype.matchAll = function (...args) {
+    if (selected.has(String(this))) scans++;
+    return Reflect.apply(matchAll, this, args);
+  };
+  try {
+    for (const text of literals) assert.equal(safeSummary(text), text);
+    assert.deepEqual(safeSummary({ values: literals }), { values: literals });
+    assert.equal(scans, 0, 'Policy-inert literals must not enter rich-text scanners');
+    const protectedKeys = safeSummary({ password: 'Passed', token: literals.at(-1) });
+    for (const value of Object.values(protectedKeys)) {
+      assert.match(value, /^\[redacted:[a-f0-9]{64}\]$/u);
+    }
+  } finally {
+    String.prototype.matchAll = matchAll;
+  }
+  for (const text of [
+    'rawPrompt: fixture-private-value; visible tail',
+    'https://example.invalid/run?token=fixture-private-value&view=public',
+    '{"password":"fixture-private-value","safe":"visible"}',
+    'ghp_' + 'a'.repeat(32),
+    '-----BEGIN PRIVATE KEY-----\nfixture-private-value\n-----END PRIVATE KEY-----',
+  ]) {
+    assert.notEqual(safeSummary(text), text);
+    assert.doesNotMatch(safeSummary(text), /fixture-private-value/u);
+  }
+  assert.throws(() => sanitizeExecutionPayload(Buffer.alloc(LIMITS.artifact + 1, 0x61)),
+    { code: 'CAPACITY' });
 });
 
 test('T-PRD037 JWT diagnostics and signed query links are sanitized without changing case outcomes', () => {

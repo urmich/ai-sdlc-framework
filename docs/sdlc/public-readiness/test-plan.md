@@ -396,6 +396,9 @@ The PR-only repeated-summary-text regression preserves exact sanitized results
 while observing one pure text transformation per traversal and a fresh scan on
 the next call. High-cardinality and oversized text still receives full
 sanitization when the temporary reuse budget is exhausted.
+The literal-text regression checks scanner bypass only for ASCII letters,
+digits and spaces; sensitive-key redaction, rich-text fallback and the original
+payload byte limit remain enforced.
 Manifest-binding PR regressions cover an unborn repository becoming committed,
 a same-commit branch switch and a controlled switch after all canonical-path
 checks. The binding-only guard still reads fresh paths and the current branch;
