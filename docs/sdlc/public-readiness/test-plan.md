@@ -399,6 +399,9 @@ sanitization when the temporary reuse budget is exhausted.
 The literal-text regression checks scanner bypass only for ASCII letters,
 digits and spaces; sensitive-key redaction, rich-text fallback and the original
 payload byte limit remain enforced.
+The JWT-header regression observes avoided JSON parses for decoded non-object
+candidates while retaining real object headers with JSON whitespace, exact
+redaction digests, malformed-object handling and conservative overlong headers.
 Manifest-binding PR regressions cover an unborn repository becoming committed,
 a same-commit branch switch and a controlled switch after all canonical-path
 checks. The binding-only guard still reads fresh paths and the current branch;

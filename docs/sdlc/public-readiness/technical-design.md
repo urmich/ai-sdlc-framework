@@ -281,6 +281,12 @@ redaction markers, so return them unchanged before rich-text scans or text-map
 lookup. Sensitive object keys still redact their values first. Punctuation,
 control characters and non-ASCII input retain the exact existing text pipeline;
 retained-payload structure, decode and byte budgets remain independent.
+For JWT-shaped text, preserve the conservative overlong-header rule and exact
+base64/UTF-8 decoding. A decoded header that cannot begin a JSON object after
+JSON whitespace cannot supply the required `alg` field, so reject that candidate
+without a failed JSON parse. Object-shaped headers retain the existing parser,
+algorithm-field predicate and malformed-input handling; no token or payload
+limit changes.
 
 After fresh binding validation, issue the independent candidate Git reads
 together: three index/diff/untracked queries for a dispatch stamp and those

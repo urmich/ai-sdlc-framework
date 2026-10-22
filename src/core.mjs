@@ -72,7 +72,9 @@ const jwtToken = /(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{8,}={0,2})\.([A-Za-z0-9_-]+={
 function jwtHeader(value) {
   if (value.length > 4096) return true;
   try {
-    const header = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
+    const decoded = Buffer.from(value, 'base64url').toString('utf8');
+    if (!/^[\t\n\r ]*\{/u.test(decoded)) return false;
+    const header = JSON.parse(decoded);
     return Boolean(header && typeof header === 'object' && !Array.isArray(header) &&
       typeof header.alg === 'string' && header.alg.trim());
   } catch (error) {

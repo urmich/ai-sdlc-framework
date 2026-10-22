@@ -4,7 +4,7 @@ export const validationDeclarations = {
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LIMITS, safeSummary } from '../src/core.mjs';
+import { LIMITS, digest, safeSummary } from '../src/core.mjs';
 import { reduceTestHistory, sanitizeExecutionPayload, validateRetainedPayload } from '../src/validation-evidence.mjs';
 
 function permutations(items) {
@@ -132,6 +132,41 @@ test('T-PRD037 plain summary literals avoid rich-text scans without bypassing se
   }
   assert.throws(() => sanitizeExecutionPayload(Buffer.alloc(LIMITS.artifact + 1, 0x61)),
     { code: 'CAPACITY' });
+});
+
+test('T-PRD037 decoded JWT non-object headers avoid JSON parsing without changing redaction policy', () => {
+  const token = header => `${Buffer.from(header).toString('base64url')}.opaque.payload`;
+  const ordinary = Array.from({ length: 64 }, (_, index) => token(`ordinary-not-json-${index}`));
+  const parse = JSON.parse;
+  let scans = 0;
+  JSON.parse = function (value, ...args) {
+    if (typeof value === 'string' && value.startsWith('ordinary-not-json-')) scans++;
+    return Reflect.apply(parse, this, [value, ...args]);
+  };
+  try {
+    assert.deepEqual(safeSummary(ordinary), ordinary);
+    assert.equal(scans, 0, 'Decoded non-object headers must not incur failed JSON parses');
+  } finally {
+    JSON.parse = parse;
+  }
+  for (const header of [
+    '{"alg":"HS256"}',
+    ' \r\n\t{"extra":true,"alg":" none "}',
+    '{"alg":"\\u0048S256"}',
+  ]) {
+    const jwt = token(header);
+    assert.equal(safeSummary(jwt), `[redacted:${digest(jwt)}]`);
+  }
+  for (const header of [
+    '{}', '{"alg":""}', '{"alg":" "}', '{"alg":false}', '{"alg":5}',
+    '[{"alg":"HS256"}]', 'null', '"HS256"', '{"alg":',
+    '\ufeff{"alg":"HS256"}', '\u00a0{"alg":"HS256"}',
+  ]) {
+    const text = token(header);
+    assert.equal(safeSummary(text), text);
+  }
+  const oversized = `${'a'.repeat(4097)}.opaque.payload`;
+  assert.equal(safeSummary(oversized), `[redacted:${digest(oversized)}]`);
 });
 
 test('T-PRD037 JWT diagnostics and signed query links are sanitized without changing case outcomes', () => {
