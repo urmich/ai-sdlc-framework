@@ -17,7 +17,7 @@ import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { executeValidationCommand, reconcileGoExecution } from '../scripts/validation-tools.mjs';
+import { executeValidationCommand, processDiagnostic, reconcileGoExecution } from '../scripts/validation-tools.mjs';
 import { launcherBuildEnvironment } from '../packaging/winget/build-launcher.mjs';
 import { generateManifests } from '../packaging/winget/generate.mjs';
 import { writePayloadFixture, fixtureCanonical, fixtureSHA, fixtureWindowsLauncher } from './winget-payload-fixture.mjs';
@@ -780,9 +780,23 @@ test('T-PRD018 tool processes retain failures, sanitized partial output and canc
   await assert.rejects(f.run('failure', process.execPath, [failing]), { code: 'EEXIST' });
   const marker = path.join(f.root, 'ready.json');
   const waiting = path.join(f.root, 'waiting.mjs');
+  const observePosix = ['darwin', 'linux'].includes(process.platform);
+  const originalReady = new Map();
+  const originalStarts = new Map();
+  const lifetime = randomUUID();
+  const childReady = `${marker}.child`;
+  const rootReady = `${marker}.parent`;
+  const readySource = destination => `writeFileSync(${JSON.stringify(`${destination}.tmp`)},
+JSON.stringify({pid:process.pid,ppid:process.ppid,lifetime:${JSON.stringify(lifetime)},
+observedAtMs:Date.now(),uptimeMs:Math.floor(process.uptime()*1000)}));
+renameSync(${JSON.stringify(`${destination}.tmp`)},${JSON.stringify(destination)});`;
+  const childSource = observePosix ?
+    `const {writeFileSync,renameSync}=require('node:fs');${readySource(childReady)}setInterval(()=>{},1000)` :
+    'setInterval(()=>{},1000)';
   await fs.writeFile(waiting, `import {writeFileSync,renameSync} from 'node:fs';
 import {spawn} from 'node:child_process';
-const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});
+const child=spawn(process.execPath,['-e',${JSON.stringify(childSource)}],{stdio:'ignore'});
+${observePosix ? readySource(rootReady) : ''}
 process.stdout.write('Authorization: Bearer ');
 process.stdout.write('fixture-secret-value\\n');
 writeFileSync(${JSON.stringify(`${marker}.tmp`)},JSON.stringify({parent:process.pid,child:child.pid}));
@@ -795,15 +809,72 @@ setInterval(()=>{},1000);
   const deadline = Date.now() + 20000;
   let pids;
   while (!pids) {
-    try { pids = JSON.parse(await fs.readFile(marker, 'utf8')); }
+    try {
+      const ready = JSON.parse(await fs.readFile(marker, 'utf8'));
+      if (observePosix) {
+        originalReady.set(ready.parent, JSON.parse(await fs.readFile(rootReady, 'utf8')));
+        originalReady.set(ready.child, JSON.parse(await fs.readFile(childReady, 'utf8')));
+      }
+      pids = ready;
+    }
     catch (error) {
       if (error.code !== 'ENOENT') throw error;
       assert.ok(Date.now() < deadline, 'Owned validation process never reached its ready barrier');
       await delay(10);
     }
   }
+  const observeOwned = async (phase, completedAtMs = 0) => {
+    const queryStartedAtMs = Date.now();
+    let query;
+    try {
+      query = await new Promise(resolve => childProcess.execFile('/bin/ps',
+        ['-p', Object.values(pids).join(','), '-o', 'pid=', '-o', 'ppid=', '-o', 'pgid=',
+          '-o', 'stat=', '-o', 'lstart='],
+        { encoding: 'utf8', timeout: 1000, maxBuffer: 2048,
+          env: { ...f.environment, LC_ALL: 'C', TZ: 'UTC' } },
+        (error, stdout) => resolve({ error, stdout })));
+    } catch (error) { query = { error, stdout: '' }; }
+    const queryFinishedAtMs = Date.now();
+    const rows = new Map();
+    let valid = !query.error || query.error.code === 1 && !query.stdout.trim();
+    for (const line of query.stdout.trim().split('\n').filter(Boolean)) {
+      const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+([A-Za-z+<>=-]{1,16})\s+((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s*$/u.exec(line);
+      const pid = Number(match?.[1]);
+      if (!match || !Object.values(pids).includes(pid) || rows.has(pid)) { valid = false; break; }
+      rows.set(pid, { ppid: Number(match[2]), pgid: Number(match[3]), state: match[4],
+        start: match[5].replace(/\s+/gu, ' ') });
+    }
+    for (const pid of Object.values(pids)) {
+      const row = valid ? rows.get(pid) : null;
+      const ready = originalReady.get(pid);
+      if (phase === 'before-cancel' && row) originalStarts.set(pid, row.start);
+      const cause = query.error ? processDiagnostic(query.error) : null;
+      t.diagnostic(JSON.stringify({
+        kind: 'owned-cancellation-observation', phase, pid, completedAtMs,
+        queryStartedAtMs, queryFinishedAtMs,
+        timing: phase === 'before-cancel' ? 'before-trigger' : 'after-strict-failure-not-at-return',
+        observation: !valid ? 'unknown' : row ? 'present-at-query' : 'no-row-at-query',
+        ppid: row?.ppid ?? -1, pgid: row?.pgid ?? -1, state: row?.state ?? 'unknown',
+        start: row?.start ?? 'unknown', startPrecision: 'one-second',
+        originalStart: originalStarts.get(pid) ?? 'unknown',
+        creationComparison: !row || !originalStarts.has(pid) ? 'unknown' :
+          row.start === originalStarts.get(pid) ? 'same-start-second-not-unique-proof' : 'different-start',
+        readyPid: Number.isSafeInteger(ready?.pid) ? ready.pid : -1,
+        readyPpid: Number.isSafeInteger(ready?.ppid) ? ready.ppid : -1,
+        readyAtMs: Number.isSafeInteger(ready?.observedAtMs) ? ready.observedAtMs : -1,
+        readyUptimeMs: Number.isSafeInteger(ready?.uptimeMs) ? ready.uptimeMs : -1,
+        lifetime: ready?.lifetime === lifetime ? lifetime : 'unknown',
+        queryCode: cause?.code ?? 'OK',
+        queryExitCode: Number.isInteger(query.error?.code) ? query.error.code : -1,
+        queryErrorSha256: cause?.original.sha256 ?? 'none',
+        queryErrorBytes: cause?.original.bytes ?? 0,
+      }));
+    }
+  };
+  if (observePosix) await observeOwned('before-cancel');
   cancellation.abort();
   const interrupted = await pending;
+  const completedAtMs = Date.now();
   assert.equal(interrupted.complete, false);
   assert.match(interrupted.diagnostic, /cancelled/u);
   assert.ok(!interrupted.stdout.includes('fixture-secret-value'));
@@ -811,8 +882,14 @@ setInterval(()=>{},1000);
   assert.ok(!journal.includes('fixture-secret-value'));
   assert.ok(journal.trim().split('\n').map(JSON.parse).some(row => row.kind === 'command-end' &&
     row.complete === false));
-  for (const pid of Object.values(pids)) {
-    assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, `Owned process ${pid} survived cancellation`);
+  try {
+    for (const pid of Object.values(pids)) {
+      assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, `Owned process ${pid} survived cancellation`);
+    }
+  } catch (error) {
+    try {
+      if (observePosix) await observeOwned('after-strict-failure', completedAtMs);
+    } finally { throw error; }
   }
   for (const [index, order] of (process.platform === 'win32' ?
     ['stop-failure-before-exit', 'exit-before-stop-failure'] : ['signal-failure-before-exit']).entries()) {
@@ -1453,7 +1530,7 @@ function contextProof() {
     expectedMerge: body.mergeSha, prNumber: 1 } };
 }
 
-test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel unit jobs and distinguishes edited base retargets', async () => {
+test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel unit jobs and distinguishes edited base retargets', async t => {
   const workflows = await readWorkflowPolicySources(repositoryRoot);
   const result = inspectWorkflowTrust(workflows);
   assert.equal(result.complete, true, JSON.stringify(result.blockers));
@@ -1487,7 +1564,33 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.equal(parts.filter(part => part.target.startsWith('macos-')).length, 13);
   assert.equal(parts.filter(part => part.target === 'macos-arm64').length, 6);
   assert.equal(parts.filter(part => part.target === 'macos-x64').length, 7);
+  const f = await fixture(t);
+  const output = path.join(f.root, 'source-bootstrap-tools.txt');
+  const selection = ci.jobs.source.steps.find(step => step.id === 'bootstrap-protocol');
+  const script = /^node --input-type=module -e '([\s\S]+)'$/u.exec(selection.run.trim());
+  assert.ok(script, 'Workflow SDK dispatch must execute the source-owned requirement recipe');
+  const selected = await f.run('source-bootstrap-tools', process.execPath,
+    ['--input-type=module', '--eval', script[1]],
+    { environment: { ...f.environment, GITHUB_OUTPUT: output } });
+  assert.equal(selected.exitCode, 0, selected.stderr);
+  const outputs = Object.fromEntries((await fs.readFile(output, 'utf8')).trim().split('\n')
+    .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+  assert.equal(outputs.protocol, nativeBootstrapProtocol);
+  const tools = JSON.parse(outputs.tools);
+  assert.deepEqual(Object.keys(tools).sort(), parts.map(part => part.role).sort());
+  assert.equal(Object.values(tools).filter(value => value.go).length, 4);
+  assert.equal(Object.values(tools).filter(value => value.python).length, 17);
+  assert.equal(Object.values(tools).filter(value => value.schema).length, 4);
+  assert.equal(Object.values(tools).filter(value => value.ownedPrefix).length, 2);
+  assert.ok(Object.entries(tools).every(([role, value]) =>
+    value.homebrew === value.ownedPrefix && value.ownedPrefix === role.endsWith('-homebrew')));
   for (const key of keys) {
+    assert.equal(ci.jobs[key].steps.find(step => step.name === 'Select pinned native Go').if,
+      '${{ fromJSON(needs.source.outputs.bootstrap-tools)[matrix.role].go }}');
+    const pythonStep = ci.jobs[key].steps.find(step => step.name === 'Select pinned native CPython');
+    if (key.includes('units')) assert.ok(ci.jobs[key].strategy.matrix.include.every(part => tools[part.role].python));
+    else assert.equal(pythonStep.if,
+      '${{ fromJSON(needs.source.outputs.bootstrap-tools)[matrix.role].python }}');
     assert.ok(ci.jobs[key].strategy.matrix.include.every(part => nativePartJobKey(part) === key));
     assert.equal(ci.jobs[key]['timeout-minutes'], 360);
     assert.equal(ci.jobs[key].strategy['fail-fast'], false);

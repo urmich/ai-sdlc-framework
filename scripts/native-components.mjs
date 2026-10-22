@@ -9,6 +9,8 @@ import { nativeConfigurationDigest, nativeProducerRole, nativePrPartsForProtocol
   nativeSpecification, nativeFrameworkShardProtocol, requireNativeShardUnitOrder } from './native-validation.mjs';
 import { nativeFrameworkShardProtocols, nativeFourBodyFrameworkShardProtocol } from './native-validation.mjs';
 import { calculatorCapability, calculatorBaselineCapability } from './pr-calculator.mjs';
+import { nativeBootstrapProtocol } from './toolchain-baseline.mjs';
+import { nativeBootstrapRequirements } from './native-bootstrap-capability.mjs';
 
 const projections = new WeakMap();
 const suffixes = { 'linux-x64': 'LX', 'windows-x64': 'WX', 'macos-arm64': 'MA', 'macos-x64': 'MI' };
@@ -108,6 +110,10 @@ export function deriveNativeComponentSpecification({ inventory, testPlan, adapte
     ...(frameworkShards ? { frameworkShards: shardProtocol,
       shardParts: nativePrPartsForProtocol(shardProtocol).filter(part => part.component === 'framework').map(part => ({
         ...part, assignmentDigest: assignments.get(part.target).digest,
+        ...(bootstrapProtocol === nativeBootstrapProtocol ? {
+          bootstrapTools: nativeBootstrapRequirements({ inventory, plan: testPlan, ...part, profile: 'pr',
+            protocol: bootstrapProtocol, assignment: assignments.get(part.target) }),
+        } : {}),
         inventoryDigest: validationInventoryDigest(nativeSpecification({
           plan: testPlan, inventory, goSources, ...part, profile: 'pr', shardProtocol,
         })),
@@ -163,6 +169,7 @@ function expectedMatrix(expectedLanes, definition) {
       context.configDigest === nativeConfigurationDigest({
         target,
         bootstrapProtocol: definition.bootstrapProtocol ?? null,
+        bootstrapTools: part.bootstrapTools ?? null,
         inventory: { complete: true, digest: definition.sourceInventoryDigest },
         profile: 'pr', component, configuredWorkers, calculator: definition.calculator ?? calculatorBaselineCapability,
         shard, shardPlanDigest: part.assignmentDigest ?? null,

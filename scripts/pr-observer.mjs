@@ -19,7 +19,7 @@ import { inspectWorkflowPolicy } from './workflow-policy.mjs';
 import { calculatorProjectFiles, calculatorSelection, reconcileCalculator } from './pr-calculator.mjs';
 import { homebrewToolchain } from './toolchain-baseline.mjs';
 import { sourceNativeBootstrapProtocol, requireNativeBootstrapCapability,
-  nativeSdkContextMatches, nativeBootstrapRequirements } from './native-bootstrap-capability.mjs';
+  nativeSdkContextMatches, nativeSdkRequirements, nativeBootstrapRequirements } from './native-bootstrap-capability.mjs';
 import { deriveNativeComponentSpecification, projectNativeComponentEvidence,
   requireNativeComponentProjection } from './native-components.mjs';
 
@@ -247,7 +247,8 @@ export function readTrustedJobContext(job, logs, {
 }
 
 export function verifyNativeCleanup(data, { target, role, context, jobKey = 'native',
-  component = 'full', shard = null, bootstrapProtocol = null }) {
+  component = 'full', shard = null, bootstrapProtocol = null, inventory, plan,
+  assignment, shardProtocol = native.nativeFrameworkShardProtocol }) {
   const request = data?.['native-homebrew-prefix-request.json'];
   const allocation = data?.['native-homebrew-prefix-allocation.json'];
   const cleanup = data?.['native-homebrew-prefix-cleanup.json'];
@@ -255,8 +256,8 @@ export function verifyNativeCleanup(data, { target, role, context, jobKey = 'nat
   const github = binding?.github;
   const prefix = request?.prefix;
   const capability = requireNativeBootstrapCapability({ bootstrap: data?.['toolchain.json'],
-    target, profile: 'pr', component, shard, role, protocol: bootstrapProtocol, prefix });
-  const resources = nativeBootstrapRequirements({ target, profile: 'pr', component, shard, role,
+    inventory, plan, assignment, shardProtocol, target, profile: 'pr', component, shard, role, protocol: bootstrapProtocol, prefix });
+  const resources = nativeBootstrapRequirements({ inventory, plan, assignment, shardProtocol, target, profile: 'pr', component, shard, role,
     protocol: bootstrapProtocol });
   requireThat(request?.schemaVersion === 1 &&
     request.repositoryRoot === `${github?.GITHUB_WORKSPACE}/source` &&
@@ -293,7 +294,7 @@ export function verifyNativeCleanup(data, { target, role, context, jobKey = 'nat
   requireThat(request.kind === 'owned-native-homebrew-prefix' &&
     typeof prefix === 'string' && /^\/opt\/[a-f0-9]{5}$/u.test(prefix) &&
     /^[a-f0-9]{64}$/u.test(request.nonce ?? '') &&
-    (capability ? context.native.toolchain.bootstrap.homebrew?.prefix === prefix :
+    (capability && component === 'framework' ? context.native.toolchain.bootstrap.homebrew?.prefix === prefix :
       context.native.toolchain.bootstrap.homebrew?.nodePrefix === `${prefix}/opt/${homebrewToolchain.formula}`) &&
     typeof data.texts?.['native-homebrew-prefix-request.json'] === 'string' &&
     allocation?.schemaVersion === 1 &&
@@ -426,6 +427,11 @@ export async function verifyOriginalNativeRows({
     ['python-version', ['--version'], context.native.toolchain.python],
   ]) {
     const command = data[`${name}.json`];
+    if (!nativeSdkRequirements({ inventory, plan, target, profile: 'pr', component, shard,
+      protocol: bootstrapProtocol })[name === 'go-version' ? 'go' : 'python']) {
+      requireThat(command === undefined, 'EVIDENCE', 'Omitted SDK preflight cannot contain fabricated tool reports');
+      continue;
+    }
     requireThat(command?.kind === 'validation-command' && command.complete === true &&
       command.exitCode === 0 && command.node === `v${native.nativeToolchain.node}` &&
       command.platform === context.native.platform && command.architecture === context.native.architecture &&
@@ -519,7 +525,8 @@ export async function verifyOriginalNativeRows({
     'EVIDENCE', 'A derived result differs from its retained original outcome/time');
   }
   const reconstructed = await native.reconcileNativeEvidenceData({ data, raw, specification, inventory,
-    sources: goSources, calculatorSources, target, component, candidate, stages: expectedStages, context, startedAt: raw.startedAt });
+    plan, bootstrapProtocol, sources: goSources, calculatorSources, target, component, candidate,
+    stages: expectedStages, context, startedAt: raw.startedAt });
   const resultsMatch = digest(reconstructed.raw.results) === digest(raw.results);
   const observedAtMatch = reconstructed.raw.observedAt === raw.observedAt;
   if (!reconstructed.raw.complete || reconstructed.raw.exitCode !== 0 || !resultsMatch || !observedAtMatch) {
@@ -785,7 +792,8 @@ export function createPrReadinessHost({
           cleanupMetadata = artifactFor(
             `${native.nativeWorkflowContract.cleanupArtifactPrefix}${role}-${run.id}-${run.run_attempt}`);
           cleanupData = await api.artifact(cleanupMetadata, { kind: 'cleanup',
-            ownedPrefix: nativeBootstrapRequirements({ target, profile: 'pr', component, shard, role,
+            ownedPrefix: nativeBootstrapRequirements({ inventory: source.inventory, plan: source.plan,
+              target, profile: 'pr', component, shard, role,
               protocol: source.bootstrapProtocol }).ownedPrefix });
         }
         acquired.push({ target, component, role, shard, job, facts, metadata, data,
@@ -811,11 +819,11 @@ export function createPrReadinessHost({
           inventory: source.inventory, plan: source.plan, target, protocol: shardProtocol,
         });
         const toolchain = raw.context.native.toolchain;
-        requireNativeBootstrapCapability({ bootstrap: data['toolchain.json'], target,
+        requireNativeBootstrapCapability({ bootstrap: data['toolchain.json'], inventory: source.inventory, plan: source.plan, assignment, target,
           profile: 'pr', component, shard, role, protocol: source.bootstrapProtocol });
         const expectedResources = native.nativeResourceFacts(facts.resources);
         requireThat(nativeSdkContextMatches(toolchain, {
-          target, profile: 'pr', component, shard, protocol: source.bootstrapProtocol }) &&
+          inventory: source.inventory, plan: source.plan, assignment, target, profile: 'pr', component, shard, protocol: source.bootstrapProtocol }) &&
           toolchain.bootstrap && data['toolchain.json'].native &&
           toolchain.resources && data['toolchain.json'].native.resources &&
           digest(toolchain.resources) === digest(expectedResources) &&
@@ -826,7 +834,7 @@ export function createPrReadinessHost({
         const context = validateExecutionContext({
           candidateDigest: digest({ revision: pr.merge_commit_sha, tree: source.tree.treeSha }),
           testSpecDigest: testSpecificationDigest(source.plan),
-          configDigest: native.nativeConfigurationDigest({ inventory: source.inventory, profile: 'pr', target, component, shard, shardProtocol,
+          configDigest: native.nativeConfigurationDigest({ inventory: source.inventory, plan: source.plan, assignment, profile: 'pr', target, component, shard, shardProtocol,
             bootstrapProtocol: source.bootstrapProtocol,
             shardPlanDigest: assignment?.digest ?? null,
             configuredWorkers: expectedResources.configuredWorkers }),
@@ -851,6 +859,7 @@ export function createPrReadinessHost({
           goSources: source.goSources, target, component, shard, shardProtocol, candidate: frozen.candidate,
           sourceFiles: source.files, plan: source.plan, context, bootstrapProtocol: source.bootstrapProtocol });
         if (cleanupData) verifyNativeCleanup(cleanupData, { target, role, context,
+          inventory: source.inventory, plan: source.plan, assignment, shardProtocol,
           component, shard, bootstrapProtocol: source.bootstrapProtocol,
           jobKey: frameworkShards ? native.nativePartJobKey({ target, shard, component }, shardProtocol) : 'native' });
         const rawDigest = digest(data.texts[native.nativeWorkflowContract.reports.execution]);
@@ -873,7 +882,8 @@ export function createPrReadinessHost({
         ...part, job: acquired.find(original => original.role === part.context.jobRef.slice('native-'.length)).job,
       })), { protocol: shardProtocol }) : null;
       const prefixParts = expectedParts.filter(part => part.target.startsWith('macos-') &&
-        nativeBootstrapRequirements({ ...part, profile: 'pr', protocol: source.bootstrapProtocol }).ownedPrefix);
+        nativeBootstrapRequirements({ inventory: source.inventory, plan: source.plan,
+          ...part, profile: 'pr', protocol: source.bootstrapProtocol }).ownedPrefix);
       const prefixes = acquired.filter(part => prefixParts.some(expected => expected.role === part.role)).map(part =>
         part.cleanupData?.['native-homebrew-prefix-request.json']?.prefix);
       requireThat(prefixes.every(prefix => typeof prefix === 'string') &&

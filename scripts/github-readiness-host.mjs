@@ -265,7 +265,7 @@ export function createReadinessGitHubClient({
           throw new SdlcError('CONTRACT', 'Artifact reader did not return valid bounded result data');
         }
       } finally {
-        await fs.rm(root, { recursive: true });
+        await fs.rm(root, { recursive: true, maxRetries: 10, retryDelay: 100 });
       }
     })());
     return artifacts.get(key);

@@ -25,7 +25,8 @@ import { buildPlatforms, renderChecksums } from './package-platforms.mjs';
 import { calculatorProjectFiles, calculatorSelection, calculatorCapability, calculatorBaselineCapability, reconcileCalculator,
   calculatorArguments } from './pr-calculator.mjs';
 import { prCryptoFixture } from './pr-capabilities.mjs';
-import { nativeToolchain, nativeBootstrapProtocol, nativeSdkBootstrapProtocol, nativeBootstrapProtocols } from './toolchain-baseline.mjs';
+import { nativeToolchain, nativeBootstrapProtocol, nativeUnitBootstrapProtocol,
+  nativeSdkBootstrapProtocol, nativeBootstrapProtocols } from './toolchain-baseline.mjs';
 import { sourceNativeBootstrapProtocol, requireNativeBootstrapCapability, nativeSdkRequirements,
   nativeSdkContextMatches, nativeBootstrapRequirements, probeNativeSdk } from './native-bootstrap-capability.mjs';
 export { nativeToolchain } from './toolchain-baseline.mjs';
@@ -144,9 +145,9 @@ const canonicalIds = (target, profile) => [
 ];
 const safe = value => sanitizeExecutionPayload(Buffer.from(JSON.stringify(value)));
 
-export function nativeConfigurationDigest({ inventory, profile, target = null, configuredWorkers = null,
+export function nativeConfigurationDigest({ inventory, plan, profile, target = null, configuredWorkers = null,
   calculator = calculatorCapability(inventory), component = 'full', shard = null, shardPlanDigest = null,
-  shardProtocol = nativeFrameworkShardProtocol, bootstrapProtocol = null }) {
+  shardProtocol = nativeFrameworkShardProtocol, bootstrapProtocol = null, bootstrapTools = null, assignment }) {
   requireThat(bootstrapProtocol === null || nativeBootstrapProtocols.includes(bootstrapProtocol),
     'INVENTORY', 'Native configuration requires a supported source-selected bootstrap protocol');
   requireThat(inventory.complete && /^[a-f0-9]{64}$/u.test(inventory.digest) &&
@@ -166,16 +167,23 @@ export function nativeConfigurationDigest({ inventory, profile, target = null, c
     new Set(calculator.files).size === calculator.files.length &&
     calculator.files.every(file => /^test\/calculator\/(?:[^/]+\/)*[^/]+\.test\.(?:js|mjs|cjs)$/u.test(file)),
   'INVENTORY', 'Native calculator capability must preserve its complete independently selected files and assertion count');
+  requireThat(bootstrapTools === null || bootstrapProtocol === nativeBootstrapProtocol &&
+    digest(Object.keys(bootstrapTools).sort()) === digest(['go', 'homebrew', 'ownedPrefix', 'python', 'schema']) &&
+    Object.values(bootstrapTools).every(value => typeof value === 'boolean') &&
+    (!bootstrapTools.schema || bootstrapTools.python) && bootstrapTools.homebrew === bootstrapTools.ownedPrefix,
+  'INVENTORY', 'Projected bootstrap requirements must preserve the closed source-derived v5 tool capabilities');
   return digest({ nativeToolchain, inventory: inventory.digest, profile,
     ...(component === 'full' ? {} : { component }),
     ...(shard === null ? {} : { frameworkShards: shardProtocol, shard, shardPlanDigest }),
     schedulingPolicy: validationSchedulingPolicyDigest(), selectedWorkersRequest: requested,
     selectionTransport: validationSelectionProtocol,
     requiredCapabilities: { crypto: prCryptoFixture, calculator,
-      ...(bootstrapProtocol !== null && component === 'framework' && shard !== null ?
-        { bootstrapProtocol, ...([nativeSdkBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol) ?
-          { tools: bootstrapProtocol === nativeBootstrapProtocol ?
-            nativeBootstrapRequirements({ target, profile, component, shard, protocol: bootstrapProtocol }) :
+      ...(bootstrapProtocol !== null && (component === 'framework' && shard !== null ||
+        bootstrapProtocol === nativeBootstrapProtocol && component === 'homebrew' && profile === 'pr') ?
+        { bootstrapProtocol, ...([nativeSdkBootstrapProtocol, nativeUnitBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol) ?
+          { tools: [nativeUnitBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol) ?
+            bootstrapTools ?? nativeBootstrapRequirements({ inventory, plan, target, profile, component, shard,
+              protocol: bootstrapProtocol, assignment, shardProtocol }) :
             nativeSdkRequirements({ target: shard === 'units-1' ? 'macos-x64' : 'linux-x64',
               profile, component, shard, protocol: bootstrapProtocol }) } : {}) } : {}) } });
 }
@@ -388,8 +396,8 @@ export async function prepareNativeHostFixtures({ candidate, candidateDir, scrat
   return { ...selected, kind: 'private-test-library-only' };
 }
 
-function nativeContextMatches(context, { target, profile, sourceRevision, artifacts, component = 'full', shard = null,
-  bootstrapProtocol = null }) {
+function nativeContextMatches(context, { inventory, plan, target, profile, sourceRevision, artifacts, component = 'full', shard = null,
+  bootstrapProtocol = null, shardProtocol = nativeFrameworkShardProtocol, assignment }) {
   const resources = context.native.toolchain.resources;
   let validResources = false;
   if (resources && typeof resources === 'object') {
@@ -401,7 +409,8 @@ function nativeContextMatches(context, { target, profile, sourceRevision, artifa
     context.native.kind === 'native' && context.native.platform === platforms[target] &&
     context.native.architecture === (target === 'macos-arm64' ? 'arm64' : 'x64') &&
     context.native.toolchain.node === nativeToolchain.node &&
-    nativeSdkContextMatches(context.native.toolchain, { target, profile, component, shard, protocol: bootstrapProtocol }) &&
+    nativeSdkContextMatches(context.native.toolchain, { inventory, plan, assignment, shardProtocol,
+      target, profile, component, shard, protocol: bootstrapProtocol }) &&
     context.location === locations[target] && context.owner === 'provider' &&
     context.mode === 'automated' && context.environment === 'local' &&
     context.producer.provider === 'github' && context.producer.connection === 'repository-ci' &&
@@ -437,14 +446,15 @@ export function aggregateNativeReadiness(evaluations, { profile, sourceRevision,
   'INPUT', 'Native aggregation needs every independently expected producer part and the complete frozen artifact set');
   const expected = new Map(executions.map(({ target, context, component = 'full', shard = null }) => {
     const actual = validateExecutionContext(context);
-    requireThat(nativeContextMatches(actual, { target, profile, sourceRevision, artifacts, component, shard, bootstrapProtocol }),
+    const assignment = shard === null ? null : nativeFrameworkShardPlan({ inventory, plan, target, protocol: shardProtocol });
+    requireThat(nativeContextMatches(actual, { inventory, plan, assignment, shardProtocol,
+      target, profile, sourceRevision, artifacts, component, shard, bootstrapProtocol }),
       'EVIDENCE', 'Expected native execution does not match source, artifacts, platform or baseline');
     if (frameworkShards) {
       const specification = nativeSpecification({ plan, inventory, goSources, target, profile, component, shard, shardProtocol });
-      const assignment = shard === null ? null : nativeFrameworkShardPlan({ inventory, plan, target, protocol: shardProtocol });
       requireThat(actual.inventoryDigest === validationInventoryDigest(specification) &&
         actual.testSpecDigest === testSpecificationDigest(plan) &&
-        actual.configDigest === nativeConfigurationDigest({ inventory, profile, target, component, shard, shardProtocol, bootstrapProtocol,
+        actual.configDigest === nativeConfigurationDigest({ inventory, plan, assignment, profile, target, component, shard, shardProtocol, bootstrapProtocol,
           shardPlanDigest: assignment?.digest ?? null,
           configuredWorkers: actual.native.toolchain.resources.configuredWorkers }),
       'EVIDENCE', 'Expected shard context differs from independently derived complete source/specification/assignment');
@@ -839,9 +849,9 @@ async function collectExecution({ directory, data, inventory, sources, calculato
   let exitCode = 0;
   const read = name => data ? Promise.resolve(data[name] ?? null) : readOptional(path.join(directory, name));
   if (bootstrapProtocol !== null) requireNativeBootstrapCapability({
-    bootstrap: await read('toolchain.json'), target, profile, component, shard, protocol: bootstrapProtocol });
-  if (bootstrapProtocol === nativeBootstrapProtocol && !nativeBootstrapRequirements({
-    target, profile, component, shard, protocol: bootstrapProtocol,
+    bootstrap: await read('toolchain.json'), inventory, plan, assignment, target, profile, component, shard, protocol: bootstrapProtocol });
+  if ([nativeUnitBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol) && !nativeBootstrapRequirements({
+    inventory, plan, assignment, target, profile, component, shard, protocol: bootstrapProtocol,
   }).ownedPrefix) {
     for (const file of ['native-homebrew-prefix-allocation.json', 'native-homebrew-prefix-cleanup.json',
       'native-homebrew.json']) {
@@ -964,7 +974,7 @@ async function collectExecution({ directory, data, inventory, sources, calculato
     ['go-version', ['version'], context.native.toolchain.go],
     ['python-version', ['--version'], context.native.toolchain.python],
   ]) {
-    const tools = nativeSdkRequirements({ target, profile, component, shard, protocol: bootstrapProtocol });
+    const tools = nativeSdkRequirements({ inventory, plan, assignment, target, profile, component, shard, protocol: bootstrapProtocol });
     if (!tools[name === 'go-version' ? 'go' : 'python']) {
       requireThat(await read(`${name}.json`) === null, 'EVIDENCE',
         'Refresh-only SDK reports must be absent, never fabricated');
@@ -1296,7 +1306,7 @@ function compileNativeDefinition({ target, profile, sourceFiles, selectedWorkers
     ...(bootstrapProtocol === null ? {} : { bootstrapProtocol }),
     stages: assignment ? assignment.parts.find(part => part.shard === shard).stages :
       component === 'homebrew' ? [] : nativeStageSelections(inventory, plan),
-    configDigest: nativeConfigurationDigest({ inventory, profile, target, component, shard, shardProtocol, bootstrapProtocol,
+    configDigest: nativeConfigurationDigest({ inventory, plan, assignment, profile, target, component, shard, shardProtocol, bootstrapProtocol,
       shardPlanDigest: assignment?.digest ?? null, configuredWorkers: selectedWorkersRequest }),
     testSpecDigest: testSpecificationDigest(plan), inventoryDigest: validationInventoryDigest(specification) };
 }
@@ -1343,9 +1353,13 @@ export async function replayNativeEvidence({ definition, data, candidate, asOf, 
   const context = validateExecutionContext(verified.context);
   const bootstrap = data['toolchain.json'];
   requireNativeBootstrapCapability({ bootstrap, target: definition.target, profile: definition.profile,
+    inventory: inputs.inventory, plan: inputs.plan,
+    shardProtocol: definition.frameworkShards,
     component: definition.component ?? 'full', shard: definition.shard ?? null,
     protocol: inputs.bootstrapProtocol ?? null });
-  requireThat(nativeContextMatches(context, { target: definition.target, profile: definition.profile,
+  requireThat(nativeContextMatches(context, { inventory: inputs.inventory, plan: inputs.plan,
+    shardProtocol: definition.frameworkShards,
+    target: definition.target, profile: definition.profile,
     component: definition.component,
     shard: definition.shard,
     sourceRevision: definition.source.revision, artifacts: nativeArtifacts(candidate),
@@ -1478,17 +1492,19 @@ export async function verifyNativeEvidence({ target, profile, candidateDir, evid
   const stored = await readOptional(path.join(evidenceDir, 'execution.json'));
   const context = validateExecutionContext(stored?.context);
   const bootstrap = await readOptional(path.join(evidenceDir, 'toolchain.json'));
-  requireNativeBootstrapCapability({ bootstrap, target, profile, component, shard,
+  requireNativeBootstrapCapability({ bootstrap, inventory: inputs.inventory, plan: inputs.plan, assignment, shardProtocol,
+    target, profile, component, shard,
     protocol: inputs.bootstrapProtocol });
   requireThat(bootstrap?.status === 'Passed' && bootstrap.target === target &&
     digest(context.native.toolchain.bootstrap) === digest(bootstrap.native),
   'EVIDENCE', 'Original native toolchain/host bootstrap is missing or differs');
   const tree = (await execute('git', ['rev-parse', `${expectedSourceCommit}^{tree}`], { cwd: repositoryRoot })).stdout.trim();
-  requireThat(nativeContextMatches(context, { target, profile, component, shard, sourceRevision: expectedSourceCommit,
+  requireThat(nativeContextMatches(context, { inventory: inputs.inventory, plan: inputs.plan, assignment, shardProtocol,
+    target, profile, component, shard, sourceRevision: expectedSourceCommit,
     artifacts: nativeArtifacts(candidate), bootstrapProtocol: inputs.bootstrapProtocol }) &&
     context.candidateDigest === digest({ revision: expectedSourceCommit, tree }) &&
     context.testSpecDigest === testSpecificationDigest(inputs.plan) &&
-    context.configDigest === nativeConfigurationDigest({ inventory: inputs.inventory, profile, target, component, shard, shardProtocol,
+    context.configDigest === nativeConfigurationDigest({ inventory: inputs.inventory, plan: inputs.plan, assignment, profile, target, component, shard, shardProtocol,
       bootstrapProtocol: inputs.bootstrapProtocol,
       shardPlanDigest: assignment?.digest ?? null,
       configuredWorkers: process.env.SDLC_TEST_WORKERS ?? null }) &&
@@ -1571,7 +1587,8 @@ export async function runNativeValidation(options) {
       runId: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT };
     for (const name of ['NODE_AUTH_TOKEN', 'NPM_TOKEN', 'GITHUB_TOKEN', 'GH_TOKEN']) delete environment[name];
     const bootstrap = await readOptional(process.env.SDLC_NATIVE_TOOLCHAIN_REPORT ?? path.join(directory, 'missing-bootstrap.json'));
-    requireNativeBootstrapCapability({ bootstrap, target, profile, component, shard,
+    requireNativeBootstrapCapability({ bootstrap, inventory: inputs.inventory, plan: inputs.plan, assignment,
+      target, profile, component, shard,
       protocol: inputs.bootstrapProtocol });
     const resources = nativeResourceFacts();
     requireThat(bootstrap?.status === 'Passed' && bootstrap.target === target &&
@@ -1580,7 +1597,7 @@ export async function runNativeValidation(options) {
       bootstrap.native.resources && digest(bootstrap.native.resources) === digest(resources),
     'HOST', 'Required native toolchain bootstrap did not establish this actual host/resource allocation');
     if (shard !== null) Object.assign(commandContext, {
-      configDigest: nativeConfigurationDigest({ inventory: inputs.inventory, profile, target, component, shard,
+      configDigest: nativeConfigurationDigest({ inventory: inputs.inventory, plan: inputs.plan, assignment, profile, target, component, shard,
         bootstrapProtocol: inputs.bootstrapProtocol,
         shardPlanDigest: assignment.digest, configuredWorkers: resources.configuredWorkers }),
       inventoryDigest: validationInventoryDigest(inputs.specification),
@@ -1589,11 +1606,12 @@ export async function runNativeValidation(options) {
     await writeJson(path.join(directory, 'toolchain.json'), bootstrap);
     const runTool = options => executeValidationCommand({ outputDir: directory, environment,
       signal: cancellation.signal, ...options });
-    const sdk = await probeNativeSdk({ target, profile, component, shard, protocol: inputs.bootstrapProtocol }, runTool);
+    const sdk = await probeNativeSdk({ inventory: inputs.inventory, plan: inputs.plan, assignment,
+      target, profile, component, shard, protocol: inputs.bootstrapProtocol }, runTool);
     const tree = (await git(['rev-parse', 'HEAD^{tree}'])).stdout.trim();
     context = validateExecutionContext({
       candidateDigest: digest({ revision, tree }), testSpecDigest: testSpecificationDigest(inputs.plan),
-      configDigest: nativeConfigurationDigest({ inventory: inputs.inventory, profile, target, component, shard,
+      configDigest: nativeConfigurationDigest({ inventory: inputs.inventory, plan: inputs.plan, assignment, profile, target, component, shard,
         bootstrapProtocol: inputs.bootstrapProtocol,
         shardPlanDigest: assignment?.digest ?? null,
         configuredWorkers: resources.configuredWorkers }),

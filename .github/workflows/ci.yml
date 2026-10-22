@@ -98,6 +98,7 @@ jobs:
     outputs:
       source-commit: ${{ steps.validation.outputs.sourceCommit }}
       bootstrap-protocol: ${{ steps.bootstrap-protocol.outputs.protocol }}
+      bootstrap-tools: ${{ steps.bootstrap-protocol.outputs.tools }}
       descriptor-sha256: ${{ steps.validation.outputs.descriptorSha256 }}
       checksums-sha256: ${{ steps.validation.outputs.checksumsSha256 }}
       candidate-artifact-id: ${{ steps.candidate.outputs.artifact-id }}
@@ -146,7 +147,22 @@ jobs:
           check-latest: false
       - name: Read source-declared bootstrap protocol
         id: bootstrap-protocol
-        run: node --input-type=module -e 'import { nativeBootstrapProtocol } from "./scripts/toolchain-baseline.mjs"; import { appendFileSync } from "node:fs"; appendFileSync(process.env.GITHUB_OUTPUT, `protocol=${nativeBootstrapProtocol}\n`);'
+        run: |
+          node --input-type=module -e '
+            import { nativeBootstrapProtocol } from "./scripts/toolchain-baseline.mjs";
+            import { nativeBootstrapRequirements } from "./scripts/native-bootstrap-capability.mjs";
+            import { nativePrParts, nativeFrameworkShardPlan } from "./scripts/native-validation.mjs";
+            import { compileValidationInventory } from "./scripts/validation-inventory.mjs";
+            import { readFileSync, appendFileSync } from "node:fs";
+            const inventory = await compileValidationInventory(process.cwd());
+            const plan = readFileSync("docs/sdlc/public-readiness/test-plan.md", "utf8");
+            const assignments = new Map([...new Set(nativePrParts.map(part => part.target))]
+              .map(target => [target, nativeFrameworkShardPlan({ inventory, plan, target })]));
+            const tools = Object.fromEntries(nativePrParts.map(part => [part.role,
+              nativeBootstrapRequirements({ ...part, profile: "pr", protocol: nativeBootstrapProtocol,
+                inventory, plan, assignment: assignments.get(part.target) })]));
+            appendFileSync(process.env.GITHUB_OUTPUT, `protocol=${nativeBootstrapProtocol}\ntools=${JSON.stringify(tools)}\n`);
+          '
       - name: Select pinned native Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         env:
@@ -280,7 +296,7 @@ jobs:
           architecture: ${{ matrix.architecture }}
           check-latest: false
       - name: Select pinned native Go
-        if: ${{ needs.source.outputs.bootstrap-protocol != 'native-bootstrap-role-capabilities-v4' }}
+        if: ${{ fromJSON(needs.source.outputs.bootstrap-tools)[matrix.role].go }}
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         env:
           GOTOOLCHAIN: local
@@ -450,7 +466,7 @@ jobs:
           architecture: ${{ matrix.architecture }}
           check-latest: false
       - name: Select pinned native Go
-        if: ${{ matrix.shard != 'refresh' || !contains(fromJSON('["native-bootstrap-role-capabilities-v3","native-bootstrap-role-capabilities-v4"]'), needs.source.outputs.bootstrap-protocol) }}
+        if: ${{ fromJSON(needs.source.outputs.bootstrap-tools)[matrix.role].go }}
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         env:
           GOTOOLCHAIN: local
@@ -459,7 +475,7 @@ jobs:
           check-latest: false
           cache: false
       - name: Select pinned native CPython
-        if: ${{ matrix.shard != 'refresh' || !contains(fromJSON('["native-bootstrap-role-capabilities-v3","native-bootstrap-role-capabilities-v4"]'), needs.source.outputs.bootstrap-protocol) }}
+        if: ${{ fromJSON(needs.source.outputs.bootstrap-tools)[matrix.role].python }}
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12.10'
@@ -580,7 +596,7 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with: { node-version: '24.20.0', architecture: '${{ matrix.architecture }}', check-latest: false }
       - name: Select pinned native Go
-        if: ${{ needs.source.outputs.bootstrap-protocol != 'native-bootstrap-role-capabilities-v4' }}
+        if: ${{ fromJSON(needs.source.outputs.bootstrap-tools)[matrix.role].go }}
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with: { go-version: '1.27.1', check-latest: false, cache: false }
       - name: Select pinned native CPython
@@ -687,11 +703,11 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with: { node-version: '24.20.0', architecture: '${{ matrix.architecture }}', check-latest: false }
       - name: Select pinned native Go
-        if: ${{ matrix.shard != 'refresh' || !contains(fromJSON('["native-bootstrap-role-capabilities-v3","native-bootstrap-role-capabilities-v4"]'), needs.source.outputs.bootstrap-protocol) }}
+        if: ${{ fromJSON(needs.source.outputs.bootstrap-tools)[matrix.role].go }}
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with: { go-version: '1.27.1', check-latest: false, cache: false }
       - name: Select pinned native CPython
-        if: ${{ matrix.shard != 'refresh' || !contains(fromJSON('["native-bootstrap-role-capabilities-v3","native-bootstrap-role-capabilities-v4"]'), needs.source.outputs.bootstrap-protocol) }}
+        if: ${{ fromJSON(needs.source.outputs.bootstrap-tools)[matrix.role].python }}
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with: { python-version: '3.12.10', architecture: '${{ matrix.architecture }}', check-latest: false }
       - name: Provision isolated native toolchain
@@ -791,7 +807,7 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with: { node-version: '24.20.0', architecture: '${{ matrix.architecture }}', check-latest: false }
       - name: Select pinned native Go
-        if: ${{ needs.source.outputs.bootstrap-protocol != 'native-bootstrap-role-capabilities-v4' }}
+        if: ${{ fromJSON(needs.source.outputs.bootstrap-tools)[matrix.role].go }}
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with: { go-version: '1.27.1', check-latest: false, cache: false }
       - name: Select pinned native CPython
@@ -897,11 +913,11 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with: { node-version: '24.20.0', architecture: '${{ matrix.architecture }}', check-latest: false }
       - name: Select pinned native Go
-        if: ${{ matrix.shard != 'refresh' || !contains(fromJSON('["native-bootstrap-role-capabilities-v3","native-bootstrap-role-capabilities-v4"]'), needs.source.outputs.bootstrap-protocol) }}
+        if: ${{ fromJSON(needs.source.outputs.bootstrap-tools)[matrix.role].go }}
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with: { go-version: '1.27.1', check-latest: false, cache: false }
       - name: Select pinned native CPython
-        if: ${{ matrix.shard != 'refresh' || !contains(fromJSON('["native-bootstrap-role-capabilities-v3","native-bootstrap-role-capabilities-v4"]'), needs.source.outputs.bootstrap-protocol) }}
+        if: ${{ fromJSON(needs.source.outputs.bootstrap-tools)[matrix.role].python }}
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with: { python-version: '3.12.10', architecture: '${{ matrix.architecture }}', check-latest: false }
       - name: Provision isolated native toolchain
@@ -1002,7 +1018,7 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with: { node-version: '24.20.0', architecture: '${{ matrix.architecture }}', check-latest: false }
       - name: Select pinned native Go
-        if: ${{ needs.source.outputs.bootstrap-protocol != 'native-bootstrap-role-capabilities-v4' }}
+        if: ${{ fromJSON(needs.source.outputs.bootstrap-tools)[matrix.role].go }}
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with: { go-version: '1.27.1', check-latest: false, cache: false }
       - name: Select pinned native CPython
@@ -1108,11 +1124,11 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with: { node-version: '24.20.0', architecture: '${{ matrix.architecture }}', check-latest: false }
       - name: Select pinned native Go
-        if: ${{ matrix.shard != 'refresh' || !contains(fromJSON('["native-bootstrap-role-capabilities-v3","native-bootstrap-role-capabilities-v4"]'), needs.source.outputs.bootstrap-protocol) }}
+        if: ${{ fromJSON(needs.source.outputs.bootstrap-tools)[matrix.role].go }}
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with: { go-version: '1.27.1', check-latest: false, cache: false }
       - name: Select pinned native CPython
-        if: ${{ matrix.shard != 'refresh' || !contains(fromJSON('["native-bootstrap-role-capabilities-v3","native-bootstrap-role-capabilities-v4"]'), needs.source.outputs.bootstrap-protocol) }}
+        if: ${{ fromJSON(needs.source.outputs.bootstrap-tools)[matrix.role].python }}
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with: { python-version: '3.12.10', architecture: '${{ matrix.architecture }}', check-latest: false }
       - name: Provision isolated native toolchain
@@ -1240,6 +1256,7 @@ jobs:
           architecture: ${{ matrix.architecture }}
           check-latest: false
       - name: Select pinned native Go
+        if: ${{ fromJSON(needs.source.outputs.bootstrap-tools)[matrix.role].go }}
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         env:
           GOTOOLCHAIN: local
@@ -1248,6 +1265,7 @@ jobs:
           check-latest: false
           cache: false
       - name: Select pinned native CPython
+        if: ${{ fromJSON(needs.source.outputs.bootstrap-tools)[matrix.role].python }}
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12.10'
@@ -1257,7 +1275,7 @@ jobs:
         id: bootstrap
         env:
           GOTOOLCHAIN: local
-        run: node scripts/native-toolchain.mjs --target "$NATIVE_TARGET" --output-dir ".test-data/bootstrap-$SDLC_NATIVE_ROLE"
+        run: node scripts/native-toolchain.mjs --target "$NATIVE_TARGET" --output-dir ".test-data/bootstrap-$SDLC_NATIVE_ROLE" --profile pr --component "$SDLC_NATIVE_COMPONENT" --role "$SDLC_NATIVE_ROLE"
       - name: Retain native bootstrap diagnostics
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

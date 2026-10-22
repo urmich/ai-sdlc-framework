@@ -117,6 +117,26 @@ The Windows-only periodic-checkpoint regression injects one conflict while the
 real worker is silently blocked, then requires a durable refreshed lease,
 live processes, exact journal identity and the original kill/cleanup assertions.
 Permanent or unclassified replacement failures remain incomplete and non-passing.
+Mutable checkpoint polling uses same-turn synchronous reads on Windows; a
+retained checkpoint error fails rather than masquerading as a live observation.
+The owned-process tests bind held original creation identities before releasing
+ready workers and require kernel exit before each immutable producer-close
+boundary. Same-identity survival, unknown or mismatched ownership, late exit and
+same-millisecond ambiguity remain non-passing. The sibling-capacity root keeps
+a real independent broker producer active during every owned-file exit check;
+no later global close or wait-until-gone result substitutes for that boundary.
+These Windows fixture corrections preserve all assertions and deadlines, introduce no
+production cleanup/retry change and do not prove the original CI reused a PID.
+The POSIX tool-cancellation root retains its strict original process assertion.
+Before cancellation, record owned self-ready identities and a bounded exact-PID
+state/start observation; only a strict failure triggers a timestamped later
+diagnostic query. Retain the original error even if diagnostics fail. Later
+absence or zombie state is not evidence of exit at the original return boundary,
+and one-second creation matches do not exclude same-second PID reuse.
+Observer artifact readers finish before their exact owned scratch directory is
+removed. Use the existing bounded filesystem-cleanup retry policy for classified
+transient sharing conflicts; persistent removal failure remains an error, never
+successful cleanup or permission to remove another directory.
 Owned process fixtures observe ready/trigger/finish markers rather than relying
 on filesystem notifications that may coalesce. Launcher fixtures await both the
 real child result and input-stream completion: an early rejecting child's exit
@@ -127,6 +147,12 @@ state to ignore or retry. The controlled pruning race creates its association
 while a real work-item lock is held, then releases that lock before the queued
 real transaction begins. Its stale-dependency assertion must not depend on
 association setup finishing within the unchanged lock-wait budget.
+Both alias-attach/archive race variants hold the real monitor owner at an
+observable Store boundary, require concurrent attach to reject with `LOCK_BUSY`
+without changing owner or active bytes, then release and await archival before
+the next attach. Preserve exactly one immutable history record and every
+current-first/historical-first identity and readability assertion. This is
+causal ordering, not a longer acquisition deadline or retry-until-success.
 
 Local test results are not inputs required from an external contributor merely
 to open a PR. PR jobs never
@@ -229,6 +255,37 @@ invented omitted tools/schema/prefixes and borrowed ownership. Replay v3/v2/null
 with their original digest shapes and real-owner counts; v4 does not retroactively
 relax their requirements. No hosted timing improvement is established by local
 controlled tests.
+
+The separate source-selected `native-bootstrap-role-capabilities-v5` omits
+Go/schema setup from framework bodies without the real Go/schema or native
+launcher roots; all real Go tests, vet, native execution and independent
+cold-cache rebuild assertions remain intact. Linux/Windows `body-3` omits
+CPython; other current bodies retain runtime-only CPython except the real schema
+body. All framework Mac bodies omit unused Brew/core/Ruby/prefix setup. Genuine
+Homebrew omits independent Go/CPython/schema SDK setup but preserves pinned
+Brew/core/Ruby, the complete native Node bottle closure, real audit/style,
+previous/current lifecycle and cleanup. Whole/full and R-PRE are unchanged.
+Source-selected closures, not a hardcoded platform ordering, determine body
+requirements. Current unit partitions still require Python: Intel main contains
+actual observer-reader consumers independently of the producer on `units-1`.
+Unknown use remains required.
+
+V5 requires two distinct genuine Mac allocations/removal receipts and eleven
+exact nonallocation proofs, retaining thirteen diagnostic artifacts/steps,
+twenty-five origins and all twenty-three framework origins. Extend the existing
+PR-only T-PRD015/021 controlled tests for exact SDK dispatch, absent facts,
+borrowed/forged prefix rejection, workflow source-derived setup, source capture,
+component composition and replay. Preserve the complete original assertion
+ID/applicability union, all shard v1–v4 topologies, v4's eight real owners and
+v3/v2/null requirements and digest shapes. The canonical local budget remains
+27. Actual CPython-reader/native execution and native speedup are NotRun until
+capable PR execution; safe local controlled tests provide no native pass.
+The genuine-bootstrap regression executes the actual provisioning function with
+isolated command/filesystem boundaries for both Mac architectures. Require
+capability/runtime facts, bottle planning before installation, retained receipts
+and runtime probing, then apply the unchanged source-bound admission check.
+This controlled dispatch test neither acquires Homebrew nor supplies native
+acceptance evidence.
 
 The Node/Python native distributions above were checked against the public
 `actions/node-versions` and `actions/python-versions` manifests during Test Design;
@@ -461,6 +518,8 @@ and forged or borrowed runtime/prefix facts, and retain complete genuine
 Homebrew/full/R-PRE and historical replay requirements. Historical v3/v2/null
 retain all thirteen real Mac prefix owners for the current topology. V4 retains
 thirteen diagnostic artifacts with eight real owners and five nonallocation proofs.
+V5 retains the same diagnostics with two real genuine Homebrew owners and eleven
+source-bound nonallocation proofs.
 
 ### 3.2 Existing full selection
 

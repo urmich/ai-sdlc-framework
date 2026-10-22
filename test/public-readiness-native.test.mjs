@@ -8,8 +8,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
+import { createContext, runInContext } from 'node:vm';
 import { randomUUID } from 'node:crypto';
-import { digest } from '../src/core.mjs';
+import { digest, requireThat } from '../src/core.mjs';
 import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
   createEvidenceBundle, readEvidenceBundle, requireReadinessEvaluation, validateExecutionContext,
   sanitizeExecutionPayload } from 'ai-sdlc-framework/evidence';
@@ -25,15 +26,17 @@ import { aggregateNativeReadiness, nativeArtifacts, nativeSpecification, nativeG
   nativePlatformUnitFrameworkShardProtocol, nativeFourBodyFrameworkShardProtocol,
   nativeFrameworkUnitShardNames, nativeStageSelections, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
 import { observerApiFixture } from './readiness-observer-fixture.mjs';
-import { validateBootstrapRequest } from '../scripts/native-toolchain.mjs';
+import { validateBootstrapRequest, bootstrapNativeToolchain, nativeBootstrapEnvironment,
+  nativeBootstrapExports, portableRubyBootstrapEnvironment, requireHomebrewBottlePlan,
+  requireHomebrewBottleReceipts, homebrewSetupLimits, homebrewBottlePlanSource } from '../scripts/native-toolchain.mjs';
 import { reconcileGoExecution, executeValidationCommand, validationCommandArguments } from '../scripts/validation-tools.mjs';
 import { repositoryRoot, createPlan, parseOptions, run as runTests } from '../scripts/test-runner.mjs';
-import { discoverDeclarations, compileValidationSourceInventory, validationSourcePaths } from '../scripts/validation-inventory.mjs';
+import { discoverDeclarations, compileValidationInventory, compileValidationSourceInventory, validationSourcePaths } from '../scripts/validation-inventory.mjs';
 import { runCalculator, calculatorFiles, calculatorSelection, calculatorArguments,
   calculatorCommandArguments, reconcileCalculator } from '../scripts/pr-calculator.mjs';
 import { fetchPinnedFixture, provisionPrCryptoFixture } from '../scripts/pr-capabilities.mjs';
 import { nativeToolchain } from '../scripts/toolchain-baseline.mjs';
-import { nativeBootstrapProtocol, nativeSdkBootstrapProtocol, homebrewToolchain } from '../scripts/toolchain-baseline.mjs';
+import { nativeBootstrapProtocol, nativeUnitBootstrapProtocol, nativeSdkBootstrapProtocol, homebrewToolchain } from '../scripts/toolchain-baseline.mjs';
 import { sourceNativeBootstrapProtocol, nativeBootstrapCapability, bootstrapRequestCapability,
   requireNativeBootstrapCapability, nativeSdkRequirements, nativeSdkContextMatches,
   nativeBootstrapRequirements, probeNativeSdk } from '../scripts/native-bootstrap-capability.mjs';
@@ -220,8 +223,8 @@ test('T-PRD015 v4 unit runtime is required while unused SDK schema and prefix ev
         { code: 'EVIDENCE' });
     }
     for (const options of [
-      { profile: 'pr', component: 'framework', shard: 'body-0', protocol: nativeBootstrapProtocol },
-      { profile: 'pr', component: 'homebrew', protocol: nativeBootstrapProtocol },
+      { profile: 'pr', component: 'framework', shard: 'body-0', protocol: nativeUnitBootstrapProtocol },
+      { profile: 'pr', component: 'homebrew', protocol: nativeUnitBootstrapProtocol },
       { profile: 'r-pre', component: 'full', protocol: nativeBootstrapProtocol },
       { profile: 'pr', component: 'framework', shard: 'units', protocol: nativeSdkBootstrapProtocol },
       { profile: 'pr', component: 'framework', shard: 'refresh', protocol: 'native-bootstrap-role-capabilities-v2' },
@@ -231,6 +234,148 @@ test('T-PRD015 v4 unit runtime is required while unused SDK schema and prefix ev
       assert.deepEqual(nativeBootstrapRequirements({ target, ...options }),
         { go: true, python: true, schema: true, homebrew: mac, ownedPrefix: mac });
     }
+  }
+  const inventory = await compileValidationInventory(repositoryRoot);
+  const plan = await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
+  for (const target of ['linux-x64', 'windows-x64', 'macos-arm64', 'macos-x64']) {
+    const assignment = nativeFrameworkShardPlan({ inventory, plan, target });
+    for (const part of assignment.parts.filter(part => part.shard.startsWith('body-'))) {
+      const request = { inventory, plan, assignment, target, ...part, profile: 'pr', component: 'framework',
+        protocol: nativeBootstrapProtocol };
+      const required = nativeBootstrapRequirements(request);
+      assert.deepEqual(required, { go: part.shard === assignment.toolShard,
+        python: target.startsWith('macos-') || part.shard !== 'body-3',
+        schema: part.shard === assignment.toolShard, homebrew: false, ownedPrefix: false });
+      const calls = [];
+      await probeNativeSdk(request, async command => {
+        calls.push(command.name);
+        return { complete: true, exitCode: 0, stdout: command.name === 'go-version' ?
+          `go version ${nativeToolchain.go} darwin/arm64\n` : `Python ${nativeToolchain.python}\n` };
+      });
+      assert.deepEqual(calls, [...(required.go ? ['go-version'] : []),
+        ...(required.python ? ['python-version'] : [])]);
+      assert.deepEqual(nativeBootstrapRequirements({ ...request, protocol: nativeUnitBootstrapProtocol }),
+        { go: true, python: true, schema: true,
+          homebrew: target.startsWith('macos-'), ownedPrefix: target.startsWith('macos-') });
+      assert.throws(() => nativeBootstrapRequirements({ ...request, assignment: undefined, inventory: undefined }),
+        { code: 'INPUT' });
+    }
+    if (target.startsWith('macos-')) {
+      const request = { target, profile: 'pr', component: 'homebrew', protocol: nativeBootstrapProtocol };
+      assert.deepEqual(nativeBootstrapRequirements(request),
+        { go: false, python: false, schema: false, homebrew: true, ownedPrefix: true });
+      assert.deepEqual(await probeNativeSdk(request, () => assert.fail('Genuine Homebrew does not execute Go/Python SDKs')), {});
+      assert.throws(() => nativeBootstrapRequirements({ ...request, role: `${target}-framework-units` }),
+        { code: 'INPUT' });
+    }
+  }
+});
+
+test('T-PRD015 genuine Homebrew bootstrap records its capability and installs the complete native bottle closure', async () => {
+  for (const target of ['macos-arm64', 'macos-x64']) {
+    const architecture = target === 'macos-arm64' ? 'arm64' : 'x64';
+    const prefix = '/opt/abcde';
+    const root = '/controlled-source';
+    const directory = `${root}/.test-data/bootstrap`;
+    const rubyExecutable = `${prefix}/Library/Homebrew/vendor/portable-ruby/${homebrewToolchain.ruby}/bin/ruby`;
+    const files = new Map();
+    const calls = [];
+    const listeners = new Map();
+    const plan = {
+      schemaVersion: 1, kind: 'native-homebrew-bottle-plan', prefix, cellar: `${prefix}/Cellar`,
+      nativeTag: architecture === 'arm64' ? 'arm64_sequoia' : 'sequoia', macosVersion: '15.7',
+      relocationEnabled: true, architecture: architecture === 'arm64' ? 'arm64' : 'x86_64',
+      rubyPlatform: `${architecture}-darwin`, rubyVersion: homebrewToolchain.ruby,
+      entries: [{ name: homebrewToolchain.formula, version: homebrewToolchain.node,
+        pkgVersion: homebrewToolchain.node,
+        prefix: `${prefix}/Cellar/${homebrewToolchain.formula}/${homebrewToolchain.node}`,
+        bottleTag: architecture === 'arm64' ? 'arm64_sequoia' : 'sequoia',
+        bottleAvailable: true, compatible: true, pourable: true, builtCellar: 'any',
+        sha256: 'a'.repeat(64) }],
+    };
+    const receipt = { poured_from_bottle: true, source: { versions: { stable: homebrewToolchain.node } } };
+    const writeFile = async (file, value) => {
+      assert.equal(files.has(file), false, `Controlled bootstrap cannot overwrite ${file}`);
+      files.set(file, Buffer.from(value));
+    };
+    const folder = name => ({ name, isDirectory: () => true, isSymbolicLink: () => false });
+    const context = createContext({
+      fs: {
+        mkdir: async () => {},
+        lstat: async () => ({ isDirectory: () => true, isSymbolicLink: () => false }),
+        realpath: async file => file,
+        readdir: async file => file === plan.cellar ? [folder(homebrewToolchain.formula)] :
+          file === `${plan.cellar}/${homebrewToolchain.formula}` ? [folder(homebrewToolchain.node)] : [],
+        readFile: async file => {
+          assert.equal(file, `${plan.entries[0].prefix}/INSTALL_RECEIPT.json`);
+          assert.ok(calls.includes('brew-node-install'), 'Receipts must follow actual dispatched installation');
+          return Buffer.from(JSON.stringify(receipt));
+        },
+        writeFile,
+        open: async (file, flags) => {
+          assert.equal(flags, 'wx');
+          return { writeFile: value => writeFile(file, value), sync: async () => {}, close: async () => {} };
+        },
+      },
+      path: path.posix, os: { release: () => '24.6.0', machine: () => plan.architecture },
+      process: {
+        platform: 'darwin', arch: architecture, versions: { node: nativeToolchain.node },
+        execPath: '/controlled-actions/node', env: {},
+        on: (signal, listener) => { listeners.set(signal, listener); },
+        off: (signal, listener) => { assert.equal(listeners.get(signal), listener); listeners.delete(signal); },
+      },
+      repositoryRoot: root, targets: {
+        'macos-arm64': ['darwin', 'arm64'], 'macos-x64': ['darwin', 'x64'],
+      },
+      digest: value => digest(value !== null && typeof value === 'object' && !Buffer.isBuffer(value) ?
+        JSON.parse(JSON.stringify(value)) : value),
+      requireThat, sanitizeExecutionPayload, nativeToolchain, homebrewToolchain,
+      bootstrapRequestCapability, nativeBootstrapRequirements,
+      homebrewSetupLimits, homebrewBottlePlanSource, AbortController, AbortSignal, Buffer,
+      console: { log: () => {} },
+      nativeResourceFacts: () => ({ configuredWorkers: 4 }),
+      allocateHomebrewPrefix: async () => ({ prefix }),
+      recordHomebrewPrefixNotRequired: () => assert.fail('Genuine Homebrew requires its own allocated prefix'),
+      provisionPrCryptoFixture: async () => ({}), prCryptoFixture: {
+        bundle: { sha256: 'b'.repeat(64) }, trust: { sha256: 'c'.repeat(64) },
+      },
+      executeValidationCommand: async ({ name }) => {
+        calls.push(name);
+        assert.doesNotMatch(name, /^(?:go-|python-|schema-)/u);
+        const values = {
+          'git-version': 'git version controlled',
+          'bash-version': 'controlled bash', 'zsh-version': 'controlled zsh',
+          'mac-uname': plan.architecture, 'mac-translation': '0',
+          'brew-git-identity': homebrewToolchain.commit, 'brew-prefix': prefix, 'brew-repository': prefix,
+          'brew-ruby-identity': homebrewToolchain.ruby, 'brew-ruby-path': rubyExecutable,
+          'brew-core-identity': homebrewToolchain.coreCommit,
+          'brew-node-bottle-plan': JSON.stringify(plan),
+          'brew-node-prefix': `${prefix}/opt/${homebrewToolchain.formula}`,
+          'brew-node-identity': JSON.stringify({ version: nativeToolchain.node, platform: 'darwin', arch: architecture }),
+        };
+        return { complete: true, exitCode: 0, stdout: values[name] ?? '', stderr: '' };
+      },
+    });
+    for (const fn of [validateBootstrapRequest, nativeBootstrapEnvironment, nativeBootstrapExports,
+      portableRubyBootstrapEnvironment, requireHomebrewBottlePlan, requireHomebrewBottleReceipts]) {
+      context[fn.name] = runInContext(`(${fn.toString()})`, context);
+    }
+    const bootstrap = runInContext(`(${bootstrapNativeToolchain.toString()})`, context);
+    const request = { target, outputDir: '.test-data/bootstrap', profile: 'pr',
+      component: 'homebrew', role: `${target}-homebrew` };
+    const result = await bootstrap(request);
+    const expectedReports = ['brew-node-bottle-plan', 'brew-node-install', 'brew-node-prefix', 'brew-node-identity'];
+    for (const name of expectedReports) assert.equal(calls.filter(call => call === name).length, 1, name);
+    assert.ok(calls.indexOf('brew-node-bottle-plan') < calls.indexOf('brew-node-install'));
+    assert.ok(calls.indexOf('brew-node-install') < calls.indexOf('brew-node-identity'));
+    assert.equal(result.report.status, 'Passed');
+    const retained = JSON.parse(files.get(`${directory}/toolchain.json`).toString('utf8'));
+    assert.equal(retained.status, 'Passed');
+    assert.deepEqual(requireNativeBootstrapCapability({ ...request, bootstrap: retained, prefix,
+      protocol: nativeBootstrapProtocol }), nativeBootstrapCapability({ ...request, protocol: nativeBootstrapProtocol }));
+    assert.equal(files.has(`${directory}/homebrew-bottle-plan.json`), true);
+    assert.equal(files.has(`${directory}/homebrew-bottle-receipts.json`), true);
+    assert.equal(listeners.size, 0);
   }
 });
 

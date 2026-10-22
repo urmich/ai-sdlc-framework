@@ -12,6 +12,7 @@ import { allocateHomebrewPrefix, cleanupHomebrewPrefix,
   recordHomebrewPrefixNotRequired } from './native-homebrew-prefix.mjs';
 import { provisionPrCryptoFixture, prCryptoFixture } from './pr-capabilities.mjs';
 import { bootstrapRequestCapability, nativeBootstrapRequirements } from './native-bootstrap-capability.mjs';
+import { compileValidationInventory } from './validation-inventory.mjs';
 
 export { homebrewToolchain };
 export const homebrewBottlePlanSource = `
@@ -169,8 +170,12 @@ export function requireHomebrewBottleReceipts(plan, receipts) {
 }
 
 export async function bootstrapNativeToolchain(options) {
-  const capability = bootstrapRequestCapability(options);
-  const tools = nativeBootstrapRequirements({ ...options, protocol: capability?.protocol ?? null });
+  const source = options.component === 'framework' && options.shard?.startsWith('body-') ? {
+    inventory: await compileValidationInventory(repositoryRoot),
+    plan: await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8'),
+  } : {};
+  const capability = bootstrapRequestCapability({ ...options, ...source });
+  const tools = nativeBootstrapRequirements({ ...options, ...source, protocol: capability?.protocol ?? null });
   const directory = validateBootstrapRequest(options);
   let current = repositoryRoot;
   for (const part of path.relative(repositoryRoot, directory).split(path.sep)) {
@@ -318,7 +323,7 @@ export async function bootstrapNativeToolchain(options) {
       const actualCoreCommit = await run('brew-core-identity', 'git', ['-C', coreRoot, 'rev-parse', 'HEAD']);
       requireThat(actualCoreCommit === homebrewToolchain.coreCommit, 'HOST',
         'The complete Homebrew dependency snapshot must match its selected immutable core commit');
-      if (capability) {
+      if (capability && options.component === 'framework') {
         retained.native.homebrew = { commit: actualCommit, coreCommit: actualCoreCommit,
           ruby, rubyExecutable, prefix: brewRoot, repository: brewRoot,
           nodeProvisioned: false, bottlesProvisioned: false,
@@ -444,13 +449,16 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   const args = process.argv.slice(2);
   const cleanup = args[0] === '--cleanup';
   if (cleanup) args.shift();
-  requireThat((args.length === 4 || !cleanup && args.length === 12 &&
+  requireThat((args.length === 4 || !cleanup && args.length === 10 &&
+    args[4] === '--profile' && args[6] === '--component' && args[7] === 'homebrew' && args[8] === '--role' ||
+    !cleanup && args.length === 12 &&
     args[4] === '--profile' && args[6] === '--component' && args[8] === '--framework-shard' &&
     args[10] === '--role') && args[0] === '--target' && args[2] === '--output-dir',
     'INPUT', 'Usage: native-toolchain.mjs [--cleanup] --target PLATFORM --output-dir OWNED_DIRECTORY ' +
-    '[--profile pr --component framework --framework-shard SHARD --role ROLE]');
+    '[--profile pr --component framework --framework-shard SHARD --role ROLE | --profile pr --component homebrew --role ROLE]');
   const request = { target: args[1], outputDir: args[3],
-    ...(args.length === 12 ? { profile: args[5], component: args[7], shard: args[9], role: args[11] } : {}) };
+    ...(args.length === 12 ? { profile: args[5], component: args[7], shard: args[9], role: args[11] } :
+      args.length === 10 ? { profile: args[5], component: args[7], role: args[9] } : {}) };
   if (cleanup) await cleanupNativeToolchain(request);
   else await bootstrapNativeToolchain(request);
 }

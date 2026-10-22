@@ -23,7 +23,7 @@ import { createReadinessGitHubClient } from '../scripts/github-readiness-host.mj
 import { createPrReadinessHost, statusConcurrencyGroup } from '../scripts/pr-observer.mjs';
 import { calculatorFiles, calculatorSelection, calculatorCommandArguments } from '../scripts/pr-calculator.mjs';
 import { validationExecutionGroups, validationGroupProtocol, validationSchedulingPolicyDigest } from '../scripts/test-scheduling.mjs';
-import { nativeToolchain, homebrewToolchain } from '../scripts/toolchain-baseline.mjs';
+import { nativeToolchain, homebrewToolchain, nativeBootstrapProtocol } from '../scripts/toolchain-baseline.mjs';
 import { nativeBootstrapCapability, nativeSdkRequirements, nativeBootstrapRequirements } from '../scripts/native-bootstrap-capability.mjs';
 
 const repository = 'urmich/ai-sdlc-framework';
@@ -338,8 +338,10 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
     inventory: source.inventory, plan: source.plan, target, protocol: shardProtocol,
   });
   const part = assignment?.parts.find(part => part.shard === shard);
-  const tools = nativeSdkRequirements({ target, profile, component, shard, protocol: bootstrapProtocol });
-  const resourcesRequired = nativeBootstrapRequirements({ target, profile, component, shard, protocol: bootstrapProtocol });
+  const bootstrapOptions = { inventory: source.inventory, plan: source.plan, assignment,
+    target, profile, component, shard, shardProtocol, protocol: bootstrapProtocol };
+  const tools = nativeSdkRequirements(bootstrapOptions);
+  const resourcesRequired = nativeBootstrapRequirements(bootstrapOptions);
   const at = seconds => new Date(startTime + seconds * 1000).toISOString();
   const commandReport = (name, target, context, args, start, finish, stdout = '') =>
     commandRecord(name, target, context, args, start, finish, stdout, at);
@@ -376,12 +378,13 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
       `/opt/${digest(role).slice(0, 5)}/opt/${homebrewToolchain.formula}`,
     uname: architecture === 'arm64' ? 'arm64' : 'x86_64', translation: '0',
   };
-  if (bootstrapProtocol !== null && component === 'framework' && shard !== null) {
-    const capability = nativeBootstrapCapability({ target, profile, component, shard, role, protocol: bootstrapProtocol });
+  if (bootstrapProtocol !== null && (component === 'framework' && shard !== null ||
+    bootstrapProtocol === nativeBootstrapProtocol && component === 'homebrew')) {
+    const capability = nativeBootstrapCapability({ ...bootstrapOptions, role });
     bootstrap.native.bootstrapCapability = capability;
     bootstrap.native.runtimeProvider = { provider: capability.runtimeProvider, executable: bootstrap.native.executables.node,
       version: nativeToolchain.node, platform: platforms[target], architecture };
-    if (target.startsWith('macos-')) {
+    if (target.startsWith('macos-') && component === 'framework') {
       const prefix = `/opt/${digest(role).slice(0, 5)}`;
       bootstrap.native.homebrew = { commit: homebrewToolchain.commit, coreCommit: homebrewToolchain.coreCommit,
         ruby: homebrewToolchain.ruby,
@@ -390,6 +393,15 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
         uname: architecture === 'arm64' ? 'arm64' : 'x86_64', translation: '0' };
       bootstrap.reports = bootstrap.reports.filter(report => !report.name.startsWith('brew-node-'));
       bootstrap.reports.push({ name: 'brew-core-identity', complete: true, exitCode: 0 });
+    }
+    if (component === 'homebrew') {
+      const prefix = `/opt/${digest(role).slice(0, 5)}`;
+      Object.assign(bootstrap.native.homebrew, { coreCommit: homebrewToolchain.coreCommit,
+        rubyExecutable: `${prefix}/Library/Homebrew/vendor/portable-ruby/${homebrewToolchain.ruby}/bin/ruby`,
+        bottlePlan: { prefix, nativeTag: architecture === 'arm64' ? 'arm64_sequoia' : 'sequoia' },
+        bottleReceiptsDigest: 'a'.repeat(64) });
+      bootstrap.reports.push(...['brew-core-identity', 'brew-node-bottle-plan']
+        .map(name => ({ name, complete: true, exitCode: 0 })));
     }
   }
   const specification = nativeSpecification({ plan: source.plan, inventory: source.inventory,
@@ -417,7 +429,8 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
   const context = validateExecutionContext({
     candidateDigest: digest({ revision: revisions.merge, tree: source.sha }),
     testSpecDigest: testSpecificationDigest(source.plan),
-    configDigest: nativeConfigurationDigest({ inventory: source.inventory, profile, target, component, shard, shardProtocol, bootstrapProtocol,
+    configDigest: nativeConfigurationDigest({ inventory: source.inventory, plan: source.plan, assignment,
+      profile, target, component, shard, shardProtocol, bootstrapProtocol,
       shardPlanDigest: assignment?.digest ?? null }),
     inventoryDigest: validationInventoryDigest(specification),
     sources: [{ repositoryId: `repository-${repositoryId}`, revision: revisions.merge,

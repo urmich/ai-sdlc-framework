@@ -354,6 +354,8 @@ Under historical bootstrap v3/v2/null, all thirteen Mac producer prefixes requir
 distinct owned allocation and matching guarded cleanup. Bootstrap v4 instead
 requires eight real owners and five nonallocation proofs across thirteen
 diagnostic artifacts, as specified below; no producer may borrow another's receipt.
+Bootstrap v5 requires two genuine Homebrew owners and eleven source-bound
+nonallocation proofs, retaining all thirteen diagnostic artifacts and steps.
 Keep default whole-native execution and release prepublication compatible.
 The required logical lane span remains under fifteen minutes from its earliest
 required unit/framework/Homebrew worker start through its last evidence/cleanup
@@ -433,6 +435,47 @@ while five carry exact source/run/role-bound nonallocation requests without
 allocation or removal receipts. Historical v3/v2/null digests and real ownership
 requirements do not acquire this exception. No assertion, causal root, stress
 boundary, shard assignment or worker policy changes with this setup optimization.
+
+The distinct source-selected `native-bootstrap-role-capabilities-v5` removes
+only setup that has no semantic consumer in the complete selected closure:
+
+| Producer on the current source | Go | CPython runtime | Schema packages | Brew/core/Ruby/owned prefix |
+| --- | --- | --- | --- | --- |
+| Every framework `body-0` | Required | Required | Required | Not required |
+| Linux/Windows `body-1` and `body-2` | Not required | Required | Not required | Not required |
+| Linux/Windows `body-3` | Not required | Not required | Not required | Not required |
+| Both Mac `body-1` and `body-2` | Not required | Required | Not required | Not required |
+| All current unit partitions | Not required | Required | Not required | Not required |
+| Refresh | Not required | Not required | Not required | Not required |
+| Genuine Homebrew on both Mac architectures | Not required | Not required | Not required | Required |
+
+The implementation follows the existing source-selected root closures rather
+than hardcoding body order. The real pinned Go/schema root and native launcher
+roots retain their tests, vet, native executable behavior and two independent
+cold-cache builds. Artifact consumers retain stdlib CPython subprocess readers;
+consumer roots retain the real non-Node producer. Even Intel's main unit partition
+contains actual observer-reader consumers, so its Python requirement remains
+conservative; the consumer producer on `units-1` is not the only Python caller.
+Body packaging consumes the source/digest/ownership-verified frozen PE; copying
+that fixture does not establish or replace compiler reproducibility.
+
+Framework Homebrew switch/metadata/quality tests use owned fixtures and injected
+commands, not the bootstrap Brew executable. Genuine Homebrew keeps the complete
+native Node bottle dependency closure, pinned Brew/core/Ruby, actual audit/style,
+previous/current lifecycle, runtime retention and guarded cleanup. Removing its
+independent Go/CPython/schema SDK setup does not prune any bottle dependency.
+Whole/full and R-PRE requirements are unchanged. Unknown tool use remains
+required rather than receiving an omission.
+
+Bind v5's closed requirements into source workflow SDK dispatch, bootstrap
+capture, configuration, component projection, replay and protected admission.
+Omitted facts/probes/schema/ownership receipts must be absent. Preserve all
+twenty-five origins, twenty-three framework origins and thirteen Mac diagnostic
+artifacts; only the two genuine Homebrew roles allocate real prefixes. Preserve
+v4's eight real owners/five nonallocations and every older serialized shape,
+configuration/specification digest and ownership requirement. Native timing and
+actual CPython/native tool acceptance remain NotRun until their capable PR lanes
+execute; Node-only regressions do not establish a native speedup.
 
 The PR workflow explicitly allocates 15 shared test-worker slots on Linux and
 Windows, 7 on Apple Silicon, four on both Intel unit hosts and fourteen on Intel
@@ -521,6 +564,28 @@ performing an unguarded one-shot rename. Keep the initial exclusive report
 claim, staged-file durability and explicit failure/cancellation behavior.
 An exhausted or unclassified replacement error remains non-passing; no test
 deadline, output bound or worker liveness assertion is relaxed.
+
+On Windows, test polling of mutable checkpoints uses same-turn synchronous
+reads so the test itself does not hold a read handle across an awaited atomic
+replacement. A retained checkpoint error fails explicitly; it is not a fresh
+active-worker observation. Production replacement recovery is unchanged.
+
+Windows owned-process test assertions share a held-original-process observer rather than
+interpreting a currently occupied PID as the original worker. Capture creation
+identity behind the live ready barrier, then compare kernel exit time against
+the immutable original producer-close event with the existing conservative
+millisecond bound. Unknown identity, a live original, late exit and same-bucket
+ambiguity fail. The sibling-capacity fixture keeps a real independent broker
+producer active across these checks; later global closure is not a substitute
+for each worker's own completion boundary. Await attached observer cleanup
+without changing deadlines or claiming the original CI proved PID reuse.
+
+POSIX tool-cancellation fixtures retain their strict original PID-exit assertion.
+Publish owned-process ready identities before cancellation and retain bounded
+exact-PID state/creation observations without command lines or environment data.
+A diagnostic query after strict failure is timestamped as a later observation,
+never proof of state at the earlier command return. One-second creation matches
+are not unique identity proof; unknown state never changes a failure to a pass.
 
 Checkpoint retention rejection preserves a bounded invalid-partial record with
 the actual cause and original snapshot identity, not passing observation rows.

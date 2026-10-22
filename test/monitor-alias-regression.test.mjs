@@ -205,12 +205,35 @@ for (const order of ['historical-first', 'current-first']) {
     const first = await attach(store, identities[0]);
     await complete(store, first);
     const before = await fs.readFile(activePath(store, first.key));
-    const [pruned, attached] = await Promise.all([
-      pruneMonitor(store, { runKey: first.key }), attach(store, identities[1]),
-    ]);
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const withWorkItemLocks = store.withWorkItemLocks;
+    store.withWorkItemLocks = async (...args) => {
+      entered.resolve();
+      await release.promise;
+      return withWorkItemLocks.apply(store, args);
+    };
+    const pruning = pruneMonitor(store, { runKey: first.key });
+    let pruned;
+    try {
+      // Pruning owns the live monitor lock until dependency inspection completes.
+      await Promise.race([entered.promise, pruning]);
+      const lock = `${activePath(store, first.key)}.lock`;
+      const owner = await fs.readFile(lock);
+      await assert.rejects(attach(store, identities[1]), { code: 'LOCK_BUSY' });
+      assert.deepEqual(await fs.readFile(lock), owner);
+      assert.deepEqual(await fs.readFile(activePath(store, first.key)), before);
+    } finally {
+      release.resolve();
+      store.withWorkItemLocks = withWorkItemLocks;
+      pruned = await pruning;
+    }
+    const attached = await attach(store, identities[1]);
     assert.equal(pruned.archived, true);
     assert.equal(attached.key, first.key);
     assert.deepEqual(await fs.readFile(archivePath(store, first.key)), before);
+    assert.deepEqual(await fs.readdir(path.dirname(archivePath(store, first.key))),
+      [`${first.key}.json`]);
     assert.equal(await readActiveMonitor(store, first.key), null);
     assert.equal(await readMonitor(store, runKey(identities[1])), null);
     assert.deepEqual(await dueMonitors(store), []);

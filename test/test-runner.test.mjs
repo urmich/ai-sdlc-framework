@@ -58,6 +58,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
@@ -69,6 +70,7 @@ import { readTestBudget } from '../scripts/test-budget.mjs';
 import { digest } from '../src/core.mjs';
 import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
 import { executeValidationCommand, processDiagnostic } from '../scripts/validation-tools.mjs';
+import { windowsProcessIdentity, assertOwnedProcessExited } from './owned-process-fixture.mjs';
 
 const canonicalNames = [
   'T-101 selected fetch remote requires exactly one credential-free URL',
@@ -129,73 +131,7 @@ function summary(output, kind) {
   return JSON.parse(line.slice(prefix.length));
 }
 
-async function windowsProcessIdentity(pid, exitPath) {
-  assert.ok(Number.isSafeInteger(pid) && pid > 0);
-  const script = `$ErrorActionPreference='Stop';$p=Get-Process -Id ${pid} -ErrorAction Stop;` +
-    `try{$null=$p.Handle;$creation=$p.StartTime.ToUniversalTime().Ticks.ToString();$image=$p.ProcessName;` +
-    `@{pid=${pid};present=$true;creationTime=$creation;image=$image;` +
-    `observedAt=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Compress;` +
-    `if(!$p.WaitForExit(15000)){throw 'Original owned worker did not exit within its observation budget'};` +
-    `$record=@{pid=${pid};present=$false;creationTime=$creation;image=$image;` +
-    `exitTimeTicks=$p.ExitTime.ToUniversalTime().Ticks.ToString();observedAt=[DateTime]::UtcNow.ToString('o')};` +
-    `[IO.File]::WriteAllText('${exitPath.replaceAll("'", "''")}.tmp',($record|ConvertTo-Json -Compress));` +
-    `[IO.File]::Move('${exitPath.replaceAll("'", "''")}.tmp','${exitPath.replaceAll("'", "''")}')` +
-    `}catch{[IO.File]::WriteAllText('${exitPath.replaceAll("'", "''")}.error',` +
-    `($_.Exception.GetType().FullName+': '+$_.Exception.Message));exit 1}` +
-    `finally{try{if(!$p.HasExited){$p.Kill();$p.WaitForExit()}}finally{$p.Dispose()}}`;
-  const child = spawn(path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-    ['-NoProfile', '-NonInteractive', '-Command', script],
-    { shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
-  const closed = new Promise(resolve => child.once('close', (code, signal) => resolve({ code, signal })));
-  let stdout = '';
-  let stderrBytes = 0;
-  child.stderr.on('data', bytes => { stderrBytes += bytes.length; });
-  const value = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Owned process identity capture did not complete')), 5000);
-    child.once('error', error => { clearTimeout(timer); reject(error); });
-    child.once('close', (code, signal) => {
-      clearTimeout(timer);
-      reject(new Error(JSON.stringify({ kind: 'process-identity-unavailable', pid, code, signal, stderrBytes })));
-    });
-    child.stdout.on('data', bytes => {
-      stdout += bytes;
-      if (!stdout.includes('\n')) return;
-      clearTimeout(timer);
-      try { resolve(JSON.parse(stdout.trim())); } catch (error) { reject(error); }
-    });
-  });
-  assert.equal(value.pid, pid);
-  assert.equal(typeof value.present, 'boolean');
-  assert.ok(Number.isFinite(Date.parse(value.observedAt)));
-  if (value.present) {
-    assert.match(value.creationTime, /^[0-9]+$/u);
-    assert.match(value.image, /^[A-Za-z0-9_.-]+$/u);
-  }
-  return { identity: value, closed };
-}
-
-function assertOwnedProcessExited(owned, observed, completedAtMs) {
-  assert.equal(owned.present, true, 'Owned identity must be captured while the worker is alive');
-  assert.equal(observed.pid, owned.pid);
-  assert.match(owned.creationTime, /^[0-9]+$/u);
-  assert.match(owned.image, /^[A-Za-z0-9_.-]+$/u);
-  assert.equal(typeof observed.present, 'boolean');
-  assert.match(observed.creationTime, /^[0-9]+$/u);
-  assert.match(observed.image, /^[A-Za-z0-9_.-]+$/u);
-  const sameProcess = observed.creationTime === owned.creationTime &&
-    observed.image.toLowerCase() === owned.image.toLowerCase();
-  const diagnostic = 'No owned file process may survive the nested command: ' +
-    JSON.stringify({ owned, observed, completedAtMs, completionClockPrecisionMs: 1 });
-  if (observed.present) { assert.equal(sameProcess, false, diagnostic); return; }
-  assert.equal(sameProcess, true, 'Exit observation must identify the held original process');
-  assert.match(observed.exitTimeTicks, /^[0-9]+$/u);
-  assert.ok(Number.isSafeInteger(completedAtMs));
-  // Completion is a millisecond lower bound; same-bucket ordering is unknown and fails closed.
-  assert.ok(BigInt(observed.exitTimeTicks) <
-    BigInt(completedAtMs) * 10000n + 621355968000000000n, diagnostic);
-}
-
-test('T-PRD018 owned worker exit assertions distinguish reused identities from surviving workers', () => {
+test('T-PRD018 owned worker exit assertions distinguish reused identities from surviving workers', async t => {
   const owned = { pid: process.pid, present: true, creationTime: '100', image: 'node' };
   const reused = { ...owned, creationTime: '101' };
   assert.doesNotThrow(() => process.kill(process.pid, 0));
@@ -213,6 +149,17 @@ test('T-PRD018 owned worker exit assertions distinguish reused identities from s
   assert.throws(() => assertOwnedProcessExited({ ...owned, present: false }, reused),
     /captured while the worker is alive/u);
   assert.throws(() => assertOwnedProcessExited(owned, { ...owned, creationTime: undefined }));
+  if (process.platform === 'win32') {
+    const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'owned-identity-'));
+    t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+    const exitPath = path.join(evidence, 'unexpected-creation.json');
+    await assert.rejects(windowsProcessIdentity(process.pid, exitPath), /live ready observation/u);
+    await assert.rejects(windowsProcessIdentity(process.pid, exitPath, { createdBeforeMs: 0 }),
+      /process-identity-unavailable/u);
+    assert.match(await fs.readFile(`${exitPath}.error`, 'utf8'), /creation does not predate its ready observation/u);
+    assert.doesNotThrow(() => process.kill(process.pid, 0),
+      'Rejecting an unexpected creation must never terminate that process');
+  }
 });
 
 test('T-PRD018 runner assertion diagnostics retain subprocess identities without inline source', () => {
@@ -618,13 +565,14 @@ test('T-PRD018 unsafe failure diagnostics terminate without hanging or manufactu
     const privateValue = 'fixture-worker-private-value';
     const guide = `# Current installation\n\n\`\`\`js\nconst config = { authorization: '${privateValue}' };\n\`\`\`\n`;
     await fs.writeFile(legitimate, `import test from 'node:test';import assert from 'node:assert/strict';
-import {writeFileSync} from 'node:fs';import {createHash} from 'node:crypto';
+import {writeFileSync,existsSync,renameSync} from 'node:fs';import {createHash} from 'node:crypto';
 import path from 'node:path';
-import {existsSync} from 'node:fs';
 import {setTimeout as delay} from 'node:timers/promises';
 async function captureOwnedIdentity(label){
   if(process.platform!=='win32')return;
-  writeFileSync(path.join(${JSON.stringify(evidence)},label+'.ready'),String(process.pid));
+  const ready=path.join(${JSON.stringify(evidence)},label+'.ready');
+  writeFileSync(ready+'.pending',JSON.stringify({pid:process.pid,observedAtMs:Date.now()}));
+  renameSync(ready+'.pending',ready);
   while(!existsSync(path.join(${JSON.stringify(evidence)},label+'.release')))await delay(10);
 }
 test('legitimate Markdown assertion failure',async()=>{
@@ -653,8 +601,10 @@ test('passing sibling after diagnostic rejection',async()=>{
             if (error.code === 'ENOENT') return false;
             throw error;
           }), 'owned worker identity barrier');
-          const pid = Number(await fs.readFile(ready, 'utf8'));
-          const monitor = await windowsProcessIdentity(pid, path.join(evidence, `${pid}.exit.json`));
+          const readyIdentity = JSON.parse(await fs.readFile(ready, 'utf8'));
+          const pid = readyIdentity.pid;
+          const monitor = await windowsProcessIdentity(pid, path.join(evidence, `${pid}.exit.json`),
+            { createdBeforeMs: readyIdentity.observedAtMs });
           monitors.push(monitor.closed);
           t.diagnostic(JSON.stringify({ kind: 'owned-worker-identity-captured',
             owned: monitor.identity, capturedBeforeTrigger: true }));
@@ -962,9 +912,14 @@ export async function readTestGroupProcesses(groupId){
       }
       let report;
       await waitFor(async () => {
-        const bytes = await fs.readFile(reportPath);
+        // Do not retain a Windows replacement-blocking read handle across thread-pool turns.
+        const bytes = readFileSync(reportPath);
         if (!bytes.length) return false;
         report = JSON.parse(bytes);
+        assert.equal(report.checkpointError, undefined, JSON.stringify({
+          kind: 'checkpoint-persistence-failed', checkpoint: report.checkpoint,
+          cause: report.checkpointError,
+        }));
         return report.groupExecution.groups.some(group =>
           report.checkpoint.activeGroupIds.includes(group.id) && group.processIds.includes(owned.pid));
       }, 'periodic durable checkpoint while the next root is silently blocked');
@@ -1158,7 +1113,7 @@ if(process.connected) process.disconnect();
         const contents = await fs.readFile(`${reportPath}.journal.ndjson`, 'utf8');
         return contents.includes('"kind":"start"');
       }, 'durably flushed running output before final report');
-      const partial = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+      const partial = JSON.parse(readFileSync(reportPath, 'utf8'));
       assert.equal(partial.complete, false);
       assert.equal(partial.finishedAt, null);
       assert.equal(partial.exitCode, null);

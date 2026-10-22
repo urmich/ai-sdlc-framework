@@ -26,10 +26,10 @@ import { calculatorFiles } from '../scripts/pr-calculator.mjs';
 import { deriveNativeComponentSpecification, nativeComponentSelection,
   projectNativeComponentEvidence, replayNativeComponentEvidence } from '../scripts/native-components.mjs';
 import { compileValidationSourceInventory } from '../scripts/validation-inventory.mjs';
-import { nativeBootstrapProtocol } from '../scripts/toolchain-baseline.mjs';
+import { nativeBootstrapProtocol, nativeUnitBootstrapProtocol } from '../scripts/toolchain-baseline.mjs';
 
 test('T-PRD021 source-bound role bootstrap preserves all producer origins and thirteen independent Mac cleanups', async t => {
-  for (const protocol of ['native-bootstrap-role-capabilities-v3', nativeBootstrapProtocol]) {
+  for (const protocol of ['native-bootstrap-role-capabilities-v3', nativeUnitBootstrapProtocol, nativeBootstrapProtocol]) {
   const f = await observerApiFixture(t, { frameworkShards: true, bootstrapProtocol: protocol,
     nodeArtifactReader: true });
   const { host, client } = f.connect();
@@ -54,13 +54,19 @@ test('T-PRD021 source-bound role bootstrap preserves all producer origins and th
       }
     } else {
       assert.equal(bootstrap.native.homebrew.node.version, '24.20.0');
-      assert.equal(Object.hasOwn(bootstrap.native, 'bootstrapCapability'), false);
+      assert.equal(Object.hasOwn(bootstrap.native, 'bootstrapCapability'), protocol === nativeBootstrapProtocol);
+      if (protocol === nativeBootstrapProtocol) {
+        assert.equal(Object.hasOwn(bootstrap.native, 'go'), false);
+        assert.equal(Object.hasOwn(bootstrap.native, 'python'), false);
+        assert.equal(Object.hasOwn(bootstrap.native, 'schemaPackages'), false);
+      }
     }
     if (f.cleanupReports.has(part.role)) {
       const entries = f.cleanupReports.get(part.role);
       const data = { ...Object.fromEntries(entries), texts: Object.fromEntries([...entries]
         .map(([file, value]) => [file, typeof value === 'string' ? value : canonical(value)])) };
-      const expected = { ...part, bootstrapProtocol: protocol, jobKey: nativePartJobKey(part) };
+      const expected = { inventory: f.source.inventory, plan: f.source.plan,
+        ...part, bootstrapProtocol: protocol, jobKey: nativePartJobKey(part) };
       const checked = verifyNativeCleanup(data, expected);
       if (checked.prefix) prefixes.push(checked.prefix);
       else {
@@ -82,7 +88,8 @@ test('T-PRD021 source-bound role bootstrap preserves all producer origins and th
       }
     }
   }
-  assert.equal(prefixes.length, protocol === nativeBootstrapProtocol ? 8 : 13);
+  assert.equal(prefixes.length, protocol === nativeBootstrapProtocol ? 2 :
+    protocol === nativeUnitBootstrapProtocol ? 8 : 13);
   assert.equal(new Set(prefixes).size, prefixes.length);
   const retained = host.componentEvidence();
   assert.equal(retained[0].projection.definition.bootstrapProtocol, protocol);
@@ -499,9 +506,13 @@ test('T-PRD021 versioned twenty-five twenty-four and twenty-part originals requi
     [nativePlatformUnitFrameworkShardProtocol, null], [nativeLegacyFrameworkShardProtocol, null],
     [nativeFourBodyFrameworkShardProtocol, 'native-bootstrap-role-capabilities-v2'],
     [nativeFrameworkShardProtocol, 'native-bootstrap-role-capabilities-v3'],
-    [nativeFourBodyFrameworkShardProtocol, nativeBootstrapProtocol],
+    [nativeFourBodyFrameworkShardProtocol, nativeUnitBootstrapProtocol],
     [nativeFrameworkShardProtocol, 'native-bootstrap-role-capabilities-v2'],
-    [nativeFrameworkShardProtocol, nativeBootstrapProtocol]]) {
+    [nativeFrameworkShardProtocol, nativeUnitBootstrapProtocol],
+    [nativeFrameworkShardProtocol, nativeBootstrapProtocol],
+    [nativeFourBodyFrameworkShardProtocol, nativeBootstrapProtocol],
+    [nativePlatformUnitFrameworkShardProtocol, nativeBootstrapProtocol],
+    [nativeLegacyFrameworkShardProtocol, nativeBootstrapProtocol]]) {
   const f = await observerApiFixture(t, { frameworkShards: true, shardProtocol, bootstrapProtocol,
     ambient: shardProtocol === nativeFrameworkShardProtocol });
   const expectedCount = nativePrPartsForProtocol(shardProtocol).length;
@@ -525,12 +536,14 @@ test('T-PRD021 versioned twenty-five twenty-four and twenty-part originals requi
       candidate: f.candidate, sourceFiles, plan: f.source.plan, context: part.context, bootstrapProtocol });
     if (f.cleanupReports.has(part.role)) {
       const cleanup = verifyNativeCleanup(dictionary(f.cleanupReports.get(part.role)),
-        { ...part, bootstrapProtocol, jobKey: nativePartJobKey(part, shardProtocol) });
+        { inventory: f.source.inventory, plan: f.source.plan,
+          ...part, bootstrapProtocol, shardProtocol, jobKey: nativePartJobKey(part, shardProtocol) });
       if (cleanup.prefix) prefixes.push(cleanup.prefix);
       else assert.equal(cleanup.status, 'not-required');
     }
   }
-  const expectedMacCount = bootstrapProtocol === nativeBootstrapProtocol ? 8 :
+  const expectedMacCount = bootstrapProtocol === nativeBootstrapProtocol ? 2 :
+    bootstrapProtocol === nativeUnitBootstrapProtocol ? 8 :
     shardProtocol === nativeFrameworkShardProtocol ? 13 : 12;
   assert.equal(prefixes.length, expectedMacCount);
   assert.equal(new Set(prefixes).size, expectedMacCount);
@@ -629,7 +642,7 @@ test('T-PRD021 versioned twenty-five twenty-four and twenty-part originals requi
     }) });
   assert.equal(replay.evaluation.status, 'Passed');
   assert.equal(replay.currentCredit, 'NotRun', 'Historical shard replay must never grant current-candidate credit');
-  if (bootstrapProtocol === nativeBootstrapProtocol) {
+  if ([nativeUnitBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol)) {
     for (const file of ['native-homebrew-prefix-allocation.json', 'native-homebrew-prefix-cleanup.json']) {
       const invented = new Map(refresh.data);
       invented.set(file, { status: 'Passed', prefix: '/opt/abcde' });

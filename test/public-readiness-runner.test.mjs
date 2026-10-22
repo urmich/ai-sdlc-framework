@@ -54,6 +54,8 @@ import { readEvidenceBundle } from '../src/evidence.mjs';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { deriveLocalSanitySpecification, localEvidenceFailureDiagnostic } from '../scripts/test-local-evidence.mjs';
+import { processDiagnostic } from '../scripts/validation-tools.mjs';
+import { windowsProcessIdentity, assertOwnedProcessExited } from './owned-process-fixture.mjs';
 
 const execute = promisify(execFile);
 const requiredCriticalSelectors = [
@@ -331,14 +333,19 @@ async function runnerFixture(t, { riskBoundaries = false, timedUnit = false, blo
     ].join('\n'));
   }
   const invoke = async (args, env = {}) => {
+    let completedAtMs;
     try {
-      const output = await execute(process.execPath, [path.join(root, 'scripts', 'test-runner.mjs'), ...args],
+      const pending = execute(process.execPath, [path.join(root, 'scripts', 'test-runner.mjs'), ...args],
         { cwd: root, env: { ...process.env, SDLC_TEST_WORKERS: '2', ...env },
           maxBuffer: 4 * 1024 * 1024 });
-      return { ...output, exitCode: 0 };
+      pending.child.prependOnceListener('close', () => { completedAtMs = Date.now(); });
+      const output = await pending;
+      assert.ok(Number.isSafeInteger(completedAtMs), 'Original producer completion boundary is required');
+      return { ...output, exitCode: 0, completedAtMs };
     } catch (error) {
       if (typeof error.code !== 'number') throw error;
-      return { stdout: error.stdout, stderr: error.stderr, exitCode: error.code };
+      assert.ok(Number.isSafeInteger(completedAtMs), 'Original failed producer completion boundary is required');
+      return { stdout: error.stdout, stderr: error.stderr, exitCode: error.code, completedAtMs };
     }
   };
   return { root, log, enteredFile, invoke, tests, unitNames,
@@ -1295,33 +1302,136 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
   const f = await runnerFixture(t);
   const inheritedBudget = Boolean(process.env.SDLC_TEST_BUDGET);
   const budget = await enterTestBudget({ workers: 2, fileCount: 2, control: true });
-  t.after(() => budget.close());
+  let independent;
+  t.after(async () => {
+    try { if (independent) await independent.close(); }
+    finally { await budget.close(); }
+  });
+  independent = await enterTestBudget({ workers: 2, fileCount: 1,
+    inherited: budget.inherited, parent: budget.parent, slot: null });
   const entered = path.join(f.root, '.test-data', 'dynamic-capacity');
   await fs.mkdir(entered, { recursive: true });
   const slow = path.join(f.root, 'test', 'dynamic-slow.test.mjs');
   const sibling = path.join(f.root, 'test', 'dynamic-sibling.test.mjs');
   const common = "import test from 'node:test';import assert from 'node:assert/strict';" +
-    "import * as fs from 'node:fs/promises';import {setTimeout as delay} from 'node:timers/promises';";
+    "import * as fs from 'node:fs/promises';import path from 'node:path';" +
+    "import {setTimeout as delay} from 'node:timers/promises';" +
+    `async function ownedReady(label){
+      if(process.platform!=='win32')return;
+      const ready=path.join(${JSON.stringify(entered)},label+'.ready');
+      const release=path.join(${JSON.stringify(entered)},label+'.release');
+      await fs.writeFile(ready+'.pending',JSON.stringify({pid:process.pid,observedAtMs:Date.now()}),{flag:'wx'});
+      await fs.rename(ready+'.pending',ready);
+      while(true){try{await fs.stat(release);break;}
+        catch(error){if(error.code!=='ENOENT')throw error;}
+        await delay(10);}
+    }`;
+  const runOwnedPhase = async (files, paths, labels) => {
+    const monitors = new Map();
+    const releases = labels.flat().map(label => path.join(entered, `${label}.release`));
+    const releaseAll = () => Promise.all(releases.map(file => fs.writeFile(file, 'released')));
+    const capture = process.platform !== 'win32' ? Promise.resolve(null) :
+      Promise.allSettled(labels.flat().map(async label => {
+        const ready = path.join(entered, `${label}.ready`);
+        const deadline = Date.now() + 10000;
+        let owned;
+        while (!owned) {
+          try { owned = JSON.parse(await fs.readFile(ready, 'utf8')); }
+          catch (error) {
+            if (error.code !== 'ENOENT') throw error;
+            assert.ok(Date.now() < deadline, `Owned worker never reached its identity barrier: ${label}`);
+            await delay(10);
+          }
+        }
+        assert.ok(Number.isSafeInteger(owned.observedAtMs),
+          'The live worker ready observation must establish its creation bound');
+        const exitPath = path.join(entered, `${label}.exit.json`);
+        const monitor = await windowsProcessIdentity(owned.pid, exitPath, { createdBeforeMs: owned.observedAtMs });
+        monitors.set(label, { ...monitor, exitPath });
+        t.diagnostic(JSON.stringify({ kind: 'owned-worker-identity-captured',
+          owned: monitor.identity, capturedBeforeTrigger: true, label }));
+        await fs.writeFile(path.join(entered, `${label}.release`), 'captured');
+      })).then(async outcomes => {
+        const failure = outcomes.find(outcome => outcome.status === 'rejected');
+        if (failure) await releaseAll();
+        return failure?.reason ?? null;
+      });
+    const producers = files.map((file, index) =>
+      f.invoke(['targeted', '--workers', '2', file],
+        { ...budget.environment, SDLC_TEST_REPORT_FILE: paths[index] }).then(result => {
+        t.diagnostic(JSON.stringify({ kind: 'owned-producer-completed', index,
+          completedAtMs: result.completedAtMs, completionClockPrecisionMs: 1,
+          independentProducer: independent.parent, independentProducerActive: !independent.signal.aborted }));
+        return result;
+      }));
+    try {
+      const results = await Promise.all(producers);
+      const captureError = await capture;
+      if (captureError) throw captureError;
+      assert.ok(results.every(result => result.exitCode === 0),
+        results.map(result => result.stdout + result.stderr).join('\n'));
+      const reports = await Promise.all(paths.map(async file => JSON.parse(await fs.readFile(file, 'utf8'))));
+      const active = await independent.snapshot();
+      assert.equal(independent.signal.aborted, false);
+      assert.ok(active.producers >= 1, 'The independent producer must remain active at the owned-exit boundary');
+      for (let index = 0; index < reports.length; index++) {
+        for (const group of reports[index].groupExecution.groups) {
+          for (const pid of group.processIds) {
+            if (process.platform === 'win32') {
+              const monitor = monitors.get(group.root);
+              assert.ok(monitor, 'Every owned file process needs a pre-trigger creation identity');
+              assert.equal(monitor.identity.pid, pid);
+              const outcome = await monitor.closed;
+              if (outcome.code !== 0 || outcome.signal !== null) {
+                const detail = await fs.readFile(`${monitor.exitPath}.error`, 'utf8').catch(error => {
+                  if (error.code === 'ENOENT') return 'Held process observer retained no error record';
+                  throw error;
+                });
+                t.diagnostic(JSON.stringify({ kind: 'owned-worker-observation-failed',
+                  owned: monitor.identity, completedAtMs: results[index].completedAtMs,
+                  outcome, cause: processDiagnostic(detail) }));
+              }
+              assert.deepEqual(outcome, { code: 0, signal: null });
+              const observed = JSON.parse(await fs.readFile(monitor.exitPath, 'utf8'));
+              t.diagnostic(JSON.stringify({ kind: 'owned-worker-exit-observation',
+                owned: monitor.identity, observed, completedAtMs: results[index].completedAtMs,
+                completionClockPrecisionMs: 1, groupId: group.id, root: group.root,
+                independentProducer: independent.parent,
+                independentProducerActive: !independent.signal.aborted }));
+              assertOwnedProcessExited(monitor.identity, observed, results[index].completedAtMs);
+            } else {
+              assert.throws(() => process.kill(pid, 0), error => error.code === 'ESRCH',
+                'Every owned file process is gone even when an independent producer is still active');
+            }
+          }
+        }
+      }
+      return { results, reports };
+    } finally {
+      await capture;
+      await releaseAll();
+      await Promise.allSettled(producers);
+      await Promise.all([...monitors.values()].map(monitor => monitor.closed));
+    }
+  };
   await fs.writeFile(slow, common +
     `test('waiting root',async()=>{
+      await ownedReady('waiting root');
       await fs.writeFile(${JSON.stringify(path.join(entered, 'waiting'))},String(process.pid),{flag:'wx'});
       const deadline=Date.now()+10000;
       while(true){try{await fs.stat(${JSON.stringify(path.join(entered, 'sibling'))});break;}
         catch(error){if(error.code!=='ENOENT')throw error;}
         assert.ok(Date.now()<deadline,'Sibling producer could not borrow idle host capacity');await delay(10);}
-    });test('short root',()=>delay(80));`);
+    });test('short root',async()=>{await ownedReady('short root');await delay(80);});`);
   await fs.writeFile(sibling, common +
     `test('sibling ready root',async()=>{
+      await ownedReady('sibling ready root');
       await fs.writeFile(${JSON.stringify(path.join(entered, 'sibling'))},String(process.pid),{flag:'wx'});
       await delay(30);
     });`);
   const paths = [path.join(entered, 'first.json'), path.join(entered, 'second.json')];
-  const results = await Promise.all([slow, sibling].map((file, index) =>
-    f.invoke(['targeted', '--workers', '2', file],
-      { ...budget.environment, SDLC_TEST_REPORT_FILE: paths[index] })));
-  assert.ok(results.every(result => result.exitCode === 0),
-    results.map(result => result.stdout + result.stderr).join('\n'));
-  const reports = await Promise.all(paths.map(async file => JSON.parse(await fs.readFile(file, 'utf8'))));
+  const { reports } = await runOwnedPhase([slow, sibling], paths,
+    [['waiting root', 'short root'], ['sibling ready root']]);
   assert.ok(reports.every(report => report.resources.budget.id === budget.id &&
     report.resources.budget.peakActiveWorkers <= budget.capacity));
   const waiting = reports[0].groupExecution.groups.find(group => group.root === 'waiting root');
@@ -1334,20 +1444,15 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
     await fs.writeFile(file, `export const validationDeclarations=${JSON.stringify({
       schemaVersion: 1, groups: [{ root: `exclusive ${name}`, exclusiveResources: ['shared-owned-device'] }],
     })};` + common +
-      `test.before(async()=>{await fs.writeFile(${JSON.stringify(lock)},String(process.pid),{flag:'wx'});await delay(30);});
+      `test.before(async()=>{await ownedReady('exclusive ${name}');await fs.writeFile(${JSON.stringify(lock)},String(process.pid),{flag:'wx'});await delay(30);});
       test.after(()=>fs.unlink(${JSON.stringify(lock)}));
       test('exclusive ${name}',()=>{});`);
     return file;
   }));
   const exclusiveReports = exclusiveFiles.map((_, index) => path.join(entered, `exclusive-${index}.json`));
-  const exclusiveResults = await Promise.all(exclusiveFiles.map((file, index) =>
-    f.invoke(['targeted', '--workers', '2', file], {
-      ...budget.environment, SDLC_TEST_REPORT_FILE: exclusiveReports[index],
-    })));
-  assert.ok(exclusiveResults.every(result => result.exitCode === 0),
-    exclusiveResults.map(result => result.stdout + result.stderr).join('\n'));
-  const exclusiveGroups = await Promise.all(exclusiveReports.map(async file =>
-    JSON.parse(await fs.readFile(file, 'utf8')).groupExecution.groups[0]));
+  const exclusive = await runOwnedPhase(exclusiveFiles, exclusiveReports,
+    [['exclusive left'], ['exclusive right']]);
+  const exclusiveGroups = exclusive.reports.map(report => report.groupExecution.groups[0]);
   const ordered = exclusiveGroups.sort((left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt));
   assert.ok(Date.parse(ordered[0].finishedAt) <= Date.parse(ordered[1].startedAt),
     'Named resources are acquired before module hooks and are exclusive across sibling producers');
@@ -1356,15 +1461,14 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
   assert.ok(snapshot.residentWorkers <= snapshot.residentLimit);
   for (const group of [...reports.flatMap(report => report.groupExecution.groups), ...exclusiveGroups]) {
     assert.ok(group.processes.every(process => process.finishedAt));
-    for (const pid of group.processIds) {
-      assert.throws(() => process.kill(pid, 0), error => error.code === 'ESRCH',
-        'Every owned file process is gone even when an independent producer is still active');
-    }
   }
+  await independent.close();
+  independent = null;
   if (!inheritedBudget) {
-    assert.equal(snapshot.activeWorkers, 0);
-    assert.equal(snapshot.residentWorkers, 0);
-    assert.equal(snapshot.pendingParentRestorations, 0);
+    const completed = await budget.snapshot();
+    assert.equal(completed.activeWorkers, 0);
+    assert.equal(completed.residentWorkers, 0);
+    assert.equal(completed.pendingParentRestorations, 0);
   }
 });
 
