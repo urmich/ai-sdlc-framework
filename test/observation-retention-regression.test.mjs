@@ -407,6 +407,7 @@ for (const interruption of ['archive:repository-observation', 'record:repository
 test('FR-063 deterministic prune/refresh race rechecks dependencies under the work-item lock', async t => {
   const f = await retentionFixture(t);
   const first = await observeFixtureRepository(f);
+  const bytes = await fs.readFile(f.store.recordPath(f.workItemId, first.id));
   await f.store.transaction(f.workItemId, tx => tx.put({
     type: 'conflict', id: 'race-consumer', workItemId: f.workItemId,
     reason: 'Hold the sole recovery reference until pruning', status: 'open',
@@ -429,14 +430,24 @@ test('FR-063 deterministic prune/refresh race rechecks dependencies under the wo
   let waiting;
   const waitingForWorkLock = new Promise(resolve => { waiting = resolve; });
   const transaction = f.store.transaction.bind(f.store);
-  t.mock.method(f.store, 'transaction', (...args) => {
+  t.mock.method(f.store, 'transaction', async (...args) => {
     waiting();
+    // Queue at the Store boundary, not inside its bounded lock acquisition.
+    await pruning;
     return transaction(...args);
   });
-  f.clock.advance(1);
-  const refreshing = observeFixtureRepository(f);
-  await waitingForWorkLock;
-  release();
+  let refreshing;
+  try {
+    const lock = path.join(f.store.workPath(f.workItemId), '.lock');
+    const owner = await fs.readFile(lock);
+    f.clock.advance(1);
+    refreshing = observeFixtureRepository(f);
+    await waitingForWorkLock;
+    assert.deepEqual(await fs.readFile(lock), owner);
+  } finally {
+    release();
+    await Promise.allSettled([pruning, refreshing]);
+  }
   const [archived, latest] = await Promise.all([pruning, refreshing]);
   assert.ok(archived.includes(first.id));
   const active = await f.store.records(f.workItemId);
@@ -444,7 +455,7 @@ test('FR-063 deterministic prune/refresh race rechecks dependencies under the wo
   assert.ok(active.some(record => record.id === latest.id));
   assert.equal((await f.store.currentRepositoryObservation(f.workItemId,
     'primary')).observation.id, latest.id);
-  assert.equal(JSON.parse(await archivedBytes(f, first.id)).id, first.id);
+  assert.deepEqual(await archivedBytes(f, first.id), bytes);
 });
 
 test('FR-063 newly associated monitor is reported STALE instead of reversing lock order', async t => {

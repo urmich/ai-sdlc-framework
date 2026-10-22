@@ -197,12 +197,13 @@ export function nativeComponentSelection({ definition, expectedLanes, now, unitO
     architecture: context.native.architecture, image: context.native.image,
     toolchainDigest: digest(context.native.toolchain),
   }));
+  const configDigest = digest({ adapter: definition.adapterDefinitionDigest, matrix,
+    ...(definition.frameworkShards ? { unitOrder: digest(unitOrder) } : {}) });
+  const inventoryDigest = validationInventoryDigest(definition.specification);
   const executions = definition.specification.cases.map(test => ({
     id: test.executionId, context: validateExecutionContext({
       candidateDigest: baseline.candidateDigest, testSpecDigest: definition.testSpecDigest,
-      configDigest: digest({ adapter: definition.adapterDefinitionDigest, matrix,
-        ...(definition.frameworkShards ? { unitOrder: digest(unitOrder) } : {}) }),
-      inventoryDigest: validationInventoryDigest(definition.specification),
+      configDigest, inventoryDigest,
       sources: baseline.sources, profile: definition.specification.profile,
       environment: 'local', location: definition.policy.location, mode: test.mode, owner: test.owner,
       native: { kind: 'metadata', platform: 'verified-native-matrix', architecture: 'x64-and-arm64',

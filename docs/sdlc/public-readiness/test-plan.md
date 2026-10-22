@@ -144,15 +144,23 @@ and stderr remain primary, while an input failure alone cannot pass a successful
 child. Keep every existing signal, cleanup, output-identity and deadline assertion.
 Readiness markers are published atomically; malformed JSON is not an initializing
 state to ignore or retry. The controlled pruning race creates its association
-while a real work-item lock is held, then releases that lock before the queued
-real transaction begins. Its stale-dependency assertion must not depend on
-association setup finishing within the unchanged lock-wait budget.
+while a real work-item lock is held, then lets the pruning promise finish,
+including durable archival and lock release, before the queued real transaction
+begins acquisition. Retain owner bytes at the held boundary and exact archived
+observation bytes. Its stale-dependency assertion must not depend on association
+setup or archival finishing within the unchanged lock-wait budget.
 Both alias-attach/archive race variants hold the real monitor owner at an
 observable Store boundary, require concurrent attach to reject with `LOCK_BUSY`
 without changing owner or active bytes, then release and await archival before
 the next attach. Preserve exactly one immutable history record and every
 current-first/historical-first identity and readability assertion. This is
 causal ordering, not a longer acquisition deadline or retry-until-success.
+Receipt-race fixtures hold a real winning acknowledgment write, require bounded
+`LOCK_BUSY` refusal without changing delivery, pending-notice or active bytes,
+then release and await the owner before exact committed replay or semantic
+refusal checks. Preserve the full 4096-byte proof, one delivery identity,
+no additional notice, conflict/stale refusals and archive/prune assertions.
+Production lock acquisition and its original budget remain unchanged.
 
 Local test results are not inputs required from an external contributor merely
 to open a PR. PR jobs never
@@ -286,6 +294,12 @@ capability/runtime facts, bottle planning before installation, retained receipts
 and runtime probing, then apply the unchanged source-bound admission check.
 This controlled dispatch test neither acquires Homebrew nor supplies native
 acceptance evidence.
+Component-selection digest reuse is confined to one synchronous call with the
+same definition and lane inputs. Preserve byte-identical selection, projection
+and protected replay across current and historical protocols, distinct per-case
+fields and fresh digests when inputs change. Empty/invalid definitions retain
+their original rejection and guard ordering. No cross-call identity, verdict or
+source cache is introduced; local function timing is not native lane proof.
 
 The Node/Python native distributions above were checked against the public
 `actions/node-versions` and `actions/python-versions` manifests during Test Design;
@@ -341,6 +355,13 @@ filesystem-denial adapter. Do not claim a Windows network-denial pass from the
 ordinary installer tests. Inventory that distinct assertion and its applicability
 before execution; a required assertion lacking a supported approved adapter is
 blocked, not silently skipped or replaced by a proxy/firewall change.
+
+The Mac npm-denied installer fixture retains bounded sanitized stdout, stderr,
+exit/signal and phase diagnostics on failure. Diagnostic failure must not replace
+the original installer or parse error; successful execution must not fabricate
+failure records. This evidence does not waive network/npm denial, any lifecycle
+assertion or a failed native result. Controlled local helper tests do not
+establish actual Mac sandbox or installer acceptance.
 
 ### 2.3 Test modes and shared procedure contracts
 

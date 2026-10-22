@@ -148,6 +148,14 @@ change is awaiting acceptance.
 
 ### 4.3 Profiles and performance
 
+Within one synchronous native component selection, derive its common
+configuration and specification digests once after the existing definition,
+lane and unit-order guards. Every case still validates its own complete context,
+and every later selection and replay derives fresh values. The specification
+guard rejects empty case lists before these per-operation derivations. This
+changes neither serialized identities nor protocol, source, origin, freshness
+or cleanup validation; it introduces no cross-call identity or verdict cache.
+
 Preserve `test:unit`'s exact current three-file/16-case sanity contract. The named
 critical profile contains those files and only the eleven exact root selectors
 in the Test Plan, with their declared descendants and cheap applicable static

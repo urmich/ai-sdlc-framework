@@ -105,6 +105,30 @@ async function deliver(store, key, deliveredRef = 'fixture:delivered') {
   });
 }
 
+async function withHeldDeliveryWrite(store, write, contend) {
+  const writing = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const originalFault = store.fault;
+  store.fault = async point => {
+    await originalFault(point);
+    if (point === 'written') {
+      writing.resolve();
+      await release.promise;
+    }
+  };
+  const owner = write();
+  try {
+    await Promise.race([writing.promise, owner.then(() =>
+      assert.fail('The delivery must reach its real durable write'))]);
+    await contend();
+  } finally {
+    release.resolve();
+    try { await owner; }
+    finally { store.fault = originalFault; }
+  }
+  return owner;
+}
+
 async function recordUnrelatedHistory(f, { complete = false } = {}) {
   await f.store.transaction(f.workItemId, tx => {
     tx.put({
@@ -216,11 +240,20 @@ for (const bytes of [undefined, 4096]) {
   test(`T-125 ${bytes ?? 'small'}-byte acknowledgment is exactly replayable and concurrent duplicates do not issue another notice`, async t => {
     const f = await fixture(t, { initialize: false });
     const { key, observed } = await terminalMonitor(f, { bytes });
+    const original = await fs.readFile(activePath(f, key));
     const input = { runKey: key, noticeGeneration: observed.notice.generation,
       deliveredRef: 'fixture:one-delivery' };
-    const [first, second] = await Promise.all([
-      monitorNotice(f.store, input), monitorNotice(f.store, input),
-    ]);
+    const first = await withHeldDeliveryWrite(f.store,
+      () => monitorNotice(f.store, input), async () => {
+        const lockPath = `${activePath(f, key)}.lock`;
+        const owner = await fs.readFile(lockPath);
+        await assert.rejects(monitorNotice(f.store, input), { code: 'LOCK_BUSY' });
+        assert.deepEqual(await fs.readFile(lockPath), owner);
+        assert.deepEqual(await fs.readFile(activePath(f, key)), original);
+        assert.equal((await monitorNotice(f.store, { runKey: key })).notice.status, 'pending');
+      });
+    const committed = await fs.readFile(activePath(f, key));
+    const second = await monitorNotice(f.store, input);
     assert.deepEqual(first, second);
     f.clock.advance(60000);
     assert.deepEqual(await monitorNotice(f.store, input), first);
@@ -232,6 +265,8 @@ for (const bytes of [undefined, 4096]) {
     }), { code: 'STALE' });
     assert.deepEqual(await monitorNotice(f.store, { runKey: key }), first);
     assert.deepEqual(await dueMonitors(f.store), []);
+    assert.deepEqual(await fs.readFile(activePath(f, key)), committed);
+    if (bytes === 4096) assert.deepEqual(committed, original);
     await assertBoundedFiles(f, key);
   });
 }
@@ -315,23 +350,34 @@ test('T-125 invalid acknowledgment fails before persistence and does not consume
 test('T-125 delivery receipts cannot acknowledge a later notice or lose a concurrent prune race', async t => {
   const f = await fixture(t, { initialize: false });
   const { key, observed } = await terminalMonitor(f, { bytes: 4096 });
+  const original = await fs.readFile(activePath(f, key));
   const input = { runKey: key, noticeGeneration: observed.notice.generation,
     deliveredRef: 'fixture:racing-delivery' };
-  const [acknowledgment, pruning] = await Promise.allSettled([
-    monitorNotice(f.store, input), pruneMonitor(f.store, { runKey: key }),
-  ]);
-  assert.equal(acknowledgment.status, 'fulfilled');
-  if (pruning.status === 'rejected') {
-    assert.equal(pruning.reason.code, 'MONITOR');
-    assert.equal((await pruneMonitor(f.store, { runKey: key })).archived, true);
-  } else assert.equal(pruning.value.archived, true);
-  assert.deepEqual(await monitorNotice(f.store, input), acknowledgment.value);
+  await assert.rejects(pruneMonitor(f.store, { runKey: key }), { code: 'MONITOR' });
+  const acknowledgment = await withHeldDeliveryWrite(f.store,
+    () => monitorNotice(f.store, input), async () => {
+      const lockPath = `${activePath(f, key)}.lock`;
+      const owner = await fs.readFile(lockPath);
+      await assert.rejects(pruneMonitor(f.store, { runKey: key }), { code: 'LOCK_BUSY' });
+      assert.deepEqual(await fs.readFile(lockPath), owner);
+      assert.deepEqual(await fs.readFile(activePath(f, key)), original);
+      assert.equal((await monitorNotice(f.store, { runKey: key })).notice.status, 'pending');
+    });
+  assert.equal(acknowledgment.notice.status, 'delivered');
+  assert.equal((await pruneMonitor(f.store, { runKey: key })).archived, true);
+  assert.equal(await readActiveMonitor(f.store, key), null);
+  assert.deepEqual(await fs.readFile(path.join(f.store.runtime,
+    'pipeline-monitors', 'archive', `${key}.json`)), original);
+  assert.deepEqual((await readMonitor(f.store, key)).evidence, observed.evidence);
+  assert.deepEqual(await monitorNotice(f.store, input), acknowledgment);
+  await assertBoundedFiles(f, key);
   const small = await terminalMonitor(f, { executionRef: 'new-notice' });
   const first = await deliver(f.store, small.key);
   await interruptMonitor(f.store, { runKey: small.key, reason: 'Explicit interruption notice' });
   const next = await monitorNotice(f.store, { runKey: small.key });
   assert.equal(next.notice.status, 'pending');
   assert.equal(next.notice.generation, first.notice.generation + 1);
+  await assert.rejects(pruneMonitor(f.store, { runKey: small.key }), { code: 'MONITOR' });
   await assert.rejects(monitorNotice(f.store, { runKey: small.key,
     noticeGeneration: first.notice.generation, deliveredRef: first.notice.evidenceRef }),
   { code: 'STALE' });

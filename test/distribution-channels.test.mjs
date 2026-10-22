@@ -28,6 +28,7 @@ import { ARCHIVE_TARGETS, EXECUTION_PLATFORMS, archiveTarget, extractEntries, is
 import { activateChannel, layoutPathsOverlap, runtimePreflight, validateChannelHome } from '../packaging/standalone/runtime.mjs';
 import { isolatedNpmEnvironment } from './npm-environment.mjs';
 import { createNetworkBoundary, deniedEnvironment, networkAdapter, verifyNetworkNegativeControls } from './distribution-network-boundary.mjs';
+import { processDiagnostic } from '../scripts/validation-tools.mjs';
 
 const execute = promisify(execFile);
 const hostTarget = Object.keys(TARGETS).find(target =>
@@ -118,11 +119,25 @@ function commandFor(source, args) {
     { executable: '/bin/sh', args: [path.join(source, 'install.sh'), ...args] };
 }
 
-async function installer(f, args, env = environment, run = execute) {
+async function installer(f, args, env = environment, run = execute, diagnostic) {
   const command = commandFor(f.source, [...args, '--channel-root', f.channelRoot, '--home', f.home]);
-  const result = await run(command.executable, command.args,
-    { env: { ...env, SDLC_NODE: process.execPath }, maxBuffer: 4 * 1024 * 1024 });
-  return JSON.parse(result.stdout);
+  let result;
+  try {
+    result = await run(command.executable, command.args,
+      { env: { ...env, SDLC_NODE: process.execPath }, maxBuffer: 4 * 1024 * 1024 });
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    try {
+      if (diagnostic) diagnostic({ test: 'T-51', phase: args[0],
+        exitCode: Number.isInteger(error.code) ? error.code : null,
+        signal: typeof error.signal === 'string' ? error.signal : null, killed: error.killed === true,
+        error: processDiagnostic(error),
+        stdout: processDiagnostic(error.stdout ?? result?.stdout ?? ''),
+        stderr: processDiagnostic(error.stderr ?? result?.stderr ?? '') });
+    } finally {
+      throw error;
+    }
+  }
 }
 
 async function verifyRetainedHookRuntime(f, removedRoots) {
@@ -545,7 +560,8 @@ test('T-51 npm-denied standalone lifecycle preserves unrelated content and runti
     }
     const controls = await verifyNetworkNegativeControls(boundary, f.directory);
     t.diagnostic(JSON.stringify({ test: 'T-51', status: 'enforced', ...controls }));
-    const runInstaller = args => installer(f, args, boundary.environment, boundary.execute);
+    const runInstaller = args => installer(f, args, boundary.environment, boundary.execute,
+      observation => t.diagnostic(JSON.stringify(observation)));
     const first = await runInstaller(['install']);
     assert.equal(first.installed, true);
     assert.match(first.nextAction, /Restart Copilot CLI/u);

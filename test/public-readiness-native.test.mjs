@@ -40,6 +40,7 @@ import { nativeBootstrapProtocol, nativeUnitBootstrapProtocol, nativeSdkBootstra
 import { sourceNativeBootstrapProtocol, nativeBootstrapCapability, bootstrapRequestCapability,
   requireNativeBootstrapCapability, nativeSdkRequirements, nativeSdkContextMatches,
   nativeBootstrapRequirements, probeNativeSdk } from '../scripts/native-bootstrap-capability.mjs';
+import { nativeComponentSelection } from '../scripts/native-components.mjs';
 
 test('T-PRD015 refresh SDK dispatch omits unused commands while historical and other roles probe exact tools in order', async () => {
   const request = { target: 'macos-arm64', profile: 'pr', component: 'framework', shard: 'refresh',
@@ -1036,6 +1037,60 @@ test('T-PRD004 native policy rejects fixture, metadata and cross-build credit an
   }
   assert.throws(() => validateBootstrapRequest({ target: 'foreign-platform', outputDir: '.test-data/never-created' }),
     { code: 'HOST' });
+  const componentPlan = expected => JSON.stringify({ tests: ['T-FIX-FIRST', 'T-FIX-SECOND'].map((id, index) => ({
+    id, requirements: ['FR-203'], conditions: ['AC-203.4'], environment: 'local', level: 'integration',
+    checkpoint: 'post-review', mode: index ? 'manual' : 'automated', owner: index ? 'user' : 'provider',
+    location: 'github-pr-matrix', expected, implementation: 'procedure: controlled-component-selection',
+    status: 'NotRun',
+  })) });
+  const selections = [];
+  for (const expected of ['Complete original source outcomes', 'Freshly revised source expectations']) {
+    const definition = deriveNativeComponentSpecification({ inventory, testPlan: componentPlan(expected),
+      adapterSourceDigest: 'a'.repeat(64) });
+    const expectedLanes = f.lanes.map(lane => ({ target: lane.target, context: {
+      ...lane.context, testSpecDigest: definition.testSpecDigest,
+      configDigest: nativeConfigurationDigest({ inventory, target: lane.target, profile: 'pr' }),
+    } }));
+    const selected = nativeComponentSelection({ definition, expectedLanes, now: '2026-10-18T10:10:00.000Z' });
+    const matrix = expectedLanes.map(({ target, context }) => ({
+      target, contextDigest: digest(context), platform: context.native.platform,
+      architecture: context.native.architecture, image: context.native.image,
+      toolchainDigest: digest(context.native.toolchain),
+    }));
+    for (const [index, execution] of selected.executions.entries()) {
+      const test = definition.specification.cases[index];
+      assert.deepEqual(execution, { id: test.executionId, context: validateExecutionContext({
+        candidateDigest: expectedLanes[0].context.candidateDigest, testSpecDigest: definition.testSpecDigest,
+        configDigest: digest({ adapter: definition.adapterDefinitionDigest, matrix }),
+        inventoryDigest: validationInventoryDigest(definition.specification),
+        sources: expectedLanes[0].context.sources, profile: definition.specification.profile,
+        environment: 'local', location: definition.policy.location, mode: test.mode, owner: test.owner,
+        native: { kind: 'metadata', platform: 'verified-native-matrix', architecture: 'x64-and-arm64',
+          image: 'derived-from-four-native-jobs', toolchain: {
+            adapter: definition.policy.protocol, adapterDefinitionDigest: definition.adapterDefinitionDigest, matrix,
+          } },
+        producer: expectedLanes[0].context.producer,
+        attemptCapability: expectedLanes[0].context.attemptCapability,
+        jobRef: `native-component-projection/${test.id}`, artifacts: expectedLanes[0].context.artifacts,
+      }) });
+    }
+    assert.notEqual(selected.executions[0].context.mode, selected.executions[1].context.mode);
+    assert.notEqual(selected.executions[0].context.owner, selected.executions[1].context.owner);
+    const empty = structuredClone(definition);
+    empty.specification.cases = [];
+    const { adapterDefinitionDigest, ...emptyInputs } = empty;
+    empty.adapterDefinitionDigest = digest(emptyInputs);
+    assert.throws(() => nativeComponentSelection({ definition: empty, expectedLanes: [],
+      now: selected.now }), { code: 'INPUT', message: 'Invalid required profile cases' },
+    'An empty specification must fail before lane or per-case digest derivation');
+    assert.throws(() => nativeComponentSelection({ definition: { ...definition, adapterDefinitionDigest: '0'.repeat(64) },
+      expectedLanes: [], now: selected.now }), { code: 'EVIDENCE' });
+    assert.throws(() => nativeComponentSelection({ definition, expectedLanes: expectedLanes.slice(1),
+      now: selected.now }), { code: 'EVIDENCE' });
+    selections.push(selected);
+  }
+  assert.notEqual(selections[0].executions[0].context.configDigest, selections[1].executions[0].context.configDigest);
+  assert.notEqual(selections[0].executions[0].context.inventoryDigest, selections[1].executions[0].context.inventoryDigest);
 });
 
 test('T-PRD016 native aggregation closes four platforms and six PR or four R-PRE cases without JSON Passed bypasses', () => {
