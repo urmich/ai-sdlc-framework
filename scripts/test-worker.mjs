@@ -5,6 +5,7 @@ import { run } from 'node:test';
 import { spec } from 'node:test/reporters';
 import { open, readFile, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { inspect } from 'node:util';
 import path from 'node:path';
 import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
 import { digest, LIMITS, requireThat, SdlcError } from '../src/core.mjs';
@@ -462,6 +463,8 @@ try {
         // Spec inspects enumerable error metadata as JavaScript, not retained JSON.
         const printableError = new Error(diagnostic.diagnostic.message);
         printableError.stack = `Error: ${diagnostic.diagnostic.message}`;
+        // Frame-less Error inspection otherwise wraps safe JSON diagnostics in non-JSON brackets.
+        Object.defineProperty(printableError, inspect.custom, { value: () => printableError.stack });
         const safeError = diagnostic.diagnostic.code === 'ERR_TEST_FAILURE' ?
           new Error(diagnostic.diagnostic.message, { cause: printableError }) : printableError;
         safeError.stack = printableError.stack;

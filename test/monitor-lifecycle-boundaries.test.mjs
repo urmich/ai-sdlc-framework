@@ -239,13 +239,36 @@ for (const bytes of [undefined, 4096]) {
 test('T-125 conflicting concurrent acknowledgments preserve exactly one delivery identity', async t => {
   const f = await fixture(t, { initialize: false });
   const { key, observed } = await terminalMonitor(f, { bytes: 4096 });
-  const results = await Promise.allSettled(['first', 'second'].map(name =>
-    monitorNotice(f.store, { runKey: key,
-      noticeGeneration: observed.notice.generation, deliveredRef: `fixture:${name}` })));
+  const original = await fs.readFile(activePath(f, key));
+  const writing = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  f.store.fault = async point => {
+    if (point === 'written') {
+      writing.resolve();
+      await release.promise;
+    }
+  };
+  const input = name => ({ runKey: key,
+    noticeGeneration: observed.notice.generation, deliveredRef: `fixture:${name}` });
+  const first = monitorNotice(f.store, input('first'));
+  let results;
+  try {
+    await Promise.race([writing.promise, first.then(() =>
+      assert.fail('The winning delivery must reach its real durable write'))]);
+    const [second] = await Promise.allSettled([monitorNotice(f.store, input('second'))]);
+    release.resolve();
+    results = [await first.then(value => ({ status: 'fulfilled', value })), second];
+  } finally {
+    release.resolve();
+    await first;
+    f.store.fault = async () => {};
+  }
   assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
-  assert.equal(results.find(result => result.status === 'rejected').reason.code, 'ID_CONFLICT');
+  assert.equal(results.find(result => result.status === 'rejected').reason.code, 'LOCK_BUSY');
+  await assert.rejects(monitorNotice(f.store, input('second')), { code: 'ID_CONFLICT' });
   assert.deepEqual(await monitorNotice(f.store, { runKey: key }),
     results.find(result => result.status === 'fulfilled').value);
+  assert.deepEqual(await fs.readFile(activePath(f, key)), original);
 });
 
 for (const stage of ['written', 'replaced']) {

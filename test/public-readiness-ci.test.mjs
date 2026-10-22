@@ -37,6 +37,7 @@ import { inspectWorkflowPolicy, readWorkflowPolicySources } from '../scripts/wor
 import { nativeBootstrapEnvironment, portableRubyBootstrapEnvironment,
   schemaPipInstallArguments, nativeBootstrapExports, homebrewToolchain,
   requireHomebrewBottlePlan, requireHomebrewBottleReceipts } from '../scripts/native-toolchain.mjs';
+import { nativeBootstrapProtocol } from '../scripts/toolchain-baseline.mjs';
 import { homebrewPrefixBinding, requireShortHomebrewPrefix, allocateOwnedDirectory,
   cleanupOwnedDirectory, recordOwnedDirectoryNotRequired, allocateHomebrewPrefix,
   verifyOwnedDirectoryOwnership, verifyHomebrewPrefixOwnership,
@@ -1503,10 +1504,11 @@ test('T-PRD020 actual CI schedules twenty-four producer parts behind a complete 
       const configuredWorkers = ci.jobs[key].env.SDLC_TEST_WORKERS;
       assert.match(configuredWorkers ?? '', /^[1-9]\d*$/u);
       const resources = nativeResourceFacts({ ...host, configuredWorkers });
-      assert.equal(resources.workerCapacity, key === 'native-units-mi' ? host.availableParallelism :
+      const cpuMatched = part.target === 'macos-x64';
+      assert.equal(resources.workerCapacity, cpuMatched ? host.availableParallelism :
         Math.min(32, Math.floor(host.totalMemoryBytes / (1024 ** 3))),
-      'Intel units use the CPU-count budget; other framework roles retain the observed memory budget');
-      assert.equal(resources.workerCapacity > host.availableParallelism, key !== 'native-units-mi');
+      'Intel framework roles use the CPU-count trial; other hosts retain the observed memory budget');
+      assert.equal(resources.workerCapacity > host.availableParallelism, !cpuMatched);
       assert.equal(resources.configuredWorkers, configuredWorkers);
       assert.ok(ci.jobs[key].steps.every(step => step.env?.SDLC_TEST_WORKERS === undefined),
         'Bootstrap, trusted context and execution must inherit one matching host allocation');
@@ -1721,9 +1723,11 @@ function observerFixture() {
     ['docs/sdlc/public-readiness/test-plan.md', plan],
     ['test/orders.test.mjs', 'export const validationDeclarations=' + JSON.stringify({
       schemaVersion: 1,
-      surfaces: [{ coverage: 'fixture-only', paths: ['scripts/native-components.mjs'] }],
+      surfaces: [{ coverage: 'fixture-only', paths: ['scripts/native-components.mjs', 'scripts/toolchain-baseline.mjs'] }],
     }) + ";\nimport test from 'node:test';throw new Error('candidate code must never execute');test('orders preserve state',()=>{});\n"],
     ['scripts/native-components.mjs', "throw new Error('candidate component adapter must never execute');\n"],
+    ['scripts/toolchain-baseline.mjs', `export const nativeBootstrapProtocol = '${nativeBootstrapProtocol}';\n` +
+      "throw new Error('candidate toolchain source must never execute');\n"],
     ['.github/workflows/ci.yml', ciDefinition],
     ['.github/workflows/pr-readiness.yml', writerDefinition()],
     ['.github/workflows/coverage-metadata.yml', writerDefinition()],

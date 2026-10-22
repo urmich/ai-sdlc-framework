@@ -396,10 +396,12 @@ All twenty-four producer origins and twelve distinct Mac cleanup owners remain
 required.
 
 The PR workflow explicitly allocates 15 shared test-worker slots on Linux and
-Windows, 7 on Apple Silicon and 14 on Intel Mac regression hosts. The Intel
-unit host uses four slots, matching its CPU count: the larger unit allocation
-regressed the measured unit barrier and is not retained merely to maximize a
-configured worker count. The other memory-bounded allocations
+Windows, 7 on Apple Silicon and four on Intel Mac framework hosts. The Intel
+unit host's CPU-matched allocation improved its measured barrier; the next
+regression trial uses that same allocation after the larger regression budget
+encountered live-lock contention and slow cancellation cleanup. A regression
+speedup remains unverified until complete hosted measurement. Do not retain a
+larger configured count merely to maximize nominal concurrency. The other memory-bounded allocations
 use the observed native hosts' whole-GiB capacities rather than limiting
 I/O-heavy isolated roots to CPU count. They stay below the existing 32-slot
 ceiling; nested producers still share that one host allocation, with all

@@ -394,8 +394,12 @@ test('T-PRD018 coded failures preserve safe command output and do not interrupt 
   const fail = path.join(directory, 'coded-failure.test.mjs');
   const pass = path.join(directory, 'sibling.test.mjs');
   const marker = path.join(directory, 'sibling-finished');
-  await fs.writeFile(fail, "import test from 'node:test';test('owned coded failure',()=>{" +
-    "throw Object.assign(new Error('Owned lock contention'),{code:'LOCK_BUSY',details:{lock:'owned-lock'}});});\n");
+  await fs.writeFile(fail, "import test from 'node:test';import assert from 'node:assert/strict';" +
+    "test('owned coded failure',()=>{" +
+    "throw Object.assign(new Error('Owned lock contention'),{code:'LOCK_BUSY',details:{lock:'owned-lock'}});});" +
+    "test('owned JSON assertion failure',()=>assert.equal('NotRun','Passed',JSON.stringify({" +
+    "status:'NotRun',blockers:['EVIDENCE','Required source is absent, linked or oversized']," +
+    "authorization:'fixture-reporter-secret'})));\n");
   await fs.writeFile(pass, "import test from 'node:test';import {writeFile} from 'node:fs/promises';" +
     `test('passing independent root',()=>writeFile(${JSON.stringify(marker)},'finished'));\n`);
   const reportPath = path.join(evidence, 'runner.json');
@@ -410,14 +414,29 @@ test('T-PRD018 coded failures preserve safe command output and do not interrupt 
   assert.equal(result.complete, true, result.diagnostic);
   assert.equal(result.exitCode, 1, 'The genuine failed assertion remains non-passing');
   assert.deepEqual(result.causes, []);
+  assert.equal(result.cleanup.requested, false);
   assert.match(result.stdout, /Owned lock contention/u);
+  assert.match(result.stdout, /"status":"NotRun"/u);
+  assert.match(result.stdout, /Required source is absent, linked or oversized/u);
+  assert.match(result.stdout, /'NotRun'[\s\S]*'Passed'/u);
   assert.equal(await fs.readFile(marker, 'utf8'), 'finished');
   const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
   assert.equal(report.complete, true);
   assert.deepEqual([report.summary.counts.failed, report.summary.counts.passed,
-    report.summary.counts.cancelled], [1, 1, 0]);
+    report.summary.counts.cancelled], [2, 1, 0]);
   assert.equal(report.executions.find(row => row.name === 'owned coded failure').diagnostic.message,
     'Owned lock contention');
+  const failed = report.executions.find(row => row.name === 'owned JSON assertion failure');
+  assert.equal(failed.status, 'Failed');
+  assert.match(failed.diagnostic.message, /"status":"NotRun"/u);
+  assert.match(failed.diagnostic.message, /'NotRun'[\s\S]*'Passed'/u);
+  const retained = JSON.parse(await fs.readFile(path.join(evidence, 'coded-failure.json'), 'utf8'));
+  assert.deepEqual(retained, result);
+  const journal = await fs.readFile(path.join(evidence, 'coded-failure.journal.ndjson'), 'utf8');
+  assert.ok(!journal.trim().split('\n').map(JSON.parse).some(row => row.kind === 'output-rejected'));
+  for (const text of [result.stdout, result.stderr, JSON.stringify(report), journal]) {
+    assert.ok(!text.includes('fixture-reporter-secret'));
+  }
 });
 
 test('T-GHB24 native execution evidence distinguishes passing, failing and skipped assertions without overwriting reports', async t => {
