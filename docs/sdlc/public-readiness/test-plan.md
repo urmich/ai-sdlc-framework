@@ -771,7 +771,9 @@ An incomplete or failed attempt is not a successful full-suite benchmark.
 
 For the next PR measurement, explicitly request the native hosts' observed
 memory-bounded shared worker allocations: Linux/Windows 15, Apple Silicon 7,
-Intel Mac 14. Verify the actual producer's requested/capacity fields and shared
+Intel Mac regression hosts 14. The Intel unit producer instead requests four
+CPU-matched slots after its larger allocation regressed the observed barrier.
+Verify the actual producer's requested/capacity fields and shared
 nested-allocation bounds; the default local gate and 32-slot ceiling do not
 change. Account for the personal-account limit of five concurrent hosted Mac
 jobs across both architectures. A lane still active at 16 minutes is cancelled,

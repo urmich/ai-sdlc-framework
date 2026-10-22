@@ -1503,9 +1503,10 @@ test('T-PRD020 actual CI schedules twenty-four producer parts behind a complete 
       const configuredWorkers = ci.jobs[key].env.SDLC_TEST_WORKERS;
       assert.match(configuredWorkers ?? '', /^[1-9]\d*$/u);
       const resources = nativeResourceFacts({ ...host, configuredWorkers });
-      assert.equal(resources.workerCapacity, Math.min(32, Math.floor(host.totalMemoryBytes / (1024 ** 3))),
-        'I/O-heavy PR roots use the observed memory budget rather than the CPU-count default');
-      assert.ok(resources.workerCapacity > host.availableParallelism);
+      assert.equal(resources.workerCapacity, key === 'native-units-mi' ? host.availableParallelism :
+        Math.min(32, Math.floor(host.totalMemoryBytes / (1024 ** 3))),
+      'Intel units use the CPU-count budget; other framework roles retain the observed memory budget');
+      assert.equal(resources.workerCapacity > host.availableParallelism, key !== 'native-units-mi');
       assert.equal(resources.configuredWorkers, configuredWorkers);
       assert.ok(ci.jobs[key].steps.every(step => step.env?.SDLC_TEST_WORKERS === undefined),
         'Bootstrap, trusted context and execution must inherit one matching host allocation');
