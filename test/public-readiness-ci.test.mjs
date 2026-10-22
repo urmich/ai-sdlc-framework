@@ -9,6 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import fsPromises from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
@@ -975,7 +976,10 @@ while(!finished){
         let latest;
         while (!partial) {
           try {
-            const value = JSON.parse(await fs.readFile(path.join(f.reportDir, `${name}.json`), 'utf8'));
+            const reportPath = path.join(f.reportDir, `${name}.json`);
+            // A pending Windows reader can deny the writer's bounded atomic replacement.
+            const value = JSON.parse(process.platform === 'win32' ?
+              readFileSync(reportPath, 'utf8') : await fs.readFile(reportPath, 'utf8'));
             latest = value;
             if (value.cleanup.outcome === 'uncertain') partial = value;
           } catch (error) {

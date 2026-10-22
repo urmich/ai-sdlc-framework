@@ -414,6 +414,40 @@ no filesystem access or copying. This requires neither deeper CI history nor
 access to actual private work-item state.
 Retained beforehook comparison and single-snapshot proof streams use unique per-invocation directories;
 repeated validation must preserve earlier evidence without path collisions.
+For the remaining native purge-timeout investigation, opt-in
+`SDLC_INSTALL_TRACE_ID` observations leave stdout JSON unchanged and emit only
+fixed-format stderr phases, invocation UUID, PID/parent, monotonic/wall time,
+cumulative CPU and aggregate write/file-flush/directory-flush counts and elapsed
+spans. Never emit paths, contents or broker credentials. Retain source/active
+verification, distribution/documentation, lock, purge, replacement and manifest
+phase boundaries. Limit each process to 256 records with an explicit truncation
+marker. Elapsed spans include descheduling and do not alone prove I/O or CPU
+contention; classified unsupported directory-flush attempts retain their existing
+durability policy rather than becoming invented successful flushes.
+Diagnostic stream failure must preserve the primary installer failure or be
+reported only after an otherwise successful transaction and lock settlement,
+never triggering rollback of a settled installation. Controlled regressions
+exercise real install/purge output, both failure cases and bounded observations.
+The denial environment, 15-second execution budget and every lifecycle assertion
+remain required; these diagnostics grant no native timing or passing credit.
+The denial boundary owns a dedicated POSIX process group anchored to the live
+child object. Its single 15,000ms execution watchdog signals only that owned
+group; the bounded 1,000ms teardown covers both root close and group
+disappearance, not additional permitted execution. After root ownership is lost,
+only read-only settlement is allowed. Unknown termination retains the primary
+failure and owned fixture rather than racing recursive deletion against writers.
+Raw stdout/stderr, numeric negative-control exits and the 4MiB per-stream limit
+remain unchanged. An expired watchdog remains failed even when a root catches
+termination, reaps its descendant and exits zero; preserve that actual root
+code/signal rather than inventing a signal exit. Real POSIX descendant/sibling
+tests require their actual kernel;
+Windows controlled contracts do not grant POSIX passing credit.
+Optional broker inspection uses an abortable owned request socket. Timeout
+destroys and awaits that socket's close, leaving sibling requests untouched.
+Bounded safe-count observations stay outside the denial environment, with no
+socket credentials passed into the child. Strict Windows checkpoint polling
+closes its read handle in the same turn; original uncertainty, ownership,
+durable-journal and deadline assertions remain.
 
 ### 2.3 Test modes and shared procedure contracts
 

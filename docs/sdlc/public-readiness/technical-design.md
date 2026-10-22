@@ -572,6 +572,36 @@ product-scale or hosted performance benchmark.
 
 ### 4.4 Producer output and cancellation
 
+Installer timing observations are opt-in and use a strict non-secret
+`SDLC_INSTALL_TRACE_ID` UUID. A small shared observer emits bounded
+`sdlc-install-v1` fixed-format stderr records, never stdout JSON or file contents,
+paths, credentials or verifier data. Source/active verification, runtime launch,
+distribution/documentation, lock acquisition/release, purge, replacement and
+manifest spans retain actual process identity, monotonic/wall time and cumulative
+process CPU. Existing per-file writes and flushes report aggregate attempts/time
+at bounded intervals; no write, flush, rollback or path check is removed or
+parallelized. A 256-record ceiling emits an explicit limit marker.
+Observer failures are latched during transaction work and surfaced only after
+settlement, or attached to the preserved primary installer error. They cannot
+cause transaction rollback after successful manifest publication. Normal callers
+without the trace UUID emit nothing. Broker observations stay in the owning test
+process outside the denial boundary; phase spans alone are not a contention or
+filesystem-latency verdict.
+The raw denial-boundary executor shares the existing owned-group stop and
+settlement policy with validation commands, without substituting sanitized
+reports for its raw stream/Error contract. A live tracked child anchors its
+dedicated POSIX group; one 15,000ms watchdog requests synchronous owned
+termination. The 1,000ms settlement bound includes root close and observed group
+disappearance. No delayed destructive signal follows ownership loss. Uncertain
+writers keep the primary timeout/overflow failure and prevent fixture deletion;
+the raw 4MiB stream limits and native negative-control outcomes stay intact.
+Existing broker inspection accepts an optional AbortSignal that closes and drains
+only its request socket; no-signal callers, credential checks, scheduling and
+capacity limits are unchanged. The owning test samples safe counts at bounded
+intervals with cancellable requests outside the denial child. Controlled tests
+cover loss of ownership, output overflow, stubborn close, abort drainage and
+sibling survival; native POSIX and actual purge timing remain separate gates.
+
 Native fixture setup transports its verified candidate/source/artifact identity
 in a dedicated context, never a reporter control. Only the exact distribution
 test file retains that context through worker preload. Each use freshly checks

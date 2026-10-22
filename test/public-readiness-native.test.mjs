@@ -241,14 +241,22 @@ test('T-PRD015 v4 unit runtime is required while unused SDK schema and prefix ev
   }
   const inventory = await compileValidationInventory(repositoryRoot);
   const plan = await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
+  const pythonConsumerFiles = new Set([
+    'test/public-readiness-ci.test.mjs', 'test/public-readiness-consumer.test.mjs',
+    'test/public-readiness-observer.test.mjs', 'test/public-readiness-native.test.mjs',
+    'test/public-readiness-docs.test.mjs',
+  ]);
   for (const target of ['linux-x64', 'windows-x64', 'macos-arm64', 'macos-x64']) {
     const assignment = nativeFrameworkShardPlan({ inventory, plan, target });
+    const pythonConsumers = new Set(inventory.cases.filter(assertion =>
+      !assertion.parents.length && assertion.applicability.platforms.includes(target) &&
+      pythonConsumerFiles.has(assertion.file)).map(assertion => assertion.id));
     for (const part of assignment.parts.filter(part => part.shard.startsWith('body-'))) {
       const request = { inventory, plan, assignment, target, ...part, profile: 'pr', component: 'framework',
         protocol: nativeBootstrapProtocol };
       const required = nativeBootstrapRequirements(request);
       assert.deepEqual(required, { go: part.shard === assignment.toolShard,
-        python: target.startsWith('macos-') || part.shard !== 'body-3',
+        python: part.assertionIds.some(id => pythonConsumers.has(id)),
         schema: part.shard === assignment.toolShard, homebrew: false, ownedPrefix: false });
       const calls = [];
       await probeNativeSdk(request, async command => {

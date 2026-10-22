@@ -234,20 +234,55 @@ function commandReportBytes(report) {
   return { sanitized, bytes };
 }
 
-async function settleOwnedProcessGroup(pid) {
-  const deadline = performance.now() + 1000;
-  for (;;) {
+export function stopOwnedProcessGroup(child, childClosed, cleanup) {
+  cleanup.pid = child.pid;
+  cleanup.mechanism = 'owned-process-group';
+  cleanup.requested = true;
+  cleanup.outcome = 'pending';
+  cleanup.survivorsVerified = false;
+  let signalError;
+  if (!Number.isInteger(child.pid) || child.pid <= 0) {
+    return Promise.reject(Object.assign(new Error('Owned process group has no established root identity.'),
+      { code: 'STOP_UNVERIFIED' }));
+  }
+  // Signal synchronously while this ChildProcess still owns the live group root.
+  if (child.exitCode === null && child.signalCode === null) {
     try {
-      if (process.kill(-pid, 0) !== true) {
+      if (process.kill(-child.pid, 'SIGTERM') !== true) {
+        throw Object.assign(new Error('Owned process group signal could not be verified.'), { code: 'STOP_UNVERIFIED' });
+      }
+      cleanup.signalSent = true;
+    } catch (error) {
+      if (error.code !== 'ESRCH') signalError = error;
+    }
+  }
+  return settleOwnedProcessGroup(childClosed, cleanup, signalError);
+}
+
+async function settleOwnedProcessGroup(childClosed, cleanup, signalError) {
+  const deadline = performance.now() + 1000;
+  let closed = false;
+  childClosed.then(() => { closed = true; cleanup.rootExitObserved = true; });
+  for (;;) {
+    let absent = false;
+    try {
+      if (process.kill(-cleanup.pid, 0) !== true) {
         throw Object.assign(new Error('Owned process group termination could not be verified.'),
           { code: 'STOP_UNVERIFIED' });
       }
     } catch (error) {
-      if (error.code === 'ESRCH') return;
-      throw error;
+      if (error.code === 'ESRCH') absent = true;
+      else throw error;
+    }
+    if (signalError) throw signalError;
+    if (absent && closed) {
+      cleanup.outcome = 'group-exited';
+      cleanup.survivorsVerified = true;
+      cleanup.groupExitObservedAt = new Date().toISOString();
+      return;
     }
     if (performance.now() >= deadline) {
-      throw Object.assign(new Error('Owned process group remains after its bounded termination settlement.'),
+      throw Object.assign(new Error('Owned process group or root close remains unsettled after its bounded termination settlement.'),
         { code: 'STOP_TIMEOUT' });
     }
     await delay(10);
@@ -288,6 +323,8 @@ export async function executeValidationCommand({
     let child;
     let childClosed;
     let stopping;
+    let stopped;
+    const stopCompleted = new Promise(resolve => { stopped = resolve; });
     const cleanup = { requested: false, pid: null, mechanism: null, outcome: 'not-requested',
       survivorsVerified: false, error: null };
     const stop = () => {
@@ -299,7 +336,7 @@ export async function executeValidationCommand({
       cleanup.outcome = 'pending';
       retain('command-stop-request', { pid: child.pid, cleanup });
       if (!finalizing) requestCheckpoint('cancelling', { force: true });
-      stopping = Promise.resolve().then(async () => {
+      const termination = process.platform === 'win32' ? Promise.resolve().then(async () => {
         if (process.platform === 'win32') {
           if (child.exitCode !== null || child.signalCode !== null) {
             cleanup.outcome = 'root-exited-unverified';
@@ -328,23 +365,9 @@ export async function executeValidationCommand({
             });
           });
           cleanup.outcome = 'reported-stopped';
-        } else {
-          if (child.exitCode === null && child.signalCode === null) {
-            try { process.kill(-child.pid, 'SIGTERM'); }
-            catch (error) {
-              if (error.code !== 'ESRCH') throw error;
-              cleanup.outcome = 'target-not-found';
-            }
-            if (cleanup.outcome === 'pending') cleanup.outcome = 'signal-sent';
-          }
-          // Root close does not settle descendants whose stdio is detached.
-          await childClosed;
-          await settleOwnedProcessGroup(child.pid);
-          cleanup.outcome = 'group-exited';
-          cleanup.survivorsVerified = true;
-          cleanup.groupExitObservedAt = new Date().toISOString();
         }
-      }).catch(async error => {
+      }) : stopOwnedProcessGroup(child, childClosed, cleanup);
+      stopping = termination.catch(async error => {
         cleanupError ??= error;
         cleanup.outcome = 'uncertain';
         cleanup.error = processDiagnostic(error);
@@ -362,6 +385,13 @@ export async function executeValidationCommand({
             diagnostic: causes.map(value => value.message).join('; '), causes, originalOutput });
           await requestCheckpoint('cancelling', { force: true });
         } catch (retentionError) { persistenceError ??= retentionError; }
+      }).finally(() => {
+        if (process.platform !== 'win32') {
+          child.stdout.destroy();
+          child.stderr.destroy();
+          if (!cleanup.survivorsVerified) child.unref?.();
+          stopped({ code: child.exitCode, signal: child.signalCode, closed: cleanup.rootExitObserved === true });
+        }
       });
     };
     const retain = (kind, data) => {
@@ -535,7 +565,7 @@ export async function executeValidationCommand({
           try { retain('command-dispatched', { pid: report.pid }); }
           catch (error) { persistenceError ??= error; stop(); }
           await requestCheckpoint('running', { force: true });
-          outcome = await childClosed;
+          outcome = await Promise.race([childClosed, stopCompleted]);
         }
       }
     } finally {

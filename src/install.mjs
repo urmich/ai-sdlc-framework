@@ -8,6 +8,7 @@ import { atomicWrite, canonicalPath, exists, readBytes, readJson,
   writeJson } from './files.mjs';
 import { platformCapabilities } from './platform.mjs';
 import { checkPackagedDocumentation, rebaseDocumentationLinks } from './documentation-links.mjs';
+import { installPhase, installProgress, observeInstallOperation, observeInstallPhase } from './install-progress.mjs';
 
 const SOURCE_ROOT = fileURLToPath(new URL('../', import.meta.url));
 const INSTALL_LOCK = '.ai-sdlc-framework.install.lock';
@@ -15,9 +16,9 @@ const MAX_PROCESS_ID = 0x7fffffff;
 const INVALID_LOCK_STALE_MS = 1000;
 const REQUIRED_INSTALLED_FILES = [
   'sdlc/bin/sdlc.mjs',
-  ...['artifacts', 'audit', 'authority', 'checks', 'cli', 'core', 'decisions',
+  ...['artifacts', 'audit', 'authority', 'checks', 'cli', 'cli-arguments', 'core', 'decisions',
     'coverage', 'coverage-cli', 'current-evidence', 'evidence', 'external-results', 'files', 'gate', 'git', 'hooks',
-    'documentation-links', 'host-invocations', 'install', 'monitor-evidence', 'monitors',
+    'documentation-links', 'host-invocations', 'install', 'install-progress', 'monitor-evidence', 'monitors',
     'observation-retention', 'operations',
     'platform', 'policy', 'pr', 'pr-description', 'provider-adapters', 'recovery', 'schemas',
     'readiness-cli', 'repository-observations', 'staging', 'store', 'tool-arguments',
@@ -195,7 +196,7 @@ export async function selectMaintenanceSource(store, input) {
     });
   return { selected: true, sessionId, sourceRoot, frameworkVersion: pkg.version };
 }
-export async function distribution(home, sourceRoot = SOURCE_ROOT) {
+async function distributionOperation(home, sourceRoot) {
   const files = new Map();
   const entry = path.join(home, 'sdlc', 'bin', 'sdlc.mjs');
   const substitutions = {
@@ -275,7 +276,8 @@ export async function distribution(home, sourceRoot = SOURCE_ROOT) {
     requireThat(files.has(relative), 'INSTALL',
       `Replacement package is incomplete: missing ${relative}`);
   }
-  const documentation = await checkPackagedDocumentation(files, { managedInstructions: block });
+  const documentation = await observeInstallPhase('documentation', () =>
+    checkPackagedDocumentation(files, { managedInstructions: block }));
   requireThat(documentation.diagnostics.length === 0, 'INSTALL',
     `Replacement package has invalid documentation: ${documentation.diagnostics.join('; ')}`);
   const pkg = JSON.parse(files.get('sdlc/package.json').toString('utf8'));
@@ -291,6 +293,7 @@ async function installLocked(store, {
   prepared,
   preparedVersion,
 } = {}) {
+    installPhase('replacement-preflight', 'begin');
     const manifestFile = await safePath(store.home, 'sdlc/install-manifest.json');
     const previous = await readJson(manifestFile, { optional: true });
     if (previous) requireThat(previous.owner === 'ai-sdlc-framework' && previous.schemaVersion === 1, 'INSTALL_CONFLICT', 'Unknown ownership manifest');
@@ -319,8 +322,10 @@ async function installLocked(store, {
     }
     if (nextInstructions !== original) changes.push({ relative: 'copilot-instructions.md', target: instructionsFile,
       before: await exists(instructionsFile) ? Buffer.from(original) : null, content: Buffer.from(nextInstructions) });
+    installPhase('replacement-preflight', 'end', changes.length);
     const applied = [];
     try {
+      installPhase('replacement-writes', 'begin');
       for (const change of changes) {
         // Recheck immediately before mutation; refuse to overwrite edits made since preflight.
         const current = await exists(change.target) ? await readBytes(change.target, LIMITS.artifact) : null;
@@ -328,13 +333,15 @@ async function installLocked(store, {
         if (change.content) await atomicWrite(change.target, change.content, { mode: change.relative === 'sdlc/bin/sdlc.mjs' ? 0o700 : 0o600 });
         else await fs.unlink(change.target);
         applied.push(change);
+        installProgress('replacement-writes', applied.length);
         await fault(change.relative);
       }
+      installPhase('replacement-writes', 'end', applied.length);
       const manifest = { schemaVersion: 1, owner: 'ai-sdlc-framework',
         version: preparedVersion ?? await sourceVersion(sourceRoot),
         files: Object.fromEntries([...files].map(([relative, content]) => [relative, digest(content)])), instructionsBlock: block,
         instructionsOriginallyExisted: previous?.instructionsOriginallyExisted ?? (original !== '') };
-      await writeJson(manifestFile, manifest);
+      await observeInstallPhase('manifest', () => writeJson(manifestFile, manifest));
       return { installed: true, changedFiles: changes.map(change => change.relative), home: store.home,
         entry: path.join(store.home, 'sdlc', 'bin', 'sdlc.mjs'), nextAction: 'Restart Copilot CLI, run doctor, and verify supported hook fixtures before relying on enforcement.' };
     } catch (error) {
@@ -349,16 +356,21 @@ async function installLocked(store, {
       throw new SdlcError('INSTALL_FAILED', error.message, { preservedConcurrentEdits: preserved });
     }
 }
-export async function install(store, options = {}) {
+async function installOperation(store, options = {}) {
   store.home = await canonicalPath(store.home);
   const sourceRoot = options.sourceRoot ?? SOURCE_ROOT;
   const prepared = await distribution(store.home, sourceRoot);
   const preparedVersion = JSON.parse(prepared.files.get('sdlc/package.json').toString('utf8')).version;
   await store.ready();
-  return withLock(installLock(store), () =>
-    installLocked(store, { ...options, prepared, preparedVersion }));
+  installPhase('install-lock', 'begin');
+  const result = await withLock(installLock(store), () => {
+    installPhase('install-lock', 'end');
+    return installLocked(store, { ...options, prepared, preparedVersion });
+  });
+  installPhase('lock-release', 'end');
+  return result;
 }
-export async function cleanInstall(store, {
+async function cleanInstallOperation(store, {
   sourceRoot = SOURCE_ROOT,
   fault = async () => {},
 } = {}) {
@@ -373,8 +385,10 @@ export async function cleanInstall(store, {
   const preparedVersion = JSON.parse(prepared.files.get('sdlc/package.json').toString('utf8')).version;
   await prepareMaintenanceHome(store);
   const lock = installLock(store);
+  installPhase('purge-lock', 'begin');
   await preparePurgeLock(lock);
-  return withLock(lock, async () => {
+  const result = await withLock(lock, async () => {
+    installPhase('purge-lock', 'end');
     await prepareLegacyInstallLock(store);
     const purge = await purgeLocked(store);
     try {
@@ -396,6 +410,8 @@ export async function cleanInstall(store, {
         { purgedExisting: true, purge, causeCode: error.code });
     }
   });
+  installPhase('lock-release', 'end');
+  return result;
 }
 async function uninstallLocked(store) {
     const manifestLiteral = await purgeOwnedPath(store.home,
@@ -537,8 +553,9 @@ async function preflightPurge(store) {
   };
 }
 async function purgeLocked(store) {
-  const plan = await preflightPurge(store);
+  const plan = await observeInstallPhase('purge-preflight', () => preflightPurge(store));
   const removed = [];
+  installPhase('purge-remove', 'begin');
   try {
     if (plan.instructions) {
       const current = await readBytes(plan.instructions.file);
@@ -562,6 +579,7 @@ async function purgeLocked(store) {
         `Owned path parent changed during purge: ${relative}`);
       await fs.rm(current, { recursive: true, force: true });
       removed.push(relative);
+      installProgress('purge-remove', removed.length);
     }
     for (const planned of plan.cleanupDirectories) {
       const relative = path.relative(store.home, planned);
@@ -578,6 +596,7 @@ async function purgeLocked(store) {
       `Framework purge failed after removing ${removed.length} owned paths: ${error.message}`,
       { purgeStarted: removed.length > 0, removed, causeCode: error.code });
   }
+  installPhase('purge-remove', 'end', removed.length);
   return {
     purged: true,
     uninstalled: true,
@@ -586,7 +605,7 @@ async function purgeLocked(store) {
     runtime: 'Irreversibly removed all framework runtime state and known framework-owned paths.',
   };
 }
-export async function uninstall(store, { purge = false } = {}) {
+async function uninstallOperation(store, { purge = false } = {}) {
   if (!purge) {
     await store.ready();
     const result = await withLock(installLock(store), () =>
@@ -608,7 +627,7 @@ export async function uninstall(store, { purge = false } = {}) {
     };
   });
 }
-export async function doctor(store) {
+async function doctorOperation(store) {
   store.home = await canonicalPath(store.home);
   store.runtime = path.join(store.home, 'sdlc', 'runtime');
   const manifestFile = path.join(store.home, 'sdlc', 'install-manifest.json');
@@ -618,6 +637,7 @@ export async function doctor(store) {
     const target = await safePath(store.home, relative);
     if (!(await exists(target)) || digest(await readBytes(target, LIMITS.artifact)) !== hash) findings.push(`Missing or modified installed file: ${relative}`);
   }
+
   if (manifest?.instructionsBlock) {
     const instructionsFile = path.join(store.home,
       'copilot-instructions.md');
@@ -657,4 +677,28 @@ export async function doctor(store) {
         nativeVerification: platform.verification.status,
         nonHostIntegration: 'unverified',
       } } };
+}
+
+export async function distribution(home, sourceRoot = SOURCE_ROOT) {
+  return observeInstallOperation(() => observeInstallPhase('distribution', () =>
+    distributionOperation(home, sourceRoot)));
+}
+
+export async function install(store, options = {}) {
+  return observeInstallOperation(() => observeInstallPhase('install', () =>
+    installOperation(store, options)));
+}
+
+export async function cleanInstall(store, options = {}) {
+  return observeInstallOperation(() => observeInstallPhase('clean-install', () =>
+    cleanInstallOperation(store, options)));
+}
+
+export async function uninstall(store, options = {}) {
+  return observeInstallOperation(() => observeInstallPhase('uninstall', () =>
+    uninstallOperation(store, options)));
+}
+
+export async function doctor(store) {
+  return observeInstallOperation(() => observeInstallPhase('doctor', () => doctorOperation(store)));
 }

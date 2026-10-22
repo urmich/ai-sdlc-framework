@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { canonical, digest, newId, parseJson, LIMITS, requireThat } from './core.mjs';
 import { isWindowsDevicePath, sameNativePath, withinNativePath } from './platform.mjs';
+import { beginInstallActivity, finishInstallActivity } from './install-progress.mjs';
 
 export function resolveCopilotHome(home = process.env.COPILOT_HOME || path.join(os.homedir(), '.copilot')) {
   return path.resolve(home);
@@ -133,6 +134,7 @@ export async function readJson(file, { optional = false, limit = LIMITS.input } 
   catch (error) { if (optional && error.code === 'ENOENT') return null; throw error; }
 }
 async function syncDirectory(directory) {
+  const activity = beginInstallActivity('directory-flush');
   let handle;
   try {
     handle = await fs.open(directory, 'r');
@@ -140,6 +142,7 @@ async function syncDirectory(directory) {
   } catch (error) {
     if (!['EINVAL', 'ENOTSUP', 'EISDIR', ...(process.platform === 'win32' ? ['EPERM', 'EACCES'] : [])].includes(error.code)) throw error;
   } finally { if (handle) await handle.close(); }
+  finishInstallActivity(activity);
 }
 export async function atomicWrite(file, content, {
   fault = async () => {},
@@ -156,9 +159,13 @@ export async function atomicWrite(file, content, {
   try {
     handle = await fs.open(temporary, 'wx', mode);
     await fault('created');
+    const write = beginInstallActivity('file-write');
     await handle.writeFile(content);
+    finishInstallActivity(write);
     await fault('written');
+    const flush = beginInstallActivity('file-flush');
     await handle.sync();
+    finishInstallActivity(flush);
     await handle.close();
     handle = undefined;
     await fault('flushed');

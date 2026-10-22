@@ -9,6 +9,7 @@ import { extractEntries, verifyTree } from './protocol.mjs';
 import { canonicalPath, resolveCopilotHome, within } from '../../src/files.mjs';
 import { parseArguments } from '../../src/cli-arguments.mjs';
 import { withinNativePath } from '../../src/platform.mjs';
+import { installPhase, observeInstallOperation, observeInstallPhase } from '../../src/install-progress.mjs';
 
 const exists = async file => {
   try { return await fs.lstat(file); } catch (error) {
@@ -142,15 +143,16 @@ async function cleanAbandonedStages(root) {
   }
 }
 
-export async function activateChannel({ sourceRoot, channelRoot = defaultRoot(),
+async function activateChannelOperation({ sourceRoot, channelRoot = defaultRoot(),
   home, node = process.execPath, lockTimeoutMs = 5000, beforeStep = async () => {} }) {
   if (!Number.isInteger(lockTimeoutMs) || lockTimeoutMs < 0 || lockTimeoutMs > 30000) {
     throw new Error('Channel lock timeout must be between 0 and 30000ms');
   }
   // All bytes and the exact runtime are checked before creating even the channel root.
-  const verified = await verifyTree(sourceRoot, { expectedPlatform: process.platform, expectedArch: process.arch });
-  const selectedNode = await runtimePreflight({ node,
-    platform: verified.platform.platform, arch: verified.platform.arch ?? process.arch });
+  const verified = await observeInstallPhase('runtime-verify-source', () =>
+    verifyTree(sourceRoot, { expectedPlatform: process.platform, expectedArch: process.arch }));
+  const selectedNode = await observeInstallPhase('runtime-preflight', () => runtimePreflight({ node,
+    platform: verified.platform.platform, arch: verified.platform.arch ?? process.arch }));
   const root = path.resolve(channelRoot);
   const layout = await validateChannelHome({ channelRoot, home });
   const source = await canonicalPath(sourceRoot);
@@ -158,7 +160,9 @@ export async function activateChannel({ sourceRoot, channelRoot = defaultRoot(),
     throw new Error('Channel root must be separate from the downloaded distribution');
   }
   await literalDirectory(root, { create: true });
+  installPhase('channel-lock', 'begin');
   const release = await acquireLock(root, lockTimeoutMs);
+  installPhase('channel-lock', 'end');
   let staging;
   let promotion;
   try {
@@ -178,7 +182,8 @@ export async function activateChannel({ sourceRoot, channelRoot = defaultRoot(),
     const versions = await literalDirectory(path.join(root, 'versions'), { create: true });
     const versionRoot = path.join(versions, verified.manifest.version);
     if (await exists(versionRoot)) {
-      const existing = await verifyTree(versionRoot, { expectedPlatform: process.platform, expectedArch: process.arch });
+      const existing = await observeInstallPhase('runtime-verify-active', () =>
+        verifyTree(versionRoot, { expectedPlatform: process.platform, expectedArch: process.arch }));
       if (canonical(existing.manifest) !== canonical(verified.manifest) ||
           canonical(existing.platform) !== canonical(verified.platform)) {
         throw new Error('Immutable channel version has a conflicting digest');
@@ -189,7 +194,8 @@ export async function activateChannel({ sourceRoot, channelRoot = defaultRoot(),
       await beforeStep('copy');
       await extractEntries(verified.entries, staging);
       await beforeStep('verify-staging');
-      await verifyTree(staging, { expectedPlatform: process.platform, expectedArch: process.arch });
+      await observeInstallPhase('runtime-verify-staging', () =>
+        verifyTree(staging, { expectedPlatform: process.platform, expectedArch: process.arch }));
       await beforeStep('activate-version');
       await fs.rename(staging, versionRoot);
       staging = undefined;
@@ -227,18 +233,25 @@ export async function activateChannel({ sourceRoot, channelRoot = defaultRoot(),
       if (promotion) await fs.rm(promotion, { force: true });
     } finally {
       await release();
+      installPhase('lock-release', 'end');
     }
   }
 }
 
+export async function activateChannel(options) {
+  return observeInstallOperation(() => activateChannelOperation(options));
+}
+
 export function invokeFramework(root, node, args) {
   const entry = path.join(root, 'package', 'bin', 'sdlc.mjs');
+  installPhase('runtime-launch', 'begin');
   const result = spawnSync(node, [entry, ...args], { stdio: 'inherit', env: { ...process.env, SDLC_NODE: node } });
   if (result.error) throw result.error;
+  installPhase('runtime-launch', 'end');
   return result.status ?? 1;
 }
 
-export async function main(argv) {
+async function runtimeMain(argv) {
   const [operation, ...input] = argv;
   const separator = input.indexOf('--');
   if (separator < 0) throw new Error('Expected runtime options followed by --');
@@ -247,10 +260,11 @@ export async function main(argv) {
     throw new Error('Expected --root and --node runtime options');
   }
   const root = await fs.realpath(options[1]);
-  const node = await runtimePreflight({ node: options[3] });
+  const node = await observeInstallPhase('runtime-preflight', () => runtimePreflight({ node: options[3] }));
   const args = input.slice(separator + 1);
   if (operation === 'launch') {
-    await verifyTree(root, { expectedPlatform: process.platform, expectedArch: process.arch });
+    await observeInstallPhase('runtime-verify-active', () =>
+      verifyTree(root, { expectedPlatform: process.platform, expectedArch: process.arch }));
     const { flags } = parseArguments(args);
     const parent = path.dirname(root);
     const managedRoot = path.basename(parent) === 'versions' &&
@@ -283,7 +297,8 @@ export async function main(argv) {
   const layout = await validateChannelHome({ channelRoot, home: flags.home });
   bindHome(args, layout.home);
   if (['doctor', 'uninstall'].includes(args[0])) {
-    await verifyTree(root, { expectedPlatform: process.platform, expectedArch: process.arch });
+    await observeInstallPhase('runtime-verify-source', () =>
+      verifyTree(root, { expectedPlatform: process.platform, expectedArch: process.arch }));
     if (channelOnly) throw new Error('--channel-only applies only to install/update');
     return invokeFramework(root, node, args);
   }
@@ -293,11 +308,17 @@ export async function main(argv) {
     return 0;
   }
   // Never resolve "sdlc" through PATH, and never hold the channel lock during framework maintenance.
+  installPhase('runtime-launch', 'begin');
   const result = spawnSync(activation.launcher, args, {
     stdio: 'inherit', env: { ...process.env, SDLC_NODE: node },
   });
   if (result.error) throw result.error;
+  installPhase('runtime-launch', 'end');
   return result.status ?? 1;
+}
+
+export async function main(argv) {
+  return observeInstallOperation(() => observeInstallPhase('runtime-main', () => runtimeMain(argv)));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

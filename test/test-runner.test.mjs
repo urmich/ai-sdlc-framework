@@ -145,7 +145,7 @@ test('T-PRD018 command cancellation settles the owned group before return and fa
   const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'group-boundary-'));
   t.after(() => fs.rm(evidence, { recursive: true, force: true }));
   const partial = 'Authorization: Bearer owned-group-fixture\n';
-  for (const mode of ['drain', 'root-exits-before-stop', 'stop-after-root-close', 'persistent', 'denied', 'unknown', 'missing']) {
+  for (const mode of ['drain', 'root-exits-before-stop', 'stop-after-root-close', 'persistent', 'denied', 'unknown', 'missing', 'root-never-closes']) {
     const directory = path.join(evidence, mode);
     await fs.mkdir(directory);
     const cancellation = new AbortController();
@@ -173,7 +173,7 @@ test('T-PRD018 command cancellation settles the owned group before return and fa
       delay: async milliseconds => {
         assert.equal(milliseconds, 10);
         clock += milliseconds;
-        if (mode === 'persistent') return;
+        if (['persistent', 'missing', 'root-never-closes'].includes(mode)) return;
         observedDrain('draining');
         await released;
         present = false;
@@ -188,7 +188,6 @@ test('T-PRD018 command cancellation settles the owned group before return and fa
             return true;
           }
           assert.equal(signal, 0, 'Settlement must not send a delayed destructive signal');
-          assert.equal(rootClosed, true, 'Descendant settlement follows the original root close');
           if (mode === 'denied') throw Object.assign(new Error('Owned group observation denied'), { code: 'EPERM' });
           if (mode === 'unknown') return false;
           if (!present) throw Object.assign(new Error('Owned group absent'), { code: 'ESRCH' });
@@ -219,7 +218,7 @@ test('T-PRD018 command cancellation settles the owned group before return and fa
       cancellation.abort();
       if (mode === 'root-exits-before-stop' || mode === 'stop-after-root-close') {
         if (!rootClosed) close();
-      } else {
+      } else if (mode !== 'root-never-closes') {
         // Let the actual stop callback send TERM before publishing root close.
         await Promise.resolve();
         close();
@@ -235,26 +234,28 @@ test('T-PRD018 command cancellation settles the owned group before return and fa
       }
       const report = await settled;
       assert.equal(report.complete, false);
-      assert.equal(report.cleanup.rootExitObserved, true);
-      assert.equal(report.cleanup.survivorsVerified, !['persistent', 'denied', 'unknown'].includes(mode));
+      assert.equal(report.cleanup.rootExitObserved, mode !== 'root-never-closes');
+      assert.equal(report.cleanup.survivorsVerified, !['persistent', 'denied', 'unknown', 'root-never-closes'].includes(mode));
       assert.equal(report.signal, owned.signalCode);
       assert.equal(report.exitCode, owned.exitCode);
       assert.ok(report.causes.some(cause => cause.type === 'cancellation'));
       assert.equal(report.originalOutput.stdout.sha256, digest(partial));
       assert.equal(report.originalOutput.stderr.sha256, digest('original validator failure\n'));
       assert.ok(!report.stdout.includes('owned-group-fixture'));
-      if (['persistent', 'denied', 'unknown'].includes(mode)) {
-        const code = mode === 'persistent' ? 'STOP_TIMEOUT' : mode === 'denied' ? 'EPERM' : 'STOP_UNVERIFIED';
+      if (['persistent', 'denied', 'unknown', 'root-never-closes'].includes(mode)) {
+        const code = ['persistent', 'root-never-closes'].includes(mode) ? 'STOP_TIMEOUT' : mode === 'denied' ? 'EPERM' : 'STOP_UNVERIFIED';
         assert.equal(report.cleanup.outcome, 'uncertain');
         assert.equal(report.cleanup.error.code, code);
         assert.ok(report.causes.some(cause => cause.type === 'cleanup' && cause.code === code));
-        if (mode !== 'persistent') assert.equal(signals.filter(signal => signal === 0).length, 1);
+        if (!['persistent', 'root-never-closes'].includes(mode)) assert.equal(signals.filter(signal => signal === 0).length, 1);
       } else {
         assert.equal(report.cleanup.outcome, 'group-exited');
         assert.equal(signals.at(-1), 0);
       }
-      if (mode.includes('root')) assert.ok(!signals.includes('SIGTERM'));
-      if (mode === 'missing') assert.deepEqual(signals, ['SIGTERM', 0]);
+      if (mode === 'stop-after-root-close') assert.ok(!signals.includes('SIGTERM'));
+      if (mode === 'root-exits-before-stop') assert.equal(signals.filter(signal => signal === 'SIGTERM').length, 1,
+        'The live root is signalled synchronously, before the later root-close event');
+      if (mode === 'missing') assert.ok(signals[0] === 'SIGTERM' && signals.slice(1).every(signal => signal === 0));
       assert.ok(clock <= 1000, 'Persistent groups use a bounded settlement budget');
       assert.deepEqual(JSON.parse(await fs.readFile(path.join(directory, 'cancelled.json'), 'utf8')), report);
     } finally {

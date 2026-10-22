@@ -12,13 +12,29 @@ function endpoint(value) {
   'BUDGET', 'Invalid inherited test-worker allocation');
   return data;
 }
-async function connect(value) {
+async function connect(value, { signal } = {}) {
+  const aborted = () => Object.assign(new Error('Test-worker budget inspection was aborted'), { code: 'BUDGET' });
+  if (signal?.aborted) throw aborted();
   const selected = endpoint(value);
   const socket = net.connect({ host: selected.host, port: selected.port });
-  await new Promise((resolve, reject) => {
-    socket.once('connect', resolve);
-    socket.once('error', reject);
-  });
+  let abortError;
+  const abort = () => { abortError ??= aborted(); socket.destroy(abortError); };
+  const closed = new Promise(resolve => socket.once('close', () => {
+    signal?.removeEventListener('abort', abort);
+    resolve();
+  }));
+  try {
+    await new Promise((resolve, reject) => {
+      socket.once('connect', resolve);
+      socket.once('error', reject);
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
+    });
+  } catch (error) {
+    socket.destroy();
+    await closed;
+    throw error;
+  }
   let sequence = 0;
   let contents = '';
   const cancellation = new AbortController();
@@ -52,8 +68,10 @@ async function connect(value) {
   socket.on('error', reject);
   socket.on('close', () => reject(Object.assign(new Error('Test-worker budget disconnected'), { code: 'BUDGET' })));
   return {
-    socket, selected, signal: cancellation.signal,
+    socket, selected, signal: cancellation.signal, closed,
     request(value) {
+      if (socket.destroyed) return Promise.reject(abortError ??
+        Object.assign(new Error('Test-worker budget disconnected'), { code: 'BUDGET' }));
       const request = ++sequence;
       return new Promise((resolve, reject) => {
         pending.set(request, { resolve, reject });
@@ -447,10 +465,10 @@ export async function acquireTestWorker(slots = 1, { groupId = null, exclusiveRe
   } catch (error) { client.close(); throw error; }
 }
 
-export async function readTestBudget() {
-  const client = await connect(process.env.SDLC_TEST_BUDGET);
+export async function readTestBudget({ signal } = {}) {
+  const client = await connect(process.env.SDLC_TEST_BUDGET, { signal });
   try { return await client.request({ op: 'snapshot' }); }
-  finally { client.close(); }
+  finally { client.close(); if (signal) await client.closed; }
 }
 
 export async function readTestGroupProcesses(groupId) {

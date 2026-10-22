@@ -41,6 +41,7 @@ let payload;
 let nativeEntries;
 let originalTmp;
 let originalCopilotHome;
+const boundaryLifetimes = [];
 const windowsLauncher = process.env.SDLC_WINDOWS_LAUNCHER;
 const targets = process.env.SDLC_DISTRIBUTION_TARGETS?.split(',') ??
   [...ARCHIVE_TARGETS.filter(target => target !== 'windows-x64' || windowsLauncher),
@@ -71,6 +72,9 @@ test.after(async () => {
   else process.env.TMPDIR = originalTmp;
   if (originalCopilotHome === undefined) delete process.env.COPILOT_HOME;
   else process.env.COPILOT_HOME = originalCopilotHome;
+  if (boundaryLifetimes.some(lifetime => !lifetime.cleanupSafe)) {
+    throw new Error('Network boundary cleanup FAILED; fixture retained because owned writers are not proven stopped.');
+  }
   if (root) await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -535,7 +539,9 @@ test('T-51 network adapters sanitize executable references and fail closed on un
 test('T-51 npm-denied standalone lifecycle preserves unrelated content and runtime until explicit purge',
   { skip: !hostTarget || process.platform === 'win32' && !windowsLauncher }, async t => {
     const f = await fixture();
-    const boundary = await createNetworkBoundary({ directory: f.directory, environment });
+    const lifetime = { cleanupSafe: true };
+    boundaryLifetimes.push(lifetime);
+    const boundary = await createNetworkBoundary({ directory: f.directory, environment, trace: true, lifetime });
     if (boundary.status === 'NotRun') {
       const reason = `T-51 network-denied lifecycle NotRun: ${boundary.reason}`;
       t.diagnostic(reason);
@@ -545,7 +551,24 @@ test('T-51 npm-denied standalone lifecycle preserves unrelated content and runti
     }
     const controls = await verifyNetworkNegativeControls(boundary, f.directory);
     t.diagnostic(JSON.stringify({ test: 'T-51', status: 'enforced', ...controls }));
-    const runInstaller = args => installer(f, args, boundary.environment, boundary.execute,
+    const run = async (command, args, options) => {
+      let result;
+      let failure;
+      try { result = await boundary.execute(command, args, options); return result; }
+      catch (error) { failure = error; throw error; }
+      finally {
+        try {
+          t.diagnostic(JSON.stringify({ test: 'T-51', phase: 'boundary-invocation',
+            ...(failure?.boundaryDiagnostics ?? result?.boundaryDiagnostics),
+            stderr: processDiagnostic(failure?.stderr ?? result?.stderr ?? ''),
+            ...(failure?.cleanup ? { cleanup: failure.cleanup } : {}) }));
+        } catch (diagnosticError) {
+          if (failure) failure.boundaryDiagnosticError = processDiagnostic(diagnosticError);
+          else throw diagnosticError;
+        }
+      }
+    };
+    const runInstaller = args => installer(f, args, boundary.environment, run,
       observation => t.diagnostic(JSON.stringify(observation)));
     const first = await runInstaller(['install']);
     assert.equal(first.installed, true);
@@ -561,12 +584,12 @@ test('T-51 npm-denied standalone lifecycle preserves unrelated content and runti
       { executable: 'powershell.exe', args: ['-NoProfile', '-NonInteractive', '-File',
         path.join(f.channelRoot, 'current.ps1'), 'doctor', '--home', f.home] } :
       { executable: path.join(f.channelRoot, 'current/bin/sdlc'), args: ['doctor', '--home', f.home] };
-    assert.equal(JSON.parse((await boundary.execute(current.executable, current.args)).stdout).installed, true);
+    assert.equal(JSON.parse((await run(current.executable, current.args)).stdout).installed, true);
     if (process.platform !== 'win32') {
       const linked = path.join(f.directory, 'user bin/sdlc');
       await fs.mkdir(path.dirname(linked));
       await fs.symlink(path.relative(path.dirname(linked), current.executable), linked);
-      assert.equal(JSON.parse((await boundary.execute(linked, ['doctor', '--home', f.home])).stdout).installed, true);
+      assert.equal(JSON.parse((await run(linked, ['doctor', '--home', f.home])).stdout).installed, true);
     }
     const update = await runInstaller(['update']);
     assert.equal(update.changedFiles.length, 0);

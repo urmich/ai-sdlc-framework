@@ -56,6 +56,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { deriveLocalSanitySpecification, localEvidenceFailureDiagnostic } from '../scripts/test-local-evidence.mjs';
 import { processDiagnostic } from '../scripts/validation-tools.mjs';
 import { windowsProcessIdentity, assertOwnedProcessExited } from './owned-process-fixture.mjs';
+import net from 'node:net';
+import { getEventListeners } from 'node:events';
 
 const execute = promisify(execFile);
 const requiredCriticalSelectors = [
@@ -71,6 +73,78 @@ const requiredCriticalSelectors = [
   ['test/test-runner.test.mjs', 'T-130 public runner preserves a real failing child and still executes the passing sibling'],
   ['test/test-runner.test.mjs', 'T-GHB24 native execution evidence distinguishes passing, failing and skipped assertions without overwriting reports'],
 ];
+
+async function inspectionBroker(t) {
+  const connections = [];
+  const requests = [];
+  const waiters = [];
+  const server = net.createServer(socket => {
+    const connection = { socket, closed: new Promise(resolve => socket.once('close', resolve)) };
+    connections.push(connection);
+    socket.on('error', () => {});
+    let buffer = '';
+    socket.on('data', bytes => {
+      buffer += bytes;
+      const newline = buffer.indexOf('\n');
+      if (newline < 0) return;
+      const request = { ...connection, request: JSON.parse(buffer.slice(0, newline)) };
+      buffer = buffer.slice(newline + 1);
+      const waiting = waiters.shift();
+      if (waiting) waiting(request);
+      else requests.push(request);
+    });
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const inherited = process.env.SDLC_TEST_BUDGET;
+  process.env.SDLC_TEST_BUDGET = JSON.stringify({ version: 2, host: '127.0.0.1',
+    port: server.address().port, id: randomUUID(), key: 'a'.repeat(64) });
+  t.after(async () => {
+    if (inherited === undefined) delete process.env.SDLC_TEST_BUDGET;
+    else process.env.SDLC_TEST_BUDGET = inherited;
+    for (const { socket } of connections) socket.destroy();
+    await new Promise(resolve => server.close(resolve));
+  });
+  return { connections, next: () => requests.length ? Promise.resolve(requests.shift()) :
+    new Promise(resolve => waiters.push(resolve)) };
+}
+
+test('T-PRD010 budget inspection rejects a pre-connect abort without creating a socket and preserves ordinary snapshots',
+  { timeout: 5000 }, async t => {
+    const broker = await inspectionBroker(t);
+    const cancellation = new AbortController();
+    cancellation.abort();
+    await assert.rejects(readTestBudget({ signal: cancellation.signal }), { code: 'BUDGET' });
+    assert.equal(broker.connections.length, 0);
+    assert.equal(getEventListeners(cancellation.signal, 'abort').length, 0);
+    const pending = readTestBudget();
+    const owned = await broker.next();
+    const response = { request: owned.request.request, capacity: 3, activeWorkers: 1,
+      residentWorkers: 2, producers: 1 };
+    owned.socket.write(`${JSON.stringify(response)}\n`);
+    assert.deepEqual(await pending, response);
+    await owned.closed;
+    assert.equal(broker.connections.length, 1);
+  });
+
+test('T-PRD010 in-flight budget inspection abort drains only its owned socket and leaves a sibling request intact',
+  { timeout: 5000 }, async t => {
+    const broker = await inspectionBroker(t);
+    const cancellation = new AbortController();
+    const pending = readTestBudget({ signal: cancellation.signal });
+    const rejected = assert.rejects(pending, { code: 'BUDGET' });
+    const owned = await broker.next();
+    const siblingPending = readTestBudget();
+    const sibling = await broker.next();
+    cancellation.abort();
+    await rejected;
+    await owned.closed;
+    assert.equal(owned.socket.destroyed, true);
+    assert.equal(sibling.socket.destroyed, false);
+    assert.equal(getEventListeners(cancellation.signal, 'abort').length, 0);
+    sibling.socket.write(`${JSON.stringify({ request: sibling.request.request, capacity: 2 })}\n`);
+    assert.equal((await siblingPending).capacity, 2);
+    await sibling.closed;
+  });
 
 test('T-PRD008 equivalent benchmark fixtures require actual origin, original assertions and matching execution conditions', () => {
   const message = 'Only a known execution attempt has an attempt reference';
