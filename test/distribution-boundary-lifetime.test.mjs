@@ -3,6 +3,10 @@ export const validationDeclarations = {
   "surfaces": [
     {"coverage": "direct", "paths": ["scripts/validation-tools.mjs"]}
   ],
+  "groups": [{
+    "root": "T-51 owned boundary terminates descendant writers before return while an unrelated sibling survives",
+    "minimumSlots": 4
+  }],
   "applicability": [{
     "names": ["T-51 owned boundary terminates descendant writers before return while an unrelated sibling survives"],
     "platforms": ["linux-x64", "macos-arm64", "macos-x64"],
@@ -279,6 +283,11 @@ if(process.argv[2]==='root'){
       }
       expire();
       await assert.rejects(pending, error => {
+        t.diagnostic(JSON.stringify({ test: 'T-51', phase: 'owned-boundary-settlement',
+          pid: child.pid, exitCode: error.code, signal: error.signal, killed: error.killed,
+          cleanupOutcome: error.cleanup.outcome, signalSent: error.cleanup.signalSent,
+          rootExitObserved: error.cleanup.rootExitObserved,
+          survivorsVerified: error.cleanup.survivorsVerified, cleanupCode: error.cleanup.error?.code }));
         assert.equal(error.cleanup.survivorsVerified, true);
         // The fixture reaps its writer and exits zero; the expired watchdog still rejects.
         assert.equal(error.code, 0);

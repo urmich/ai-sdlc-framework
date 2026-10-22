@@ -16,8 +16,19 @@ export const validationDeclarations = {
       "owner": "maintainer",
       "reason": "PR-only setup trust-boundary regressions; each root owns an exact current-source snapshot, archives and cleanup. The history-independent regression runs only two representative roots. No shared mutations, network, real builds, native execution or critical-budget additions.",
       "prerequisites": ["Node >=22", "Git and the current source checkout", "Owned checkout-local filesystem with directory links"]
+    },
+    {
+      "names": ["T-PRD057 fixture-free release policy avoids builders while real consumers retain setup"],
+      "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+      "owner": "maintainer",
+      "reason": "PR-only pure-root and required-build boundary regression. Owned child processes deny all non-Git command dispatch; no package-manager, provisioning, native execution or critical-budget additions.",
+      "prerequisites": ["Node >=22", "Git", "Owned checkout-local filesystem"]
     }
   ],
+  "groups": [{
+    "root": "T-PRD057 fixture-free release policy avoids builders while real consumers retain setup",
+    "minimumSlots": 3
+  }],
   "surfaces": [
     {"coverage": "direct", "paths": ["scripts/frozen-distribution-fixture.mjs", "scripts/frozen-fixture-transport.mjs", "scripts/committed-source-inputs.mjs"]}
   ]
@@ -279,7 +290,7 @@ test('T-PRD014 missing frozen inputs select real build boundaries and dedicated 
   assert.equal(calls[1][1].artifact, 'controlled-boundary-only');
   const file = path.join(ROOT, 'test', 'distribution-channels.test.mjs');
   assert.deepEqual(filterFrozenFixtureTransport(f.environment, file), f.environment);
-  for (const sibling of ['provider-observations.unit.test.mjs', 'foreign/distribution-channels.test.mjs']) {
+  for (const sibling of ['provider-observations.unit.test.mjs', 'release-ci.test.mjs', 'foreign/distribution-channels.test.mjs']) {
     const filtered = filterFrozenFixtureTransport(f.environment, path.join(ROOT, 'test', sibling));
     assert.equal(filtered.SDLC_DISTRIBUTION_FIXTURE_CONTEXT, undefined);
     assert.equal(f.environment.SDLC_DISTRIBUTION_FIXTURE_CONTEXT, JSON.stringify(f.context));
@@ -526,4 +537,91 @@ test('T-PRD014 current-source fixtures and beforehook work without historical Gi
     await fs.writeFile(path.join(retained, 'proof.json'), `${JSON.stringify(proof, null, 2)}\n`, { flag: 'wx' });
   }
   t.diagnostic(JSON.stringify(proof));
+});
+
+test('T-PRD057 fixture-free release policy avoids builders while real consumers retain setup', async t => {
+  const root = path.join(ROOT, '.test-data', `release-setup-${randomUUID()}`);
+  await fs.mkdir(root, { recursive: true });
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const pure = 'T-PRD057 two archive targets retain four mandatory native execution platforms without Linux standalone support';
+  const ordinary = 'release preparation cannot attribute candidate bytes to a different source commit';
+  const realLauncher = 'T-PRD063 future Mac output leaves the separate Windows v1 PE and cross-platform npm bytes intact';
+  const results = [];
+  const run = async (name, names) => {
+    const directory = path.join(root, name);
+    await fs.mkdir(directory);
+    const calls = path.join(directory, 'build-calls.jsonl');
+    const preload = path.join(directory, 'deny-builds.mjs');
+    await fs.writeFile(preload, `
+      import cp from 'node:child_process';
+      import fs from 'node:fs';
+      import { promisify } from 'node:util';
+      import { syncBuiltinESMExports } from 'node:module';
+      const guard = (command, args = []) => {
+        if (command === 'git') return;
+        const argumentsList = Array.isArray(args) ? args : [];
+        fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({
+          npmPack: argumentsList.includes('pack') && argumentsList.includes('--ignore-scripts'),
+        }) + '\\n');
+        throw new Error('FORBIDDEN_RELEASE_SETUP_BUILD');
+      };
+      const originalFile = cp.execFile;
+      const originalAsync = promisify(originalFile);
+      cp.execFile = function(command, args, ...rest) {
+        guard(command, args); return originalFile.call(this, command, args, ...rest);
+      };
+      cp.execFile[promisify.custom] = (command, args, ...rest) => {
+        guard(command, args); return originalAsync(command, args, ...rest);
+      };
+      for (const name of ['spawn', 'spawnSync', 'exec', 'execSync', 'execFileSync', 'fork']) {
+        const original = cp[name];
+        cp[name] = function(command, args, ...rest) {
+          guard(command, args); return original.call(this, command, args, ...rest);
+        };
+      }
+      syncBuiltinESMExports();
+    `);
+    const environment = { ...process.env };
+    for (const key of Object.keys(environment)) {
+      if (key === 'NODE_TEST_CONTEXT' || key.startsWith('SDLC_TEST_REPORT_') ||
+          ['SDLC_DISTRIBUTION_FIXTURE_CONTEXT', 'SDLC_RELEASE_DIR', 'SDLC_RELEASE_SOURCE_COMMIT'].includes(key)) {
+        delete environment[key];
+      }
+    }
+    const pattern = `^(?:${names.map(name => name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')).join('|')})$`;
+    const result = await executeValidationCommand({ name, command: process.execPath,
+      args: ['--import', pathToFileURL(preload).href, '--test', '--test-reporter=tap',
+        '--test-name-pattern', pattern, path.join(ROOT, 'test', 'release-ci.test.mjs')],
+      cwd: ROOT, environment, outputDir: directory, signal: t.signal });
+    assert.equal(result.complete, true, result.diagnostic);
+    const count = key => Number(new RegExp(`^# ${key} (\\d+)$`, 'mu').exec(result.stdout)?.[1] ?? NaN);
+    const buildCalls = await fs.readFile(calls, 'utf8').then(bytes =>
+      bytes.trim().split('\n').map(line => JSON.parse(line)),
+    error => { if (error.code === 'ENOENT') return []; throw error; });
+    const observed = { name, exitCode: result.exitCode, tests: count('tests'),
+      passed: count('pass'), failed: count('fail'), skipped: count('skipped'), buildCalls,
+      stdoutSha256: sha256(result.stdout), stderrSha256: sha256(result.stderr) };
+    results.push(observed);
+    if (process.env.SDLC_TEST_EVIDENCE_ROOT) {
+      const retained = path.resolve(process.env.SDLC_TEST_EVIDENCE_ROOT, `release-setup-${name}`);
+      const relative = path.relative(ROOT, retained);
+      assert.equal(relative.split(path.sep)[0], '.test-data');
+      assert.ok(!relative.split(path.sep).includes('..'));
+      await fs.cp(directory, retained, { recursive: true, force: false, errorOnExist: true });
+      await fs.writeFile(path.join(retained, 'observed.json'), `${JSON.stringify(observed, null, 2)}\n`, { flag: 'wx' });
+    }
+    return { result, observed };
+  };
+  const policy = await run('pure', [pure]);
+  assert.equal(policy.result.exitCode, 0, policy.result.stdout + policy.result.stderr);
+  assert.deepEqual([policy.observed.tests, policy.observed.passed, policy.observed.failed, policy.observed.skipped], [1, 1, 0, 0]);
+  assert.deepEqual(policy.observed.buildCalls, []);
+  const consumers = await run('consumers', [pure, ordinary, realLauncher]);
+  assert.notEqual(consumers.result.exitCode, 0);
+  assert.deepEqual([consumers.observed.tests, consumers.observed.passed, consumers.observed.failed,
+    consumers.observed.skipped], [3, 1, 2, 0]);
+  assert.deepEqual(consumers.observed.buildCalls, [{ npmPack: true }],
+    'Real consumers still require the original build, initialized once per file lifetime');
+  assert.match(consumers.result.stdout, /FORBIDDEN_RELEASE_SETUP_BUILD/u);
+  t.diagnostic(JSON.stringify({ kind: 'controlled-setup-boundary-not-native-timing', results }));
 });

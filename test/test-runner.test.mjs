@@ -985,6 +985,10 @@ test('queued root must remain unstarted',()=>assert.fail('queued root executed')
     const observationPath = path.join(directory, 'lease-observations.ndjson');
     const conflictMarker = path.join(directory, 'replacement-conflict.json');
     if (hiddenLease) {
+      if (replacementConflict) {
+        await fs.writeFile(`${conflictMarker}.pending`,
+          JSON.stringify({ code: 'EPERM', phase: 'running' }), { flag: 'wx' });
+      }
       const plan = await createPlan(parseOptions(['targeted', '--workers', '1', file], {}), root);
       const group = plan.groups.find(group => group.name.includes('silent blocked root'));
       assert.ok(group);
@@ -993,19 +997,20 @@ test('queued root must remain unstarted',()=>assert.fail('queued root executed')
       const replacementProbe = replacementConflict ? `
 import mutableFs from 'node:fs/promises';import {syncBuiltinESMExports} from 'node:module';
 const originalRename=mutableFs.rename;
+let conflictArmed=false;
 let conflictInjected=false;
+let conflictRecorded=false;
 mutableFs.rename=async(from,to)=>{
-  if(!conflictInjected&&to===${JSON.stringify(reportPath)}){
-    const snapshot=JSON.parse(await mutableFs.readFile(from,'utf8'));
-    if(snapshot.checkpoint?.phase==='running'&&snapshot.groupExecution.groups.some(group=>
-      group.root==='silent blocked root'&&group.startedAt&&!group.finishedAt&&group.processIds.length)){
-      conflictInjected=true;
-      await mutableFs.writeFile(${JSON.stringify(conflictMarker)},
-        JSON.stringify({code:'EPERM',phase:'running'}),{flag:'wx'});
-      throw Object.assign(new Error('Controlled transient checkpoint replacement conflict'),{code:'EPERM'});
-    }
+  if(conflictArmed&&!conflictInjected&&to===${JSON.stringify(reportPath)}){
+    conflictInjected=true;
+    throw Object.assign(new Error('Controlled transient checkpoint replacement conflict'),{code:'EPERM'});
   }
-  return originalRename(from,to);
+  const result=await originalRename(from,to);
+  if(conflictInjected&&!conflictRecorded&&to===${JSON.stringify(reportPath)}){
+    await originalRename(${JSON.stringify(`${conflictMarker}.pending`)},${JSON.stringify(conflictMarker)});
+    conflictRecorded=true;
+  }
+  return result;
 };
 syncBuiltinESMExports();
 ` : '';
@@ -1020,6 +1025,8 @@ export async function readTestGroupProcesses(groupId){
   const processes=await actualProcesses(groupId);
   if(groupId===${JSON.stringify(group.id)})await appendFile(${JSON.stringify(observationPath)},
     JSON.stringify({hidden,groupId,processes,returned:hidden?[]:processes,budget:await actualBudget()})+'\\n');
+  ${replacementConflict ? `// Arm before atomicWrite starts its replacement deadline; the injected failure performs no I/O.
+  if(groupId===${JSON.stringify(group.id)}&&!hidden&&processes.length)conflictArmed=true;` : ''}
   return hidden?[]:processes;
 }
 `);
@@ -1097,6 +1104,10 @@ export async function readTestGroupProcesses(groupId){
         }
       }
       if (replacementConflict) {
+        await waitFor(async () => {
+          try { await fs.access(conflictMarker); return true; }
+          catch (error) { if (error.code !== 'ENOENT') throw error; return false; }
+        }, 'successful real replacement after the injected conflict');
         assert.deepEqual(JSON.parse(await fs.readFile(conflictMarker, 'utf8')),
           { code: 'EPERM', phase: 'running' });
       }

@@ -595,12 +595,31 @@ termination. The 1,000ms settlement bound includes root close and observed group
 disappearance. No delayed destructive signal follows ownership loss. Uncertain
 writers keep the primary timeout/overflow failure and prevent fixture deletion;
 the raw 4MiB stream limits and native negative-control outcomes stay intact.
+Validation commands publish rejected-stop uncertainty before allowing read-only
+root/output drainage within the remaining original settlement deadline. Natural
+exit codes and complete output remain distinct from cleanup success; no second
+grace period or later destructive signal is introduced.
+The native ownership fixture reserves four aggregate worker slots for its
+test process and three real child processes, without changing host capacities
+or the one-second settlement bound.
+The Windows periodic-checkpoint fixture injects its classified failure without
+asynchronous preparation inside the timed replacement attempt. Its marker is
+prepared beforehand and published only after a subsequent real replacement;
+production's 100ms retry budget and worker-liveness checks are unchanged.
 Existing broker inspection accepts an optional AbortSignal that closes and drains
 only its request socket; no-signal callers, credential checks, scheduling and
 capacity limits are unchanged. The owning test samples safe counts at bounded
 intervals with cancellable requests outside the denial child. Controlled tests
 cover loss of ownership, output overflow, stubborn close, abort drainage and
 sibling survival; native POSIX and actual purge timing remain separate gates.
+
+The pure release archive-policy root needs no generated fixture. Other release
+roots retain the original complete initializer, lazily shared only within the
+same file lifetime. Synthetic revision, PE and target-set identities are not
+interchangeable with native frozen artifacts; distribution context transport
+continues to exclude that consumer. The PR-only denied-build control reserves
+three slots for its test worker and two nested Node processes. This removes
+unused setup without weakening real builder requirements or adding a cache.
 
 Native fixture setup transports its verified candidate/source/artifact identity
 in a dedicated context, never a reporter control. Only the exact distribution

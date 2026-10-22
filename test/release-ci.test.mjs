@@ -60,6 +60,7 @@ let base;
 let payload;
 let originalTmp;
 let previousFixture;
+let fixtureSetup;
 let originalPreviousEnvironment = {};
 const repository = NPM_TRUST.repository;
 const sourceCommit = 'a'.repeat(40);
@@ -176,7 +177,13 @@ async function unitNativeVerifier({ target, evidenceDir }) {
 const sealBundle = options => sealProductionBundle({ ...options, sourceCommit, releaseIntentId, verifyEvidence: unitNativeVerifier });
 const verifyBundle = options => verifyProductionBundle({ ...options, verifyEvidence: unitNativeVerifier });
 
-test.before(async () => {
+test.beforeEach(async context => {
+  if (context.name === 'T-PRD057 two archive targets retain four mandatory native execution platforms without Linux standalone support') return;
+  fixtureSetup ??= prepareReleaseFixture();
+  await fixtureSetup;
+});
+
+async function prepareReleaseFixture() {
   root = path.resolve('.test-data', `release-unit-${randomUUID()}`);
   await fs.mkdir(path.join(root, 'scratch'), { recursive: true });
   originalTmp = process.env.TMPDIR;
@@ -244,9 +251,10 @@ test.before(async () => {
     identity: evidenceIdentity(final), scope: RELEASE_SCOPE, prerelease,
     launcher: { sha256: sha256(pe) },
     homebrew: { status: prerelease ? 'NotPublishedPrerelease' : 'Generated' } });
-});
+}
 
 test.after(async () => {
+  if (!fixtureSetup) return;
   if (originalTmp === undefined) delete process.env.TMPDIR;
   else process.env.TMPDIR = originalTmp;
   for (const [key, value] of Object.entries(originalPreviousEnvironment)) {

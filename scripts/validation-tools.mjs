@@ -234,7 +234,7 @@ function commandReportBytes(report) {
   return { sanitized, bytes };
 }
 
-export function stopOwnedProcessGroup(child, childClosed, cleanup) {
+export function stopOwnedProcessGroup(child, childClosed, cleanup, deadline = performance.now() + 1000) {
   cleanup.pid = child.pid;
   cleanup.mechanism = 'owned-process-group';
   cleanup.requested = true;
@@ -256,11 +256,10 @@ export function stopOwnedProcessGroup(child, childClosed, cleanup) {
       if (error.code !== 'ESRCH') signalError = error;
     }
   }
-  return settleOwnedProcessGroup(childClosed, cleanup, signalError);
+  return settleOwnedProcessGroup(childClosed, cleanup, signalError, deadline);
 }
 
-async function settleOwnedProcessGroup(childClosed, cleanup, signalError) {
-  const deadline = performance.now() + 1000;
+async function settleOwnedProcessGroup(childClosed, cleanup, signalError, deadline) {
   let closed = false;
   childClosed.then(() => { closed = true; cleanup.rootExitObserved = true; });
   for (;;) {
@@ -336,6 +335,7 @@ export async function executeValidationCommand({
       cleanup.outcome = 'pending';
       retain('command-stop-request', { pid: child.pid, cleanup });
       if (!finalizing) requestCheckpoint('cancelling', { force: true });
+      const stopDeadline = performance.now() + 1000;
       const termination = process.platform === 'win32' ? Promise.resolve().then(async () => {
         if (process.platform === 'win32') {
           if (child.exitCode !== null || child.signalCode !== null) {
@@ -366,7 +366,7 @@ export async function executeValidationCommand({
           });
           cleanup.outcome = 'reported-stopped';
         }
-      }) : stopOwnedProcessGroup(child, childClosed, cleanup);
+      }) : stopOwnedProcessGroup(child, childClosed, cleanup, stopDeadline);
       stopping = termination.catch(async error => {
         cleanupError ??= error;
         cleanup.outcome = 'uncertain';
@@ -385,6 +385,12 @@ export async function executeValidationCommand({
             diagnostic: causes.map(value => value.message).join('; '), causes, originalOutput });
           await requestCheckpoint('cancelling', { force: true });
         } catch (retentionError) { persistenceError ??= retentionError; }
+        if (process.platform !== 'win32') {
+          await new Promise(resolve => {
+            const timer = setTimeout(resolve, Math.max(0, stopDeadline - performance.now()));
+            childClosed.then(() => { clearTimeout(timer); resolve(); });
+          });
+        }
       }).finally(() => {
         if (process.platform !== 'win32') {
           child.stdout.destroy();

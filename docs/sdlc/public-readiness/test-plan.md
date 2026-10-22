@@ -406,6 +406,15 @@ dedicated-context sibling filtering. Preserve actual builder/reproducibility
 cases and the absent-input build path; Linux's once-built private fixtures remain
 test-only. Controlled denied-build versus verified-reuse outcomes do not prove
 an Intel timeout fix or native elapsed improvement.
+The fixture-free T-PRD057 archive-policy root skips unused release setup.
+Every real release-fixture consumer still awaits the original complete
+initializer once per file lifetime. Its synthetic revision, controlled PE bytes
+and two-target metadata must not be replaced by differently bound native frozen
+inputs. A PR-only denied-build regression proves the pure root executes with
+zero builds while real consumers still require one initialization; it reserves
+three slots for its worker, child test coordinator and child file worker.
+The release test remains excluded from distribution-only context transport.
+No native speedup or broader fixture reuse is established by this control.
 Fixture snapshots use only registered Git index paths, including intent-to-add
 source files, never arbitrary untracked workspace data. A one-commit snapshot
 without the historical object or alternates must execute the two representative
@@ -442,12 +451,27 @@ termination, reaps its descendant and exits zero; preserve that actual root
 code/signal rather than inventing a signal exit. Real POSIX descendant/sibling
 tests require their actual kernel;
 Windows controlled contracts do not grant POSIX passing credit.
+If a POSIX stop request is rejected, retain its uncertain checkpoint before
+read-only root/output drainage within the remainder of the same 1,000ms
+settlement deadline. Preserve an observed natural exit and its complete output
+without converting uncertain cleanup into success or starting a second grace
+period. Native ownership failures retain safe code/signal/cleanup observations
+before assertions. The real-kernel root reserves four aggregate slots for its
+test worker, owned root, descendant writer and unrelated sibling; host worker
+limits and the one-second settlement bound remain unchanged.
+A failure during provider cancellation is not discarded or
+attributed to cancellation without evidence.
 Optional broker inspection uses an abortable owned request socket. Timeout
 destroys and awaits that socket's close, leaving sibling requests untouched.
 Bounded safe-count observations stay outside the denial environment, with no
 socket credentials passed into the child. Strict Windows checkpoint polling
 closes its read handle in the same turn; original uncertainty, ownership,
 durable-journal and deadline assertions remain.
+The periodic Windows replacement-conflict fixture prepares its marker before
+execution, arms from the visible worker lease and injects an immediate classified
+error without asynchronous preparation inside the timed rename attempt. Publish
+the observation only after a real successful replacement. The production
+100ms retry budget, worker liveness and queued-work assertions remain unchanged.
 
 ### 2.3 Test modes and shared procedure contracts
 
