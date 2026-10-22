@@ -629,6 +629,58 @@ test('T-48 batch work-item locks are acquired before any invalidation action', a
   release();
   await held;
 });
+test('T-19 manifest binding checks fresh paths and branch without unused revision reads', async t => {
+  const f = await fixture(t);
+  const calls = [];
+  const observe = ({ process: child }) => {
+    child.once('close', () => {
+      if (child.spawnargs[0] === 'git') calls.push(child.spawnargs.slice(1));
+    });
+  };
+  subscribe('child_process', observe);
+  try {
+    const unborn = await f.store.manifest(f.workItemId);
+    assert.equal(unborn.coordinator.root, f.repo);
+    assert.deepEqual(calls.map(args => args[2]), ['rev-parse', 'symbolic-ref'],
+      'An unborn manifest binding needs current paths and branch, not a revision');
+    await f.runGit('commit', '--allow-empty', '-qm', 'Advance manifest binding fixture');
+    calls.length = 0;
+    const committed = await f.store.manifest(f.workItemId);
+    assert.deepEqual(committed.metadata, unborn.metadata);
+    assert.deepEqual(calls.map(args => args[2]), ['rev-parse', 'symbolic-ref']);
+    await f.runGit('checkout', '-qb', 'feature/manifest-same-head');
+    calls.length = 0;
+    await assert.rejects(f.store.manifest(f.workItemId), { code: 'BINDING' });
+    assert.deepEqual(calls.map(args => args[2]), ['rev-parse', 'symbolic-ref']);
+  } finally {
+    unsubscribe('child_process', observe);
+  }
+});
+
+test('T-19 manifest binding guards recheck the branch after all canonical path checks', async t => {
+  const f = await fixture(t);
+  await f.runGit('commit', '--allow-empty', '-qm', 'Create manifest binding race fixture');
+  await f.runGit('branch', 'feature/manifest-path-race');
+  const gitDir = await fs.realpath(path.join(f.repo, '.git'));
+  const realpath = fsPromises.realpath;
+  let checks = 0;
+  const mocked = t.mock.method(fsPromises, 'realpath', async (...args) => {
+    const resolved = await realpath(...args);
+    if (resolved === gitDir && ++checks === 2) {
+      await f.runGit('checkout', '-q', 'feature/manifest-path-race');
+    }
+    return resolved;
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(f.store.manifest(f.workItemId), { code: 'BINDING' });
+    assert.equal(checks, 2, 'Both common-directory and Git-directory checks must precede the branch read');
+  } finally {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
+
 test('Git identity batches fresh path queries and preserves unborn and linked worktrees', async t => {
   const f = await fixture(t);
   await f.runGit('add', '.sdlc');

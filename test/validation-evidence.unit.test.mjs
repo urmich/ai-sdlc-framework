@@ -62,6 +62,43 @@ test('retained payload bytes, not just locators, are sanitized', () => {
   assert.throws(() => sanitizeExecutionPayload(Buffer.from([0xff, 0xfe])), { code: 'UNSAFE' });
 });
 
+test('T-PRD037 repeated summary text is sanitized once per traversal without reusing another call', () => {
+  const text = 'Read https://example.invalid/run?token=fixture-value&view=summary';
+  const matchAll = String.prototype.matchAll;
+  let scans = 0;
+  String.prototype.matchAll = function (...args) {
+    if (String(this) === text) scans++;
+    return Reflect.apply(matchAll, this, args);
+  };
+  try {
+    const expected = safeSummary(text);
+    const once = scans;
+    assert.ok(once > 0, 'The observer must see the actual text sanitizer');
+    assert.doesNotMatch(expected, /fixture-value/u);
+    assert.match(expected, /view=summary/u);
+    scans = 0;
+    assert.deepEqual(safeSummary({ first: text, nested: { second: text }, list: [text] }),
+      { first: expected, nested: { second: expected }, list: [expected] });
+    assert.equal(scans, once, 'Identical text must not repeat pure parsing in one traversal');
+    scans = 0;
+    assert.deepEqual(safeSummary({ first: text, second: text }),
+      { first: expected, second: expected });
+    assert.equal(scans, once, 'A separate call must sanitize its inputs again');
+    assert.match(safeSummary({ password: text, visible: text }).password,
+      /^\[redacted:[a-f0-9]{64}\]$/u);
+  } finally {
+    String.prototype.matchAll = matchAll;
+  }
+  const texts = Array.from({ length: 512 }, (_, index) =>
+    `https://example.invalid/run/${index}?token=fixture-${index}&view=summary`);
+  const large = `${'ordinary diagnostic '.repeat(5000)}${text}`;
+  assert.deepEqual(safeSummary({ texts, large, tail: [text, text] }), {
+    texts: texts.map(safeSummary),
+    large: safeSummary(large),
+    tail: [safeSummary(text), safeSummary(text)],
+  });
+});
+
 test('T-PRD037 JWT diagnostics and signed query links are sanitized without changing case outcomes', () => {
   const jwt = [
     JSON.stringify({ alg: 'HS256', typ: 'JWT' }),

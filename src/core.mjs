@@ -259,62 +259,84 @@ export function unsafeSummaryContent(value) {
     sensitiveKey.test(key) ||
     unsafeSummaryContent(item));
 }
-export function safeSummary(value) {
-  if (typeof value === 'string') {
-    if (/^\s*[\[{]/u.test(value)) {
-      try {
-        const parsed = JSON.parse(value);
-        if (parsed && typeof parsed === 'object') {
-          return unsafeSummaryContent(parsed) ?
-            JSON.stringify(safeSummary(parsed)) : value;
-        }
-      } catch {
-        // Continue with safe treatment of a fragment or malformed value.
+function safeSummaryText(value) {
+  if (/^\s*[\[{]/u.test(value)) {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object') {
+        return unsafeSummaryContent(parsed) ?
+          JSON.stringify(safeSummary(parsed)) : value;
       }
+    } catch {
+      // Continue with safe treatment of a fragment or malformed value.
     }
-    let result = '';
-    let start = 0;
-    const assignments = sensitiveAssignmentSpans(value);
-    let assignmentIndex = 0;
-    const urls = [...value.matchAll(webUrl)].map(match =>
-      [match.index, match.index + match[0].length]);
-    for (let index = 0; index < value.length; index++) {
-      if (value[index] !== '{' && value[index] !== '[') continue;
-      while (assignmentIndex < assignments.length &&
-          index >= assignments[assignmentIndex].end) assignmentIndex++;
-      const assignment = assignments[assignmentIndex];
-      if (assignment && index >= assignment.start &&
-          index < assignment.end) {
-        index = assignment.end - 1;
-        continue;
-      }
-      const containingUrl = urls.find(([from, to]) => index >= from && index < to);
-      if (containingUrl) {
-        index = containingUrl[1] - 1;
-        continue;
-      }
-      const end = jsonFragmentEnd(value, index);
-      if (end < 0) continue;
-      const fragment = value.slice(index, end + 1);
-      let parsed;
-      try {
-        parsed = JSON.parse(fragment);
-      } catch { continue; }
-      result += redactTextUrls(value.slice(start, index));
-      const sanitized = safeSummary(parsed);
-      result += unsafeSummaryContent(parsed) ? JSON.stringify(sanitized) : fragment;
-      start = end + 1;
-      index = end;
-    }
-    return result + redactTextUrls(value.slice(start));
   }
-  if (Array.isArray(value)) return value.map(safeSummary);
+  let result = '';
+  let start = 0;
+  const assignments = sensitiveAssignmentSpans(value);
+  let assignmentIndex = 0;
+  const urls = [...value.matchAll(webUrl)].map(match =>
+    [match.index, match.index + match[0].length]);
+  for (let index = 0; index < value.length; index++) {
+    if (value[index] !== '{' && value[index] !== '[') continue;
+    while (assignmentIndex < assignments.length &&
+        index >= assignments[assignmentIndex].end) assignmentIndex++;
+    const assignment = assignments[assignmentIndex];
+    if (assignment && index >= assignment.start &&
+        index < assignment.end) {
+      index = assignment.end - 1;
+      continue;
+    }
+    const containingUrl = urls.find(([from, to]) => index >= from && index < to);
+    if (containingUrl) {
+      index = containingUrl[1] - 1;
+      continue;
+    }
+    const end = jsonFragmentEnd(value, index);
+    if (end < 0) continue;
+    const fragment = value.slice(index, end + 1);
+    let parsed;
+    try {
+      parsed = JSON.parse(fragment);
+    } catch { continue; }
+    result += redactTextUrls(value.slice(start, index));
+    const sanitized = safeSummary(parsed);
+    result += unsafeSummaryContent(parsed) ? JSON.stringify(sanitized) : fragment;
+    start = end + 1;
+    index = end;
+  }
+  return result + redactTextUrls(value.slice(start));
+}
+const summaryTextCacheEntries = 256;
+const summaryTextCacheBytes = 64 * 1024;
+function summarizeValue(value, cache) {
+  if (typeof value === 'string') {
+    const cached = cache.texts.get(value);
+    if (cached !== undefined) return cached;
+    const sanitized = safeSummaryText(value);
+    const remaining = summaryTextCacheBytes - cache.bytes;
+    if (cache.texts.size < summaryTextCacheEntries &&
+        value.length + sanitized.length <= remaining) {
+      const bytes = Buffer.byteLength(value) + Buffer.byteLength(sanitized);
+      if (bytes <= remaining) {
+        cache.texts.set(value, sanitized);
+        cache.bytes += bytes;
+      }
+    }
+    return sanitized;
+  }
+  if (Array.isArray(value)) return value.map(item => summarizeValue(item, cache));
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(Object.entries(value).map(([key, item]) =>
     [key, sensitiveKey.test(key) ?
       (typeof item === 'string' && redactedValue.test(item) ?
         item : `[redacted:${digest(item === undefined ? 'undefined' : item)}]`) :
-      safeSummary(item)]));
+      summarizeValue(item, cache)]));
+}
+export function safeSummary(value) {
+  if (typeof value === 'string') return safeSummaryText(value);
+  if (!value || typeof value !== 'object') return value;
+  return summarizeValue(value, { texts: new Map(), bytes: 0 });
 }
 export function shellArgument(value) {
   if (/^[a-zA-Z0-9._:/\\-]+$/u.test(value)) return value;

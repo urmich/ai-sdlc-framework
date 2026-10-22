@@ -392,6 +392,14 @@ The PR-only retention-fixture regression observes actual child-process dispatch:
 unchanged fixture reads reuse the existing cache, while a real commit, remote
 change and same-commit branch switch invalidate it. All ordered refreshes,
 storage operations and assertions remain real; production Git reads stay fresh.
+The PR-only repeated-summary-text regression preserves exact sanitized results
+while observing one pure text transformation per traversal and a fresh scan on
+the next call. High-cardinality and oversized text still receives full
+sanitization when the temporary reuse budget is exhausted.
+Manifest-binding PR regressions cover an unborn repository becoming committed,
+a same-commit branch switch and a controlled switch after all canonical-path
+checks. The binding-only guard still reads fresh paths and the current branch;
+the separate full-identity regressions keep their revision and fallback checks.
 
 ### 3.2 Existing full selection
 

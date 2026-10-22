@@ -3,7 +3,7 @@ import os from 'node:os';
 import * as fs from 'node:fs/promises';
 import { LIMITS, PHASES, budget, byteSize, choice, digest, id, newId, object, recordLimit, requireThat, safeRecord, text } from './core.mjs';
 import { atomicWrite, canonicalPath, exists, immutableJson, listJson, privateDirectory, readBytes, readJson, readJsonEntries, safePath, updateJson, withLock, writeJson } from './files.mjs';
-import { bindingKey, identity, sameBinding, validateBinding } from './git.mjs';
+import { bindingKey, identity, sameBinding, validateBinding, validateWorktreeBinding } from './git.mjs';
 import { validateManifest, validateRecord } from './schemas.mjs';
 import { sameNativePath } from './platform.mjs';
 import { currentTestEvidence, testCheckpoint } from './authority.mjs';
@@ -449,7 +449,7 @@ export class Store {
     const metadata = await this.metadata(workItemId);
     const coordinator = metadata.members.find(member => member.repositoryId === metadata.coordinatorId);
     requireThat(coordinator, 'BINDING', 'Coordinator mapping is unavailable');
-    await validateBinding(coordinator);
+    await validateWorktreeBinding(coordinator);
     const file = await safePath(coordinator.root, `.sdlc/work-items/${workItemId}.json`);
     const manifest = await readJson(file, { limit: LIMITS.checkpoint });
     validateManifest(manifest);

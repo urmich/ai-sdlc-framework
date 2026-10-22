@@ -20,8 +20,7 @@ export async function git(cwd, args, { optional = false, maxBuffer = LIMITS.arti
     throw new SdlcError('GIT', `Git ${args[0]} failed`, { cause: error.stderr?.trim() || error.message });
   }
 }
-export async function identity(cwd, repositoryId, branchHint) {
-  id(repositoryId, 'repository ID');
+async function repositoryPaths(cwd) {
   const paths = (await git(cwd, ['rev-parse', '--path-format=absolute',
     '--show-toplevel', '--git-common-dir', '--absolute-git-dir'])).split(/\r?\n/u);
   // Individual outputs preserve paths whose line breaks make the combined framing ambiguous.
@@ -31,6 +30,11 @@ export async function identity(cwd, repositoryId, branchHint) {
     await git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir']));
   const gitDir = await canonicalPath(paths.length === 3 ? paths[2].trimEnd() :
     await git(root, ['rev-parse', '--absolute-git-dir']));
+  return { root, commonDir, gitDir };
+}
+export async function identity(cwd, repositoryId, branchHint) {
+  id(repositoryId, 'repository ID');
+  const { root, commonDir, gitDir } = await repositoryPaths(cwd);
   let branch;
   let head;
   // A stored branch is only a lookup hint, never evidence of the current checkout.
@@ -93,6 +97,15 @@ export async function validateBinding(member) {
   const current = await identity(member.root, member.repositoryId, member.branch);
   requireThat(sameBinding(member, current), 'BINDING', 'Repository/worktree/branch changed; explicitly bind and resume before mutation');
   return current;
+}
+export async function validateWorktreeBinding(member) {
+  id(member.repositoryId, 'repository ID');
+  const { root, commonDir } = await repositoryPaths(member.root);
+  const branch = await git(root, ['symbolic-ref', '-q', 'HEAD'], { optional: true });
+  requireThat(branch?.startsWith('refs/heads/'), 'BINDING',
+    'Detached HEAD requires an explicitly selected branch/worktree');
+  requireThat(sameBinding(member, { repositoryId: member.repositoryId, root, commonDir, branch }),
+    'BINDING', 'Repository/worktree/branch changed; explicitly bind and resume before mutation');
 }
 export async function publicationPaths(member, sourceRevision, targetRevision) {
   for (const [label, revision] of [['source', sourceRevision], ['target', targetRevision]]) {
