@@ -17,7 +17,8 @@ export function nativeBootstrapCapability({ target, profile, component, shard = 
   if (protocol === null) return null;
   const mac = ['macos-arm64', 'macos-x64'].includes(target);
   const targets = ['linux-x64', 'windows-x64', 'macos-arm64', 'macos-x64'];
-  const shards = ['units', 'refresh', ...Array.from({ length: mac ? 3 : 4 }, (_, i) => `body-${i}`)];
+  const shards = ['units', ...(target === 'macos-x64' ? ['units-1'] : []),
+    'refresh', ...Array.from({ length: mac ? 3 : 4 }, (_, i) => `body-${i}`)];
   requireThat(nativeBootstrapProtocols.includes(protocol) && targets.includes(target) &&
     profile === 'pr' && component === 'framework' && shards.includes(shard) &&
     role === `${target}-framework-${shard}`, 'INPUT',

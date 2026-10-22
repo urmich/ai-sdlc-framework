@@ -439,7 +439,7 @@ dispatch without changing explicit targeted order or the selected assertion unio
 Role-bootstrap regressions require the captured
 `native-bootstrap-role-capabilities-v2` contract, reject profile/role downgrades
 and forged or borrowed runtime/prefix facts, and retain complete genuine
-Homebrew/full/R-PRE and historical replay requirements. All twelve real Mac
+Homebrew/full/R-PRE and historical replay requirements. All thirteen real Mac
 prefix owners and matching cleanup receipts remain mandatory.
 
 ### 3.2 Existing full selection
@@ -846,8 +846,9 @@ partial comparison and do not silently retry to obtain a ratio.
 1. With scoped push/PR authority, use the exact candidate selected for validation and a clean
    controlled contribution without local result files. Observe initial PR and
    new head updates; retain exact candidate/source, workflow and attempt.
-2. Confirm all four logical native lanes and all twenty-four required producer parts
-   start with their own prerequisites. Each platform has a unit producer and an
+2. Confirm all four logical native lanes and all twenty-five required producer parts
+   start with their own prerequisites. Intel Mac has two unit producers; each
+   other platform has one. Every platform also has an
    independently required producer for the unchanged, causally ordered
    550-refresh root. The remaining complete root closures are partitioned across
    four body producers on Linux/Windows and three on each Mac architecture.
@@ -856,21 +857,33 @@ partial comparison and do not silently retry to obtain a ratio.
    platform's regression shards execute; another platform or attempt cannot
    supply the prerequisite. Include the unit barrier, every part's provisioning,
    evidence retention and cleanup in the whole-lane elapsed time.
-   For `native-framework-shards-v3-four-body-platform-units`, require each platform's
-   actual unit job to finish successfully, including evidence and cleanup,
+   For `native-framework-shards-v4-split-intel-units`, require each platform's
+   actual unit jobs to finish successfully, including evidence and cleanup,
    before its own regression jobs start. Other platforms' unit jobs may finish
-   later; all twenty-four successful parts still remain mandatory for completeness.
+   later; all twenty-five successful parts still remain mandatory for completeness.
+   Partition extended-unit files through the common source-bound algorithm:
+   two nonempty Intel subsets and one elsewhere. Execute the canonical sixteen
+   assertions once on the original unit producer. Verify exact disjoint complete
+   unions including descendants, dependencies and exclusive resources. The new
+   Intel producer has no unit prerequisite of its own. Every Intel regression
+   must wait for both unit jobs, not a borrowed ARM/original-unit result.
    Keep `native-framework-shards-v1` global-barrier and
    `native-framework-shards-v2-platform-units` twenty-part replay distinct,
-   including their eighteen framework SDK origins. The current topology requires
-   twenty-two framework origins and two genuine Homebrew origins under
-   `native-component-projection-shards-v2`; preserve the historical v1 projection
-   without relabeling its origins. Reject
+   including their eighteen framework SDK origins; also retain v3's twenty-four
+   parts, twenty-two framework origins and projection-shards-v2 unchanged.
+   The current topology requires twenty-three framework origins and two genuine
+   Homebrew origins under `native-component-projection-shards-v3`; preserve the
+   historical v1/v2 projections without relabeling their origins. Reject
    wrong-version or borrowed unit proofs. Do not start waiting regression hosts
-   early to overlap bootstrap. Verify all twelve distinct Mac prefix allocations
+   early to overlap bootstrap. Verify all thirteen distinct Mac prefix allocations
    and their matching guarded cleanup receipts; count every real wait honestly.
    Separate jobs use their own native hosts, resource budgets, scratch paths and
    owned prefixes rather than racing on a shared package-manager installation.
+   Controlled negatives must reject six-of-seven Intel parts, either missing,
+   failed, stale or wrong-attempt unit origin, a regression starting before
+   either unit cleanup completes, duplicated canonical work and borrowed prefix
+   receipts. Genuine hosted whole-lane timing remains required; the additional
+   standard Intel VM fills the fifth initial Mac slot, not a speedup claim.
    Exercise actual Go, Python, shell and Homebrew surfaces in their assigned
    lanes. Install tests operate only in fixture homes; fork jobs have no publish
    capability. Required authentic-verifier setup supplies independently pinned

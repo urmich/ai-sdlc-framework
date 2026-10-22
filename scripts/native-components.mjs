@@ -7,7 +7,7 @@ import { validationPlatforms } from './validation-inventory.mjs';
 // The shared native configuration recipe is invoked only after module initialization.
 import { nativeConfigurationDigest, nativeProducerRole, nativePrPartsForProtocol, nativeFrameworkShardPlan,
   nativeSpecification, nativeFrameworkShardProtocol, requireNativeShardUnitOrder } from './native-validation.mjs';
-import { nativeFrameworkShardProtocols } from './native-validation.mjs';
+import { nativeFrameworkShardProtocols, nativeFourBodyFrameworkShardProtocol } from './native-validation.mjs';
 import { calculatorCapability, calculatorBaselineCapability } from './pr-calculator.mjs';
 
 const projections = new WeakMap();
@@ -32,8 +32,13 @@ const fourBodyShardPolicy = Object.freeze({ ...shardPolicy,
   protocol: 'native-component-projection-shards-v2', profile: 'pr-components-shards-v2',
   origins: 'all-twenty-two-original-native-framework-executions',
   verifierId: 'github-native-component-projection-shards-v2' });
+const splitUnitShardPolicy = Object.freeze({ ...shardPolicy,
+  protocol: 'native-component-projection-shards-v3', profile: 'pr-components-shards-v3',
+  origins: 'all-twenty-three-original-native-framework-executions',
+  verifierId: 'github-native-component-projection-shards-v3' });
 const componentPolicy = protocol => !protocol ? nativeComponentPolicy :
-  protocol === nativeFrameworkShardProtocol ? fourBodyShardPolicy : shardPolicy;
+  protocol === nativeFrameworkShardProtocol ? splitUnitShardPolicy :
+    protocol === nativeFourBodyFrameworkShardProtocol ? fourBodyShardPolicy : shardPolicy;
 const sourceTimes = values => [...values].sort((a, b) => Date.parse(a) - Date.parse(b));
 const prefix = name => /^(T-[A-Z0-9]+(?:-[A-Z0-9]+)*)(?:\s|$)/u.exec(name)?.[1];
 const bindingDigest = assertion => digest({ id: assertion.id, file: assertion.file,

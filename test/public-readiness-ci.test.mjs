@@ -1453,7 +1453,7 @@ function contextProof() {
     expectedMerge: body.mergeSha, prNumber: 1 } };
 }
 
-test('T-PRD020 actual CI schedules twenty-four producer parts behind a complete unit barrier and distinguishes edited base retargets', async () => {
+test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel unit jobs and distinguishes edited base retargets', async () => {
   const workflows = await readWorkflowPolicySources(repositoryRoot);
   const result = inspectWorkflowTrust(workflows);
   assert.equal(result.complete, true, JSON.stringify(result.blockers));
@@ -1479,12 +1479,14 @@ test('T-PRD020 actual CI schedules twenty-four producer parts behind a complete 
   assert.equal(ci.jobs.native.strategy['fail-fast'], false);
   assert.equal(ci.jobs.native['timeout-minutes'], 360);
   assert.equal(ci.jobs.native.name, 'native-${{ matrix.role }}');
-  assert.equal(parts.length, 24);
+  assert.equal(parts.length, 25);
   for (const target of ['linux-x64', 'windows-x64']) {
     assert.equal(parts.filter(part => part.target === target).length, 6);
     assert.equal(parts.filter(part => part.target === target && part.shard.startsWith('body-')).length, 4);
   }
-  assert.equal(parts.filter(part => part.target.startsWith('macos-')).length, 12);
+  assert.equal(parts.filter(part => part.target.startsWith('macos-')).length, 13);
+  assert.equal(parts.filter(part => part.target === 'macos-arm64').length, 6);
+  assert.equal(parts.filter(part => part.target === 'macos-x64').length, 7);
   for (const key of keys) {
     assert.ok(ci.jobs[key].strategy.matrix.include.every(part => nativePartJobKey(part) === key));
     assert.equal(ci.jobs[key]['timeout-minutes'], 360);
@@ -1492,7 +1494,11 @@ test('T-PRD020 actual CI schedules twenty-four producer parts behind a complete 
     const part = ci.jobs[key].strategy.matrix.include[0];
     assert.deepEqual(ci.jobs[key].needs, ['intent', 'source',
       ...(part.shard && part.shard !== 'units' ? [nativePartJobKey({ ...part, shard: 'units' })] : [])]);
-    if (part.shard === 'units') assert.equal(ci.jobs[key].strategy.matrix.include.length, 1);
+    if (part.shard === 'units') {
+      assert.equal(ci.jobs[key].strategy.matrix.include.length, part.target === 'macos-x64' ? 2 : 1);
+      assert.ok(ci.jobs[key].strategy.matrix.include.every(row =>
+        row.shard === 'units' || row.target === 'macos-x64' && row.shard === 'units-1'));
+    }
     if (part.component === 'framework') {
       const hosts = {
         'linux-x64': { availableParallelism: 4, totalMemoryBytes: 16760344576 },

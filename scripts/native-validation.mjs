@@ -41,9 +41,11 @@ const locations = { 'linux-x64': 'github-linux-x64', 'windows-x64': 'github-wind
   'macos-arm64': 'github-macos-arm64', 'macos-x64': 'github-macos-x64' };
 export const nativeLegacyFrameworkShardProtocol = 'native-framework-shards-v1';
 export const nativePlatformUnitFrameworkShardProtocol = 'native-framework-shards-v2-platform-units';
-export const nativeFrameworkShardProtocol = 'native-framework-shards-v3-four-body-platform-units';
+export const nativeFourBodyFrameworkShardProtocol = 'native-framework-shards-v3-four-body-platform-units';
+export const nativeFrameworkShardProtocol = 'native-framework-shards-v4-split-intel-units';
 export const nativeFrameworkShardProtocols = Object.freeze([
-  nativeLegacyFrameworkShardProtocol, nativePlatformUnitFrameworkShardProtocol, nativeFrameworkShardProtocol,
+  nativeLegacyFrameworkShardProtocol, nativePlatformUnitFrameworkShardProtocol,
+  nativeFourBodyFrameworkShardProtocol, nativeFrameworkShardProtocol,
 ]);
 export const nativeLegacyPrParts = Object.freeze(validationPlatforms.flatMap(target =>
   (target.startsWith('macos-') ? ['framework', 'homebrew'] : ['full'])
@@ -65,10 +67,18 @@ export function nativePrPartsForProtocol(protocol = nativeFrameworkShardProtocol
 export function nativeFrameworkShardNames(target, protocol = nativeFrameworkShardProtocol) {
   requireThat(validationPlatforms.includes(target) && nativeFrameworkShardProtocols.includes(protocol),
     'INPUT', 'Select an exact native shard target and supported protocol');
-  return ['units', 'refresh', ...Array.from({
-    length: target.startsWith('macos-') ? 3 : protocol === nativeFrameworkShardProtocol ? 4 : 2,
+  return [...nativeFrameworkUnitShardNames(target, protocol), 'refresh', ...Array.from({
+    length: target.startsWith('macos-') ? 3 :
+      [nativeFourBodyFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? 4 : 2,
   },
     (_, index) => `body-${index}`)];
+}
+
+export function nativeFrameworkUnitShardNames(target, protocol = nativeFrameworkShardProtocol) {
+  requireThat(validationPlatforms.includes(target) && nativeFrameworkShardProtocols.includes(protocol),
+    'INPUT', 'Select an exact native unit target and supported protocol');
+  const count = target === 'macos-x64' && protocol === nativeFrameworkShardProtocol ? 2 : 1;
+  return Array.from({ length: count }, (_, index) => index === 0 ? 'units' : `units-${index}`);
 }
 
 export function nativeProducerRole(target, component = 'full', shard = null) {
@@ -86,7 +96,8 @@ export function nativePartJobKey({ target, shard = null, component }, protocol =
   const suffix = protocol === nativeLegacyFrameworkShardProtocol || shard === null || target === 'linux-x64' ?
     '' : `-${suffixes[target]?.toLowerCase()}`;
   requireThat(shard === null || validationPlatforms.includes(target), 'INPUT', 'Native shard job keys need their target');
-  return `${shard === 'units' ? 'native-units' : 'native'}${suffix}`;
+  return `${shard !== null && nativeFrameworkUnitShardNames(target, protocol).includes(shard) ?
+    'native-units' : 'native'}${suffix}`;
 }
 
 function shardFromContext(context, target) {
@@ -163,7 +174,8 @@ export function nativeConfigurationDigest({ inventory, profile, configuredWorker
     requiredCapabilities: { crypto: prCryptoFixture, calculator,
       ...(bootstrapProtocol !== null && component === 'framework' && shard !== null ?
         { bootstrapProtocol, ...(bootstrapProtocol === nativeBootstrapProtocol ?
-          { tools: nativeSdkRequirements({ target: 'linux-x64', profile, component, shard, protocol: bootstrapProtocol }) } : {}) } : {}) } });
+          { tools: nativeSdkRequirements({ target: shard === 'units-1' ? 'macos-x64' : 'linux-x64',
+            profile, component, shard, protocol: bootstrapProtocol }) } : {}) } : {}) } });
 }
 
 export function nativeResourceFacts({ availableParallelism = os.availableParallelism(),
@@ -229,6 +241,10 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
   requireThat(nativeFrameworkShardProtocols.includes(protocol),
     'INVENTORY', 'Unknown native framework prerequisite topology');
   const stages = nativeStageSelections(inventory, plan);
+  const unitShards = nativeFrameworkUnitShardNames(target, protocol);
+  const extendedUnits = stages.find(stage => stage.name === 'required-units');
+  const unitPartitions = partitionValidationInventory({ ...inventory, cases: extendedUnits.cases,
+    files: inventory.files.filter(file => extendedUnits.files.includes(file.file)) }, unitShards.length);
   const regression = stages.find(stage => stage.name === 'regression');
   const refreshFile = 'test/observation-retention-refresh.test.mjs';
   const refreshGroups = validationExecutionGroups(inventory, {
@@ -245,9 +261,10 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
   const bodyFiles = new Set(bodyCases.map(test => test.file));
   const partitions = partitionValidationInventory({ ...inventory, cases: bodyCases,
     files: inventory.files.filter(file => bodyFiles.has(file.file)) },
-  nativeFrameworkShardNames(target, protocol).length - 2);
+  nativeFrameworkShardNames(target, protocol).filter(shard => shard.startsWith('body-')).length);
   const roots = validationExecutionGroups(inventory, {
-    files: regression.files, pattern: regression.selectorName, preserveOrder: true,
+    ...(protocol === nativeFrameworkShardProtocol ? {} :
+      { files: regression.files, pattern: regression.selectorName }), preserveOrder: true,
   });
   const procedureFile = 'test/public-readiness-ci.test.mjs';
   const toolRoot = inventory.cases.find(test => test.file === procedureFile && !test.parents.length &&
@@ -257,7 +274,12 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
     'The actual Go/Python/schema/launcher causal root must be assigned intact to one body');
   const toolShard = `body-${toolPartition.index}`;
   const parts = nativeFrameworkShardNames(target, protocol).map(shard => {
-    const selected = shard === 'units' ? stages.filter(stage => stage.name !== 'regression') :
+    const unitIndex = unitShards.indexOf(shard);
+    const selected = unitIndex >= 0 ? [
+      ...(unitIndex === 0 ? stages.filter(stage => stage.name === 'unit') : []),
+      { ...extendedUnits, cases: extendedUnits.cases.filter(test =>
+        unitPartitions[unitIndex].assertionIds.includes(test.id)) },
+    ] :
       [{ ...regression, cases: shard === 'refresh' ?
         regression.cases.filter(test => refreshIds.has(test.id)) :
         bodyCases.filter(test => partitions[Number(shard.slice(5))].assertionIds.includes(test.id)) }];
@@ -280,9 +302,10 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
     const procedures = shard === 'units' ? ['static', 'frozen-artifacts'] :
       shard === toolShard ? ['calculator'] : [];
     return { shard, role: nativeProducerRole(target, 'framework', shard),
-      prerequisites: shard === 'units' ? [] :
+      prerequisites: unitIndex >= 0 ? [] :
         (protocol === nativeLegacyFrameworkShardProtocol ? validationPlatforms : [target])
-          .map(platform => nativeProducerRole(platform, 'framework', 'units')),
+          .flatMap(platform => nativeFrameworkUnitShardNames(platform, protocol)
+            .map(unit => nativeProducerRole(platform, 'framework', unit))),
       stages: selectedStages, assertionIds, procedures, go: shard === toolShard };
   });
   const assigned = parts.flatMap(part => part.assertionIds);
@@ -508,8 +531,9 @@ export function verifyNativeShardUnitOrder(parts, { protocol = nativeFrameworkSh
     'EVIDENCE', 'Unit-order evidence differs from the actual required native job/context/attempt');
     return { ...expected, context, job };
   });
-  for (const part of selected.filter(part => part.shard && part.shard !== 'units')) {
-    requireThat(selected.filter(other => other.shard === 'units' &&
+  for (const part of selected.filter(part => part.shard &&
+    !nativeFrameworkUnitShardNames(part.target, protocol).includes(part.shard))) {
+    requireThat(selected.filter(other => nativeFrameworkUnitShardNames(other.target, protocol).includes(other.shard) &&
       (protocol === nativeLegacyFrameworkShardProtocol || other.target === part.target)).every(units =>
       Date.parse(units.job.completed_at) <= Date.parse(part.job.started_at)), 'EVIDENCE',
     'Required actual platform units must complete before their regression shards start');
@@ -1591,12 +1615,15 @@ export async function runNativeValidation(options) {
       requireThat(command.complete && command.exitCode === 0, 'VALIDATION',
         `Native ${selected.name} did not complete successfully; original reports are retained`);
     };
-    if (component !== 'homebrew' && (part === undefined || shard === 'units')) {
+    if (component !== 'homebrew' && (part === undefined ||
+      nativeFrameworkUnitShardNames(target).includes(shard))) {
     for (const selected of inputs.stages.filter(stage => stage.name !== 'regression')) {
       if (selected.name === 'unit' || phase === 'validation') await stage(selected);
     }
-    const staticReport = await runTool({ name: 'static', command: process.execPath, args: ['scripts/check.mjs'] });
-    requireThat(staticReport.complete && staticReport.exitCode === 0, 'VALIDATION', 'Native static validation did not pass');
+    if (part === undefined || part.procedures.includes('static')) {
+      const staticReport = await runTool({ name: 'static', command: process.execPath, args: ['scripts/check.mjs'] });
+      requireThat(staticReport.complete && staticReport.exitCode === 0, 'VALIDATION', 'Native static validation did not pass');
+    }
     }
     if (buildCandidate) {
       await literalDirectory(candidateDir, { create: true, empty: true });
@@ -1617,7 +1644,8 @@ export async function runNativeValidation(options) {
     candidateReady = true;
     if (phase === 'validation') {
     environment.SDLC_TEST_REPORT_CONTEXT = JSON.stringify(context);
-    if (component !== 'homebrew' && (part === undefined || shard !== 'units')) {
+    if (component !== 'homebrew' && (part === undefined ||
+      !nativeFrameworkUnitShardNames(target).includes(shard))) {
     const windows = archiveRecord(candidate, 'windows-x64');
     const launcher = readZip(await fs.readFile(path.join(candidateDir, 'assets', windows.filename)))
       .find(entry => entry.path === 'bin/sdlc.exe');

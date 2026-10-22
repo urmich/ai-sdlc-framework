@@ -17,7 +17,7 @@ import { nativeSpecification, nativeConfigurationDigest, nativeArtifacts, native
   nativeWorkflowContract, nativeStageSelections, nativeProducerRole } from '../scripts/native-validation.mjs';
 import { nativeLegacyPrParts, nativeFrameworkShardPlan, nativeFrameworkShardProtocol,
   nativeLegacyFrameworkShardProtocol, nativePartJobKey, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
-import { nativeResourceFacts } from '../scripts/native-validation.mjs';
+import { nativeResourceFacts, nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
 import { repositoryRoot, unitFiles } from '../scripts/test-runner.mjs';
 import { createReadinessGitHubClient } from '../scripts/github-readiness-host.mjs';
 import { createPrReadinessHost, statusConcurrencyGroup } from '../scripts/pr-observer.mjs';
@@ -588,7 +588,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
     if (!part.go && file.startsWith('tools-') || !part.procedures.includes('calculator') && file.startsWith('calculator') ||
         !part.procedures.includes('static') && file === 'static.json') data.delete(file);
   }
-  const observedAt = at(part ? shard === 'units' ? 14.8 : part.go ? 51 : 50 :
+  const observedAt = at(part ? nativeFrameworkUnitShardNames(target, shardProtocol).includes(shard) ? 14.8 : part.go ? 51 : 50 :
     target.startsWith('macos-') && component !== 'framework' ? 55 :
     profile === 'r-pre' && target === 'windows-x64' ? 56 : 51);
   const raw = { schemaVersion: 1, kind: 'test-execution', context, startedAt: at(6),
@@ -712,7 +712,8 @@ export async function observerApiFixture(t, options = {}) {
     protocolKeys.map(key => {
       const part = protocolParts.find(part => nativePartJobKey(part, shardProtocol) === key);
       return `  ${key}:
-    needs: ${JSON.stringify(['intent', 'source', ...(part.shard && part.shard !== 'units' ?
+    needs: ${JSON.stringify(['intent', 'source', ...(part.shard &&
+    !nativeFrameworkUnitShardNames(part.target, shardProtocol).includes(part.shard) ?
     [nativePartJobKey({ ...part, shard: 'units' }, shardProtocol)] : [])])}
     timeout-minutes: 360
     strategy:
@@ -754,7 +755,8 @@ jobs:
   const parts = new Map(expectedParts.map(part => [part.role,
     laneData(source, candidate, revisions, part.target, { ...part, frameworkShards: Boolean(options.frameworkShards), shardProtocol,
       bootstrapProtocol: options.bootstrapProtocol,
-      startTime: epoch + (part.shard && part.shard !== 'units' ? 100000 : 0) })]));
+      startTime: epoch + (part.shard &&
+        !nativeFrameworkUnitShardNames(part.target, shardProtocol).includes(part.shard) ? 100000 : 0) })]));
   const lanes = new Map(validationPlatforms.map(target => [target, [...parts.values()].find(part =>
     part.target === target && part.component !== 'homebrew' && (!options.frameworkShards ||
       part.shard === nativeFrameworkShardPlan({ inventory: source.inventory, plan: source.plan, target, protocol: shardProtocol }).toolShard))]));
@@ -766,7 +768,7 @@ jobs:
     path: nativeWorkflowContract.path, head_sha: revisions.head, head_repository: { id: 29 },
     repository: { id: repositoryId }, status: 'completed', conclusion: 'success', pull_requests: [] };
   const jobs = [...parts.values()].map(({ target, role, shard }, index) => {
-    const shift = shard && shard !== 'units' ? 100 : 0;
+    const shift = shard && !nativeFrameworkUnitShardNames(target, shardProtocol).includes(shard) ? 100 : 0;
     return ({
     id: 1000 + index, run_id: runId, name: `native-${role}`, head_sha: revisions.head,
     run_attempt: 1, status: 'completed', conclusion: 'success',
@@ -800,7 +802,8 @@ jobs:
     if (options.frameworkShards) body.nativeShard = lane.shard;
     const git = lane.context.native.platform === 'win32' ?
       '"C:\\Program Files\\Git\\bin\\git.exe"' : '/usr/bin/git';
-    const shift = lane.shard && lane.shard !== 'units' ? 100 : 0;
+    const shift = lane.shard &&
+      !nativeFrameworkUnitShardNames(lane.target, shardProtocol).includes(lane.shard) ? 100 : 0;
     return [job.id, `${at(shift + 0.5)} sdlc-run-context:${JSON.stringify(body)}\n` +
       `${at(shift + 2)} [command]${git} log -1 --format=%H\n${at(shift + 2.1)} ${revisions.merge}\n`];
   }));
@@ -980,7 +983,8 @@ jobs:
       const frozen = candidateData(mergeSha);
       const currentParts = expectedParts.map(part => laneData(source, frozen.candidate, currentRevisions, part.target,
         { ...part, prNumber: number, executionId, frameworkShards: Boolean(options.frameworkShards), shardProtocol,
-          startTime: epoch + (part.shard && part.shard !== 'units' ? 100000 : 0) }));
+          startTime: epoch + (part.shard &&
+            !nativeFrameworkUnitShardNames(part.target, shardProtocol).includes(part.shard) ? 100000 : 0) }));
       const currentLanes = new Map(validationPlatforms.map(target => [target, currentParts.find(part =>
         part.target === target && part.component !== 'homebrew' && (!options.frameworkShards ||
           part.shard === nativeFrameworkShardPlan({ inventory: source.inventory, plan: source.plan, target, protocol: shardProtocol }).toolShard))]));

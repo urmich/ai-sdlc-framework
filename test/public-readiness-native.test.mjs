@@ -22,12 +22,13 @@ import { aggregateNativeReadiness, nativeArtifacts, nativeSpecification, nativeG
   nativePrParts, nativeLegacyPrParts, nativeProducerRole,
   nativeFrameworkShardPlan, verifyNativeShardUnitOrder,
   nativeFrameworkShardProtocol, nativeLegacyFrameworkShardProtocol,
-  nativePlatformUnitFrameworkShardProtocol, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
+  nativePlatformUnitFrameworkShardProtocol, nativeFourBodyFrameworkShardProtocol,
+  nativeFrameworkUnitShardNames, nativeStageSelections, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
 import { observerApiFixture } from './readiness-observer-fixture.mjs';
 import { validateBootstrapRequest } from '../scripts/native-toolchain.mjs';
 import { reconcileGoExecution, executeValidationCommand, validationCommandArguments } from '../scripts/validation-tools.mjs';
 import { repositoryRoot, createPlan, parseOptions, run as runTests } from '../scripts/test-runner.mjs';
-import { discoverDeclarations, compileValidationSourceInventory } from '../scripts/validation-inventory.mjs';
+import { discoverDeclarations, compileValidationSourceInventory, validationSourcePaths } from '../scripts/validation-inventory.mjs';
 import { runCalculator, calculatorFiles, calculatorSelection, calculatorArguments,
   calculatorCommandArguments, reconcileCalculator } from '../scripts/pr-calculator.mjs';
 import { fetchPinnedFixture, provisionPrCryptoFixture } from '../scripts/pr-capabilities.mjs';
@@ -42,6 +43,7 @@ test('T-PRD015 refresh SDK dispatch omits unused commands while historical and o
     protocol: nativeBootstrapProtocol };
   assert.deepEqual(await probeNativeSdk(request, () => { throw new Error('Unused Go/Python invoked'); }), {});
   for (const change of [{ protocol: null }, { protocol: 'native-bootstrap-role-capabilities-v2' }, { shard: 'units' },
+    { target: 'macos-x64', shard: 'units-1' },
     { shard: 'body-0' }, { component: 'full', shard: null }, { component: 'homebrew', shard: null }]) {
     const calls = [];
     const facts = await probeNativeSdk({ ...request, ...change }, async command => {
@@ -580,9 +582,9 @@ test('T-PRD016 six PR producer parts require both exact Mac originals and reject
   }
 });
 
-test('T-PRD016 twenty-four native shard selections preserve complete root unions and require protected actual unit ordering', async t => {
+test('T-PRD016 twenty-five native shard selections preserve complete root unions and require both actual Intel unit origins', async t => {
   const f = await observerApiFixture(t, { frameworkShards: true });
-  assert.equal(f.parts.size, 24);
+  assert.equal(f.parts.size, 25);
   const request = { target: 'linux-x64', profile: 'pr', component: 'framework', shard: 'units',
     candidateDir: '.test-data/shard-candidate', evidenceDir: '.test-data/shard-evidence' };
   const environment = { EXPECTED_SOURCE_COMMIT: f.revisions.merge,
@@ -606,10 +608,26 @@ test('T-PRD016 twenty-four native shard selections preserve complete root unions
     assert.equal(new Set(selected).size, selected.length);
     assert.equal(assignment.parts.filter(part => part.go).length, 1);
     assert.equal(assignment.parts.find(part => part.shard === 'refresh').assertionIds.length, 1);
-    assert.equal(assignment.parts.length, target.startsWith('macos-') ? 5 : 6);
+    assert.equal(assignment.parts.length, target === 'macos-arm64' ? 5 : 6);
     assert.ok(assignment.parts.filter(part => part.shard.startsWith('body-')).every(part => part.assertionIds.length));
-    assert.ok(assignment.parts.every(part => digest(part.prerequisites) === digest(part.shard === 'units' ?
-      [] : [nativeProducerRole(target, 'framework', 'units')])));
+    const unitShards = nativeFrameworkUnitShardNames(target);
+    assert.ok(assignment.parts.every(part => digest(part.prerequisites) === digest(unitShards.includes(part.shard) ?
+      [] : unitShards.map(shard => nativeProducerRole(target, 'framework', shard)))));
+    const unitParts = assignment.parts.filter(part => unitShards.includes(part.shard));
+    const stageSelection = nativeStageSelections(f.source.inventory, f.source.plan);
+    assert.deepEqual(unitParts.flatMap(part => part.stages.filter(stage => stage.name === 'unit'))
+      .flatMap(stage => stage.cases.map(test => test.id)),
+    stageSelection.find(stage => stage.name === 'unit').cases.map(test => test.id),
+    'Canonical assertions execute once, on the original units producer');
+    assert.deepEqual(unitParts.flatMap(part => part.stages.filter(stage => stage.name === 'required-units'))
+      .flatMap(stage => stage.cases.map(test => test.id)).sort(),
+    stageSelection.find(stage => stage.name === 'required-units').cases.map(test => test.id).sort());
+    assert.ok(unitParts.every(part => part.stages.every(stage => stage.cases.length > 0)));
+    const fourBody = nativeFrameworkShardPlan({ inventory: f.source.inventory, plan: f.source.plan,
+      target, protocol: nativeFourBodyFrameworkShardProtocol });
+    assert.deepEqual(fourBody.parts.filter(part => part.shard !== 'units').map(part => part.assertionIds),
+      assignment.parts.filter(part => !unitShards.includes(part.shard)).map(part => part.assertionIds),
+      'The new unit host does not move regression roots or change the refresh boundary');
     const global = nativeFrameworkShardPlan({ inventory: f.source.inventory, plan: f.source.plan,
       target, protocol: nativeLegacyFrameworkShardProtocol });
     const previous = nativeFrameworkShardPlan({ inventory: f.source.inventory, plan: f.source.plan,
@@ -664,7 +682,9 @@ test('T-PRD016 twenty-four native shard selections preserve complete root unions
   const intelUnit = staggered.find(part => part.target === 'macos-x64' && part.shard === 'units');
   intelUnit.job.completed_at = '2026-10-18T10:01:50.000Z';
   for (const part of staggered.filter(part => part.target === 'macos-x64' &&
-    part.shard && part.shard !== 'units')) part.job.started_at = '2026-10-18T10:02:00.000Z';
+    part.shard && !nativeFrameworkUnitShardNames(part.target).includes(part.shard))) {
+    part.job.started_at = '2026-10-18T10:02:00.000Z';
+  }
   assert.equal(verifyNativeShardUnitOrder(staggered).protocol, nativeFrameworkShardProtocol);
   assert.throws(() => verifyNativeShardUnitOrder(staggered, { protocol: nativeLegacyFrameworkShardProtocol }),
     { code: 'EVIDENCE' });
@@ -686,9 +706,92 @@ test('T-PRD016 twenty-four native shard selections preserve complete root unions
   const duplicateJobs = executions.map(part => ({ ...part, job: structuredClone(part.job) }));
   duplicateJobs[1].job.id = duplicateJobs[0].job.id;
   assert.throws(() => verifyNativeShardUnitOrder(duplicateJobs), { code: 'EVIDENCE' });
+  const intelExtra = executions.find(part => part.target === 'macos-x64' && part.shard === 'units-1');
+  for (const mutate of [
+    job => { job.conclusion = 'failure'; },
+    job => { job.conclusion = 'cancelled'; },
+    job => { job.conclusion = 'skipped'; },
+    job => { job.run_attempt++; },
+    job => { job.run_id++; },
+  ]) {
+    const changed = executions.map(part => ({ ...part, job: structuredClone(part.job) }));
+    mutate(changed.find(part => part.target === 'macos-x64' && part.shard === 'units-1').job);
+    assert.throws(() => verifyNativeShardUnitOrder(changed), { code: 'EVIDENCE' });
+  }
+  const foreign = executions.map(part => ({ ...part, context: structuredClone(part.context) }));
+  foreign.find(part => part.target === 'macos-x64' && part.shard === 'units-1')
+    .context.sources[0].revision = 'f'.repeat(40);
+  assert.throws(() => aggregateNativeReadiness(evaluations, { ...expected, executions: foreign }),
+    { code: 'EVIDENCE' });
+  for (const shard of ['refresh', 'body-0', 'body-1', 'body-2']) {
+    const earlyIntel = executions.map(part => ({ ...part, job: structuredClone(part.job) }));
+    earlyIntel.find(part => part.target === 'macos-x64' && part.shard === shard).job.started_at =
+      new Date(Date.parse(intelExtra.job.completed_at) - 1000).toISOString();
+    assert.throws(() => verifyNativeShardUnitOrder(earlyIntel), { code: 'EVIDENCE' },
+      `${shard} must wait for the second Intel units producer, not just the original`);
+  }
+  assert.throws(() => verifyNativeShardUnitOrder(executions.filter(part => part !== intelExtra)), { code: 'EVIDENCE' });
+  const extraEvaluation = evaluations.findIndex(part => part.target === 'macos-x64' && part.shard === 'units-1');
+  assert.equal(aggregateNativeReadiness(evaluations.filter((_, index) => index !== extraEvaluation),
+    expected).status, 'NotRun', 'Six of seven Intel parts cannot pass the logical lane');
   assert.equal(nativePrPartsForProtocol(nativeLegacyFrameworkShardProtocol).length, 20);
   assert.equal(nativePrPartsForProtocol(nativePlatformUnitFrameworkShardProtocol).length, 20);
+  assert.equal(nativePrPartsForProtocol(nativeFourBodyFrameworkShardProtocol).length, 24);
   assert.equal(f.calls.length, 0, 'No provider, native toolchain or Python execution is needed for this controlled proof');
+});
+
+test('T-PRD016 split native units execute disjoint complete root closures with real isolated Node workers', async t => {
+  const f = await observerApiFixture(t, { frameworkShards: true });
+  const sourceFiles = [...f.source.files].map(([file, contents]) => ({ file, contents: contents.replace(
+    'throw new Error("candidate test source must never execute in the trusted observer");', '') }));
+  const extended = sourceFiles.filter(source => /observer-(?:critical|unplanned)\.unit\.test\.mjs$/u.test(source.file));
+  const firstRoot = f.source.names.find(test => test.file === extended[0].file).name;
+  extended[0].contents = `export const validationDeclarations=${JSON.stringify({ schemaVersion: 1, groups: [
+    { root: firstRoot, exclusiveResources: ['owned-unit-fixture'] },
+    { root: 'dependent unit root', dependsOn: [firstRoot], exclusiveResources: ['owned-unit-fixture'] },
+  ] })};\nimport test from 'node:test';import assert from 'node:assert/strict';\n` +
+    `test(${JSON.stringify(firstRoot)},async t=>{await t.test('complete child',()=>assert.equal(2+2,4));});\n` +
+    "test('dependent unit root',()=>assert.equal(3+3,6));\n";
+  const testPaths = new Set(validationSourcePaths(sourceFiles.map(source => source.file)));
+  const inventory = compileValidationSourceInventory({ files: sourceFiles.filter(source => testPaths.has(source.file)),
+    surfacePaths: sourceFiles.map(source => source.file) });
+  assert.equal(inventory.complete, true, JSON.stringify(inventory.unresolved));
+  const assignment = nativeFrameworkShardPlan({ inventory, plan: f.source.plan, target: 'macos-x64' });
+  const units = assignment.parts.filter(part => nativeFrameworkUnitShardNames('macos-x64').includes(part.shard));
+  const actual = [];
+  const target = process.platform === 'win32' ? 'windows-x64' :
+    process.platform === 'darwin' ? `macos-${process.arch}` : 'linux-x64';
+  for (const part of units) for (const stage of part.stages) {
+    for (const file of stage.files) {
+      const source = sourceFiles.find(source => source.file === file);
+      const destination = path.join(f.root, ...file.split('/'));
+      await fs.mkdir(path.dirname(destination), { recursive: true });
+      await fs.writeFile(destination, source.contents.replace(
+        'throw new Error("candidate test source must never execute in the trusted observer");', ''));
+    }
+    const selected = await createPlan(parseOptions(['targeted', '--workers', '2',
+      ...(stage.name === 'unit' ? [] : ['--name', stage.selectorName]),
+      ...stage.files.map(file => path.join(f.root, ...file.split('/')))]), f.root);
+    const reportPath = path.join(f.root, `${part.shard}-${stage.name}.json`);
+    assert.equal(await runTests(selected, { reportPath }), 0);
+    const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+    const journal = await fs.readFile(`${reportPath}.journal.ndjson`, 'utf8');
+    validateNativeGroupReport({ inventory, stage, report, journal, target });
+    actual.push(...report.executions.filter(row => row.status === 'Passed').map(row =>
+      [row.file, row.parents, row.name]));
+  }
+  const selectedCases = units.flatMap(part => part.stages.flatMap(stage => stage.cases));
+  assert.deepEqual(actual.map(digest).sort(),
+    selectedCases.map(test => digest([test.file, test.parents, test.name])).sort());
+  assert.equal(new Set(actual.map(digest)).size, actual.length);
+  assert.ok(actual.some(([, parents, name]) => parents[0] === firstRoot && name === 'complete child'));
+  const conflicting = structuredClone(inventory);
+  conflicting.groupDeclarations.push({ file: extended[1].file,
+    root: f.source.names.find(test => test.file === extended[1].file).name,
+    exclusiveResources: ['owned-unit-fixture'] });
+  assert.throws(() => nativeFrameworkShardPlan({ inventory: conflicting,
+    plan: f.source.plan, target: 'macos-x64' }), { code: 'INVENTORY' },
+  'Cross-host shared exclusive resources must be rejected rather than split');
 });
 
 test('T-PRD004 native policy rejects fixture, metadata and cross-build credit and uses protected evaluation inputs', () => {

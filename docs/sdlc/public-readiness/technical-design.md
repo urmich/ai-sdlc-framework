@@ -313,8 +313,9 @@ Keep receipt validation, real backups, copy verification, locks, durable state
 transitions and all channel, hook and quality commands unchanged. No captured
 dependency state is cached across mutation phases.
 
-For ordinary PR validation, use twenty-four independently required native producer
-parts consuming the same frozen candidate. Each platform has one unit producer
+For ordinary PR validation, use twenty-five independently required native producer
+parts consuming the same frozen candidate. Intel Mac has two unit producers;
+each other platform has one unit producer
 and one producer containing the entire unchanged 550-refresh root. Partition
 the remaining root closures across four Linux/Windows body producers and three
 body producers per Mac architecture; each Mac also retains its real Homebrew
@@ -327,21 +328,29 @@ observed part results. Require source-, platform-, job-, run- and attempt-bound
 unit evidence before regression shards execute. Independently verify every
 part's SDK context, complete assertion union and allocated-prefix cleanup;
 missing, duplicated, overlapping or swapped parts cannot produce completeness.
-The source-adopted `native-framework-shards-v3-four-body-platform-units` protocol uses four
+The source-adopted `native-framework-shards-v4-split-intel-units` protocol uses four
 explicit platform-specific unit-to-regression job groups. A platform's unit
-producer must complete successfully, including retention and cleanup, before
+producers must all complete successfully, including retention and cleanup, before
 its own regression jobs start. Unrelated unit producers may finish later, but
-overall completeness still requires every one of the twenty-four parts. No waiting
+overall completeness still requires every one of the twenty-five parts. The same
+source-inventory file partitioner assigns extended units with a count of two
+for Intel and one otherwise; complete root closures, source digests, dependencies
+and exclusive resources remain intact. Canonical units and static validation
+execute only on the original `units` producer; `units-1` executes only its
+nonempty extended-unit subset. Both Intel unit jobs share `native-units-mi`'s
+standard runner matrix, each with its own four-worker budget and prefix. No waiting
 regression host is started early merely to overlap provisioning.
 Preserve the original `native-framework-shards-v1` global-barrier and
 `native-framework-shards-v2-platform-units` twenty-part proof and archive
-semantics; a new protocol must not relabel older evidence or reinterpret its
-eighteen framework producers as the current twenty-two.
+semantics, and the `native-framework-shards-v3-four-body-platform-units`
+twenty-four-part topology. Do not relabel their eighteen or twenty-two framework
+origins as the current twenty-three.
 Bind the current SDK component projection to
-`native-component-projection-shards-v2`; retain
-`native-component-projection-shards-v1` for its historical topology and reject
+`native-component-projection-shards-v3`; retain
+`native-component-projection-shards-v1` and `native-component-projection-shards-v2`
+for their historical topologies and reject
 cross-version producer counts or borrowed origins.
-All twelve Mac producer prefixes require distinct owned allocation and matching
+All thirteen Mac producer prefixes require distinct owned allocation and matching
 guarded cleanup; no producer may borrow another's receipt.
 Keep default whole-native execution and release prepublication compatible.
 The required logical lane span remains under fifteen minutes from its earliest
@@ -400,7 +409,7 @@ semantics. Bind the capability and required tool inventory into captured
 definitions, configuration digests, protected admission and actual reports.
 Missing required reports, invented absent-tool facts and role/protocol
 mismatches fail rather than downgrade.
-All twenty-four producer origins and twelve distinct Mac cleanup owners remain
+All twenty-five producer origins and thirteen distinct Mac cleanup owners remain
 required.
 
 The PR workflow explicitly allocates 15 shared test-worker slots on Linux and
@@ -415,7 +424,9 @@ I/O-heavy isolated roots to CPU count. They stay below the existing 32-slot
 ceiling; nested producers still share that one host allocation, with all
 dependency, exclusive-resource and resident-process bounds unchanged.
 The personal-account hosted Mac ceiling is five simultaneous jobs, shared by
-both architectures; adding queued Mac shards is not additional execution capacity.
+both architectures. Two Intel unit hosts, the ARM unit host and both genuine
+Homebrew hosts can occupy all five slots initially without delaying ready work;
+adding queued Mac shards is not additional execution capacity.
 The four-body Linux/Windows matrices can provide five regression hosts per
 platform while at most five Mac hosts run, fitting fifteen native jobs within
 the conservative twenty-job standard personal allowance. Use standard runners

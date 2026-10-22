@@ -143,7 +143,9 @@ export function inspectWorkflowTrust(workflows) {
       'native-units-mi', 'native-mi'].some(key => jobs?.[key] !== undefined);
     const fourBody = Object.values(jobs ?? {}).some(job => job?.strategy?.matrix?.include?.some(row =>
       ['linux-x64', 'windows-x64'].includes(row.target) && ['body-2', 'body-3'].includes(row.shard)));
-    const protocol = platformBarrier ? fourBody ? native.nativeFrameworkShardProtocol :
+    const splitUnits = jobs?.['native-units-mi']?.strategy?.matrix?.include?.some(row => row.shard === 'units-1');
+    const protocol = platformBarrier ? splitUnits ? native.nativeFrameworkShardProtocol :
+      fourBody ? native.nativeFourBodyFrameworkShardProtocol :
       native.nativePlatformUnitFrameworkShardProtocol :
       sharded ? native.nativeLegacyFrameworkShardProtocol : null;
     nativeProtocol = protocol;
@@ -163,7 +165,8 @@ export function inspectWorkflowTrust(workflows) {
         expected.some(part => !entries.some(entry => digest(entry) === digest(part))) ||
         protocol && keys.some(key => {
           const part = expectedParts.find(part => native.nativePartJobKey(part, protocol) === key);
-          const needs = ['intent', 'source', ...(part.shard && part.shard !== 'units' ?
+          const needs = ['intent', 'source', ...(part.shard &&
+            !native.nativeFrameworkUnitShardNames(part.target, protocol).includes(part.shard) ?
             [native.nativePartJobKey({ ...part, shard: 'units' }, protocol)] : [])];
           return jobs[key]?.strategy?.['fail-fast'] !== false || jobs[key]?.['timeout-minutes'] !== 360 ||
             jobs[key]?.strategy?.matrix?.include?.some(row => native.nativePartJobKey(row, protocol) !== key) ||

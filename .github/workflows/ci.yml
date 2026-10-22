@@ -965,6 +965,7 @@ jobs:
       matrix:
         include:
           - { target: macos-x64, component: framework, shard: units, role: macos-x64-framework-units, os: macos-15-intel, architecture: x64 }
+          - { target: macos-x64, component: framework, shard: units-1, role: macos-x64-framework-units-1, os: macos-15-intel, architecture: x64 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 360
     env:
