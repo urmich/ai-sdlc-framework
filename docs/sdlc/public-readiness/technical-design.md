@@ -256,6 +256,10 @@ and HEAD queries; a same-commit different branch cannot qualify. All canonical
 path checks still run on each call, without a cross-call identity cache.
 The process-count and fresh-state regression is PR-only, outside the finite
 27-assertion local sanity profile; hosted latency still needs actual native proof.
+The retention fixture's existing immutable Git-read cache also recognizes the
+read-only current-ref query. Writes and unknown Git commands still invalidate
+all cached fixture reads. This test-only reuse does not cache production state
+or replace any real refresh, archival, durability or cleanup operation.
 
 After fresh binding validation, issue the independent candidate Git reads
 together: three index/diff/untracked queries for a dispatch stamp and those

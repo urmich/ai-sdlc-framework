@@ -9,10 +9,11 @@ import { canonical } from '../src/core.mjs';
 const execute = childProcess.execFile;
 const gitReads = new Map();
 childProcess.execFile = (file, args, options, callback) => {
-  const command = args.filter(argument => !['--no-pager',
-    '--no-optional-locks'].includes(argument))[0];
-  const cacheable = file === 'git' && (['rev-parse', 'symbolic-ref'].includes(command) ||
-    command === 'remote' && (!args.includes('add') && !args.includes('set-url')));
+  const gitArgs = args.filter(argument => !['--no-pager',
+    '--no-optional-locks'].includes(argument));
+  const command = gitArgs[0];
+  const cacheable = file === 'git' && (['rev-parse', 'symbolic-ref', 'for-each-ref'].includes(command) ||
+    command === 'remote' && (gitArgs.length === 1 || gitArgs[1] === 'get-url'));
   if (file === 'git' && !cacheable) gitReads.clear();
   const key = canonical([options.cwd, args]);
   if (cacheable && gitReads.has(key)) {

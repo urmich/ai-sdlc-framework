@@ -12,6 +12,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import * as fs from 'node:fs/promises';
+import { subscribe, unsubscribe } from 'node:diagnostics_channel';
 import { LIMITS, canonical, digest } from '../src/core.mjs';
 import { fixture, observeFixtureRepository, pruneWork, adoptPr, evaluateReadiness, updatePrFacts,
   archiveSupersededObservations, withObservationRetention, currentArtifact, currentDeployment,
@@ -23,6 +24,58 @@ const pruneObservations = f => withObservationRetention(f.store, f.workItemId,
   (tx, monitorDependencies) =>
     archiveSupersededObservations(f.store, tx, { monitorDependencies }),
   { allowRecoveryRequired: true });
+
+test('FR-063 immutable fixture Git reads are reused without masking subsequent writes', async t => {
+  const f = await retentionFixture(t);
+  const first = await observeFixtureRepository(f);
+  const commands = [];
+  const observe = ({ process: child }) => {
+    child.once('spawn', () => {
+      if (child.spawnargs[0] !== 'git') return;
+      commands.push(child.spawnargs.slice(1).filter(argument =>
+        !['--no-pager', '--no-optional-locks'].includes(argument)));
+    });
+  };
+  subscribe('child_process', observe);
+  t.after(() => unsubscribe('child_process', observe));
+
+  f.clock.advance(1);
+  const repeated = await observeFixtureRepository(f);
+  assert.equal(repeated.revision, first.revision);
+  assert.equal(commands.length, 0,
+    `Immutable fixture reads must not launch Git again: ${JSON.stringify(commands)}`);
+
+  await f.runGit('commit', '--allow-empty', '-qm', 'Advance retention fixture');
+  const revision = await f.runGit('rev-parse', 'HEAD');
+  assert.notEqual(revision, first.revision);
+  commands.length = 0;
+  f.clock.advance(1);
+  assert.equal((await observeFixtureRepository(f)).revision, revision);
+  assert.ok(commands.some(args => args[0] === 'for-each-ref'),
+    'A real commit must invalidate the cached current-ref query');
+
+  const remoteRepositoryURL = 'https://example.invalid/changed-retention.git';
+  await f.runGit('remote', 'set-url', 'origin', remoteRepositoryURL);
+  commands.length = 0;
+  f.clock.advance(1);
+  assert.equal((await observeFixtureRepository(f)).remoteRepositoryURL, remoteRepositoryURL);
+  assert.ok(commands.some(args => args[0] === 'remote' && args.includes('get-url')),
+    'A real remote change must invalidate cached destination reads');
+
+  const remoteName = 'renamed-retention';
+  await f.runGit('remote', 'rename', 'origin', remoteName);
+  commands.length = 0;
+  f.clock.advance(1);
+  assert.equal((await observeFixtureRepository(f, { remoteName })).remoteRepositoryURL,
+    remoteRepositoryURL);
+  assert.ok(commands.some(args => args[0] === 'remote' && args.length === 1),
+    'A remote rename must invalidate the cached remote-name list');
+
+  await f.runGit('checkout', '-qb', 'feature/changed-retention');
+  assert.equal(await f.runGit('rev-parse', 'HEAD'), revision);
+  await assert.rejects(observeFixtureRepository(f, { remoteName }), { code: 'BINDING' },
+    'A same-commit branch switch must not reuse the old checked-out-ref marker');
+});
 
 test('FR-063/064 pruneWork alone archives released historical observations and facts without another refresh', async t => {
   const f = await retentionFixture(t);

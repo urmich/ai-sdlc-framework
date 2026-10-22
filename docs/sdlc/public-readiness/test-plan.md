@@ -388,6 +388,10 @@ selection overlaps execute once. The three specific retention roots are real
 required behavior, not a replacement mock/fingerprint. The causally ordered
 550-refresh stress scenario remains unchanged in full native/directly affected
 coverage and is not silently pulled into every routine local critical run.
+The PR-only retention-fixture regression observes actual child-process dispatch:
+unchanged fixture reads reuse the existing cache, while a real commit, remote
+change and same-commit branch switch invalidate it. All ordered refreshes,
+storage operations and assertions remain real; production Git reads stay fresh.
 
 ### 3.2 Existing full selection
 
