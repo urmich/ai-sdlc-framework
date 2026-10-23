@@ -238,8 +238,8 @@ Archived native reconstruction selects the scheduling policy from the existing
 authenticated `definition.sourceFiles` entry for `scripts/test-scheduling.mjs`.
 The non-executing declaration tokenizer requires exact token-normalized
 fingerprints for the exported protocol, priority table and complete policy
-initializers. Current live execution uses literal v4; historical reconstruction
-also retains the exact v3 and v2 contracts and their original digests. Missing,
+initializers. Current live execution uses literal v5; historical reconstruction
+also retains the exact v4, v3 and v2 contracts and their original digests. Missing,
 unknown, duplicate, spoofed or computed contracts fail `EVIDENCE`. Do not
 execute captured code, accept a report policy flag or try alternate digests.
 Thread that source-selected policy through ordering, configuration and original
@@ -392,16 +392,18 @@ is a stretch goal. Its observation cutoff moves from sixteen to twenty minutes,
 without changing command watchdogs, owned-process settlement or other limits.
 Configured host fan-out, an isolated shard time or an elapsed-work estimate is
 not a passing latency result; fresh complete hosted measurements are required.
-Use the existing measured-file priority policy to start the retained-identity
-acceptance family, then the validation catalog, the unchanged native WinGet
-launcher family and the joined release-report family, before shorter file families.
+Keep the existing observation refresh/regression and observer priorities first.
+Under implicit policy v5, start the unchanged CI-input and retained-evidence
+families next where those files belong to the selected shard, before shorter
+families. Preserve the relative retained-identity acceptance, catalog, native
+WinGet launcher and joined release-report prefix in shards that own those files.
 The catalog's independent long root can use the three remaining ARM slots while
 the retained guard reserves four of the existing seven. Retain the complete
 38-assertion closure, callback ordering/concurrency and every catalog root.
 This changes neither host capacity, shard ownership nor explicit targeted
 caller order. Actual overlap and whole-lane improvement require native proof.
-Priority v4 changes only that implicit file order; it does not cache cold Go
-builds, alter launcher/report assertions or replace either historical policy.
+Priority v5 changes only that implicit file order; it does not cache cold Go
+builds, alter CI/evidence/launcher/report assertions or replace historical policies.
 
 The PR workflow uses five Linux read-only allocation coordinators under
 `arm-regression-allocation-v4-retained-first`. After ARM's own unit barrier,

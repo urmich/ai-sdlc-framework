@@ -1023,14 +1023,18 @@ test('T-PRD074 archived native reconstruction uses original source and commands 
 test('T-PRD074 archived scheduling reconstructs only its authenticated captured literal policy without current-credit fallback', async t => {
   const f = await observerApiFixture(t, { nodeArtifactReader: true });
   const currentSource = await fs.readFile(new URL('../scripts/test-scheduling.mjs', import.meta.url), 'utf8');
-  const middleSource = currentSource.replace("  'winget-launcher-native.test.mjs',\n", '')
+  const previousSource = currentSource.replace("  'public-readiness-ci.test.mjs',\n", '')
+    .replace("  'public-readiness-evidence.test.mjs',\n", '')
+    .replace("schemaVersion: 5, algorithm: 'source-bound-ready-root-v5'",
+      "schemaVersion: 4, algorithm: 'source-bound-ready-root-v4'");
+  const middleSource = previousSource.replace("  'winget-launcher-native.test.mjs',\n", '')
     .replace("  'public-readiness-release-report.test.mjs',\n", '')
     .replace("schemaVersion: 4, algorithm: 'source-bound-ready-root-v4'",
       "schemaVersion: 3, algorithm: 'source-bound-ready-root-v3'");
   const legacySource = middleSource.replace("  'validation-catalog.test.mjs',\n", '')
     .replace("schemaVersion: 3, algorithm: 'source-bound-ready-root-v3'",
       "schemaVersion: 2, algorithm: 'source-bound-ready-root-v2'");
-  for (const schedulingSource of [legacySource, middleSource, currentSource]) {
+  for (const schedulingSource of [legacySource, middleSource, previousSource, currentSource]) {
     const captured = nativeReplayFixture({ candidate: f.candidate, sourceCommit: f.revisions.merge,
       asOf: '2026-10-18T10:00:00.000Z', schedulingSource });
     const files = captured.definition.stages.find(stage=>stage.name==='regression').files;
@@ -1042,9 +1046,18 @@ test('T-PRD074 archived scheduling reconstructs only its authenticated captured 
     const launcherIndex = files.indexOf('test/winget-launcher-native.test.mjs');
     const reportIndex = files.indexOf('test/public-readiness-release-report.test.mjs');
     assert.ok(launcherIndex >= 0 && reportIndex >= 0);
-    if (schedulingSource === currentSource) {
+    if (schedulingSource === currentSource || schedulingSource === previousSource) {
       assert.equal(launcherIndex, catalogIndex + 1);
       assert.equal(reportIndex, launcherIndex + 1);
+    }
+    const ciIndex = files.indexOf('test/public-readiness-ci.test.mjs');
+    const evidenceIndex = files.indexOf('test/public-readiness-evidence.test.mjs');
+    assert.ok(ciIndex >= 0 && evidenceIndex >= 0);
+    if (schedulingSource === currentSource) {
+      assert.equal(evidenceIndex, ciIndex + 1);
+      assert.ok(ciIndex < retainedIndex && evidenceIndex < retainedIndex);
+    } else {
+      assert.ok(ciIndex > retainedIndex && evidenceIndex > retainedIndex);
     }
     const definitionDigest = digest(captured.definition), reportDigest = digest(captured.data.texts['execution.json']);
     const verifyArchive = input => {
@@ -1069,7 +1082,7 @@ test('T-PRD074 archived scheduling reconstructs only its authenticated captured 
     await assert.rejects(replayNativeEvidence({ ...input, data: badGroup }), { code: 'EVIDENCE' });
     await assert.rejects(replayNativeEvidence({ ...input, verifyArchive: () => null }), { code: 'EVIDENCE' });
   }
-  for (const schedulingSource of [legacySource, middleSource]) {
+  for (const schedulingSource of [legacySource, middleSource, previousSource]) {
   const oldShard = await observerApiFixture(t, { frameworkShards: true, bootstrapProtocol: nativeBootstrapProtocol,
     schedulingSource, nodeArtifactReader: true, ambient: false });
   const part = oldShard.parts.get('macos-arm64-framework-body-1');

@@ -1643,6 +1643,10 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
       'test/winget-launcher-native.test.mjs'),
     discoverDeclarations("import test from 'node:test';test('unchanged joined release-report family',()=>{});",
       'test/public-readiness-release-report.test.mjs'),
+    discoverDeclarations("import test from 'node:test';test('unchanged CI input family',()=>{});",
+      'test/public-readiness-ci.test.mjs'),
+    discoverDeclarations("import test from 'node:test';test('unchanged retained evidence family',()=>{});",
+      'test/public-readiness-evidence.test.mjs'),
   ];
   const inventory = { complete: true, files: declarations.map(source =>
     ({ file: source.file, sourceDigest: source.sourceDigest })), cases: declarations.flatMap(source => source.cases) };
@@ -1653,8 +1657,10 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
   ] });
   assert.ok(selected.units.cases.some(test => test.name === 'unit family without local binding'));
   assert.ok(selected.units.cases.some(test => test.name === 'T-PRD008 selected planned unit'));
-  assert.deepEqual(selected.regression.files.slice(0, 5), [
+  assert.deepEqual(selected.regression.files.slice(0, 7), [
     'test/observation-retention-refresh.test.mjs',
+    'test/public-readiness-ci.test.mjs',
+    'test/public-readiness-evidence.test.mjs',
     'test/github-retained-identity-acceptance.test.mjs',
     'test/validation-catalog.test.mjs',
     'test/winget-launcher-native.test.mjs',
@@ -1678,15 +1684,22 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
     ['validation-catalog.test.mjs', 'catalog'],
     ['winget-launcher-native.test.mjs', 'native-launcher'],
     ['public-readiness-release-report.test.mjs', 'release-report'],
+    ['public-readiness-ci.test.mjs', 'ci'],
+    ['public-readiness-evidence.test.mjs', 'evidence'],
   ]) await fs.writeFile(path.join(f.root, 'test', file),
     "import test from 'node:test';import {appendFile} from 'node:fs/promises';" +
     `test('dispatch ${value}',()=>appendFile(${JSON.stringify(marker)},'${value}\\n'));`);
   const result = await f.invoke(['full', '--workers', '1']);
   assert.equal(result.exitCode, 0, result.stdout + result.stderr);
   assert.deepEqual((await fs.readFile(marker, 'utf8')).trim().split(/\r?\n/u),
-    ['retention', 'observer', 'retained-identity', 'catalog', 'native-launcher', 'release-report', 'operation']);
+    ['retention', 'observer', 'ci', 'evidence', 'retained-identity', 'catalog',
+      'native-launcher', 'release-report', 'operation']);
   const source = await fs.readFile(new URL('../scripts/test-scheduling.mjs', import.meta.url), 'utf8');
-  const middle = source.replace("  'winget-launcher-native.test.mjs',\n", '')
+  const previous = source.replace("  'public-readiness-ci.test.mjs',\n", '')
+    .replace("  'public-readiness-evidence.test.mjs',\n", '')
+    .replace("schemaVersion: 5, algorithm: 'source-bound-ready-root-v5'",
+      "schemaVersion: 4, algorithm: 'source-bound-ready-root-v4'");
+  const middle = previous.replace("  'winget-launcher-native.test.mjs',\n", '')
     .replace("  'public-readiness-release-report.test.mjs',\n", '')
     .replace("schemaVersion: 4, algorithm: 'source-bound-ready-root-v4'",
       "schemaVersion: 3, algorithm: 'source-bound-ready-root-v3'");
@@ -1695,6 +1708,9 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
       "schemaVersion: 2, algorithm: 'source-bound-ready-root-v2'");
   const selectedPolicy = contents => sourceValidationSchedulingPolicy([{ file: 'scripts/test-scheduling.mjs', contents }]);
   assert.equal(selectedPolicy(source), validationSchedulingPolicy);
+  assert.equal(selectedPolicy(previous).schemaVersion, 4);
+  assert.equal(validationSchedulingPolicyDigest(selectedPolicy(previous)),
+    '2273d5335dc6b8bdb7034af1dfde42a2843c1df35345188cb97d3285d0151d64');
   assert.equal(selectedPolicy(middle).schemaVersion, 3);
   assert.equal(validationSchedulingPolicyDigest(selectedPolicy(middle)),
     '6274c99ad21f86dff3a67164c7f486bcb35cae3e9fcf67fb71deec2c72859c3f');
@@ -1708,6 +1724,8 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
     source.replace("  'validation-catalog.test.mjs',\n", ''),
     source.replace("  'winget-launcher-native.test.mjs',\n", ''),
     source.replace("  'public-readiness-release-report.test.mjs',\n", ''),
+    source.replace("  'public-readiness-ci.test.mjs',\n", ''),
+    source.replace("  'public-readiness-evidence.test.mjs',\n", ''),
     source.replace('export const measuredFilePriorities', 'const measuredFilePriorities') +
       '\n// export const measuredFilePriorities = Object.freeze([]);\n',
     source + '\nexport const validationGroupProtocol = "forged";\n',
