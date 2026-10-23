@@ -88,10 +88,11 @@ test('T-PRD021 source-bound role bootstrap preserves all producer origins and th
       const expected = { inventory: f.source.inventory, plan: f.source.plan,
         ...part, bootstrapProtocol: protocol, jobKey: part.jobKey };
       const checked = verifyNativeCleanup(data, expected);
-      if (['native-mi-refresh', 'native-homebrew-mi'].includes(part.jobKey)) {
+      if (['native-mi-refresh', 'native-homebrew-mi', 'native-ma-refresh', 'native-mi-retained'].includes(part.jobKey)) {
         const staleJob = structuredClone(data);
         staleJob['native-homebrew-prefix-request.json'].binding.github.GITHUB_JOB =
-          part.component === 'homebrew' ? 'native-homebrew' : 'native-mi';
+          part.component === 'homebrew' ? 'native-homebrew' :
+            part.target === 'macos-arm64' ? 'native-ma' : 'native-mi';
         assert.throws(() => verifyNativeCleanup(staleJob, expected), { code: 'EVIDENCE' });
       }
       if (checked.prefix) prefixes.push(checked.prefix);

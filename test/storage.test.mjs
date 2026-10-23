@@ -14,6 +14,7 @@ export const validationDeclarations = {
     {"id": "T-PRD013", "selectors": [
       {"name": "T-PRD013 JSON entry failures and consumer exits drain dispatched reads without admitting queued files", "parents": []},
       {"name": "T-PRD013 real archived history retains original records and rejects changed identities and active conflicts", "parents": []},
+      {"name": "T-PRD013 active events are checked on both transaction reads", "parents": []},
       {"name": "T-PRD013 bounded reads allocate for observed bytes while preserving short-read and growth failures", "parents": []}
     ]}
   ]
@@ -69,6 +70,34 @@ test('T-PRD010 canonical encoding reuses only property-name bytes within each fr
     `{"value":${stringify('"\\\n\u2028\ud800')}}`);
   for (const invalid of [NaN, Infinity, undefined, Object.create(null), new Date()]) {
     assert.throws(() => canonical(invalid), { code: 'INPUT' });
+  }
+});
+
+test('T-PRD013 active events are checked on both transaction reads', async t => {
+  const f = await fixture(t);
+  const { event } = await grant(f, 'scope-inclusion', { itemId: 'record-read-probe' });
+  const file = f.store.recordPath(f.workItemId, event.id);
+  const checkpointFile = path.join(f.store.workPath(f.workItemId), 'checkpoint.json');
+  const original = await fs.readFile(file);
+  const checkpoint = await fs.readFile(checkpointFile);
+  const changed = { ...event, effect: { itemId: 'altered-record-read-probe' } };
+  await writeJson(file, changed);
+  try {
+    await assert.rejects(f.store.records(f.workItemId), { code: 'DIGEST' });
+  } finally {
+    await fs.writeFile(file, original);
+  }
+  let actionReached = false;
+  try {
+    await assert.rejects(f.store.transaction(f.workItemId, async tx => {
+      actionReached = true;
+      assert.deepEqual(tx.get(event.id), event);
+      await writeJson(file, changed);
+    }), { code: 'DIGEST' });
+    assert.equal(actionReached, true);
+    assert.deepEqual(await fs.readFile(checkpointFile), checkpoint);
+  } finally {
+    await fs.writeFile(file, original);
   }
 });
 

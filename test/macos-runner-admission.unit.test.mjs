@@ -200,17 +200,25 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   assert.equal(coordinator.strategy, undefined);
   assert.deepEqual(coordinator.permissions, { actions: 'read', contents: 'read' });
   assert.deepEqual(coordinator.needs, ['intent', 'source', 'native-units-ma']);
-  assert.deepEqual(ci.jobs['native-mi'].needs, ['intent', 'source', 'native-units-mi', 'mac-admission']);
+  assert.deepEqual(ci.jobs['native-mi'].needs, ['intent', 'source', 'native-units-mi', 'intel-homebrew-admission']);
   assert.deepEqual(ci.jobs['native-ma'].needs, ['intent', 'source', 'native-units-ma']);
   assert.deepEqual(ci.jobs['native-units-ma'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-units-mi'].needs, ['intent', 'source']);
-  assert.deepEqual(ci.jobs['intel-admission'].needs, ['intent', 'source', 'native-units-mi', 'mac-admission']);
+  assert.deepEqual(ci.jobs['intel-admission'].needs, ['intent', 'source', 'native-units-mi', 'intel-homebrew-admission']);
   assert.deepEqual(ci.jobs['native-mi-refresh'].needs,
-    ['intent', 'source', 'native-units-mi', 'intel-homebrew-admission']);
+    ['intent', 'source', 'native-units-mi', 'intel-admission']);
   assert.deepEqual(ci.jobs['native-homebrew'].needs, ['intent', 'source']);
-  assert.deepEqual(ci.jobs['native-homebrew-mi'].needs, ['intent', 'source', 'intel-admission']);
+  assert.deepEqual(ci.jobs['native-homebrew-mi'].needs, ['intent', 'source', 'arm-refresh-admission']);
   assert.deepEqual(ci.jobs['native-mi'].strategy.matrix.include.map(part => part.shard),
+    ['body-0', 'body-2']);
+  assert.deepEqual(ci.jobs['native-ma'].strategy.matrix.include.map(part => part.shard),
     ['body-0', 'body-1', 'body-2']);
+  assert.deepEqual(ci.jobs['native-mi-retained'].needs,
+    ['intent', 'source', 'native-units-mi', 'mac-admission']);
+  assert.deepEqual(ci.jobs['native-mi-retained'].strategy.matrix.include.map(part => part.shard), ['body-1']);
+  assert.deepEqual(ci.jobs['native-ma-refresh'].needs,
+    ['intent', 'source', 'native-units-ma', 'intel-retained-admission']);
+  assert.deepEqual(ci.jobs['native-ma-refresh'].strategy.matrix.include.map(part => part.shard), ['refresh']);
   assert.equal(ci.jobs['native-mi-refresh'].strategy.matrix.include.length, 1);
   assert.equal(ci.jobs['native-homebrew'].strategy.matrix.include[0].target, 'macos-arm64');
   assert.equal(ci.jobs['native-homebrew'].strategy.matrix.include.length, 1);
@@ -223,7 +231,7 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   assert.match(intelGate.steps.find(step => step.name === 'Wait for actual Intel body worker allocation').run,
     /--group intel-bodies --output \.test-data\/intel-admission\.json/u);
   const homebrewGate = ci.jobs['intel-homebrew-admission'];
-  assert.deepEqual(homebrewGate.needs, ['intent', 'source', 'native-units-mi', 'intel-admission']);
+  assert.deepEqual(homebrewGate.needs, ['intent', 'source', 'native-units-mi', 'arm-refresh-admission']);
   assert.equal(homebrewGate.name, 'Intel Homebrew admission');
   assert.equal(homebrewGate['runs-on'], 'ubuntu-24.04');
   assert.equal(homebrewGate['timeout-minutes'], 10);
@@ -231,6 +239,19 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   assert.deepEqual(homebrewGate.permissions, { actions: 'read', contents: 'read' });
   assert.match(homebrewGate.steps.find(step => step.name === 'Wait for actual Intel Homebrew worker allocation').run,
     /--group intel-homebrew --output \.test-data\/intel-homebrew-admission\.json/u);
+  for (const [key, needs, group] of [
+    ['intel-retained-admission', ['intent', 'source', 'native-units-mi', 'mac-admission'], 'intel-retained-body'],
+    ['arm-refresh-admission', ['intent', 'source', 'native-units-ma', 'intel-retained-admission'], 'arm-refresh'],
+  ]) {
+    const gate = ci.jobs[key];
+    assert.deepEqual(gate.needs, needs);
+    assert.equal(gate['runs-on'], 'ubuntu-24.04');
+    assert.equal(gate['timeout-minutes'], 10);
+    assert.equal(gate.strategy, undefined);
+    assert.ok(!gate.name.startsWith('native-'));
+    assert.deepEqual(gate.permissions, { actions: 'read', contents: 'read' });
+    assert.ok(gate.steps[4].run.includes(`--group ${group} --output .test-data/${key}.json`));
+  }
   const visiting = new Set();
   const complete = new Set();
   const visit = key => {
@@ -246,6 +267,8 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   assert.ok(ci.jobs['producer-summary'].needs.includes('mac-admission'));
   assert.ok(ci.jobs['producer-summary'].needs.includes('intel-admission'));
   assert.ok(ci.jobs['producer-summary'].needs.includes('intel-homebrew-admission'));
+  assert.ok(ci.jobs['producer-summary'].needs.includes('intel-retained-admission'));
+  assert.ok(ci.jobs['producer-summary'].needs.includes('arm-refresh-admission'));
   const summary = ci.jobs['producer-summary'].steps[0];
   assert.equal(summary.env.MAC_ADMISSION_RESULT, '${{ needs.mac-admission.result }}');
   assert.match(summary.run, /"\$MAC_ADMISSION_RESULT"/u);
@@ -270,8 +293,9 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   assert.equal(checkout.with.ref, '${{ needs.source.outputs.source-commit }}');
   assert.equal(checkout.with['persist-credentials'], false);
   assert.equal(coordinator.steps.find(step => step.name === 'Select pinned native Node').with['node-version'], '24.20.0');
-  assert.match(coordinator.steps.find(step => step.name === 'Wait for actual ARM worker allocation').run,
+  assert.match(coordinator.steps.find(step => step.name === 'Wait for actual ARM body worker allocation').run,
     /--attempt "\$GITHUB_RUN_ATTEMPT".*--head-sha "\$ADMISSION_HEAD_SHA"/u);
+  assert.match(coordinator.steps[4].run, /--group arm-bodies/u);
   assert.equal(criticalProfileBudget.maximumRootChecks, 27);
   assert.equal(criticalProfileBudget.maximumAssertions, 27);
 });
@@ -372,6 +396,38 @@ test('T-MACADM014 Intel Homebrew admission requires its own worker allocation bu
   assert.equal(denied.calls.length, 1);
 });
 
+test('T-MACADM015 retained-first groups admit only their exact allocated workers and never queued placeholders or completion', async () => {
+  for (const [group, names] of [
+    ['arm-bodies', [0, 1, 2].map(index => `native-macos-arm64-framework-body-${index}`)],
+    ['intel-retained-body', ['native-macos-x64-framework-body-1']],
+    ['arm-refresh', ['native-macos-arm64-framework-refresh']],
+  ]) {
+    const identity = { ...expected, group };
+    const queued = names.map((name, index) => ({ ...jobs()[0], id: index + 1, name }));
+    assert.equal(evaluateMacAdmission(observation(queued), identity).admitted, false);
+    const allocated = queued.map(job => ({ ...job, status: 'in_progress', runner_name: 'synthetic-worker' }));
+    const result = evaluateMacAdmission(observation(allocated), identity);
+    assert.equal(result.admitted, true);
+    assert.equal(result.group, group);
+    assert.equal(result.parts.length, names.length);
+    assert.ok(result.parts.every(part => part.conclusion === null));
+    assert.equal(evaluateMacAdmission(observation(allocated), expected).admitted, false,
+      'New groups cannot substitute for the historical four-part ARM group');
+    assert.equal(evaluateMacAdmission(observation(allocated.slice(0, -1)), identity).admitted, false);
+    assert.equal(evaluateMacAdmission(observation([{
+      ...allocated[0], name: 'native-macos-x64-homebrew',
+    }]), identity).admitted, false);
+    assert.throws(() => evaluateMacAdmission(observation([...allocated, {
+      ...allocated[0], id: 99,
+    }]), identity), { code: 'ADMISSION_IDENTITY' });
+    const ready = adapter({ selectedJobs: allocated });
+    assert.equal((await waitForMacAdmission(identity, ready.options)).admitted, true);
+    const pending = adapter({ selectedJobs: queued });
+    await assert.rejects(waitForMacAdmission(identity, pending.options), error =>
+      error.code === 'ADMISSION_TIMEOUT' && error.observation.group === group);
+  }
+});
+
 test('T-MACADM010 cancellation and the overall deadline interrupt in-flight synthetic HTTP without admission', async () => {
   for (const mode of ['cancel', 'timeout']) {
     const controller = new AbortController();
@@ -416,7 +472,7 @@ test('T-MACADM011 CLI binds synthetic event context and owned receipt without cr
   assert.equal(receipt.observation, null);
   assert.equal(receipt.code, 'ADMISSION_IDENTITY');
   await fs.unlink(output);
-  for (const group of ['intel-bodies', 'intel-homebrew']) {
+  for (const group of ['intel-bodies', 'intel-homebrew', 'arm-bodies', 'intel-retained-body', 'arm-refresh']) {
     await assert.rejects(execute(process.execPath, [...args, '--group', group], { env }), { code: 1 });
     assert.equal(JSON.parse(await fs.readFile(output, 'utf8')).identity.group, group);
     await fs.unlink(output);

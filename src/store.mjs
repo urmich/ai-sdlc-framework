@@ -429,10 +429,6 @@ export class Store {
       validateRecord(record);
       budget(record, recordLimit(record), 'Active record');
       requireThat(record.workItemId === workItemId && typeof record.type === 'string', 'SCHEMA', 'Record identity/type is invalid');
-      if (record.type === 'event') {
-        const { digest: expected, ...content } = record;
-        requireThat(expected === digest(content), 'DIGEST', 'Effective event content digest mismatch; recover authoritative records');
-      }
       records.push(record);
     }
     budget(records, LIMITS.workingSet, 'Active work-item records');

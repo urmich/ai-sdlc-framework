@@ -136,10 +136,15 @@ async function mapReads(values, operation) {
 const macAdmissionResourcePolicy = 'arm-regression-allocation-v1';
 const intelPriorityResourcePolicy = 'arm-regression-allocation-v2-priority-intel-bodies';
 const intelHomebrewResourcePolicy = 'arm-regression-allocation-v3-intel-homebrew-first';
-const priorityPolicies = [intelPriorityResourcePolicy, intelHomebrewResourcePolicy];
+const retainedFirstResourcePolicy = 'arm-regression-allocation-v4-retained-first';
+const priorityPolicies = [intelPriorityResourcePolicy, intelHomebrewResourcePolicy, retainedFirstResourcePolicy];
 const admissionPolicies = [macAdmissionResourcePolicy, ...priorityPolicies];
 
 function resourceJobKey(part, protocol, resourcePolicy) {
+  if (resourcePolicy === retainedFirstResourcePolicy) {
+    if (part.target === 'macos-arm64' && part.shard === 'refresh') return 'native-ma-refresh';
+    if (part.target === 'macos-x64' && part.shard === 'body-1') return 'native-mi-retained';
+  }
   if (priorityPolicies.includes(resourcePolicy) && part.target === 'macos-x64') {
     if (part.component === 'homebrew') return 'native-homebrew-mi';
     if (part.shard === 'refresh') return 'native-mi-refresh';
@@ -147,7 +152,7 @@ function resourceJobKey(part, protocol, resourcePolicy) {
   return native.nativePartJobKey(part, protocol);
 }
 
-function expectedMacAdmissionJob(group = 'arm-regressions') {
+function expectedMacAdmissionJob(group = 'arm-regressions', retainedFirst = false) {
   const job = {
     needs: ['intent', 'source', 'native-units-ma'],
     if: "${{ needs.intent.outputs.requires-native == 'true' }}",
@@ -203,10 +208,36 @@ function expectedMacAdmissionJob(group = 'arm-regressions') {
     job.steps[5].with.name = 'intel-homebrew-admission-${{ github.run_id }}-${{ github.run_attempt }}';
     job.steps[5].with.path = 'source/.test-data/intel-homebrew-admission.json';
   }
+  if (retainedFirst && group === 'intel-bodies') {
+    job.needs = ['intent', 'source', 'native-units-mi', 'intel-homebrew-admission'];
+  }
+  if (retainedFirst && group === 'intel-homebrew') {
+    job.needs = ['intent', 'source', 'native-units-mi', 'arm-refresh-admission'];
+  }
+  if (group === 'arm-bodies') {
+    job.steps[4].name = 'Wait for actual ARM body worker allocation';
+    job.steps[4].run = job.steps[4].run.replace('--output .test-data/mac-admission.json',
+      '--group arm-bodies --output .test-data/mac-admission.json');
+  }
+  for (const [selected, id, name, needs] of [
+    ['intel-retained-body', 'intel-retained-admission', 'Intel retained admission',
+      ['intent', 'source', 'native-units-mi', 'mac-admission']],
+    ['arm-refresh', 'arm-refresh-admission', 'ARM refresh admission',
+      ['intent', 'source', 'native-units-ma', 'intel-retained-admission']],
+  ]) if (group === selected) {
+    job.needs = needs;
+    job.name = name;
+    job.steps[4].name = `Wait for actual ${selected === 'arm-refresh' ? 'ARM refresh' : 'Intel retained body'} worker allocation`;
+    job.steps[4].run = job.steps[4].run.replace('--output .test-data/mac-admission.json',
+      `--group ${selected} --output .test-data/${id}.json`);
+    job.steps[5].name = `Retain ${name} observation`;
+    job.steps[5].with.name = `${id}-\${{ github.run_id }}-\${{ github.run_attempt }}`;
+    job.steps[5].with.path = `source/.test-data/${id}.json`;
+  }
   return job;
 }
 
-function macAdmissionPolicyMatches(document, protocol, priority, homebrewFirst) {
+function macAdmissionPolicyMatches(document, protocol, priority, homebrewFirst, retainedFirst) {
   const summary = document.jobs?.['producer-summary'];
   const expectedSummary = {
     permissions: {}, name: 'Native producer completeness', if: '${{ always() }}',
@@ -262,6 +293,18 @@ function macAdmissionPolicyMatches(document, protocol, priority, homebrewFirst) 
     reporting.run = reporting.run.replace(' "$MI_HOMEBREW_RESULT")',
       ' "$MI_HOMEBREW_RESULT" "$INTEL_HOMEBREW_ADMISSION_RESULT")');
   }
+  if (retainedFirst) {
+    const reporting = expectedSummary.steps[0];
+    Object.assign(reporting.env, {
+      ARM_REFRESH_RESULT: '${{ needs.native-ma-refresh.result }}',
+      MI_RETAINED_RESULT: '${{ needs.native-mi-retained.result }}',
+      INTEL_RETAINED_ADMISSION_RESULT: '${{ needs.intel-retained-admission.result }}',
+      ARM_REFRESH_ADMISSION_RESULT: '${{ needs.arm-refresh-admission.result }}',
+    });
+    reporting.run = reporting.run.replace(' "$INTEL_HOMEBREW_ADMISSION_RESULT")',
+      ' "$INTEL_HOMEBREW_ADMISSION_RESULT" "$ARM_REFRESH_RESULT" "$MI_RETAINED_RESULT" ' +
+      '"$INTEL_RETAINED_ADMISSION_RESULT" "$ARM_REFRESH_ADMISSION_RESULT")');
+  }
   const sameRecipe = (left, right) => {
     if (!left || !right) return false;
     const copy = structuredClone(left);
@@ -270,12 +313,19 @@ function macAdmissionPolicyMatches(document, protocol, priority, homebrewFirst) 
     return digest(copy) === digest(right);
   };
   return protocol === native.nativeFrameworkShardProtocol &&
-    digest(document.jobs?.['mac-admission'] ?? null) === digest(expectedMacAdmissionJob()) &&
+    digest(document.jobs?.['mac-admission'] ?? null) ===
+      digest(expectedMacAdmissionJob(retainedFirst ? 'arm-bodies' : 'arm-regressions')) &&
     (priority ? digest(document.jobs?.['intel-admission'] ?? null) ===
-      digest(expectedMacAdmissionJob('intel-bodies')) : document.jobs?.['intel-admission'] === undefined) &&
+      digest(expectedMacAdmissionJob('intel-bodies', retainedFirst)) : document.jobs?.['intel-admission'] === undefined) &&
     (homebrewFirst ? digest(document.jobs?.['intel-homebrew-admission'] ?? null) ===
-      digest(expectedMacAdmissionJob('intel-homebrew')) :
+      digest(expectedMacAdmissionJob('intel-homebrew', retainedFirst)) :
       document.jobs?.['intel-homebrew-admission'] === undefined) &&
+    (!retainedFirst || digest(document.jobs?.['intel-retained-admission'] ?? null) ===
+      digest(expectedMacAdmissionJob('intel-retained-body')) &&
+      digest(document.jobs?.['arm-refresh-admission'] ?? null) ===
+      digest(expectedMacAdmissionJob('arm-refresh')) &&
+      sameRecipe(document.jobs?.['native-mi-retained'], document.jobs?.['native-mi']) &&
+      sameRecipe(document.jobs?.['native-ma-refresh'], document.jobs?.['native-ma'])) &&
     (!priority || sameRecipe(document.jobs?.['native-mi-refresh'], document.jobs?.['native-mi']) &&
       sameRecipe(document.jobs?.['native-homebrew-mi'], document.jobs?.['native-homebrew']) &&
       document.concurrency === undefined) &&
@@ -306,12 +356,15 @@ export function inspectWorkflowTrust(workflows) {
     const resourcePolicy = selected.document.env?.SDLC_MAC_ADMISSION_POLICY;
     const admission = admissionPolicies.includes(resourcePolicy);
     const priority = priorityPolicies.includes(resourcePolicy);
-    const homebrewFirst = resourcePolicy === intelHomebrewResourcePolicy;
+    const retainedFirst = resourcePolicy === retainedFirstResourcePolicy;
+    const homebrewFirst = retainedFirst || resourcePolicy === intelHomebrewResourcePolicy;
     nativeResourcePolicy = resourcePolicy ?? null;
     if ((resourcePolicy !== undefined &&
-        (!admission || !macAdmissionPolicyMatches(selected.document, protocol, priority, homebrewFirst))) ||
+        (!admission || !macAdmissionPolicyMatches(selected.document, protocol, priority, homebrewFirst, retainedFirst))) ||
         (!admission && (jobs?.['mac-admission'] !== undefined || jobs?.['intel-admission'] !== undefined)) ||
         (!homebrewFirst && jobs?.['intel-homebrew-admission'] !== undefined) ||
+        (!retainedFirst && ['native-ma-refresh', 'native-mi-retained',
+          'intel-retained-admission', 'arm-refresh-admission'].some(key => jobs?.[key] !== undefined)) ||
         (!priority && (jobs?.['native-mi-refresh'] !== undefined || jobs?.['native-homebrew-mi'] !== undefined))) {
       result.blockers.push({ file: selected.file, code: 'MAC_ADMISSION_POLICY_DIFFERS' });
     }
@@ -334,9 +387,13 @@ export function inspectWorkflowTrust(workflows) {
           const needs = ['intent', 'source', ...(part.shard &&
             !native.nativeFrameworkUnitShardNames(part.target, protocol).includes(part.shard) ?
             [native.nativePartJobKey({ ...part, shard: 'units' }, protocol)] : []),
-          ...(admission && key === 'native-mi' ? ['mac-admission'] : []),
+          ...(admission && key === 'native-mi' ?
+            [retainedFirst ? 'intel-homebrew-admission' : 'mac-admission'] : []),
           ...(priority && ['native-mi-refresh', 'native-homebrew-mi'].includes(key) ?
-            [homebrewFirst && key === 'native-mi-refresh' ? 'intel-homebrew-admission' : 'intel-admission'] : [])];
+            [retainedFirst ? key === 'native-mi-refresh' ? 'intel-admission' : 'arm-refresh-admission' :
+              homebrewFirst && key === 'native-mi-refresh' ? 'intel-homebrew-admission' : 'intel-admission'] : []),
+          ...(retainedFirst && key === 'native-mi-retained' ? ['mac-admission'] : []),
+          ...(retainedFirst && key === 'native-ma-refresh' ? ['intel-retained-admission'] : [])];
           return jobs[key]?.strategy?.['fail-fast'] !== false || jobs[key]?.['timeout-minutes'] !== 360 ||
             priority && (jobs[key]?.name !== 'native-${{ matrix.role }}' ||
               jobs[key]?.['runs-on'] !== '${{ matrix.os }}' ||
@@ -349,7 +406,8 @@ export function inspectWorkflowTrust(workflows) {
           digest([...(jobs['producer-summary']?.needs ?? [])].sort()) !==
             digest(['intent', 'minimum-node', 'source', ...keys, ...(admission ? ['mac-admission'] : []),
               ...(priority ? ['intel-admission'] : []),
-              ...(homebrewFirst ? ['intel-homebrew-admission'] : [])].sort())) {
+              ...(homebrewFirst ? ['intel-homebrew-admission'] : []),
+              ...(retainedFirst ? ['intel-retained-admission', 'arm-refresh-admission'] : [])].sort())) {
       result.blockers.push({ file: selected.file, code: 'NATIVE_COMPONENT_MATRIX_DIFFERS' });
     }
   }
