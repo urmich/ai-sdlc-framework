@@ -391,7 +391,18 @@ test('T-PRD016 API-only native admission composes six producer parts and four co
 
 test('T-PRD016 API-only twenty-five-part admission restores both Intel unit origins and thirteen guarded cleanups', async t => {
   const f = await observerApiFixture(t, { frameworkShards: true });
-  const { host } = f.connect();
+  const { host, client } = f.connect();
+  const helper = 'scripts/macos-runner-admission.mjs';
+  const helperBytes = await fs.readFile(new URL(`../${helper}`, import.meta.url), 'utf8');
+  const helperEntry = f.source.tree.find(entry => entry.path === helper);
+  assert.ok(helperEntry);
+  assert.equal(f.source.files.get(helper), helperBytes);
+  for (const revision of [f.revisions.merge, f.revisions.trusted]) {
+    const tree = await client.tree(revision);
+    assert.equal(tree.paths.get(helper).sha, helperEntry.sha);
+    assert.equal(await client.file(tree, helper), helperBytes,
+      'Candidate and adopted API source must bind the actual registered helper blob, never a reporter stub');
+  }
   const snapshot = await host.snapshot();
   assert.equal(verdict(snapshot).status, 'Passed', JSON.stringify(verdict(snapshot).blockers));
   const retained = host.componentEvidence()[0];
@@ -407,6 +418,35 @@ test('T-PRD016 API-only twenty-five-part admission restores both Intel unit orig
   assert.equal(saved.nativeParts.length, 25);
   assert.equal(new Set(saved.nativeOriginals.map(original => original.filename)).size, 23);
   assert.ok(saved.unitOrder);
+  const blob = f.source.blobs.get(helperEntry.sha);
+  const originalContent = blob.content;
+  try {
+    blob.content = Buffer.from(`${helperBytes}\n// Corrupted controlled API blob response.\n`).toString('base64');
+    const fresh = f.connect().client;
+    await assert.rejects(fresh.file(await fresh.tree(f.revisions.merge), helper), { code: 'EVIDENCE' });
+  } finally { blob.content = originalContent; }
+  for (const options of [
+    { admissionHelper: 'missing' },
+    { adoptedAdmissionHelper: 'missing' },
+    { admissionHelper: 'missing', adoptedAdmissionHelper: 'missing' },
+    { admissionHelper: 'mutated' },
+    { adoptedAdmissionHelper: 'mutated' },
+  ]) {
+    const unadopted = await observerApiFixture(t, {
+      frameworkShards: true, nodeArtifactReader: true, ambient: false, ...options,
+    });
+    const rejected = verdict(await unadopted.connect().host.snapshot());
+    assert.equal(rejected.status, 'NotRun', JSON.stringify(options));
+    assert.ok(rejected.blockers.includes('Producer definitions have not been maintainer-adopted'));
+    assert.ok(!unadopted.calls.some(call =>
+      /\/actions\/artifacts\/\d+\/zip$/u.test(new URL(call.url).pathname)));
+    unadopted.assertReadOnly();
+  }
+  const historical = await observerApiFixture(t, { frameworkShards: true,
+    shardProtocol: nativeLegacyFrameworkShardProtocol, nodeArtifactReader: true, ambient: false });
+  assert.equal(historical.source.files.has(helper), false);
+  assert.equal(verdict(await historical.connect().host.snapshot()).status, 'Passed');
+  historical.assertReadOnly();
   const part = f.jobs.find(job => job.name === 'native-macos-x64-framework-units-1');
   part.steps.find(step => step.name === 'Remove owned short Homebrew prefix').conclusion = 'skipped';
   assert.equal(verdict(await f.connect().host.snapshot()).status, 'NotRun');

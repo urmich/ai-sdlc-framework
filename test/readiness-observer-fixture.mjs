@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
@@ -21,6 +22,7 @@ import { nativeResourceFacts, nativeFrameworkUnitShardNames } from '../scripts/n
 import { repositoryRoot, unitFiles } from '../scripts/test-runner.mjs';
 import { createReadinessGitHubClient } from '../scripts/github-readiness-host.mjs';
 import { createPrReadinessHost, statusConcurrencyGroup } from '../scripts/pr-observer.mjs';
+import { parseWorkflow } from '../scripts/workflow-policy.mjs';
 import { calculatorFiles, calculatorSelection, calculatorCommandArguments } from '../scripts/pr-calculator.mjs';
 import { validationExecutionGroups, validationGroupProtocol, validationSchedulingPolicyDigest } from '../scripts/test-scheduling.mjs';
 import { nativeToolchain, homebrewToolchain, nativeBootstrapProtocol,
@@ -127,7 +129,8 @@ function fixturePlan(names, additionalTests = []) {
 }
 
 function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = false, docsOnly = false,
-  narrowedRequiredScope = false, additionalTests = [], producerChange, bootstrapProtocol = null } = {}) {
+  narrowedRequiredScope = false, additionalTests = [], producerChange, bootstrapProtocol = null,
+  admissionHelper = 'source' } = {}) {
   const names = [
     ...unitFiles.map((file, index) => ({ file, stage: 'unit', id: `T-FIX-CANONICAL-${index + 1}`,
       name: `T-FIX-CANONICAL-${index + 1} controlled canonical assertion` })),
@@ -160,6 +163,14 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
   });
   const files = new Map(reporterPaths.map(file => [file,
     file.endsWith('.yml') ? ci : 'throw new Error("candidate reporter must never execute in the observer");\n']));
+  assert.ok(['source', 'missing', 'mutated'].includes(admissionHelper));
+  if (parseWorkflow({ file: nativeWorkflowContract.path, contents: ci })
+    .env?.SDLC_MAC_ADMISSION_POLICY === 'arm-regression-allocation-v1' && admissionHelper !== 'missing') {
+    const macAdmissionHelper = readFileSync(
+      new URL('../scripts/macos-runner-admission.mjs', import.meta.url), 'utf8');
+    files.set('scripts/macos-runner-admission.mjs', macAdmissionHelper +
+      (admissionHelper === 'mutated' ? '\n// Controlled unadopted helper delta.\n' : ''));
+  }
   files.set('scripts/toolchain-baseline.mjs',
     `${files.get('scripts/toolchain-baseline.mjs')}export const nativeToolchain = ${JSON.stringify(nativeToolchain)};\n` +
     `export const homebrewToolchain = ${JSON.stringify(homebrewToolchain)};\n`);
@@ -804,7 +815,8 @@ jobs:
           persist-credentials: false
 `;
   const revisions = { head: 'a'.repeat(40), base: 'b'.repeat(40), merge: 'c'.repeat(40), trusted: 'd'.repeat(40) };
-  const adopted = fixtureSources(ci, { bootstrapProtocol: options.bootstrapProtocol });
+  const adopted = fixtureSources(ci, { bootstrapProtocol: options.bootstrapProtocol,
+    admissionHelper: options.adoptedAdmissionHelper });
   const source = fixtureSources(ci, options);
   const { candidate, entries } = candidateData(revisions.merge);
   const expectedParts = options.frameworkShards ? protocolParts : nativeLegacyPrParts;
