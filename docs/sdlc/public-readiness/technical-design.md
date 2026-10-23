@@ -549,6 +549,18 @@ default finite local gate. Hosted PR membership remains complete. Benchmark equi
 inventories/toolchains/resources repeatedly; timing is advisory and no speedup
 is claimed before measurement.
 
+Canonical JSON encoding keeps its existing bytes, lexical key order, primitive
+guards and sparse-array behavior. One invocation may reuse only the JSON
+encoding of a repeated property name, with at most 128 bounded entries; every
+value is still read and encoded afresh. The map is discarded after that call.
+Payload sanitization similarly classifies repeated property and assignment
+names in a bounded, invocation-local map. This stores no values, source facts,
+reports, verifier capabilities or evaluation outcomes. Every value, sensitive
+field, structured-log fragment, byte/depth/work budget and final equality check
+still executes. The text scanner compares its three structural characters
+directly rather than constructing a membership array for each character.
+These are representation/classification optimizations, not cached validation.
+
 The standalone `validation-benchmark.mjs` adapter consumes explicitly owned
 baseline/candidate workspaces, worker budget, focused assertion-ID JSON and an
 owned output directory. Both workspaces need the same adopted harness protocol.

@@ -37,7 +37,57 @@ import { attachMonitor, readMonitor } from '../src/monitors.mjs';
 import { currentCycle, currentTestEvidence, stagePassed } from '../src/authority.mjs';
 import { currentArtifact, currentDeployment } from '../src/current-evidence.mjs';
 import { formatAudit, recordAudit, replayAudit } from '../src/audit.mjs';
-import { prepareValidationHistory } from '../src/validation-evidence.mjs';
+import { prepareValidationHistory, validateRetainedPayload } from '../src/validation-evidence.mjs';
+
+test('T-PRD010 canonical encoding reuses only property-name bytes within each fresh call', t => {
+  const value = { rows: Array.from({ length: 32 }, (_, index) => ({
+    repeatedProperty: index, nested: { otherProperty: index + 1 },
+  })) };
+  const expected = `{"rows":[${value.rows.map((row, index) =>
+    `{"nested":{"otherProperty":${index + 1}},"repeatedProperty":${index}}`).join(',')}]}`;
+  const encodedNames = new Map();
+  const stringify = JSON.stringify;
+  t.mock.method(JSON, 'stringify', function (item, ...args) {
+    if (['rows', 'nested', 'repeatedProperty', 'otherProperty'].includes(item)) {
+      encodedNames.set(item, (encodedNames.get(item) ?? 0) + 1);
+    }
+    return Reflect.apply(stringify, this, [item, ...args]);
+  });
+  assert.equal(canonical(value), expected);
+  assert.equal(canonical(value), expected);
+  assert.deepEqual([...encodedNames.values()], [2, 2, 2, 2],
+    'Property-name encodings are local to one call, never reused with another input');
+  value.rows[0].repeatedProperty = 99;
+  assert.notEqual(canonical(value), expected, 'Values are always read and encoded afresh');
+  assert.equal(canonical(JSON.parse('{"__proto__":{"value":1},"2":2,"10":10}')),
+    '{"10":10,"2":2,"__proto__":{"value":1}}');
+  assert.equal(canonical([, 1]), '[,1]', 'Existing sparse-array byte identity is retained');
+  assert.equal(canonical({ value: '"\\\n\u2028\ud800' }),
+    `{"value":${stringify('"\\\n\u2028\ud800')}}`);
+  for (const invalid of [NaN, Infinity, undefined, Object.create(null), new Date()]) {
+    assert.throws(() => canonical(invalid), { code: 'INPUT' });
+  }
+});
+
+test('T-PRD018 payload key classification never reuses value validation or crosses calls', t => {
+  const key = 'ordinaryRepeatedField';
+  const value = { rows: Array.from({ length: 32 }, (_, index) => ({ [key]: index })) };
+  const replace = String.prototype.replace;
+  let classifications = 0;
+  t.mock.method(String.prototype, 'replace', function (pattern, ...args) {
+    if (String(this) === key && pattern?.source === '([a-z0-9])([A-Z])') classifications++;
+    return Reflect.apply(replace, this, [pattern, ...args]);
+  });
+  validateRetainedPayload(value);
+  validateRetainedPayload(value);
+  assert.equal(classifications, 2, 'Every call independently classifies its repeated keys');
+  value.rows[1][key] = 'ACCESS_TOKEN=owned-fixture-value';
+  assert.throws(() => validateRetainedPayload(value), { code: 'UNSAFE' });
+  assert.throws(() => validateRetainedPayload({ rows: [
+    { token: '[redacted]' }, { token: 'owned-fixture-value' },
+  ] }), { code: 'UNSAFE' });
+  validateRetainedPayload({ token: '[redacted]' });
+});
 
 async function waitForStorageReadBarrier(promise) {
   let timer;

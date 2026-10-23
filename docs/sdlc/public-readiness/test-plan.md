@@ -1108,6 +1108,18 @@ causal ordering; added IDs stay separate. Original definition/applicability/
 resource classes must match exactly. Failed planned measurements retain a
 partial comparison and do not silently retry to obtain a ratio.
 
+The PR-only `T-PRD010 canonical encoding reuses only property-name bytes within
+each fresh call` and `T-PRD018 payload key classification never reuses value
+validation or crosses calls` roots in `test/storage.test.mjs` retain encoding
+bytes, unsupported-input guards, fresh values and sensitive-field rejection.
+They instrument only immutable name work within isolated processes; no
+verification result or input object is cached. Both must fail against the
+original repeated-work implementation and pass on the changed candidate.
+Measure the original complete protected-SDK row callback before and after on
+the same host/runtime, keeping fixture inputs and all assertions unchanged.
+These focused observations neither establish native lane speed nor enlarge
+the finite 27-assertion local critical gate.
+
 ## 7. PR matrix procedure
 
 1. With scoped push/PR authority, use the exact candidate selected for validation and a clean

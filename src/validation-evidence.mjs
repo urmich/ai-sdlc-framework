@@ -18,12 +18,18 @@ const redactedPayloadValue = /^\[redacted(?::[a-f0-9]{64})?\]$/u;
 const sensitiveHeader = /^(?:authorization|proxy[-_]authorization|cookie|set[-_]cookie|x[-_]api[-_]key|x[-_]auth[-_]token|x[-_]amz[-_]security[-_]token)$/iu;
 const environmentSecret = /(?:^|_)(?:secret|password|passwd|token|jwt|credential|credentials|private_key|access_key|api_key|client_secret)(?:_|$)/iu;
 
-function sensitivePayloadKey(key) {
+function sensitivePayloadKey(key, state) {
+  const cached = state?.keyClassifications.get(key);
+  if (cached !== undefined) return cached;
   const normalized = key.replace(/([a-z0-9])([A-Z])/gu, '$1_$2')
     .replace(/[.-]/gu, '_');
-  return sensitiveHeader.test(key) ||
+  const sensitive = sensitiveHeader.test(key) ||
     sensitiveHeader.test(normalized) ||
     /^[A-Za-z_][A-Za-z0-9_]*$/u.test(normalized) && environmentSecret.test(normalized);
+  if (state && state.keyClassifications.size < 256 && key.length <= 128) {
+    state.keyClassifications.set(key, sensitive);
+  }
+  return sensitive;
 }
 function unsupportedPayloadFragment(value) {
   if (/["'\\]/u.test(value)) return true;
@@ -35,7 +41,8 @@ function redactPayloadValue(value) {
     value : `[redacted:${digest(value)}]`;
 }
 function payloadSanitizerState() {
-  return { nodes: 0, parsedBytes: 0, scannedCharacters: 0, summarize: createSummarySanitizer() };
+  return { nodes: 0, parsedBytes: 0, scannedCharacters: 0,
+    keyClassifications: new Map(), summarize: createSummarySanitizer() };
 }
 function checkPayloadWork(state, depth) {
   requireThat(depth <= 32 && ++state.nodes <= 65536, 'CAPACITY',
@@ -75,7 +82,8 @@ function sanitizePayloadText(value, state = payloadSanitizerState(), depth = 0) 
   let text = '';
   let start = 0;
   for (let index = 0; index < value.length; index++) {
-    if (!['{', '[', '"'].includes(value[index])) continue;
+    const character = value[index];
+    if (character !== '{' && character !== '[' && character !== '"') continue;
     const marker = value.startsWith('[redacted', index) ?
       /^\[redacted(?::[a-f0-9]{64})?\]/u.exec(value.slice(index, index + 80)) : null;
     if (marker) { index += marker[0].length - 1; continue; }
@@ -110,7 +118,7 @@ function sanitizePayloadText(value, state = payloadSanitizerState(), depth = 0) 
     (_, start, name, content) => `${start}${name}${redactPayloadValue(content.trim())}`);
   const assignments = headers.replace(
     /(?<![A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)([ \t]*=[ \t]*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s;&]+)/gu,
-    (assignment, name, separator, content) => sensitivePayloadKey(name) ?
+    (assignment, name, separator, content) => sensitivePayloadKey(name, state) ?
       `${name}${separator}${redactPayloadValue(content)}` : assignment);
   return state.summarize(assignments);
 }
@@ -120,7 +128,7 @@ function sanitizeRetainedValue(value, state = payloadSanitizerState(), depth = 0
   if (Array.isArray(value)) return value.map(item => sanitizeRetainedValue(item, state, depth + 1));
   if (!value || typeof value !== 'object') return value;
   return state.summarize(Object.fromEntries(Object.entries(value).map(([key, item]) =>
-    [key, sensitivePayloadKey(key) ? redactPayloadValue(item) :
+    [key, sensitivePayloadKey(key, state) ? redactPayloadValue(item) :
       sanitizeRetainedValue(item, state, depth + 1)])));
 }
 export function validateRetainedPayload(value) {

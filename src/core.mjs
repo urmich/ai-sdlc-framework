@@ -48,14 +48,29 @@ export function strings(value, label, max = 100) {
   return value;
 }
 export function canonical(value) {
-  if (value === null || typeof value === 'boolean' || typeof value === 'string') return JSON.stringify(value);
-  if (typeof value === 'number') {
-    requireThat(Number.isFinite(value), 'INPUT', 'Non-finite JSON number');
-    return JSON.stringify(value);
+  const encodedKeys = new Map();
+  function encode(item) {
+    if (item === null || typeof item === 'boolean' || typeof item === 'string') return JSON.stringify(item);
+    if (typeof item === 'number') {
+      requireThat(Number.isFinite(item), 'INPUT', 'Non-finite JSON number');
+      return JSON.stringify(item);
+    }
+    if (Array.isArray(item)) return `[${item.map(encode).join(',')}]`;
+    requireThat(item && Object.getPrototypeOf(item) === Object.prototype, 'INPUT', 'Only plain JSON data is supported');
+    let result = '{';
+    const keys = Object.keys(item).sort();
+    for (let index = 0; index < keys.length; index++) {
+      const key = keys[index];
+      let name = encodedKeys.get(key);
+      if (name === undefined) {
+        name = JSON.stringify(key);
+        if (encodedKeys.size < 128 && key.length <= 128 && name.length <= 256) encodedKeys.set(key, name);
+      }
+      result += `${index ? ',' : ''}${name}:${encode(item[key])}`;
+    }
+    return result + '}';
   }
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  requireThat(value && Object.getPrototypeOf(value) === Object.prototype, 'INPUT', 'Only plain JSON data is supported');
-  return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+  return encode(value);
 }
 export function digest(value) {
   return createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : canonical(value)).digest('hex');
