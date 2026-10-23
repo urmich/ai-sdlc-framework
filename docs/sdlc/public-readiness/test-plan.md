@@ -1196,6 +1196,12 @@ original thirty-eight-assertion closure without changing callbacks, stress
 boundaries or internal concurrency, and verify the actual group allocation.
 The reservation must not increase the selected host pool or substitute for a
 fresh native whole-lane timing result.
+Retain one `retained-bridge-setup` diagnostic for each prepared retained fixture,
+using only the closed `fixture-and-bridge-setup` phase and a monotonic elapsed
+duration. Inspect it alongside the original complete child callback duration
+before attributing native cost to setup or public-consumer actions. Diagnostics
+must not change the thirty-eight callbacks, reuse mutable fixtures or print
+repository/home paths, provider identities or credentials.
 On Windows, recovery-guard creation `EPERM` is contention only after a fresh
 inspection proves an existing literal directory. Keep the existing owner/token
 checks and wait bounds; absent or non-directory guards retain the original
@@ -1205,6 +1211,13 @@ the existing aggregate budget for its orchestration and held-worker observer
 processes. Exercise the actual Windows identity-ready/release/exit protocol
 without increasing the five-second capture or thirty-second case deadline,
 borrowing an identity or replacing the OS observation.
+The observer uses the same held .NET process handle directly, without loading
+PowerShell command modules for process lookup or JSON formatting. Verify real
+identity and exit records, the ASCII image contract and exact creation/exit
+ticks through both the unsafe-diagnostic and dynamic sibling-producer cases.
+The existing unexpected-creation negative must still reject without terminating
+the unrelated process. Keep observer startup inside the unchanged five-second
+capture budget and retain the fifteen-second exit and thirty-second case bounds.
 The measured GitHub process-partition preservation test must keep the original
 143-assertion count, root vector and callback fingerprint unchanged. Validate
 the one new byte-snapshot regression by its exact ID, file, name and empty parent

@@ -9,16 +9,19 @@ export async function windowsProcessIdentity(pid, exitPath, { createdBeforeMs } 
   const creationGuard =
     `if([long]::Parse($creation)-ge[long]::Parse('${BigInt(createdBeforeMs) * 10000n + 621355968000000000n}'))` +
     `{throw 'Owned process creation does not predate its ready observation'};`;
-  const script = `$ErrorActionPreference='Stop';$p=Get-Process -Id ${pid} -ErrorAction Stop;` +
+  // Closed scalar records avoid cmdlet-module loading within the capture budget.
+  const script = `$ErrorActionPreference='Stop';$p=[Diagnostics.Process]::GetProcessById(${pid});` +
     `$ownedVerified=$false;` +
     `try{$null=$p.Handle;$creation=$p.StartTime.ToUniversalTime().Ticks.ToString();$image=$p.ProcessName;` +
     creationGuard + `$ownedVerified=$true;` +
-    `@{pid=${pid};present=$true;creationTime=$creation;image=$image;` +
-    `observedAt=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Compress;` +
+    `if($image -cnotmatch '^[A-Za-z0-9_.-]+$'){throw 'Invalid owned process image'};` +
+    `$record='{"pid":${pid},"present":true,"creationTime":"'+$creation+'","image":"'+$image+` +
+    `'","observedAt":"'+[DateTime]::UtcNow.ToString('o')+'"}';[Console]::Out.WriteLine($record);` +
     `if(!$p.WaitForExit(15000)){throw 'Original owned worker did not exit within its observation budget'};` +
-    `$record=@{pid=${pid};present=$false;creationTime=$creation;image=$image;` +
-    `exitTimeTicks=$p.ExitTime.ToUniversalTime().Ticks.ToString();observedAt=[DateTime]::UtcNow.ToString('o')};` +
-    `[IO.File]::WriteAllText('${exitPath.replaceAll("'", "''")}.tmp',($record|ConvertTo-Json -Compress));` +
+    `$record='{"pid":${pid},"present":false,"creationTime":"'+$creation+'","image":"'+$image+` +
+    `'","exitTimeTicks":"'+$p.ExitTime.ToUniversalTime().Ticks.ToString()+` +
+    `'","observedAt":"'+[DateTime]::UtcNow.ToString('o')+'"}';` +
+    `[IO.File]::WriteAllText('${exitPath.replaceAll("'", "''")}.tmp',$record);` +
     `[IO.File]::Move('${exitPath.replaceAll("'", "''")}.tmp','${exitPath.replaceAll("'", "''")}')` +
     `}catch{[IO.File]::WriteAllText('${exitPath.replaceAll("'", "''")}.error',` +
     `($_.Exception.GetType().FullName+': '+$_.Exception.Message));exit 1}` +

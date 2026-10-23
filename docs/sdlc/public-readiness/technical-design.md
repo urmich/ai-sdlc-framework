@@ -668,6 +668,12 @@ Keep its original thirty-eight assertions, callbacks and internal concurrency
 unchanged. This is conservative resource admission within the selected pool,
 not an additional worker allowance or a timing pass; retain actual admission
 and complete hosted execution observations.
+Its file-local fixture wrapper emits one monotonic setup duration through the
+existing test diagnostic channel. The closed phase label and elapsed duration
+separate bridge preparation from the complete callback duration without logging
+paths or identities, caching state, or changing any of the thirty-eight
+callbacks. Native observations, not aggregate durations alone, decide whether
+fixture preparation is a remaining optimization target.
 Windows recovery-guard creation can report `EPERM` for an existing directory.
 Treat that case like existing-guard contention only after a fresh literal-
 directory inspection, retaining all owner/token checks. A missing or nonliteral
@@ -678,6 +684,13 @@ worker and Windows process observer need admission together. This does not
 increase a host budget or extend the five-second identity capture or
 thirty-second case deadline. Keep the real held process handle, creation-time
 bound, release barrier and independently observed exit.
+Use the same held .NET process object directly and write closed scalar JSON
+records to the observer's stdout and owned exit file. Validate the image's
+existing ASCII identifier contract before encoding it. Avoid `Get-Process` and
+`ConvertTo-Json` module autoload in each observer; all process startup and
+identity capture still occur within the original five-second budget. Keep
+creation and exit ticks, immediate identity output, the fifteen-second exit
+wait, guarded termination and disposal unchanged.
 The measured GitHub partition guard retains its original 143-assertion
 fingerprint and root vector. Account for the additional byte-snapshot regression
 by its exact ID, file, name and parent closure, and require all 144 current IDs
