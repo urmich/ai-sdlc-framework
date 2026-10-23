@@ -163,7 +163,11 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
     { file: 'test/github-retained-identity-acceptance.test.mjs', stage: 'regression',
       id: 'T-FIX-PRIORITY-RETAINED', name: 'T-FIX-PRIORITY-RETAINED controlled retained root' },
     { file: 'test/validation-catalog.test.mjs', stage: 'regression',
-      id: 'T-FIX-PRIORITY-CATALOG', name: 'T-FIX-PRIORITY-CATALOG controlled catalog root' });
+      id: 'T-FIX-PRIORITY-CATALOG', name: 'T-FIX-PRIORITY-CATALOG controlled catalog root' },
+    { file: 'test/winget-launcher-native.test.mjs', stage: 'regression',
+      id: 'T-FIX-PRIORITY-LAUNCHER', name: 'T-FIX-PRIORITY-LAUNCHER controlled launcher root' },
+    { file: 'test/public-readiness-release-report.test.mjs', stage: 'regression',
+      id: 'T-FIX-PRIORITY-REPORT', name: 'T-FIX-PRIORITY-REPORT controlled report root' });
   if (bootstrapProtocol === nativeBootstrapProtocol) names.push({
     file: 'test/public-readiness-release-consumer.test.mjs', stage: 'regression', id: 'T-PRD041',
     name: 'T-PRD041 retained signed fixtures use the actual verifier for payload signature certificate and transparency failures',

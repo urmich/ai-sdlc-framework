@@ -1069,8 +1069,9 @@ regression hosts. Keep the two-unit topology, case union and all other selected
 allocations unchanged for this comparison: the four-slot regression trial did
 not complete before the cutoff. Do not claim a whole-lane speedup before complete
 hosted results.
-Keep the measured retained-identity acceptance family ahead of the shorter
-file families in the existing expensive-first policy. Verify both hosted
+Keep the measured retained-identity acceptance family, catalog, unchanged
+native WinGet launcher family and joined release-report family ahead of shorter
+file families, in that order, under the existing expensive-first policy. Verify both hosted
 selection order and actual implicit dispatch; explicit targeted caller order
 remains unchanged. Earlier dispatch is not itself proof of a native speedup.
 Verify the actual producer's requested/capacity fields and shared
@@ -1153,10 +1154,17 @@ dispatch and caller-order contracts.
 After awaiting the nested command, reject an aborted signal and require its
 evidence finalization to be complete before accepting exit or group proof.
 Exit code zero alone cannot pass a cancelled or incomplete command.
+Write each owned marker's complete JSON to its unique pending file before
+renaming it to the published name. A visible final marker must never expose a
+partial write; do not catch or retry invalid JSON, relax a barrier or extend its
+deadline to conceal incomplete publication.
 The PR-only `T-PRD074 archived scheduling reconstructs only its authenticated
 captured literal policy without current-credit fallback` root in
-`test/public-readiness-observer.test.mjs` checks current and legacy archives
-and legacy sharded SDK evidence. Select the known literal policy only from
+`test/public-readiness-observer.test.mjs` checks current v4, middle v3 and legacy
+v2 archives and both historical policies' sharded SDK evidence. Preserve the
+exact original v3 digest `6274c99ad21f86dff3a67164c7f486bcb35cae3e9fcf67fb71deec2c72859c3f`
+and v2 digest `0217489f1d88ac4649cee4e85b81777276297c70c140e4ab9346eef2770ee6db`.
+Select the known literal policy only from
 authenticated captured source, retaining exact configuration, group, context
 and source digests. Unknown or forged source, duplicate or comment-spoofed
 declarations, untrusted expressions, malformed budgets, opposite known group

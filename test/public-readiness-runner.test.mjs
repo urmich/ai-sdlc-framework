@@ -1639,6 +1639,10 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
       'test/github-retained-identity-acceptance.test.mjs'),
     discoverDeclarations("import test from 'node:test';test('catalog independent case',()=>{});",
       'test/validation-catalog.test.mjs'),
+    discoverDeclarations("import test from 'node:test';test('unchanged native launcher family',()=>{});",
+      'test/winget-launcher-native.test.mjs'),
+    discoverDeclarations("import test from 'node:test';test('unchanged joined release-report family',()=>{});",
+      'test/public-readiness-release-report.test.mjs'),
   ];
   const inventory = { complete: true, files: declarations.map(source =>
     ({ file: source.file, sourceDigest: source.sourceDigest })), cases: declarations.flatMap(source => source.cases) };
@@ -1649,10 +1653,12 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
   ] });
   assert.ok(selected.units.cases.some(test => test.name === 'unit family without local binding'));
   assert.ok(selected.units.cases.some(test => test.name === 'T-PRD008 selected planned unit'));
-  assert.deepEqual(selected.regression.files.slice(0, 3), [
+  assert.deepEqual(selected.regression.files.slice(0, 5), [
     'test/observation-retention-refresh.test.mjs',
     'test/github-retained-identity-acceptance.test.mjs',
     'test/validation-catalog.test.mjs',
+    'test/winget-launcher-native.test.mjs',
+    'test/public-readiness-release-report.test.mjs',
   ]);
   assert.equal(selected.units.files[0], 'test/public-readiness-observer.test.mjs');
   assert.deepEqual(Object.values(selected).flatMap(stage => stage.cases.map(test => test.id)).sort(),
@@ -1670,19 +1676,28 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
     ['public-readiness-observer.test.mjs', 'observer'],
     ['github-retained-identity-acceptance.test.mjs', 'retained-identity'],
     ['validation-catalog.test.mjs', 'catalog'],
+    ['winget-launcher-native.test.mjs', 'native-launcher'],
+    ['public-readiness-release-report.test.mjs', 'release-report'],
   ]) await fs.writeFile(path.join(f.root, 'test', file),
     "import test from 'node:test';import {appendFile} from 'node:fs/promises';" +
     `test('dispatch ${value}',()=>appendFile(${JSON.stringify(marker)},'${value}\\n'));`);
   const result = await f.invoke(['full', '--workers', '1']);
   assert.equal(result.exitCode, 0, result.stdout + result.stderr);
   assert.deepEqual((await fs.readFile(marker, 'utf8')).trim().split(/\r?\n/u),
-    ['retention', 'observer', 'retained-identity', 'catalog', 'operation']);
+    ['retention', 'observer', 'retained-identity', 'catalog', 'native-launcher', 'release-report', 'operation']);
   const source = await fs.readFile(new URL('../scripts/test-scheduling.mjs', import.meta.url), 'utf8');
-  const legacy = source.replace("  'validation-catalog.test.mjs',\n", '')
+  const middle = source.replace("  'winget-launcher-native.test.mjs',\n", '')
+    .replace("  'public-readiness-release-report.test.mjs',\n", '')
+    .replace("schemaVersion: 4, algorithm: 'source-bound-ready-root-v4'",
+      "schemaVersion: 3, algorithm: 'source-bound-ready-root-v3'");
+  const legacy = middle.replace("  'validation-catalog.test.mjs',\n", '')
     .replace("schemaVersion: 3, algorithm: 'source-bound-ready-root-v3'",
       "schemaVersion: 2, algorithm: 'source-bound-ready-root-v2'");
   const selectedPolicy = contents => sourceValidationSchedulingPolicy([{ file: 'scripts/test-scheduling.mjs', contents }]);
   assert.equal(selectedPolicy(source), validationSchedulingPolicy);
+  assert.equal(selectedPolicy(middle).schemaVersion, 3);
+  assert.equal(validationSchedulingPolicyDigest(selectedPolicy(middle)),
+    '6274c99ad21f86dff3a67164c7f486bcb35cae3e9fcf67fb71deec2c72859c3f');
   assert.equal(selectedPolicy(legacy).schemaVersion, 2);
   assert.equal(validationSchedulingPolicyDigest(selectedPolicy(legacy)),
     '0217489f1d88ac4649cee4e85b81777276297c70c140e4ab9346eef2770ee6db');
@@ -1691,6 +1706,8 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
   for (const changed of [
     source.replace('maxWorkers: 32', 'maxWorkers: 31'),
     source.replace("  'validation-catalog.test.mjs',\n", ''),
+    source.replace("  'winget-launcher-native.test.mjs',\n", ''),
+    source.replace("  'public-readiness-release-report.test.mjs',\n", ''),
     source.replace('export const measuredFilePriorities', 'const measuredFilePriorities') +
       '\n// export const measuredFilePriorities = Object.freeze([]);\n',
     source + '\nexport const validationGroupProtocol = "forged";\n',
@@ -1719,8 +1736,10 @@ const entered=async name=>{
   const lease=leases.find(value=>value.pid===process.pid&&value.slot===process.env.SDLC_TEST_BUDGET_SLOT);
   assert.ok(lease);assert.equal(lease.finishedAt,null);assert.equal(lease.minimumSlots,group.minimumSlots);
   const budget=await readTestBudget();
-  await fs.writeFile(path.join(root,name),JSON.stringify({pid:process.pid,time:Date.now(),group,lease,
+  const pending=path.join(root,name+'.pending');
+  await fs.writeFile(pending,JSON.stringify({pid:process.pid,time:Date.now(),group,lease,
     producer:process.env.SDLC_TEST_BUDGET_PRODUCER,budgetId:budget.id,globalCapacity:budget.capacity}),{flag:'wx'});
+  await fs.rename(pending,path.join(root,name));
 };
 `;
   await fs.writeFile(path.join(f.root, 'test', 'github-retained-identity-acceptance.test.mjs'),
