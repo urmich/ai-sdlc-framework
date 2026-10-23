@@ -1020,6 +1020,76 @@ test('T-PRD074 archived native reconstruction uses original source and commands 
   assert.equal(f.calls.length, 0, 'Historical data reconstruction never asks a current provider for replacement evidence');
 });
 
+test('T-PRD074 archived scheduling reconstructs only its authenticated captured literal policy without current-credit fallback', async t => {
+  const f = await observerApiFixture(t, { nodeArtifactReader: true });
+  const currentSource = await fs.readFile(new URL('../scripts/test-scheduling.mjs', import.meta.url), 'utf8');
+  const legacySource = currentSource.replace("  'validation-catalog.test.mjs',\n", '')
+    .replace("schemaVersion: 3, algorithm: 'source-bound-ready-root-v3'",
+      "schemaVersion: 2, algorithm: 'source-bound-ready-root-v2'");
+  for (const schedulingSource of [legacySource, currentSource]) {
+    const captured = nativeReplayFixture({ candidate: f.candidate, sourceCommit: f.revisions.merge,
+      asOf: '2026-10-18T10:00:00.000Z', schedulingSource });
+    const files = captured.definition.stages.find(stage=>stage.name==='regression').files;
+    const retainedIndex = files.indexOf('test/github-retained-identity-acceptance.test.mjs');
+    const catalogIndex = files.indexOf('test/validation-catalog.test.mjs');
+    assert.ok(retainedIndex >= 0 && catalogIndex > retainedIndex);
+    if (schedulingSource === currentSource) assert.equal(catalogIndex, retainedIndex + 1);
+    else assert.ok(catalogIndex > retainedIndex + 1);
+    const definitionDigest = digest(captured.definition), reportDigest = digest(captured.data.texts['execution.json']);
+    const verifyArchive = input => {
+      assert.equal(input.definitionDigest, definitionDigest);
+      assert.equal(input.reportDigest, reportDigest);
+      return { verifierId: 'source-bound-scheduling-archive', definitionDigest, reportDigest,
+        context: captured.context, sourceTime: captured.data['execution.json'].observedAt,
+        sourceSequence: captured.data['execution.json'].sequence };
+    };
+    const input = { ...captured, candidate: f.candidate, asOf: '2026-10-18T10:10:00.000Z', verifyArchive };
+    const restored = await replayNativeEvidence(input);
+    assert.equal(restored.evaluation.status, 'Passed', JSON.stringify(restored.diagnostics));
+    assert.equal(restored.currentCredit, 'NotRun');
+    const badSource = structuredClone(captured.definition);
+    badSource.sourceFiles.find(source=>source.file==='scripts/test-scheduling.mjs').contents =
+      currentSource.replace('maxWorkers: 32','maxWorkers: 31');
+    await assert.rejects(replayNativeEvidence({ ...input, definition: badSource }), { code: 'EVIDENCE' });
+    const badGroup = structuredClone(captured.data);
+    badGroup['unit.json'].groupExecution.policyDigest = schedulingSource === legacySource ?
+      '6274c99ad21f86dff3a67164c7f486bcb35cae3e9fcf67fb71deec2c72859c3f' :
+      '0217489f1d88ac4649cee4e85b81777276297c70c140e4ab9346eef2770ee6db';
+    await assert.rejects(replayNativeEvidence({ ...input, data: badGroup }), { code: 'EVIDENCE' });
+    await assert.rejects(replayNativeEvidence({ ...input, verifyArchive: () => null }), { code: 'EVIDENCE' });
+  }
+  const oldShard = await observerApiFixture(t, { frameworkShards: true, bootstrapProtocol: nativeBootstrapProtocol,
+    schedulingSource: legacySource, nodeArtifactReader: true, ambient: false });
+  const part = oldShard.parts.get('macos-arm64-framework-body-1');
+  const assignment = nativeFrameworkShardPlan({ inventory: oldShard.source.inventory,
+    plan: oldShard.source.plan, target: part.target, schedulingPolicy: oldShard.source.schedulingPolicy });
+  const definition = { schemaVersion: 1, kind: 'native-validation-definition', target: part.target,
+    profile: 'pr', component: 'framework', shard: 'body-1', frameworkShards: nativeFrameworkShardProtocol,
+    bootstrapProtocol: nativeBootstrapProtocol, selectedWorkersRequest: null,
+    sourceFiles: [...oldShard.source.files].map(([file, contents]) => ({ file, contents })),
+    plan: oldShard.source.plan, inventory: oldShard.source.inventory, goSources: oldShard.source.goSources,
+    calculatorSources: [...oldShard.source.files].filter(([file])=>calculatorFiles.includes(file))
+      .map(([file,contents])=>({file,contents})),
+    specification: part.specification, stages: assignment.parts.find(item=>item.shard==='body-1').stages,
+    configDigest: part.context.configDigest, testSpecDigest: part.context.testSpecDigest,
+    inventoryDigest: part.context.inventoryDigest,
+    source: { revision: oldShard.revisions.merge, treeSha: oldShard.source.sha, repositoryId: 'repository-17' } };
+  const data = Object.fromEntries(part.data);
+  data.texts = Object.fromEntries([...part.data].filter(([file])=>/\.(?:json|ndjson)$/u.test(file))
+    .map(([file,value])=>[file,typeof value==='string'?value:canonical(value)]));
+  const definitionDigest = digest(definition), reportDigest = digest(data.texts['execution.json']);
+  const restoredShard = await replayNativeEvidence({ definition, data, candidate: oldShard.candidate,
+    asOf: '2026-10-18T10:10:00.000Z', verifyArchive: input => {
+      assert.equal(input.definitionDigest,definitionDigest);assert.equal(input.reportDigest,reportDigest);
+      return { verifierId:'source-bound-old-shard',definitionDigest,reportDigest,context:part.context,
+        sourceTime:data['execution.json'].observedAt,sourceSequence:data['execution.json'].sequence };
+    } });
+  assert.equal(restoredShard.evaluation.status,'Passed',JSON.stringify(restoredShard.diagnostics));
+  assert.equal(restoredShard.currentCredit,'NotRun');
+  assert.equal(oldShard.calls.length,0);
+  assert.equal(f.calls.length, 0, 'Historical reconstruction never fetches replacement provider evidence');
+});
+
 test('T-PRD079-WX native previous-current evidence requires both real-host shell outcomes and independently pinned original metadata', async t => {
   const f = await observerApiFixture(t);
   const fixture = nativeReplayFixture({ candidate: f.candidate, target: 'windows-x64', profile: 'r-pre',

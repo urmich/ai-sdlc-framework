@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { digest, requireThat } from '../src/core.mjs';
 import { exactPattern, excludingPattern } from './test-profiles.mjs';
-import { matchesNodeSelection, requiredFileWorkers } from './validation-inventory.mjs';
+import { declarationTokens, matchesNodeSelection, requiredFileWorkers } from './validation-inventory.mjs';
 
 export const validationGroupProtocol = 'isolated-root-ready-pool-v1';
 
@@ -9,6 +9,7 @@ export const measuredFilePriorities = Object.freeze([
   'observation-retention-refresh.test.mjs', 'observation-retention-regression.test.mjs',
   'public-readiness-observer.test.mjs',
   'github-retained-identity-acceptance.test.mjs',
+  'validation-catalog.test.mjs',
   'github-operation-results.unit.test.mjs', 'github-existing-consumer-boundaries.unit.test.mjs',
   'github-consumer-policy.unit.test.mjs', 'github-operation-dispatch.unit.test.mjs',
   'github-consumer-source.unit.test.mjs', 'github-consumer-refresh.unit.test.mjs',
@@ -20,7 +21,7 @@ export const measuredFilePriorities = Object.freeze([
   'deployment-revisions.test.mjs', 'pr-publication.test.mjs',
 ]);
 export const validationSchedulingPolicy = Object.freeze({
-  schemaVersion: 2, algorithm: 'source-bound-ready-root-v2',
+  schemaVersion: 3, algorithm: 'source-bound-ready-root-v3',
   groupProtocol: validationGroupProtocol,
   priorities: measuredFilePriorities, hints: 'exact-assertion-and-source-digest; no nested double-counting',
   hostedUnits: 'complete-unit-test-files-plus-automated-plan-unit-root-closure',
@@ -32,9 +33,86 @@ export const validationSchedulingPolicy = Object.freeze({
     files: 'process-isolated-root-closures; dynamic-shared-ready-pool; minimum-and-exclusive-before-module-setup',
     nested: 'awaited-parent-yield; ancestor-token-loan; restore-before-return' }),
 });
-export function validationSchedulingPolicyDigest() { return digest(validationSchedulingPolicy); }
+const priorSchedulingPolicy = Object.freeze({
+  ...validationSchedulingPolicy,
+  schemaVersion: 2, algorithm: 'source-bound-ready-root-v2',
+  priorities: Object.freeze(measuredFilePriorities.filter(file => file !== 'validation-catalog.test.mjs')),
+});
+const knownPolicies = new Set([validationSchedulingPolicy, priorSchedulingPolicy]);
+export function validationSchedulingPolicyDigest(policy = validationSchedulingPolicy) {
+  requireThat(knownPolicies.has(policy), 'EVIDENCE', 'Scheduling policy must be current or independently source-selected');
+  return digest(policy);
+}
 
-export function resolveValidationWorkers({ availableParallelism, totalMemoryBytes, requested = null }) {
+function schedulingDeclarations(source) {
+  const names = new Set(['validationGroupProtocol', 'measuredFilePriorities', 'validationSchedulingPolicy']);
+  const tokens = declarationTokens(source);
+  const found = {};
+  let depth = 0;
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (depth === 0 && token.kind === 'identifier' && token.value === 'export' &&
+        tokens[index + 1]?.value === 'const' && names.has(tokens[index + 2]?.value)) {
+      const name = tokens[index + 2].value;
+      requireThat(!Object.hasOwn(found, name) && tokens[index + 3]?.value === '=',
+        'EVIDENCE', 'Source scheduling declarations must be unique literal contracts');
+      const expression = [];
+      let nesting = 0;
+      let cursor = index + 4;
+      for (; cursor < tokens.length; cursor++) {
+        const selected = tokens[cursor];
+        if (selected.kind === 'punctuation' && selected.value === ';' && nesting === 0) break;
+        expression.push([selected.kind, selected.value]);
+        if (selected.kind === 'punctuation' && ['(', '[', '{'].includes(selected.value)) nesting++;
+        if (selected.kind === 'punctuation' && [')', ']', '}'].includes(selected.value)) nesting--;
+        requireThat(nesting >= 0, 'EVIDENCE', 'Source scheduling declaration is malformed');
+      }
+      requireThat(cursor < tokens.length && nesting === 0, 'EVIDENCE', 'Source scheduling declaration is incomplete');
+      found[name] = expression.filter(([kind, value], position) =>
+        !(kind === 'punctuation' && value === ',' &&
+          [']', '}'].includes(expression[position + 1]?.[1])));
+      index = cursor;
+    } else {
+      if (token.kind === 'punctuation' && ['(', '[', '{'].includes(token.value)) depth++;
+      if (token.kind === 'punctuation' && [')', ']', '}'].includes(token.value)) depth--;
+    }
+  }
+  requireThat(Object.keys(found).length === names.size, 'EVIDENCE', 'Captured scheduling source is missing its literal policy');
+  return digest(found);
+}
+
+function schedulingContract(policy) {
+  const literal = value => typeof value === 'object' ?
+    Array.isArray(value) ? `[${value.map(literal).join(',')}]` :
+      `{${Object.entries(value).map(([key, entry]) => `${key}:${literal(entry)}`).join(',')}}` :
+    JSON.stringify(value);
+  const fields = Object.entries(policy).map(([key, value]) =>
+    `${key}:${key === 'groupProtocol' ? 'validationGroupProtocol' :
+      key === 'priorities' ? 'measuredFilePriorities' :
+      key === 'budget' ? `Object.freeze(${literal(value)})` : literal(value)}`).join(',');
+  return `export const validationGroupProtocol=${literal(validationGroupProtocol)};
+export const measuredFilePriorities=Object.freeze(${literal(policy.priorities)});
+export const validationSchedulingPolicy=Object.freeze({${fields}});`;
+}
+
+const policyContracts = [...knownPolicies].map(policy => ({
+  policy, declarations: schedulingDeclarations(schedulingContract(policy)),
+}));
+
+export function sourceValidationSchedulingPolicy(sourceFiles) {
+  requireThat(Array.isArray(sourceFiles), 'EVIDENCE', 'Historical scheduling requires captured source records');
+  const sources = sourceFiles.filter(source => source.file === 'scripts/test-scheduling.mjs');
+  requireThat(sources.length === 1 && typeof sources[0].contents === 'string' &&
+    Buffer.byteLength(sources[0].contents) <= 4 * 1024 * 1024,
+  'EVIDENCE', 'Historical scheduling requires the exact bounded captured scheduling source');
+  const declarations = schedulingDeclarations(sources[0].contents);
+  const selected = policyContracts.find(contract => contract.declarations === declarations);
+  requireThat(selected, 'EVIDENCE', 'Captured scheduling policy is not an adopted literal version');
+  return selected.policy;
+}
+
+export function resolveValidationWorkers({ availableParallelism, totalMemoryBytes, requested = null },
+  policy = validationSchedulingPolicy) {
   requireThat(Number.isSafeInteger(availableParallelism) && availableParallelism > 0 &&
     Number.isSafeInteger(totalMemoryBytes) && totalMemoryBytes > 0,
   'BUDGET', 'Resolve worker capacity from independently captured actual host resources');
@@ -47,7 +125,7 @@ export function resolveValidationWorkers({ availableParallelism, totalMemoryByte
   return { workers: capacity, capacity,
     requestedWorkers: requested === null || requested === undefined ? null : String(requested),
     resources: { availableParallelism, totalMemoryBytes },
-    policyDigest: validationSchedulingPolicyDigest() };
+    policyDigest: validationSchedulingPolicyDigest(policy) };
 }
 
 export function allocateValidationWorkers(producers, capacity, minimums = []) {
@@ -67,8 +145,9 @@ export function allocateValidationWorkers(producers, capacity, minimums = []) {
 }
 
 export function scheduleValidationFiles(inventory, {
-  files = inventory.files.map(file => file.file), durations = [],
+  files = inventory.files.map(file => file.file), durations = [], policy = validationSchedulingPolicy,
 } = {}) {
+  validationSchedulingPolicyDigest(policy);
   requireThat(Array.isArray(files) && new Set(files).size === files.length &&
     files.every(file => inventory.files.some(source => source.file === file)),
   'INVENTORY', 'Schedule each selected declared file exactly once');
@@ -85,10 +164,10 @@ export function scheduleValidationFiles(inventory, {
       parent.parents.every((name, index) => name === test.parents[index]) && timings.has(parent.id))))
     .reduce((sum, test) => sum + timings.get(test.id), 0);
   const ranked = files.map(file => ({ file, durationMs: duration(file),
-    priority: measuredFilePriorities.indexOf(path.posix.basename(file.replaceAll('\\', '/'))) }));
+    priority: policy.priorities.indexOf(path.posix.basename(file.replaceAll('\\', '/'))) }));
   return ranked.sort((left, right) => right.durationMs - left.durationMs ||
-    (left.priority < 0 ? measuredFilePriorities.length : left.priority) -
-      (right.priority < 0 ? measuredFilePriorities.length : right.priority) ||
+    (left.priority < 0 ? policy.priorities.length : left.priority) -
+      (right.priority < 0 ? policy.priorities.length : right.priority) ||
     left.file.localeCompare(right.file, 'en')).map(value => value.file);
 }
 
@@ -228,7 +307,7 @@ export function validationUnitAssertionIds({ cases, tests, canonicalFiles = [] }
     unitRoots.has(JSON.stringify([test.file, test.parents[0] ?? test.name]))).map(test => test.id));
 }
 
-export function hostedValidationSelection({ inventory, tests, canonicalFiles }) {
+export function hostedValidationSelection({ inventory, tests, canonicalFiles, policy = validationSchedulingPolicy }) {
   requireThat(inventory.complete && Array.isArray(tests) && Array.isArray(canonicalFiles) &&
     new Set(inventory.cases.map(test => test.id)).size === inventory.cases.length &&
     inventory.cases.every(test => inventory.files.some(source => source.file === test.file)),
@@ -240,7 +319,7 @@ export function hostedValidationSelection({ inventory, tests, canonicalFiles }) 
   const regression = cases.filter(test => !unitIds.has(test.id));
   const fullName = test => [...test.parents, test.name].join(' ');
   const select = (selected, stage) => {
-    const files = scheduleValidationFiles(inventory, { files: [...new Set(selected.map(test => test.file))] });
+    const files = scheduleValidationFiles(inventory, { files: [...new Set(selected.map(test => test.file))], policy });
     const name = stage === 'regression' ? excludingPattern([...canonical, ...units].map(fullName)) :
       selected.length ? exactPattern(selected.map(fullName)) : '(?!)';
     const pattern = new RegExp(name);

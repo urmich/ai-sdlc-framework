@@ -25,6 +25,7 @@ import { verifyCandidate, archiveRecord } from './release-bundle.mjs';
 import { readZip, canonical as releaseCanonical } from '../packaging/standalone/archive.mjs';
 import { runtimePreflight } from '../packaging/standalone/runtime.mjs';
 import { hostedValidationSelection, resolveValidationWorkers,
+  validationSchedulingPolicy, sourceValidationSchedulingPolicy,
   validationSchedulingPolicyDigest, validationExecutionGroups, validationGroupProtocol } from './test-scheduling.mjs';
 import { buildPlatforms, renderChecksums } from './package-platforms.mjs';
 import { calculatorProjectFiles, calculatorSelection, calculatorCapability, calculatorBaselineCapability, reconcileCalculator,
@@ -153,7 +154,8 @@ const safe = value => sanitizeExecutionPayload(Buffer.from(JSON.stringify(value)
 
 export function nativeConfigurationDigest({ inventory, plan, profile, target = null, configuredWorkers = null,
   calculator = calculatorCapability(inventory), component = 'full', shard = null, shardPlanDigest = null,
-  shardProtocol = nativeFrameworkShardProtocol, bootstrapProtocol = null, bootstrapTools = null, assignment }) {
+  shardProtocol = nativeFrameworkShardProtocol, bootstrapProtocol = null, bootstrapTools = null, assignment,
+  schedulingPolicy = validationSchedulingPolicy }) {
   requireThat(bootstrapProtocol === null || nativeBootstrapProtocols.includes(bootstrapProtocol),
     'INVENTORY', 'Native configuration requires a supported source-selected bootstrap protocol');
   requireThat(inventory.complete && /^[a-f0-9]{64}$/u.test(inventory.digest) &&
@@ -191,7 +193,7 @@ export function nativeConfigurationDigest({ inventory, plan, profile, target = n
   return digest({ nativeToolchain, inventory: inventory.digest, profile,
     ...(component === 'full' ? {} : { component }),
     ...(shard === null ? {} : { frameworkShards: shardProtocol, shard, shardPlanDigest }),
-    schedulingPolicy: validationSchedulingPolicyDigest(), selectedWorkersRequest: requested,
+    schedulingPolicy: validationSchedulingPolicyDigest(schedulingPolicy), selectedWorkersRequest: requested,
     selectionTransport: validationSelectionProtocol,
     requiredCapabilities: { crypto: bootstrapProtocol === nativeBootstrapProtocol && tools?.crypto === false ?
       null : prCryptoFixture, calculator,
@@ -201,8 +203,9 @@ export function nativeConfigurationDigest({ inventory, plan, profile, target = n
 }
 
 export function nativeResourceFacts({ availableParallelism = os.availableParallelism(),
-  totalMemoryBytes = os.totalmem(), configuredWorkers = process.env.SDLC_TEST_WORKERS ?? null } = {}) {
-  const selected = resolveValidationWorkers({ availableParallelism, totalMemoryBytes, requested: configuredWorkers });
+  totalMemoryBytes = os.totalmem(), configuredWorkers = process.env.SDLC_TEST_WORKERS ?? null } = {},
+  schedulingPolicy = validationSchedulingPolicy) {
+  const selected = resolveValidationWorkers({ availableParallelism, totalMemoryBytes, requested: configuredWorkers }, schedulingPolicy);
   return { availableParallelism, totalMemoryBytes, configuredWorkers: selected.requestedWorkers,
     workerCapacity: selected.capacity, schedulingPolicy: selected.policyDigest };
 }
@@ -233,7 +236,7 @@ export function createNativeObservationCheckpoint(file, producer) {
 }
 
 export function nativeSpecification({ plan, inventory, goSources, target, profile, component = 'full', shard = null,
-  shardProtocol = nativeFrameworkShardProtocol }) {
+  shardProtocol = nativeFrameworkShardProtocol, schedulingPolicy = validationSchedulingPolicy }) {
   requireThat(validationPlatforms.includes(target) && ['pr', 'r-pre'].includes(profile) && inventory.complete,
     'INVENTORY', 'Native validation requires the complete declared inventory and an explicit profile/platform');
   requireThat(shard === null || nativeFrameworkShardProtocols.includes(shardProtocol) &&
@@ -241,7 +244,7 @@ export function nativeSpecification({ plan, inventory, goSources, target, profil
   'Native shard selection must belong to its explicit versioned topology');
   const role = nativeProducerRole(target, component, shard);
   requireThat(component === 'full' || profile === 'pr', 'INPUT', 'Partial native components are PR-only');
-  if (shard !== null) return nativeFrameworkShardSpecification({ plan, inventory, goSources, target, shard, shardProtocol });
+  if (shard !== null) return nativeFrameworkShardSpecification({ plan, inventory, goSources, target, shard, shardProtocol, schedulingPolicy });
     calculatorSelection(inventory);
   const definitions = parseTestPlan(plan);
   const node = inventory.cases.filter(test => test.applicability.platforms.includes(target))
@@ -272,12 +275,13 @@ export function nativeSpecification({ plan, inventory, goSources, target, profil
   }) };
 }
 
-export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = nativeFrameworkShardProtocol }) {
+export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = nativeFrameworkShardProtocol,
+  schedulingPolicy = validationSchedulingPolicy }) {
   requireThat(inventory.complete && validationPlatforms.includes(target),
     'INVENTORY', 'Framework shards need the complete independently declared native inventory');
   requireThat(nativeFrameworkShardProtocols.includes(protocol),
     'INVENTORY', 'Unknown native framework prerequisite topology');
-  const stages = nativeStageSelections(inventory, plan);
+  const stages = nativeStageSelections(inventory, plan, schedulingPolicy);
   const unitShards = nativeFrameworkUnitShardNames(target, protocol);
   const extendedUnits = stages.find(stage => stage.name === 'required-units');
   const unitPartitions = partitionValidationInventory({ ...inventory, cases: extendedUnits.cases,
@@ -370,12 +374,12 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
   return { ...identity, digest: digest(identity), parts };
 }
 
-function nativeFrameworkShardSpecification({ plan, inventory, goSources, target, shard, shardProtocol }) {
-  const assignment = nativeFrameworkShardPlan({ inventory, plan, target, protocol: shardProtocol });
+function nativeFrameworkShardSpecification({ plan, inventory, goSources, target, shard, shardProtocol, schedulingPolicy }) {
+  const assignment = nativeFrameworkShardPlan({ inventory, plan, target, protocol: shardProtocol, schedulingPolicy });
   const part = assignment.parts.find(part => part.shard === shard);
   requireThat(part, 'INVENTORY', 'Unknown independently expected native framework shard');
   const whole = nativeSpecification({ plan, inventory, goSources, target, profile: 'pr',
-    component: target.startsWith('macos-') ? 'framework' : 'full' });
+    component: target.startsWith('macos-') ? 'framework' : 'full', schedulingPolicy });
   const ids = new Set(part.assertionIds);
   const specification = { schemaVersion: 1, profile: nativeProfile('pr', target, 'framework', shard),
     cases: whole.cases.map(test => ({ ...test, executionId: `native-${part.role}`,
@@ -424,11 +428,12 @@ export async function prepareNativeHostFixtures({ candidate, candidateDir, scrat
 }
 
 function nativeContextMatches(context, { inventory, plan, target, profile, sourceRevision, artifacts, component = 'full', shard = null,
-  bootstrapProtocol = null, shardProtocol = nativeFrameworkShardProtocol, assignment }) {
+  bootstrapProtocol = null, shardProtocol = nativeFrameworkShardProtocol, assignment,
+  schedulingPolicy = validationSchedulingPolicy }) {
   const resources = context.native.toolchain.resources;
   let validResources = false;
   if (resources && typeof resources === 'object') {
-    try { validResources = digest(resources) === digest(nativeResourceFacts(resources)); }
+    try { validResources = digest(resources) === digest(nativeResourceFacts(resources, schedulingPolicy)); }
     catch (error) { if (!['INPUT', 'BUDGET', 'INVENTORY'].includes(error.code)) throw error; }
   }
   return validResources && context.profile === nativeProfile(profile, target, component, shard) &&
@@ -731,8 +736,8 @@ export function nativeGoObservations(sources, reports, target) {
     checked.status, observations };
 }
 
-export function nativeStageSelections(inventory, plan) {
-  const selected = hostedValidationSelection({ inventory, tests: parseTestPlan(plan), canonicalFiles: unitFiles });
+export function nativeStageSelections(inventory, plan, schedulingPolicy = validationSchedulingPolicy) {
+  const selected = hostedValidationSelection({ inventory, tests: parseTestPlan(plan), canonicalFiles: unitFiles, policy: schedulingPolicy });
   requireThat(Object.values(selected).every(stage => !stage.blockers.length),
     'INVENTORY', 'Every required unit must have an executable binding before native admission');
   const stages = [
@@ -749,7 +754,8 @@ export function nativeStageSelections(inventory, plan) {
   });
 }
 
-export function validateNativeGroupReport({ inventory, stage, report, journal, target }) {
+export function validateNativeGroupReport({ inventory, stage, report, journal, target,
+  schedulingPolicy = validationSchedulingPolicy }) {
   requireThat(Array.isArray(report.selection?.namePatterns) &&
     digest(report.selection.namePatterns) === digest(stage.name === 'unit' ? [] : [stage.selectorName]) &&
     digest(report.selection?.skipPatterns ?? []) === digest([]) && report.selection?.coverage !== true,
@@ -760,7 +766,7 @@ export function validateNativeGroupReport({ inventory, stage, report, journal, t
   });
   const retained = report.groupExecution;
   requireThat(retained?.schemaVersion === 1 && retained.protocol === validationGroupProtocol &&
-    retained.policyDigest === validationSchedulingPolicyDigest() && retained.selectionDigest === digest(groups) &&
+    retained.policyDigest === validationSchedulingPolicyDigest(schedulingPolicy) && retained.selectionDigest === digest(groups) &&
     Array.isArray(retained.groups) && retained.groups.length === groups.length &&
     new Set(retained.groups.map(group => group.id)).size === groups.length &&
     typeof journal === 'string' && journal.length > 0,
@@ -854,8 +860,8 @@ async function retainedToolReports(directory) {
 async function collectExecution({ directory, data, inventory, sources, calculatorSources, target, stages, context, specification, startedAt, plan,
   candidate, profile = context.profile.startsWith('r-pre-') ? 'r-pre' : 'pr',
   component = componentFromContext(context, target), shard = shardFromContext(context, target),
-  shardProtocol = nativeFrameworkShardProtocol, bootstrapProtocol = null }) {
-  const assignment = shard === null ? null : nativeFrameworkShardPlan({ inventory, plan, target, protocol: shardProtocol });
+  shardProtocol = nativeFrameworkShardProtocol, bootstrapProtocol = null, schedulingPolicy = validationSchedulingPolicy }) {
+  const assignment = shard === null ? null : nativeFrameworkShardPlan({ inventory, plan, target, protocol: shardProtocol, schedulingPolicy });
   const part = assignment?.parts.find(part => part.shard === shard);
   const observations = [];
   const diagnostics = [];
@@ -926,7 +932,7 @@ async function collectExecution({ directory, data, inventory, sources, calculato
     try {
       const journal = data ? data.texts?.[`${stage.name}.json.journal.ndjson`] :
         await fs.readFile(path.join(directory, `${stage.name}.json.journal.ndjson`), 'utf8');
-      groupCount = validateNativeGroupReport({ inventory, stage, report, journal, target }).length;
+      groupCount = validateNativeGroupReport({ inventory, stage, report, journal, target, schedulingPolicy }).length;
     } catch (error) {
       complete = false;
       diagnostics.push({ stage: stage.name, code: error.code ?? 'INVALID_ORIGINAL_GROUP_EXECUTION', message: error.message });
@@ -1247,6 +1253,8 @@ export async function captureNativeDefinitionInputs({ target, profile, component
   }
   const sourceFiles = files.sort((left, right) => left.file < right.file ? -1 : left.file > right.file ? 1 : 0);
   const selectedWorkersRequest = process.env.SDLC_TEST_WORKERS ?? null;
+  requireThat(sourceValidationSchedulingPolicy(sourceFiles) === validationSchedulingPolicy,
+    'EVIDENCE', 'Live native capture must use only the current committed scheduling policy');
   const inputs = compileNativeDefinition({ target, profile, component, shard, shardProtocol, sourceFiles, selectedWorkersRequest });
   const definition = { schemaVersion: 1, kind: 'native-validation-definition', target, profile, sourceFiles,
     ...(component === 'full' ? {} : { component }),
@@ -1301,6 +1309,7 @@ function compileNativeDefinition({ target, profile, sourceFiles, selectedWorkers
   component = 'full', shard = null, frameworkShards,
   shardProtocol = frameworkShards ?? nativeFrameworkShardProtocol }) {
   validateNativeSourceDefinitions(sourceFiles);
+  const schedulingPolicy = sourceValidationSchedulingPolicy(sourceFiles);
   const bootstrapProtocol = sourceNativeBootstrapProtocol(sourceFiles);
   const paths = sourceFiles.map(source => source.file);
   const selected = new Set(validationSourcePaths(paths));
@@ -1312,16 +1321,16 @@ function compileNativeDefinition({ target, profile, sourceFiles, selectedWorkers
     .map(source => ({ file: path.posix.basename(source.file), contents: source.contents }));
   const plan = sourceFiles.find(source => source.file === 'docs/sdlc/public-readiness/test-plan.md')?.contents;
   requireThat(typeof plan === 'string', 'EVIDENCE', 'The original native Test Plan bytes are required');
-  const specification = nativeSpecification({ plan, inventory, goSources, target, profile, component, shard, shardProtocol });
-  const assignment = shard === null ? null : nativeFrameworkShardPlan({ inventory, plan, target, protocol: shardProtocol });
+  const specification = nativeSpecification({ plan, inventory, goSources, target, profile, component, shard, shardProtocol, schedulingPolicy });
+  const assignment = shard === null ? null : nativeFrameworkShardPlan({ inventory, plan, target, protocol: shardProtocol, schedulingPolicy });
   const calculatorSources = sourceFiles.filter(source => calculatorProjectFiles(inventory).includes(source.file));
   calculatorSelection(inventory);
   return { plan, inventory, goSources, calculatorSources, specification,
     ...(bootstrapProtocol === null ? {} : { bootstrapProtocol }),
     stages: assignment ? assignment.parts.find(part => part.shard === shard).stages :
-      component === 'homebrew' ? [] : nativeStageSelections(inventory, plan),
+      component === 'homebrew' ? [] : nativeStageSelections(inventory, plan, schedulingPolicy),
     configDigest: nativeConfigurationDigest({ inventory, plan, assignment, profile, target, component, shard, shardProtocol, bootstrapProtocol,
-      shardPlanDigest: assignment?.digest ?? null, configuredWorkers: selectedWorkersRequest }),
+      shardPlanDigest: assignment?.digest ?? null, configuredWorkers: selectedWorkersRequest, schedulingPolicy }),
     testSpecDigest: testSpecificationDigest(plan), inventoryDigest: validationInventoryDigest(specification) };
 }
 
@@ -1344,6 +1353,11 @@ export async function replayNativeEvidence({ definition, data, candidate, asOf, 
     typeof asOf === 'string' && Number.isFinite(Date.parse(asOf)) && typeof verifyArchive === 'function',
   'EVIDENCE', 'Historical native replay requires archived definitions, an explicit as-of clock and an in-process archive verifier');
   const inputs = compileNativeDefinition(definition);
+  const schedulingPolicy = sourceValidationSchedulingPolicy(definition.sourceFiles);
+  const assignment = definition.shard === undefined ? null : nativeFrameworkShardPlan({
+    inventory: inputs.inventory, plan: inputs.plan, target: definition.target,
+    protocol: definition.frameworkShards, schedulingPolicy,
+  });
   requireThat((definition.bootstrapProtocol ?? null) === (inputs.bootstrapProtocol ?? null),
     'EVIDENCE', 'Archived bootstrap capability differs from its original source declaration');
   requireThat(['plan', 'inventory', 'goSources', 'calculatorSources', 'specification', 'stages', 'configDigest',
@@ -1367,11 +1381,11 @@ export async function replayNativeEvidence({ definition, data, candidate, asOf, 
   const context = validateExecutionContext(verified.context);
   const bootstrap = data['toolchain.json'];
   requireNativeBootstrapCapability({ bootstrap, target: definition.target, profile: definition.profile,
-    inventory: inputs.inventory, plan: inputs.plan,
+    inventory: inputs.inventory, plan: inputs.plan, assignment,
     shardProtocol: definition.frameworkShards,
     component: definition.component ?? 'full', shard: definition.shard ?? null,
     protocol: inputs.bootstrapProtocol ?? null });
-  requireThat(nativeContextMatches(context, { inventory: inputs.inventory, plan: inputs.plan,
+  requireThat(nativeContextMatches(context, { inventory: inputs.inventory, plan: inputs.plan, assignment, schedulingPolicy,
     shardProtocol: definition.frameworkShards,
     target: definition.target, profile: definition.profile,
     component: definition.component,
@@ -1388,7 +1402,7 @@ export async function replayNativeEvidence({ definition, data, candidate, asOf, 
   'Authenticated historical context differs from the original source/specification/configuration/artifact definitions');
   const reconstructed = await reconcileNativeEvidenceData({ ...inputs, sources: inputs.goSources, data,
     target: definition.target, profile: definition.profile, context, candidate, startedAt: raw.startedAt,
-    shardProtocol: definition.frameworkShards ?? nativeFrameworkShardProtocol });
+    shardProtocol: definition.frameworkShards ?? nativeFrameworkShardProtocol, schedulingPolicy });
   requireThat(digest(reconstructed.raw.results) === digest(raw.results) &&
     reconstructed.raw.observedAt === raw.observedAt && reconstructed.raw.complete === raw.complete &&
     reconstructed.raw.exitCode === raw.exitCode, 'EVIDENCE',

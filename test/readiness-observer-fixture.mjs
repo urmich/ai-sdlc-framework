@@ -24,7 +24,8 @@ import { createReadinessGitHubClient } from '../scripts/github-readiness-host.mj
 import { createPrReadinessHost, statusConcurrencyGroup } from '../scripts/pr-observer.mjs';
 import { parseWorkflow } from '../scripts/workflow-policy.mjs';
 import { calculatorFiles, calculatorSelection, calculatorCommandArguments } from '../scripts/pr-calculator.mjs';
-import { validationExecutionGroups, validationGroupProtocol, validationSchedulingPolicyDigest } from '../scripts/test-scheduling.mjs';
+import { validationExecutionGroups, validationGroupProtocol, validationSchedulingPolicyDigest,
+  sourceValidationSchedulingPolicy } from '../scripts/test-scheduling.mjs';
 import { nativeToolchain, homebrewToolchain, nativeBootstrapProtocol,
   nativeBodyBootstrapProtocol } from '../scripts/toolchain-baseline.mjs';
 import { prCryptoFixture } from '../scripts/pr-capabilities.mjs';
@@ -63,6 +64,7 @@ const calculatorSources = await Promise.all(calculatorFiles.map(async file => ({
   file, contents: await fs.readFile(path.join(repositoryRoot, ...file.split('/')), 'utf8'),
 })));
 const calculatorManifest = await fs.readFile(path.join(repositoryRoot, 'test', 'calculator', 'package.json'), 'utf8');
+const currentSchedulingSource = await fs.readFile(new URL('../scripts/test-scheduling.mjs', import.meta.url), 'utf8');
 
 function writerDefinition() {
   return `on: workflow_dispatch
@@ -130,7 +132,7 @@ function fixturePlan(names, additionalTests = []) {
 
 function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = false, docsOnly = false,
   narrowedRequiredScope = false, additionalTests = [], producerChange, bootstrapProtocol = null,
-  admissionHelper = 'source' } = {}) {
+  admissionHelper = 'source', schedulingSource = currentSchedulingSource, priorityFixture = false } = {}) {
   const names = [
     ...unitFiles.map((file, index) => ({ file, stage: 'unit', id: `T-FIX-CANONICAL-${index + 1}`,
       name: `T-FIX-CANONICAL-${index + 1} controlled canonical assertion` })),
@@ -157,12 +159,19 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
       'const validationIntegrityInventory = `{"schemaVersion":1,"tests":{"TestIntegrity":[]}}`\n' +
       'func TestIntegrity(t *testing.T) {}\n' },
   ];
+  if (priorityFixture) names.push(
+    { file: 'test/github-retained-identity-acceptance.test.mjs', stage: 'regression',
+      id: 'T-FIX-PRIORITY-RETAINED', name: 'T-FIX-PRIORITY-RETAINED controlled retained root' },
+    { file: 'test/validation-catalog.test.mjs', stage: 'regression',
+      id: 'T-FIX-PRIORITY-CATALOG', name: 'T-FIX-PRIORITY-CATALOG controlled catalog root' });
   if (bootstrapProtocol === nativeBootstrapProtocol) names.push({
     file: 'test/public-readiness-release-consumer.test.mjs', stage: 'regression', id: 'T-PRD041',
     name: 'T-PRD041 retained signed fixtures use the actual verifier for payload signature certificate and transparency failures',
   });
   const files = new Map(reporterPaths.map(file => [file,
     file.endsWith('.yml') ? ci : 'throw new Error("candidate reporter must never execute in the observer");\n']));
+  files.set('scripts/test-scheduling.mjs', schedulingSource);
+  const schedulingPolicy = sourceValidationSchedulingPolicy([{ file: 'scripts/test-scheduling.mjs', contents: schedulingSource }]);
   assert.ok(['source', 'missing', 'mutated'].includes(admissionHelper));
   const workflow = parseWorkflow({ file: nativeWorkflowContract.path, contents: ci });
   if (['arm-regression-allocation-v1', 'arm-regression-allocation-v2-priority-intel-bodies',
@@ -226,7 +235,7 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
     surfacePaths: [...files.keys()],
   });
   assert.equal(inventory.complete, true, JSON.stringify(inventory.unresolved));
-  return { ...sourceTree(files), inventory, goSources, names, requirements, plan,
+  return { ...sourceTree(files), inventory, goSources, names, requirements, plan, schedulingPolicy,
     roleJobs: new Map(Object.entries(workflow.jobs).flatMap(([key, job]) =>
       (job.strategy?.matrix?.include ?? []).map(row => [row.role, key]))) };
 }
@@ -362,7 +371,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
   shardProtocol = nativeFrameworkShardProtocol, bootstrapProtocol = null } = {}) {
   const role = nativeProducerRole(target, component, shard);
   const assignment = shard === null ? null : nativeFrameworkShardPlan({
-    inventory: source.inventory, plan: source.plan, target, protocol: shardProtocol,
+    inventory: source.inventory, plan: source.plan, target, protocol: shardProtocol, schedulingPolicy: source.schedulingPolicy,
   });
   const part = assignment?.parts.find(part => part.shard === shard);
   const bootstrapOptions = { inventory: source.inventory, plan: source.plan, assignment,
@@ -378,7 +387,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
   const ImageVersion = `controlled-${target}-image-1`;
   const go = `go version go1.27.1 ${{ linux: 'linux', win32: 'windows', darwin: 'darwin' }[platforms[target]]}/${architecture === 'x64' ? 'amd64' : architecture}`;
   const resources = nativeResourceFacts({ availableParallelism: 4, totalMemoryBytes: 8 * 1024 ** 3,
-    configuredWorkers: null });
+    configuredWorkers: null }, source.schedulingPolicy);
   const bootstrap = { schemaVersion: 1, status: 'Passed', target,
     native: { platform: platforms[target], architecture, node: nativeToolchain.node, go,
       resources,
@@ -432,7 +441,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
     }
   }
   const specification = nativeSpecification({ plan: source.plan, inventory: source.inventory,
-    goSources: source.goSources, target, profile, component, shard, shardProtocol });
+    goSources: source.goSources, target, profile, component, shard, shardProtocol, schedulingPolicy: source.schedulingPolicy });
   if (!tools.go) {
     delete bootstrap.native.go;
     delete bootstrap.native.executables.go;
@@ -466,7 +475,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
     testSpecDigest: testSpecificationDigest(source.plan),
     configDigest: nativeConfigurationDigest({ inventory: source.inventory, plan: source.plan, assignment,
       profile, target, component, shard, shardProtocol, bootstrapProtocol,
-      shardPlanDigest: assignment?.digest ?? null }),
+      shardPlanDigest: assignment?.digest ?? null, schedulingPolicy: source.schedulingPolicy }),
     inventoryDigest: validationInventoryDigest(specification),
     sources: [{ repositoryId: `repository-${repositoryId}`, revision: revisions.merge,
       contentDigest: digest(source.sha) }],
@@ -493,7 +502,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
     runId: String(executionId), attempt: '1' };
   const data = new Map([['toolchain.json', bootstrap]]);
   const observations = new Map();
-  const selectedStages = part?.stages ?? nativeStageSelections(source.inventory, source.plan);
+  const selectedStages = part?.stages ?? nativeStageSelections(source.inventory, source.plan, source.schedulingPolicy);
   for (const selectedStage of selectedStages) {
     const stage = selectedStage.name;
     const index = nativeWorkflowContract.stages.indexOf(stage);
@@ -538,7 +547,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
         } },
       startedAt: at(start), finishedAt: at(finish), complete: true, exitCode: 0, executions,
       groupExecution: { schemaVersion: 1, protocol: validationGroupProtocol,
-        policyDigest: validationSchedulingPolicyDigest(), selectionDigest: digest(expectedGroups), groups },
+        policyDigest: validationSchedulingPolicyDigest(source.schedulingPolicy), selectionDigest: digest(expectedGroups), groups },
       diagnostics: [], summary: { success: true, counts: {
         tests: executions.length, cancelled: 0, failed: 0, passed: executions.length,
         suites: 0, skipped: 0, todo: 0 }, durationMs: (finish - start) * 1000 } });
@@ -722,13 +731,13 @@ function cleanupData(lane, executionId = runId) {
 export function nativeReplayFixture({ candidate, target = 'linux-x64', profile = 'r-pre',
   sourceCommit = candidate?.descriptor?.sourceCommit, asOf,
   releaseIntentId = candidate?.context?.releaseIntentId ?? 'controlled-release-intent', executionId = runId,
-  previousMetadata = nativeReplayPreviousFixture(), additionalTests = [] }) {
+  previousMetadata = nativeReplayPreviousFixture(), additionalTests = [], schedulingSource = currentSchedulingSource }) {
   assert.ok(candidate?.descriptor && candidate.context?.identity && /^[a-f0-9]{40}$/u.test(sourceCommit));
   assert.ok(typeof asOf === 'string' && Number.isFinite(Date.parse(asOf)));
   const ci = `name: Controlled archived native fixture\non: pull_request\npermissions: {contents: read}\n` +
     'jobs:\n  native:\n    strategy:\n      matrix:\n' +
     '        target: [linux-x64, windows-x64, macos-arm64, macos-x64]\n';
-  const source = fixtureSources(ci, { additionalTests });
+  const source = fixtureSources(ci, { additionalTests, schedulingSource, priorityFixture: true });
   const revisions = { head: 'a'.repeat(40), base: 'b'.repeat(40), merge: sourceCommit };
   const lane = laneData(source, candidate, revisions, target, { profile,
     startTime: Date.parse(asOf) - 60000, previousMetadata, releaseIntentId, executionId });
@@ -736,8 +745,8 @@ export function nativeReplayFixture({ candidate, target = 'linux-x64', profile =
     sourceFiles: [...source.files].map(([file, contents]) => ({ file, contents })),
     plan: source.plan, inventory: source.inventory, goSources: source.goSources, specification: lane.specification,
     calculatorSources,
-    stages: nativeStageSelections(source.inventory, source.plan),
-    configDigest: nativeConfigurationDigest({ inventory: source.inventory, profile }),
+    stages: nativeStageSelections(source.inventory, source.plan, source.schedulingPolicy),
+    configDigest: nativeConfigurationDigest({ inventory: source.inventory, profile, schedulingPolicy: source.schedulingPolicy }),
     testSpecDigest: testSpecificationDigest(source.plan), inventoryDigest: validationInventoryDigest(lane.specification),
     source: { revision: sourceCommit, treeSha: source.sha, repositoryId: `repository-${repositoryId}` } };
   const data = Object.fromEntries(lane.data);

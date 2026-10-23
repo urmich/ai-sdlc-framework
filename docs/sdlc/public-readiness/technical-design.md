@@ -234,6 +234,16 @@ selector constants. `critical --affected FILE` (repeatable) /
 unit groups, then independent integration groups concurrently where the one
 aggregate budget permits. Timing advisory/elapsed/exceeded fields never change
 correctness status or declaration requiredness.
+Archived native reconstruction selects the scheduling policy from the existing
+authenticated `definition.sourceFiles` entry for `scripts/test-scheduling.mjs`.
+The non-executing declaration tokenizer requires exact token-normalized
+fingerprints for the exported protocol, priority table and complete policy
+initializers. Only the known literal v2 and v3 contracts qualify; missing,
+unknown, duplicate, spoofed or computed contracts fail `EVIDENCE`. Do not
+execute captured code, accept a report policy flag or try alternate digests.
+Thread that source-selected policy through ordering, configuration and original
+group validation without rewriting old reports or renewing historical credit.
+Live capture and execution continue to require the current policy.
 
 Split independent top-level scenarios into coherent file processes, retaining
 stable case IDs. Each has unique Git/home/cache/temp roots. Do not enable blanket
@@ -382,10 +392,12 @@ without changing command watchdogs, owned-process settlement or other limits.
 Configured host fan-out, an isolated shard time or an elapsed-work estimate is
 not a passing latency result; fresh complete hosted measurements are required.
 Use the existing measured-file priority policy to start the retained-identity
-acceptance family before the shorter file families. Its observed Intel tail
-had no dependency but waited for earlier dispatches; retain its complete
-38-assertion root closure and existing internal ordering/concurrency. This
-changes neither host capacity nor explicit targeted caller order.
+acceptance family, then the validation catalog, before shorter file families.
+The catalog's independent long root can use the three remaining ARM slots while
+the retained guard reserves four of the existing seven. Retain the complete
+38-assertion closure, callback ordering/concurrency and every catalog root.
+This changes neither host capacity, shard ownership nor explicit targeted
+caller order. Actual overlap and whole-lane improvement require native proof.
 
 The PR workflow uses five Linux read-only allocation coordinators under
 `arm-regression-allocation-v4-retained-first`. After ARM's own unit barrier,
@@ -425,6 +437,11 @@ Release prepublication and default whole-native execution remain separate and
 unchanged. Fresh complete hosted measurements still decide delivery success.
 This prioritizes owned work within the existing shared pool; it does not claim
 that Intel Homebrew is the only provider bottleneck or erase provisioning gaps.
+The existing Homebrew command trace also records a monotonic `elapsedMs` for
+each awaited subprocess, including rejected commands. This measures service
+time, not surrounding snapshot checks, bootstrap, evidence retention or cleanup.
+Retain those costs in whole-lane timing. No command, order, watchdog, assertion
+or fresh keg/receipt verification is changed or cached by this diagnostic.
 
 Reuse only verified immutable fixture inputs such as an unchanged payload
 build. Keep transactions, durability flushes, lock races, archival and cleanup

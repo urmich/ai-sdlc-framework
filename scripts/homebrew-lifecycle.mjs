@@ -93,8 +93,14 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
       }
       const channelOnly = command === brew && ['install', 'upgrade', 'uninstall', 'autoremove', 'tab', 'link', 'unlink'].includes(args[0]);
       const before = channelOnly ? await snapshot(environment.COPILOT_HOME) : undefined;
-      const output = await execute(command, args,
-        { maxBuffer: 16 * 1024 * 1024, ...options, env: options.env ?? environment });
+      const serviceStarted = process.hrtime.bigint();
+      let output;
+      try {
+        output = await execute(command, args,
+          { maxBuffer: 16 * 1024 * 1024, ...options, env: options.env ?? environment });
+      } finally {
+        entry.elapsedMs = Number(process.hrtime.bigint() - serviceStarted) / 1e6;
+      }
       if (before) {
         const after = await snapshot(environment.COPILOT_HOME);
         entry.homeBeforeSha256 = createHash('sha256').update(JSON.stringify(before)).digest('hex');

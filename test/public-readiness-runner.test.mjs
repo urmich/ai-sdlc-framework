@@ -4,6 +4,10 @@ export const validationDeclarations = {
     {"coverage": "process", "paths": ["scripts/test-profiles.mjs", "scripts/test-budget-worker.mjs"]},
     {"coverage": "direct", "paths": ["scripts/test-scheduling.mjs", "scripts/test-budget.mjs", "scripts/test-local-evidence.mjs", "scripts/validation-benchmark.mjs"]}
   ],
+  "groups": [{
+    "root": "T-PRD010-CATALOG catalog third root overlaps a live four-slot retained guard within seven shared slots",
+    "minimumSlots": 7
+  }],
   "applicability": [{
     "names": [
       "T-PRD010 independent file workers overlap without sharing environment, module patches or fixture ownership",
@@ -48,13 +52,14 @@ import { compileValidationInventory, discoverDeclarations } from '../scripts/val
 import { digest, SdlcError } from '../src/core.mjs';
 import { captureBenchmarkCache, compareValidationBenchmarks, runValidationBenchmark } from '../scripts/validation-benchmark.mjs';
 import { hostedValidationSelection, scheduleValidationFiles, validationExecutionGroups,
-  runValidationReadyPool, validationSchedulingPolicyDigest } from '../scripts/test-scheduling.mjs';
+  runValidationReadyPool, validationSchedulingPolicyDigest, sourceValidationSchedulingPolicy,
+  validationSchedulingPolicy } from '../scripts/test-scheduling.mjs';
 import { acquireTestWorker, enterTestBudget, readTestBudget } from '../scripts/test-budget.mjs';
 import { readEvidenceBundle } from '../src/evidence.mjs';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { deriveLocalSanitySpecification, localEvidenceFailureDiagnostic } from '../scripts/test-local-evidence.mjs';
-import { processDiagnostic } from '../scripts/validation-tools.mjs';
+import { processDiagnostic, executeValidationCommand } from '../scripts/validation-tools.mjs';
 import { windowsProcessIdentity, assertOwnedProcessExited } from './owned-process-fixture.mjs';
 import net from 'node:net';
 import { getEventListeners } from 'node:events';
@@ -1632,6 +1637,8 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
       'test/public-readiness-observer.test.mjs'),
     discoverDeclarations("import test from 'node:test';test('retained identity acceptance through existing public consumers',()=>{});",
       'test/github-retained-identity-acceptance.test.mjs'),
+    discoverDeclarations("import test from 'node:test';test('catalog independent case',()=>{});",
+      'test/validation-catalog.test.mjs'),
   ];
   const inventory = { complete: true, files: declarations.map(source =>
     ({ file: source.file, sourceDigest: source.sourceDigest })), cases: declarations.flatMap(source => source.cases) };
@@ -1642,9 +1649,10 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
   ] });
   assert.ok(selected.units.cases.some(test => test.name === 'unit family without local binding'));
   assert.ok(selected.units.cases.some(test => test.name === 'T-PRD008 selected planned unit'));
-  assert.deepEqual(selected.regression.files.slice(0, 2), [
+  assert.deepEqual(selected.regression.files.slice(0, 3), [
     'test/observation-retention-refresh.test.mjs',
     'test/github-retained-identity-acceptance.test.mjs',
+    'test/validation-catalog.test.mjs',
   ]);
   assert.equal(selected.units.files[0], 'test/public-readiness-observer.test.mjs');
   assert.deepEqual(Object.values(selected).flatMap(stage => stage.cases.map(test => test.id)).sort(),
@@ -1661,13 +1669,165 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
     ['github-operation-results.unit.test.mjs', 'operation'],
     ['public-readiness-observer.test.mjs', 'observer'],
     ['github-retained-identity-acceptance.test.mjs', 'retained-identity'],
+    ['validation-catalog.test.mjs', 'catalog'],
   ]) await fs.writeFile(path.join(f.root, 'test', file),
     "import test from 'node:test';import {appendFile} from 'node:fs/promises';" +
     `test('dispatch ${value}',()=>appendFile(${JSON.stringify(marker)},'${value}\\n'));`);
   const result = await f.invoke(['full', '--workers', '1']);
   assert.equal(result.exitCode, 0, result.stdout + result.stderr);
   assert.deepEqual((await fs.readFile(marker, 'utf8')).trim().split(/\r?\n/u),
-    ['retention', 'observer', 'retained-identity', 'operation']);
+    ['retention', 'observer', 'retained-identity', 'catalog', 'operation']);
+  const source = await fs.readFile(new URL('../scripts/test-scheduling.mjs', import.meta.url), 'utf8');
+  const legacy = source.replace("  'validation-catalog.test.mjs',\n", '')
+    .replace("schemaVersion: 3, algorithm: 'source-bound-ready-root-v3'",
+      "schemaVersion: 2, algorithm: 'source-bound-ready-root-v2'");
+  const selectedPolicy = contents => sourceValidationSchedulingPolicy([{ file: 'scripts/test-scheduling.mjs', contents }]);
+  assert.equal(selectedPolicy(source), validationSchedulingPolicy);
+  assert.equal(selectedPolicy(legacy).schemaVersion, 2);
+  assert.equal(validationSchedulingPolicyDigest(selectedPolicy(legacy)),
+    '0217489f1d88ac4649cee4e85b81777276297c70c140e4ab9346eef2770ee6db');
+  assert.notEqual(validationSchedulingPolicyDigest(selectedPolicy(legacy)), validationSchedulingPolicyDigest());
+  assert.throws(() => validationSchedulingPolicyDigest({ ...validationSchedulingPolicy }), { code: 'EVIDENCE' });
+  for (const changed of [
+    source.replace('maxWorkers: 32', 'maxWorkers: 31'),
+    source.replace("  'validation-catalog.test.mjs',\n", ''),
+    source.replace('export const measuredFilePriorities', 'const measuredFilePriorities') +
+      '\n// export const measuredFilePriorities = Object.freeze([]);\n',
+    source + '\nexport const validationGroupProtocol = "forged";\n',
+    source.replace('Object.freeze([', 'untrustedFactory(['),
+  ]) assert.throws(() => selectedPolicy(changed), { code: 'EVIDENCE' });
+});
+
+test('T-PRD010-CATALOG catalog third root overlaps a live four-slot retained guard within seven shared slots', async t => {
+  const f = await runnerFixture(t);
+  const evidence = path.join(f.root, '.test-data', 'catalog-overlap');
+  await fs.mkdir(evidence, { recursive: true });
+  const shared = `import test from 'node:test';import assert from 'node:assert/strict';
+import * as fs from 'node:fs/promises';import path from 'node:path';
+import {setTimeout as delay} from 'node:timers/promises';
+import {readTestBudget,readTestGroupProcesses} from ${JSON.stringify(new URL('../scripts/test-budget.mjs', import.meta.url).href)};
+const root=${JSON.stringify(evidence)};
+const wait=async predicate=>{const end=performance.now()+15000;while(!await predicate()){
+  assert.ok(performance.now()<end,'Owned overlap barrier expired');await delay(10);}};
+const exists=async name=>fs.stat(path.join(root,name)).then(()=>true,error=>{
+  if(error.code!=='ENOENT')throw error;return false;});
+const entered=async name=>{
+  const encoded=process.execArgv.find(value=>value.startsWith('--conditions=sdlc-group-'));
+  assert.ok(encoded);
+  const group=JSON.parse(Buffer.from(encoded.slice('--conditions=sdlc-group-'.length),'base64url').toString('utf8'));
+  const leases=await readTestGroupProcesses(group.id);
+  const lease=leases.find(value=>value.pid===process.pid&&value.slot===process.env.SDLC_TEST_BUDGET_SLOT);
+  assert.ok(lease);assert.equal(lease.finishedAt,null);assert.equal(lease.minimumSlots,group.minimumSlots);
+  const budget=await readTestBudget();
+  await fs.writeFile(path.join(root,name),JSON.stringify({pid:process.pid,time:Date.now(),group,lease,
+    producer:process.env.SDLC_TEST_BUDGET_PRODUCER,budgetId:budget.id,globalCapacity:budget.capacity}),{flag:'wx'});
+};
+`;
+  await fs.writeFile(path.join(f.root, 'test', 'github-retained-identity-acceptance.test.mjs'),
+    'export const validationDeclarations={"schemaVersion":1,"groups":[{"root":"retained guard","minimumSlots":4}]};\n' +
+    shared + `test('retained guard',async()=>{
+      await entered('retained-entered');
+      await wait(async()=>await exists('catalog-0')&&await exists('catalog-1')&&await exists('catalog-2'));
+      await wait(()=>exists('release-retained'));
+      await entered('retained-finished');
+    });`);
+  await fs.writeFile(path.join(f.root, 'test', 'validation-catalog.test.mjs'), shared +
+    [0, 1, 2].map(index => `test('catalog ${index}',async()=>{
+      await wait(()=>exists('retained-entered'));await entered('catalog-${index}');
+      await wait(()=>exists('retained-finished'));
+    });`).join('\n'));
+  const reportPath = path.join(f.root, '.test-data', 'catalog-overlap.json');
+  const initial = await readTestBudget();
+  const files = [path.join(f.root, 'test', 'github-retained-identity-acceptance.test.mjs'),
+    path.join(f.root, 'test', 'validation-catalog.test.mjs')];
+  const args = ['targeted', '--workers', '7', ...files];
+  const planned = await createPlan(parseOptions(args), f.root);
+  assert.equal(planned.groups.length, 4);
+  assert.equal(planned.groups.reduce((sum, group) => sum + group.minimumSlots, 0), 7);
+  const controller = new AbortController();
+  const signal = AbortSignal.any([t.signal, controller.signal]);
+  const timer = setTimeout(() => controller.abort(new Error('Owned overlap observation expired')), 15000);
+  let nested;
+  const wait = async predicate => {
+    const deadline = performance.now() + 15000;
+    while (!await predicate()) {
+      signal.throwIfAborted();
+      assert.ok(performance.now() < deadline, 'Owned overlap observation expired');
+      await delay(10, undefined, { signal });
+    }
+  };
+  const exists = name => fs.stat(path.join(evidence, name)).then(() => true, error => {
+    if (error.code !== 'ENOENT') throw error;
+    return false;
+  });
+  try {
+    nested = executeValidationCommand({ name: 'catalog-overlap', command: process.execPath,
+      args: [path.join(f.root, 'scripts', 'test-runner.mjs'), ...args], cwd: f.root,
+      environment: { ...process.env, SDLC_TEST_REPORT_FILE: reportPath }, outputDir: evidence, signal });
+    await wait(async () => await exists('retained-entered') && await exists('catalog-0') &&
+      await exists('catalog-1') && await exists('catalog-2'));
+    const occupied = await readTestBudget();
+    assert.equal(occupied.id, initial.id);
+    assert.equal(occupied.capacity, initial.capacity);
+    const live = await Promise.all(['retained-entered','catalog-0','catalog-1','catalog-2']
+      .map(async name => JSON.parse(await fs.readFile(path.join(evidence, name), 'utf8'))));
+    assert.equal(new Set(live.map(item => item.pid)).size, 4);
+    assert.equal(new Set(live.map(item => item.producer)).size, 1);
+    assert.equal(new Set(live.map(item => item.group.id)).size, 4);
+    assert.equal(new Set(live.map(item => item.lease.slot)).size, 4);
+    for (const item of live) {
+      const expected = planned.groups.find(group => group.id === item.group.id);
+      assert.ok(expected);
+      for (const field of ['minimumSlots', 'exclusiveResources']) {
+        assert.deepEqual(item.group[field], expected[field]);
+      }
+      assert.equal(item.lease.pid, item.pid);
+      assert.equal(item.lease.minimumSlots, expected.minimumSlots);
+      assert.equal(item.lease.finishedAt, null);
+      assert.equal(item.budgetId, initial.id);
+      assert.equal(item.globalCapacity, initial.capacity);
+    }
+    assert.equal(live.reduce((sum, item) => sum + item.lease.minimumSlots, 0), 7,
+      'Only these participants own four plus three live slots; global spare capacity is not reserved');
+    await fs.writeFile(path.join(evidence, 'release-retained'), 'release', { flag: 'wx' });
+    const result = await nested;
+    signal.throwIfAborted();
+    assert.equal(result.complete, true, 'The nested command must finish evidence finalization without cancellation');
+    assert.equal(result.exitCode, 0, result.stdout + result.stderr);
+    const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+    for (const group of report.groupExecution.groups) {
+      const expected = planned.groups.find(item => item.id === group.id);
+      assert.ok(expected);
+      for (const field of ['rootId', 'file', 'sourceDigest']) assert.deepEqual(group[field], expected[field]);
+    }
+    const retained = report.groupExecution.groups.find(group => group.root === 'retained guard');
+    const catalog = report.groupExecution.groups.filter(group => /^catalog [012]$/u.test(group.root));
+    assert.equal(retained.minimumSlots, 4);
+    assert.equal(catalog.length, 3);
+    assert.equal(retained.minimumSlots + catalog.reduce((sum, group) => sum + group.minimumSlots, 0), 7);
+    assert.ok(catalog.every(group => group.minimumSlots === 1 &&
+      Date.parse(group.startedAt) < Date.parse(retained.finishedAt)));
+    const observed = await Promise.all(['retained-entered','catalog-0','catalog-1','catalog-2','retained-finished']
+      .map(async name => JSON.parse(await fs.readFile(path.join(evidence,name),'utf8'))));
+    assert.equal(new Set(observed.slice(0,4).map(item=>item.pid)).size,4);
+    assert.ok(observed.slice(1,4).every(item=>item.time<=observed[4].time));
+    assert.equal(report.resources.budget.id, initial.id);
+    assert.equal(report.resources.budget.capacity, initial.capacity);
+    assert.ok(report.resources.budget.peakActiveWorkers <= initial.capacity);
+    t.diagnostic(JSON.stringify({ sharedBudgetId: initial.id, globalCapacity: initial.capacity,
+      participantSlots: 7, retainedSlots: 4, catalogSlots: 3, participantProcesses: 4,
+      noOutsideReservation: true, participants: live.map(item => ({
+        groupId: item.group.id, sourceDigest: planned.groups.find(group => group.id === item.group.id).sourceDigest,
+        file: planned.groups.find(group => group.id === item.group.id).file,
+        minimumSlots: item.lease.minimumSlots, pid: item.pid, slot: item.lease.slot,
+        startedAt: item.lease.startedAt, finishedAt: item.lease.finishedAt,
+      })) }));
+  } finally {
+    clearTimeout(timer);
+    await fs.writeFile(path.join(evidence, 'release-retained'), 'release');
+    controller.abort();
+    if (nested) await nested.catch(() => {});
+  }
 });
 
 test('T-PRD010 nested producers retain one aggregate budget, queued work and ordered real file outcomes', async t => {

@@ -1133,6 +1133,36 @@ the same host/runtime, keeping fixture inputs and all assertions unchanged.
 These focused observations neither establish native lane speed nor enlarge
 the finite 27-assertion local critical gate.
 
+The PR-only `T-PRD010-CATALOG catalog third root overlaps a live four-slot
+retained guard within seven shared slots` root in
+`test/public-readiness-runner.test.mjs` proves real distinct-process overlap
+using owned entered/finished barriers. Three catalog workers, including the
+third long root, must start before the four-slot retained guard is released.
+Keep all closures, the seven-slot budget, explicit caller order and unchanged
+assertion-to-native-shard ownership; no fixed-duration sleep substitutes for
+the barriers.
+The fixture requests only its declared seven participant slots under aggregates
+of seven, fourteen or fifteen. Verify four live source-bound leases, distinct
+PIDs and the exact `4 + 1 + 1 + 1` allocation, with aggregate identity/capacity
+unchanged. Do not acquire padding, exclude the host, add an eighth-slot probe,
+strip inherited budget state or create another pool. An external controlled
+peer harness verifies progress while another producer remains active; that
+peer is not created by the fixture itself. Keep waits bounded and cancellable,
+drain owned participants, and retain shorter-file ordering in the separate
+dispatch and caller-order contracts.
+After awaiting the nested command, reject an aborted signal and require its
+evidence finalization to be complete before accepting exit or group proof.
+Exit code zero alone cannot pass a cancelled or incomplete command.
+The PR-only `T-PRD074 archived scheduling reconstructs only its authenticated
+captured literal policy without current-credit fallback` root in
+`test/public-readiness-observer.test.mjs` checks current and legacy archives
+and legacy sharded SDK evidence. Select the known literal policy only from
+authenticated captured source, retaining exact configuration, group, context
+and source digests. Unknown or forged source, duplicate or comment-spoofed
+declarations, untrusted expressions, malformed budgets, opposite known group
+policies and unauthenticated archives must reject. Never rewrite old evidence,
+execute candidate source, weaken a digest check or renew historical credit.
+
 The PR-only `T-PRD013 active events are checked on both transaction reads`
 root in `test/storage.test.mjs` preserves event-digest rejection after removing
 the duplicate calculation already performed by the authoritative schema
@@ -1302,6 +1332,12 @@ the original subset. A new legitimate test must not erase preservation checks.
    retaining all thirteen cleanup diagnostic artifacts; count every real wait honestly.
    Separate jobs use their own native hosts, resource budgets, scratch paths and
    owned prefixes where required rather than racing on a shared package-manager installation.
+   Retain finite nonnegative monotonic `elapsedMs` values in the existing
+   Homebrew command records for both successful and deliberately rejected
+   commands. These subprocess durations identify service cost without a new
+   metrics artifact or a changed execution path. Bootstrap, snapshot checks,
+   evidence retention and cleanup remain part of the complete lane; command
+   timings alone never establish its latency result.
    Controlled negatives must reject six-of-seven Intel parts, either missing,
    failed, stale or wrong-attempt unit origin, a regression starting before
    either unit cleanup completes, duplicated canonical work and borrowed prefix
