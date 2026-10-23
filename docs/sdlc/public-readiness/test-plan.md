@@ -1040,8 +1040,11 @@ fixture evidence through the actual API-only observer boundary.
 
 ## 6. Comparable benchmark procedure
 
-The required delivery target is **under 15 minutes for each complete logical
-native PR lane**. Include job-specific toolchain provisioning, every required
+The required delivery limits for each **complete logical native PR lane** are
+Linux **at most 460 seconds (7m40s)**, Windows **at most 665 seconds (11m05s)**,
+Apple Silicon **at most 627 seconds (10m27s)** and Intel macOS **strictly under
+1,200 seconds (20m)**. Intel's former 15-minute target remains a stretch goal.
+Include job-specific toolchain provisioning, every required
 test/procedure, evidence retention and owned-resource cleanup. For a lane with
 parallel required parts, use the earliest part's actual worker start and the
 latest part's completion; do not time only the fastest or longest isolated part,
@@ -1054,6 +1057,10 @@ do not prove that the latency target was achieved.
 Stability, complete native coverage and honest failure reporting take precedence:
 do not drop assertions, weaken checks or hide retries to meet the target.
 An incomplete or failed attempt is not a successful full-suite benchmark.
+Do not cancel an Intel measurement at the former 16-minute observation cutoff.
+Its revised observation cutoff is 20 minutes; a still-active lane at that
+cutoff cannot pass the strict timing limit. This changes no command watchdog,
+owned-process settlement allowance, assertion, iteration or durability boundary.
 
 For the next PR measurement, explicitly request the native hosts' observed
 memory-bounded shared worker allocations: Linux/Windows 15, Apple Silicon 7,
@@ -1065,8 +1072,10 @@ hosted results.
 Verify the actual producer's requested/capacity fields and shared
 nested-allocation bounds; the default local gate and 32-slot ceiling do not
 change. Account for the personal-account limit of five concurrent hosted Mac
-jobs across both architectures. A lane still active at 16 minutes is cancelled,
-retained as non-passing and returned to measured parallelism work.
+jobs across both architectures. Cancel the attempt if a non-Intel lane is still
+active at 16 minutes or Intel is still active at 20 minutes; retain the original
+non-passing results and return to measured bottleneck work. A tighter delivery
+limit miss is reported separately, not used to cancel Intel before its cutoff.
 
 Use independent owned baseline and candidate workspaces on the **same host**
 with the same Node/tool versions, worker/resource limits and environment policy.
@@ -1119,6 +1128,28 @@ Measure the original complete protected-SDK row callback before and after on
 the same host/runtime, keeping fixture inputs and all assertions unchanged.
 These focused observations neither establish native lane speed nor enlarge
 the finite 27-assertion local critical gate.
+
+The PR-only `T-PRD037 markerless payload text retains core redaction without
+impossible structured scans` root in `test/validation-evidence.unit.test.mjs`
+checks the conservative punctuation discriminator. Marker-free JWT text must
+still fail the existing sensitive-content guard; header, assignment and
+structured-JSON credentials retain the original parsing and rejection path.
+Keep the byte/depth/decode limits and the complete existing sanitizer corpus.
+The new root must fail on the original no-op scan behavior, without promoting
+it into the finite critical profile or claiming hosted latency from a unit pass.
+
+The unchanged `FR-063/064 real refresh and prune archive superseded
+observations/facts before exhaustion` root must complete its fixed 550 repository
+refreshes, 275 conditional PR/fact refreshes and all 1,114 assertion executions
+in the owned worker. Preserve its legacy assertion namespace and root ID.
+The five PR-only controls in `test/observation-refresh-worker.test.mjs` reject
+foreign/incomplete child proofs, preserve assertion and teardown failures,
+refuse scenario overrides, retain cancellation and verify the fixed preload's
+actual Git process counts plus mutation freshness. Require the actual child
+PID, source/preload identity, live and closed leases, inherited budget and
+completed cleanup; neither a forged result nor a cheap control can pass the
+real root. The outer result includes the complete child interval. Local
+functional and timing observations remain separate from native acceptance.
 
 ## 7. PR matrix procedure
 

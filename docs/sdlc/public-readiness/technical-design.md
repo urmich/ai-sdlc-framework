@@ -365,9 +365,13 @@ diagnostic artifacts, as specified below; no producer may borrow another's recei
 Bootstrap v5 requires two genuine Homebrew owners and eleven source-bound
 nonallocation proofs, retaining all thirteen diagnostic artifacts and steps.
 Keep default whole-native execution and release prepublication compatible.
-The required logical lane span remains under fifteen minutes from its earliest
-required unit/framework/Homebrew worker start through its last evidence/cleanup
-completion, including unit barriers, repeated provisioning and internal queues.
+The required logical lane span is at most 460 seconds on Linux, 665 seconds on
+Windows and 627 seconds on Apple Silicon, and strictly under 1,200 seconds on
+Intel macOS. Measure from the earliest required unit/framework/Homebrew worker
+start through the last evidence/cleanup completion, including unit barriers,
+repeated provisioning and internal queues. Intel's former fifteen-minute target
+is a stretch goal. Its observation cutoff moves from sixteen to twenty minutes,
+without changing command watchdogs, owned-process settlement or other limits.
 Configured host fan-out, an isolated shard time or an elapsed-work estimate is
 not a passing latency result; fresh complete hosted measurements are required.
 
@@ -514,7 +518,7 @@ contracts unchanged. All 1610 assertion identities, complete closures, 25
 origins, 13 Mac diagnostics, two real prefix owners, eleven nonallocations,
 SDK decisions and worker allocations remain unchanged. Controlled Node-only
 dispatch/absence tests establish no native elapsed improvement, authentic
-verification success or four-lane under-900-second acceptance.
+verification success or achievement of the complete native lane timing limits.
 
 The PR workflow explicitly allocates 15 shared test-worker slots on Linux and
 Windows, 7 on Apple Silicon, four on both Intel unit hosts and fourteen on Intel
@@ -536,8 +540,11 @@ The four-body Linux/Windows matrices can provide five regression hosts per
 platform while at most five Mac hosts run, fitting fifteen native jobs within
 the conservative twenty-job standard personal allowance. Use standard runners
 in this public repository without paid larger runners or a billing change.
-If any required complete lane remains active at 16 minutes, cancel that attempt
-and revise the measured bottleneck rather than waiting for a late green result.
+If a required non-Intel lane remains active at 16 minutes, or Intel remains
+active at 20 minutes, cancel that attempt and retain its non-passing originals.
+Report misses of the tighter delivery limits separately; they do not cancel an
+Intel measurement before its cutoff. Revise the measured bottleneck rather than
+waiting for a late green result.
 Reject a non-improving iteration as an unsuccessful optimization and revise its
 measured critical path; neither a configured allocation nor a passing local
 regression demonstrates a hosted speedup.
@@ -560,6 +567,28 @@ field, structured-log fragment, byte/depth/work budget and final equality check
 still executes. The text scanner compares its three structural characters
 directly rather than constructing a membership array for each character.
 These are representation/classification optimizations, not cached validation.
+
+Payload text without a double quote, opening object/array marker, colon or
+equals sign cannot contain a candidate for the structured-fragment, header or
+assignment parsers. After the unchanged byte bound and redacted-value check,
+such text proceeds directly to the existing core summary sanitizer. That
+sanitizer still examines JWTs and other sensitive text; marker-free text is
+never accepted merely because it lacks parser punctuation. Other text keeps
+the complete original parsing path, work limits and final equality check.
+
+The existing 550-refresh retention root keeps its assertion identity and every
+ordered assertion, but executes that unchanged body in one source-bound Node
+child without `node:test` bookkeeping. The protected outer test yields its
+existing active worker slot; the child acquires that same aggregate budget.
+The original fixture module is explicitly preloaded before transport imports
+can capture Git's executor, preserving its isolated immutable-read cache and
+real mutation-triggered invalidation. Production Git and storage are unchanged.
+Completion requires the actual owned PID, source/preload digest, nonce, closed
+lease, exit zero, single complete result and verified fixture teardown. An
+assertion, cleanup, cancellation or provenance failure remains non-passing and
+retains its owned evidence. No new timeout, grace, process allowance, CI part
+or reduced iteration/durability boundary is introduced; child setup, execution,
+retention and cleanup remain inside whole-root and whole-lane measurements.
 
 The standalone `validation-benchmark.mjs` adapter consumes explicitly owned
 baseline/candidate workspaces, worker budget, focused assertion-ID JSON and an

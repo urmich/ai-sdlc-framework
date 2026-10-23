@@ -17,6 +17,7 @@ const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 const redactedPayloadValue = /^\[redacted(?::[a-f0-9]{64})?\]$/u;
 const sensitiveHeader = /^(?:authorization|proxy[-_]authorization|cookie|set[-_]cookie|x[-_]api[-_]key|x[-_]auth[-_]token|x[-_]amz[-_]security[-_]token)$/iu;
 const environmentSecret = /(?:^|_)(?:secret|password|passwd|token|jwt|credential|credentials|private_key|access_key|api_key|client_secret)(?:_|$)/iu;
+const payloadTextMarkers = /["\[{:=]/u;
 
 function sensitivePayloadKey(key, state) {
   const cached = state?.keyClassifications.get(key);
@@ -79,6 +80,7 @@ function sanitizePayloadText(value, state = payloadSanitizerState(), depth = 0) 
   requireThat(Buffer.byteLength(value) <= LIMITS.artifact, 'CAPACITY',
     'Retained text exceeds the immutable-object byte budget');
   if (redactedPayloadValue.test(value)) return value;
+  if (!payloadTextMarkers.test(value)) return state.summarize(value);
   let text = '';
   let start = 0;
   for (let index = 0; index < value.length; index++) {

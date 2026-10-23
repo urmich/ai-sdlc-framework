@@ -7,6 +7,26 @@ import assert from 'node:assert/strict';
 import { LIMITS, createSummarySanitizer, digest, safeSummary } from '../src/core.mjs';
 import { reduceTestHistory, sanitizeExecutionPayload, validateRetainedPayload } from '../src/validation-evidence.mjs';
 
+test('T-PRD037 markerless payload text retains core redaction without impossible structured scans', t => {
+  const value = 'owned-markerless-path/0123456789abcdef';
+  const replace = String.prototype.replace;
+  let headerScans = 0;
+  t.mock.method(String.prototype, 'replace', function (pattern, ...args) {
+    if (String(this) === value && pattern?.source.includes('Proxy-Authorization')) headerScans++;
+    return Reflect.apply(replace, this, [pattern, ...args]);
+  });
+  validateRetainedPayload(value);
+  assert.equal(headerScans, 0);
+  const jwt = `${Buffer.from('{"alg":"HS256"}').toString('base64url')}.opaque.payload`;
+  assert.throws(() => validateRetainedPayload(jwt), { code: 'UNSAFE' },
+    'Markerless text must still use the existing core redactor');
+  for (const unsafe of [
+    'Authorization: owned-fixture-value',
+    'ACCESS_TOKEN=owned-fixture-value',
+    'result {"password":"owned-fixture-value"}',
+  ]) assert.throws(() => validateRetainedPayload(unsafe), { code: 'UNSAFE' });
+});
+
 function permutations(items) {
   return items.length ? items.flatMap((item, index) =>
     permutations(items.filter((_, other) => other !== index))
