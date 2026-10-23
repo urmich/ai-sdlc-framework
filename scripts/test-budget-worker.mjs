@@ -6,6 +6,9 @@ const fixtureEnvironment = filterFrozenFixtureTransport(process.env, process.arg
 if (fixtureEnvironment.SDLC_DISTRIBUTION_FIXTURE_CONTEXT === undefined) {
   delete process.env.SDLC_DISTRIBUTION_FIXTURE_CONTEXT;
 }
+if (fixtureEnvironment.SDLC_SYNTHETIC_RELEASE_FIXTURE_CONTEXT === undefined) {
+  delete process.env.SDLC_SYNTHETIC_RELEASE_FIXTURE_CONTEXT;
+}
 const resources = JSON.parse(process.env.SDLC_TEST_FILE_RESOURCES ?? '{}');
 const file = path.resolve(process.argv[1]);
 const encodedGroup = process.execArgv.find(argument => argument.startsWith('--conditions=sdlc-group-'));

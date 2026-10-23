@@ -29,8 +29,8 @@ import { isPrerelease, platformEntries, TARGETS, validateWindowsLauncher, verify
 import { generateManifests } from '../packaging/winget/generate.mjs';
 import { generateWindowsTesterPrompt, INPUT_FILENAME, renderWindowsTesterPrompt,
   validateWindowsTesterPrompt } from '../packaging/windows-tester/generate.mjs';
-import { buildPackage } from '../scripts/package.mjs';
-import { buildPlatforms, writeReleaseMetadata } from '../scripts/package-platforms.mjs';
+import { writeReleaseMetadata } from '../scripts/package-platforms.mjs';
+import { materializeSyntheticReleaseInputs, syntheticReleaseLauncher } from '../scripts/synthetic-release-fixture.mjs';
 import { RELEASE_SCOPE, RELEASE_TARGETS, RELEASE_EXECUTION_PLATFORMS, RELEASE_GATE_TARGETS, RELEASE_PRE_CASES, archiveRecord, evidenceIdentity, options,
   copyNativeReports, homebrewMetadata, releaseRepository, sealBundle as sealProductionBundle, selectGateFiles, validateGates, verifyBundle as verifyProductionBundle,
   prepareRelease, prepublicationEvidence, reuseBundle, resumeCandidate, verifyCandidate, windowsTesterInput, windowsTesterReadiness, writeJson } from '../scripts/release-bundle.mjs';
@@ -191,18 +191,14 @@ async function prepareReleaseFixture() {
     'SUPPORTED_PREVIOUS_CHECKSUMS_SHA256', 'SUPPORTED_PREVIOUS_REPOSITORY'].map(key => [key, process.env[key]]));
   for (const key of Object.keys(originalPreviousEnvironment)) delete process.env[key];
   process.env.TMPDIR = path.join(root, 'scratch');
-  payload = await buildPackage({ outputDir: path.join(root, 'npm') });
-  const pe = Buffer.alloc(256);
-  pe.write('MZ');
-  pe.writeUInt32LE(128, 60);
-  pe.writeUInt32LE(0x4550, 128);
-  pe.writeUInt16LE(0x8664, 132);
-  pe.writeUInt16LE(0x20b, 152);
+  const portable = await materializeSyntheticReleaseInputs({ root });
+  payload = portable.payload;
+  const pe = syntheticReleaseLauncher();
   const launcher = path.join(root, 'nonexecutable-PE-test-fixture');
   await fs.writeFile(launcher, pe);
   base = path.join(root, 'base');
-  const built = await buildPlatforms({ artifact: payload.artifact, outputDir: path.join(base, 'assets'),
-    windowsLauncher: launcher, sourceCommit, targets: RELEASE_TARGETS });
+  const built = await writeReleaseMetadata({ artifact: payload.artifact, outputDir: path.join(base, 'assets'),
+    sourceCommit, targets: RELEASE_TARGETS });
   const prerelease = isPrerelease(built.descriptor.version);
   const archive = archiveRecord(built, 'windows-x64');
   const winget = await generateManifests({ version: built.descriptor.version, releaseRepository: repository,
@@ -217,21 +213,8 @@ async function prepareReleaseFixture() {
     sourceCommit, targets: RELEASE_TARGETS,
     metadataFiles: prerelease ? [] : [...winget.files, { artifact: formula, kind: 'homebrew' }] });
   const previousRoot = path.join(root, 'controlled-previous-version-input');
-  await fs.mkdir(previousRoot);
-  const previousPayload = tarGzip(readTarGzip(await fs.readFile(payload.artifact)).map(entry =>
-    entry.path === 'package/package.json' ? { ...entry,
-      data: Buffer.from(JSON.stringify({ ...JSON.parse(entry.data), version: '0.3.0' })) } : entry));
-  const previousArtifact = path.join(previousRoot, 'ai-sdlc-framework-0.3.0.tgz');
-  await fs.writeFile(previousArtifact, previousPayload);
+  const previousArtifact = portable.previousArtifact;
   const previousAssets = path.join(previousRoot, 'assets');
-  await fs.mkdir(previousAssets);
-  // The release builder accepts only the checkout version; older fixtures use the same archive codec directly.
-  for (const target of RELEASE_TARGETS) {
-    const { entries, manifest } = platformEntries(previousPayload, target, pe);
-    const extension = TARGETS[target].extension;
-    const encode = extension === 'zip' ? zip : tarGzip;
-    await fs.writeFile(path.join(previousAssets, `${manifest.name}-${manifest.version}-${target}.${extension}`), encode(entries));
-  }
   const old = await writeReleaseMetadata({ outputDir: previousAssets, artifact: previousArtifact,
     sourceCommit: 'b'.repeat(40), targets: RELEASE_TARGETS });
   const oldFormula = path.join(previousRoot, 'ai-sdlc-framework.rb');

@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises';
 import { frozenDistributionContext } from './frozen-distribution-fixture.mjs';
+import { prepareSelectedSyntheticReleaseFixture, syntheticReleaseContextVariable } from './synthetic-release-fixture.mjs';
 import { assertCommittedSourceInputs } from './committed-source-inputs.mjs';
 import path from 'node:path';
 import os from 'node:os';
@@ -1582,7 +1583,7 @@ export async function runNativeValidation(options) {
       repositoryId: `repository-${process.env.GITHUB_REPOSITORY_ID}`,
       runId: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT };
     for (const name of ['NODE_AUTH_TOKEN', 'NPM_TOKEN', 'GITHUB_TOKEN', 'GH_TOKEN',
-      'SDLC_DISTRIBUTION_FIXTURE_CONTEXT']) delete environment[name];
+      'SDLC_DISTRIBUTION_FIXTURE_CONTEXT', syntheticReleaseContextVariable]) delete environment[name];
     const bootstrap = await readOptional(process.env.SDLC_NATIVE_TOOLCHAIN_REPORT ?? path.join(directory, 'missing-bootstrap.json'));
     const bootstrapCapability = requireNativeBootstrapCapability({ bootstrap, inventory: inputs.inventory, plan: inputs.plan, assignment,
       target, profile, component, shard,
@@ -1702,6 +1703,13 @@ export async function runNativeValidation(options) {
       directory: environment.SDLC_RELEASE_DIR,
       targets: environment.SDLC_DISTRIBUTION_TARGETS.split(','), context, kind: fixtureKind,
     }));
+    const syntheticRelease = await prepareSelectedSyntheticReleaseFixture({
+      stages: inputs.stages, target, directory: path.join(scratch, 'synthetic-release-fixture'), environment,
+      expectedSourceCommit: revision, expectedTree: tree,
+    });
+    if (syntheticRelease) {
+      environment[syntheticReleaseContextVariable] = JSON.stringify(syntheticRelease);
+    }
     for (const selected of inputs.stages.filter(stage => stage.name === 'regression')) await stage(selected);
     if (part === undefined || part.procedures.includes('calculator')) {
     const calculator = await runTool({ name: 'calculator-command', command: process.execPath,

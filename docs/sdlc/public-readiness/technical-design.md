@@ -602,6 +602,11 @@ grace period or later destructive signal is introduced.
 The native ownership fixture reserves four aggregate worker slots for its
 test process and three real child processes, without changing host capacities
 or the one-second settlement bound.
+The denied installer lifecycle likewise reserves four slots for its observed
+test/runtime/runtime/CLI process chain. Its child environment still excludes
+broker credentials, so the owning test reserves their capacity in advance.
+This is process accounting, not a change to host limits, execution deadlines,
+durability or a claim about contention causality.
 The Windows periodic-checkpoint fixture injects its classified failure without
 asynchronous preparation inside the timed replacement attempt. Its marker is
 prepared beforehand and published only after a subsequent real replacement;
@@ -620,6 +625,20 @@ interchangeable with native frozen artifacts; distribution context transport
 continues to exclude that consumer. The PR-only denied-build control reserves
 three slots for its test worker and two nested Node processes. This removes
 unused setup without weakening real builder requirements or adding a cache.
+The selected native producer can prepare a separate six-file synthetic release
+input set once, after candidate verification and before regression dispatch.
+Its actual source origin and recipe/configuration binding are distinct from
+the original synthetic current/previous descriptor revisions and PE recipe.
+Only release-fixture consumers receive the dedicated
+`SDLC_SYNTHETIC_RELEASE_FIXTURE_CONTEXT`; unrelated workers and reporter/broker
+channels do not retain it.
+The reader revalidates registered source/index/raw-mode identity and every
+archive's bytes, layout and modes on each use, then exclusively writes private
+consumer copies. Supplied invalid context fails closed; absence alone selects
+the real-build fallback. Pure policy, unit, refresh and unrelated selections
+do not prepare it. Metadata constructors, owned paths, environment lifecycle
+and tester/context generation stay fresh. No assertion-time real launcher,
+reproduction, nondeterminism or cold-build call is replaced.
 
 Native fixture setup transports its verified candidate/source/artifact identity
 in a dedicated context, never a reporter control. Only the exact distribution

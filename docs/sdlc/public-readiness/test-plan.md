@@ -415,6 +415,27 @@ zero builds while real consumers still require one initialization; it reserves
 three slots for its worker, child test coordinator and child file worker.
 The release test remains excluded from distribution-only context transport.
 No native speedup or broader fixture reuse is established by this control.
+Selected producers may separately prepare six exact synthetic release inputs:
+current npm/Mac/Windows archives and the matching previous-version three.
+Bind their actual committed source/tree/index/raw modes and recipe/configuration
+separately from the unchanged synthetic descriptor revisions and PE bytes.
+`SDLC_SYNTHETIC_RELEASE_FIXTURE_CONTEXT` reaches only the exact release test.
+Every use rechecks source and all six buffers before exclusively copying them
+into consumer-owned literal files. Stale, linked, altered, missing, foreign or
+incomplete supplied inputs fail rather than rebuilding; only absent input uses
+the original builders. Unit, refresh, unrelated and fixture-free selections do
+not prepare unused inputs.
+Per-consumer metadata, environment, tester/context state and paths remain fresh.
+Assertion-time launcher, archive/formula reproduction, nondeterminism and
+independent cold builds are not intercepted. Four new PR-only controlled roots
+cover codec byte/mode equivalence, once-only preparation, rejection and private
+copy/canary isolation, fresh metadata and retained builder boundaries; nested
+consumer checks reserve three worker slots. These controls do not establish
+authentic npm/compiler/native equivalence or a native lane speedup.
+Bootstrap regressions derive Go needs from applicable selected schema and genuine
+launcher root identities, not a fixed body position; unit Go omission and all
+missing/invented-tool refusals remain. Retained release-setup comparison outputs
+use invocation-unique directories and preserve earlier failed and passing files.
 Fixture snapshots use only registered Git index paths, including intent-to-add
 source files, never arbitrary untracked workspace data. A one-commit snapshot
 without the historical object or alternates must execute the two representative
@@ -459,6 +480,11 @@ period. Native ownership failures retain safe code/signal/cleanup observations
 before assertions. The real-kernel root reserves four aggregate slots for its
 test worker, owned root, descendant writer and unrelated sibling; host worker
 limits and the one-second settlement bound remain unchanged.
+The npm-denied lifecycle also reserves four slots for its test worker, outer
+installer runtime, activated runtime and framework CLI. Phase observations
+establish those concurrent process identities, not a CPU or I/O contention
+cause; host capacities, the 15-second execution watchdog and all lifecycle
+assertions remain unchanged.
 A failure during provider cancellation is not discarded or
 attributed to cancellation without evidence.
 Optional broker inspection uses an abortable owned request socket. Timeout

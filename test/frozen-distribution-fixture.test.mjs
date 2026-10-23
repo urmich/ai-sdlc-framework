@@ -603,7 +603,7 @@ test('T-PRD057 fixture-free release policy avoids builders while real consumers 
       stdoutSha256: sha256(result.stdout), stderrSha256: sha256(result.stderr) };
     results.push(observed);
     if (process.env.SDLC_TEST_EVIDENCE_ROOT) {
-      const retained = path.resolve(process.env.SDLC_TEST_EVIDENCE_ROOT, `release-setup-${name}`);
+      const retained = path.resolve(process.env.SDLC_TEST_EVIDENCE_ROOT, `${path.basename(root)}-${name}`);
       const relative = path.relative(ROOT, retained);
       assert.equal(relative.split(path.sep)[0], '.test-data');
       assert.ok(!relative.split(path.sep).includes('..'));

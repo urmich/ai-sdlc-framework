@@ -6,6 +6,10 @@ export const validationDeclarations = {
     {"options": "{skip:!hostTarget||process.platform==='win32'&&!windowsLauncher}", "excludeNames": ["T-51 npm-denied standalone lifecycle preserves unrelated content and runtime until explicit purge"], "platforms": ["windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Supported standalone distributions require their native host; missing Windows launcher is blocked, not an exemption.", "prerequisites": ["Frozen supported archive", "Real Windows PE launcher on Windows", "Isolated channel and Copilot home"]},
     {"names": ["T-51 npm-denied standalone lifecycle preserves unrelated content and runtime until explicit purge"], "platforms": ["macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Real network-and-npm denial uses the supported Mac adapter. Windows network denial has no validated adapter and remains a separate explicit limitation, not a native Windows pass.", "prerequisites": ["Verified Mac network negative controls", "Isolated standalone archive lifecycle"]}
   ],
+  "groups": [{
+    "root": "T-51 npm-denied standalone lifecycle preserves unrelated content and runtime until explicit purge",
+    "minimumSlots": 4
+  }],
   "surfaces": [
     {"coverage": "direct", "paths": ["scripts/package-platforms.mjs", "scripts/verify-platform-package.mjs", "packaging/standalone/archive.mjs", "packaging/standalone/protocol.mjs"]},
     {"coverage": "process", "paths": ["packaging/standalone/install.sh", "packaging/standalone/install.ps1", "packaging/standalone/runtime.mjs", "packaging/standalone/sdlc"]}
