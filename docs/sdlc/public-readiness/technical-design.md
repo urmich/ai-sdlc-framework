@@ -374,6 +374,11 @@ is a stretch goal. Its observation cutoff moves from sixteen to twenty minutes,
 without changing command watchdogs, owned-process settlement or other limits.
 Configured host fan-out, an isolated shard time or an elapsed-work estimate is
 not a passing latency result; fresh complete hosted measurements are required.
+Use the existing measured-file priority policy to start the retained-identity
+acceptance family before the shorter file families. Its observed Intel tail
+had no dependency but waited for earlier dispatches; retain its complete
+38-assertion root closure and existing internal ordering/concurrency. This
+changes neither host capacity nor explicit targeted caller order.
 
 Reuse only verified immutable fixture inputs such as an unchanged payload
 build. Keep transactions, durability flushes, lock races, archival and cleanup
@@ -589,6 +594,12 @@ assertion, cleanup, cancellation or provenance failure remains non-passing and
 retains its owned evidence. No new timeout, grace, process allowance, CI part
 or reduced iteration/durability boundary is introduced; child setup, execution,
 retention and cleanup remain inside whole-root and whole-lane measurements.
+The preservation guard binds the outer dispatch and reconstructs the original
+callback fingerprint from the actual exported scenario. The command observer
+and broker socket-close observer are independent: the same owned closed lease
+must be bounded by an actual post-command broker inspection, not an assumed
+ordering between those observers or an added grace interval. Retain that
+inspection timestamp with the closed lease, including on validation failure.
 
 The standalone `validation-benchmark.mjs` adapter consumes explicitly owned
 baseline/candidate workspaces, worker budget, focused assertion-ID JSON and an

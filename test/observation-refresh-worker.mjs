@@ -147,8 +147,11 @@ export async function validateRefreshWorkerResult(report, expected, leases) {
   assert.ok(timestamp(report.startedAt) <= timestamp(outcome.lease.startedAt) &&
     timestamp(outcome.lease.startedAt) <= timestamp(outcome.finishedAt) &&
     timestamp(outcome.finishedAt) <= timestamp(report.finishedAt));
+  const leaseObservedAt = timestamp(expected.leaseObservedAt);
+  assert.ok(timestamp(report.finishedAt) <= leaseObservedAt, 'Inspect the lease after command completion');
+  // The broker observes socket closure independently of the command observer.
   assert.ok(timestamp(finishedAt) >= timestamp(outcome.finishedAt) &&
-    timestamp(finishedAt) <= timestamp(report.finishedAt), 'Actual child lease must close within its execution');
+    timestamp(finishedAt) <= leaseObservedAt, 'Actual child lease must be closed by its broker inspection');
   assert.equal(typeof outcome.fixtureRoot, 'string');
   assert.equal(path.dirname(outcome.fixtureRoot), expected.fixtureParent);
   assert.match(path.basename(outcome.fixtureRoot), /^[a-f0-9-]{36}$/u);
@@ -192,19 +195,25 @@ async function runOwnedRefresh(t, scope) {
       signal: t.signal ? AbortSignal.any([budget.signal, t.signal]) : budget.signal,
     });
     leases = await readGroups(budget, groupId);
+    expected.leaseObservedAt = new Date().toISOString();
+    t.diagnostic?.(JSON.stringify({ refreshLeaseObservation: {
+      sourceDigest, groupId, nonce, pid: report.pid, commandFinishedAt: report.finishedAt,
+      observedAt: expected.leaseObservedAt, leases } }));
     const outcome = await validateRefreshWorkerResult(report, expected, leases);
     assert.equal(await refreshIdentity(scope), sourceDigest, 'Refresh sources changed during execution');
     const allocation = await budget.snapshot();
     return { report, outcome, expected, leases, allocation, root };
   } catch (error) {
     primary = error;
-    error.refreshWorker = { root, sourceDigest, groupId, report, leases };
+    error.refreshWorker = { root, sourceDigest, groupId, report, leases,
+      leaseObservedAt: expected.leaseObservedAt };
     throw error;
   } finally {
     try { await budget.close(); removable = !primary; }
     catch (error) {
       if (!primary) {
-        error.refreshWorker = { root, sourceDigest, groupId, report, leases };
+        error.refreshWorker = { root, sourceDigest, groupId, report, leases,
+          leaseObservedAt: expected.leaseObservedAt };
         throw error;
       }
       primary.budgetCleanup = processDiagnostic(error);

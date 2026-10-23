@@ -38,6 +38,7 @@ import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { executeValidationCommand } from '../scripts/validation-tools.mjs';
+import { runRefreshScenario } from './observation-refresh-worker.mjs';
 import { compileCoverage, prepareCoverage, renderCoverageSection, readCoverageSection,
   replaceCoverageSection, inspectCoverage } from '../src/coverage.mjs';
 
@@ -758,7 +759,16 @@ test('T-PRD017 recursive source additions, renames and deletions retain exact sh
     assert.equal(original.length, 1);
     assert.equal(original[0].file, 'test/observation-retention-refresh.test.mjs');
     assert.equal(original[0].id, 'assertion-8dc566af6d5f4cba896fde6196863255393355cf4a0450e3bbe3d515788358eb');
-    assert.equal(original[0].definitionDigest, 'f03ae57142aa5719195f61fa979581e7ac2e42d82ce8909656eb9a96c0383d3b');
+    assert.equal(original[0].definitionDigest, '223b543cd32b194dffc9c7c3eb2328e5dd7af64cd1df41de517907ed1b7521b6');
+    const scenario = runRefreshScenario.toString().replace(/\r\n/gu, '\n')
+      .replace(/^async function runRefreshScenario\(t\) \{/u,
+        `test('${original[0].name}', async t => {`)
+      .replace(/\n  return \{ fixtureRoot: f\.root \};\n\}$/u, '\n});');
+    const preserved = discoverDeclarations(scenario, original[0].file);
+    assert.deepEqual(preserved.unresolved, []);
+    assert.equal(preserved.cases.length, 1);
+    assert.equal(preserved.cases[0].definitionDigest,
+      'f03ae57142aa5719195f61fa979581e7ac2e42d82ce8909656eb9a96c0383d3b');
     const shards = partitionValidationInventory(inventory, 4, [{
       assertionId: original[0].id, sourceDigest: original[0].sourceDigest, durationMs: 100000,
     }]);

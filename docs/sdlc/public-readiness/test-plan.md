@@ -1069,6 +1069,10 @@ regression hosts. Keep the two-unit topology, case union and all other selected
 allocations unchanged for this comparison: the four-slot regression trial did
 not complete before the cutoff. Do not claim a whole-lane speedup before complete
 hosted results.
+Keep the measured retained-identity acceptance family ahead of the shorter
+file families in the existing expensive-first policy. Verify both hosted
+selection order and actual implicit dispatch; explicit targeted caller order
+remains unchanged. Earlier dispatch is not itself proof of a native speedup.
 Verify the actual producer's requested/capacity fields and shared
 nested-allocation bounds; the default local gate and 32-slot ceiling do not
 change. Account for the personal-account limit of five concurrent hosted Mac
@@ -1150,6 +1154,13 @@ PID, source/preload identity, live and closed leases, inherited budget and
 completed cleanup; neither a forged result nor a cheap control can pass the
 real root. The outer result includes the complete child interval. Local
 functional and timing observations remain separate from native acceptance.
+The preservation guard must verify both the exact outer dispatch and the
+original callback reconstructed from the actual exported scenario; changing
+only the expected wrapper fingerprint does not establish preserved assertions.
+Broker socket-close observation may follow command completion. Bound the
+closed lease by the actual post-command broker inspection, reject absent,
+premature or future inspection evidence, and retain both observer timestamps.
+Do not substitute a timing tolerance or claim clock skew from missing evidence.
 
 ## 7. PR matrix procedure
 

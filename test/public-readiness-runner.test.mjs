@@ -1630,6 +1630,8 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
       'test/observation-retention-refresh.test.mjs'),
     discoverDeclarations("import test from 'node:test';test('T-PRD024 measured observer tail',()=>{});",
       'test/public-readiness-observer.test.mjs'),
+    discoverDeclarations("import test from 'node:test';test('retained identity acceptance through existing public consumers',()=>{});",
+      'test/github-retained-identity-acceptance.test.mjs'),
   ];
   const inventory = { complete: true, files: declarations.map(source =>
     ({ file: source.file, sourceDigest: source.sourceDigest })), cases: declarations.flatMap(source => source.cases) };
@@ -1640,7 +1642,10 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
   ] });
   assert.ok(selected.units.cases.some(test => test.name === 'unit family without local binding'));
   assert.ok(selected.units.cases.some(test => test.name === 'T-PRD008 selected planned unit'));
-  assert.equal(selected.regression.files[0], 'test/observation-retention-refresh.test.mjs');
+  assert.deepEqual(selected.regression.files.slice(0, 2), [
+    'test/observation-retention-refresh.test.mjs',
+    'test/github-retained-identity-acceptance.test.mjs',
+  ]);
   assert.equal(selected.units.files[0], 'test/public-readiness-observer.test.mjs');
   assert.deepEqual(Object.values(selected).flatMap(stage => stage.cases.map(test => test.id)).sort(),
     inventory.cases.map(test => test.id).sort());
@@ -1655,13 +1660,14 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
     ['observation-retention-refresh.test.mjs', 'retention'],
     ['github-operation-results.unit.test.mjs', 'operation'],
     ['public-readiness-observer.test.mjs', 'observer'],
+    ['github-retained-identity-acceptance.test.mjs', 'retained-identity'],
   ]) await fs.writeFile(path.join(f.root, 'test', file),
     "import test from 'node:test';import {appendFile} from 'node:fs/promises';" +
     `test('dispatch ${value}',()=>appendFile(${JSON.stringify(marker)},'${value}\\n'));`);
   const result = await f.invoke(['full', '--workers', '1']);
   assert.equal(result.exitCode, 0, result.stdout + result.stderr);
   assert.deepEqual((await fs.readFile(marker, 'utf8')).trim().split(/\r?\n/u),
-    ['retention', 'observer', 'operation']);
+    ['retention', 'observer', 'retained-identity', 'operation']);
 });
 
 test('T-PRD010 nested producers retain one aggregate budget, queued work and ordered real file outcomes', async t => {

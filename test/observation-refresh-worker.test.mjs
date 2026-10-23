@@ -59,6 +59,21 @@ test('T-PRD010 refresh controller owns one closed budgeted child and rejects for
   await assert.rejects(validateRefreshWorkerResult(result.report,
     { ...result.expected, scope: 'refresh' }, result.leases),
   'A cheap control result must never complete the protected 550-refresh root');
+  const start = Date.parse(outcome.lease.startedAt);
+  const commandFinishedAt = new Date(start + 1).toISOString();
+  const closedAt = new Date(start + 2).toISOString();
+  const observedAt = new Date(start + 3).toISOString();
+  const lateReport = { ...result.report, finishedAt: commandFinishedAt,
+    stdout: encode({ ...outcome, finishedAt: commandFinishedAt }) };
+  const lateLeases = [{ ...result.leases[0], finishedAt: closedAt }];
+  const lateExpected = { ...result.expected, leaseObservedAt: observedAt };
+  await validateRefreshWorkerResult(lateReport, lateExpected, lateLeases);
+  await assert.rejects(validateRefreshWorkerResult(lateReport, lateExpected,
+    [{ ...lateLeases[0], finishedAt: new Date(start + 4).toISOString() }]));
+  await assert.rejects(validateRefreshWorkerResult(lateReport,
+    { ...lateExpected, leaseObservedAt: new Date(start).toISOString() }, lateLeases));
+  await assert.rejects(validateRefreshWorkerResult(lateReport,
+    { ...lateExpected, leaseObservedAt: undefined }, lateLeases));
   await fs.mkdir(outcome.fixtureRoot);
   await assert.rejects(validateRefreshWorkerResult(result.report, result.expected, result.leases));
   await fs.rmdir(outcome.fixtureRoot);
