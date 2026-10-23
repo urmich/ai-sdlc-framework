@@ -1207,6 +1207,17 @@ permission failure. The focused regression remains PR-only.
    unions including descendants, dependencies and exclusive resources. The new
    Intel producer has no unit prerequisite of its own. Every Intel regression
    must wait for both unit jobs, not a borrowed ARM/original-unit result.
+   Also require the Linux Mac-admission coordinator before Intel regression
+   dispatch. Observe all four ARM regression parts obtaining actual workers
+   in the exact same repository/run/attempt/head context before admission
+   completes. Reject queued placeholder timestamps, duplicates, mismatched
+   identities, unavailable or incomplete provider pages and cancelled parts
+   without allocation. Admission must not wait for allocated ARM parts to
+   complete, consume a waiting Mac VM, add a native part or supply passing
+   assertion credit. Exercise bounded timeout/cancellation without a passing
+   fallback. Preserve ARM's own unit barrier, both Intel units and all
+   twenty-five native parts and worker limits; verify real overlap and queues
+   again on the next frozen candidate.
    Keep `native-framework-shards-v1` global-barrier and
    `native-framework-shards-v2-platform-units` twenty-part replay distinct,
    including their eighteen framework SDK origins; also retain v3's twenty-four

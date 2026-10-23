@@ -15,7 +15,7 @@ import * as native from './native-validation.mjs';
 import { validateNativeHomebrewEvidence } from './release-gate.mjs';
 import { createReadinessGitHubClient, requireReadinessGitHubClient } from './github-readiness-host.mjs';
 import { evaluateApproval, evaluateConversations, reconcilePrReadiness, statusContexts } from './pr-readiness.mjs';
-import { inspectWorkflowPolicy } from './workflow-policy.mjs';
+import { inspectWorkflowPolicy, workflowActionPins } from './workflow-policy.mjs';
 import { calculatorProjectFiles, calculatorSelection, reconcileCalculator } from './pr-calculator.mjs';
 import { homebrewToolchain } from './toolchain-baseline.mjs';
 import { sourceNativeBootstrapProtocol, requireNativeBootstrapCapability,
@@ -133,9 +133,99 @@ async function mapReads(values, operation) {
   return result;
 }
 
+const macAdmissionResourcePolicy = 'arm-regression-allocation-v1';
+
+function expectedMacAdmissionJob() {
+  return {
+    needs: ['intent', 'source', 'native-units-ma'],
+    if: "${{ needs.intent.outputs.requires-native == 'true' }}",
+    name: 'Mac regression admission', 'runs-on': labels['linux-x64'], 'timeout-minutes': 10,
+    permissions: { actions: 'read', contents: 'read' },
+    env: {
+      SDLC_REPOSITORY_ID: '${{ github.repository_id }}',
+      SDLC_PR_NUMBER: "${{ github.event.pull_request.number || '' }}",
+      SDLC_HEAD_REPOSITORY_ID: "${{ github.event.pull_request.head.repo.id || '' }}",
+      SDLC_HEAD_SHA: "${{ github.event.pull_request.head.sha || '' }}",
+      SDLC_BASE_SHA: "${{ github.event.pull_request.base.sha || '' }}",
+      SDLC_MERGE_SHA: '${{ github.sha }}', SDLC_EVENT: '${{ github.event_name }}',
+    },
+    steps: [
+      { name: 'Record trusted execution context', 'working-directory': '${{ github.workspace }}',
+        run: 'node -e \'const e=process.env;console.log("sdlc-run-context:"+JSON.stringify({repositoryId:e.SDLC_REPOSITORY_ID,prNumber:e.SDLC_PR_NUMBER||null,headRepositoryId:e.SDLC_HEAD_REPOSITORY_ID||null,headSha:e.SDLC_HEAD_SHA||null,baseSha:e.SDLC_BASE_SHA||null,mergeSha:e.SDLC_MERGE_SHA,event:e.SDLC_EVENT,runId:e.GITHUB_RUN_ID,attempt:e.GITHUB_RUN_ATTEMPT,platform:process.platform,architecture:process.arch}));\'\n' },
+      { name: 'Check out exact candidate', uses: `actions/checkout@${workflowActionPins['actions/checkout']}`,
+        with: { path: 'source', ref: '${{ needs.source.outputs.source-commit }}', 'persist-credentials': false } },
+      { name: 'Materialize committed source bytes',
+        run: 'git config --local core.autocrlf false\ngit config --local core.eol lf\n' +
+          'git -c core.autocrlf=false -c core.eol=lf checkout-index --force --all\n' },
+      { name: 'Select pinned native Node', uses: `actions/setup-node@${workflowActionPins['actions/setup-node']}`,
+        with: { 'node-version': '24.20.0', architecture: 'x64', 'check-latest': false } },
+      { name: 'Wait for actual ARM worker allocation',
+        env: { GITHUB_TOKEN: '${{ github.token }}',
+          ADMISSION_HEAD_SHA: '${{ github.event.pull_request.head.sha || github.sha }}' },
+        run: 'mkdir -p .test-data\nnode scripts/macos-runner-admission.mjs --repository "$GITHUB_REPOSITORY" ' +
+          '--run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --head-sha "$ADMISSION_HEAD_SHA" ' +
+          '--output .test-data/mac-admission.json\n' },
+      { name: 'Retain Mac admission observation', if: '${{ always() }}',
+        uses: `actions/upload-artifact@${workflowActionPins['actions/upload-artifact']}`,
+        with: { name: 'mac-admission-${{ github.run_id }}-${{ github.run_attempt }}',
+          path: 'source/.test-data/mac-admission.json', 'if-no-files-found': 'warn', 'retention-days': 90 } },
+    ],
+  };
+}
+
+function macAdmissionPolicyMatches(document, protocol) {
+  const summary = document.jobs?.['producer-summary'];
+  const expectedSummary = {
+    permissions: {}, name: 'Native producer completeness', if: '${{ always() }}',
+    needs: summary?.needs ?? null, 'runs-on': labels['linux-x64'], 'timeout-minutes': 5,
+    steps: [{
+      name: 'Report complete producer scheduling', 'working-directory': '${{ github.workspace }}',
+      env: {
+        SOURCE_RESULT: '${{ needs.source.result }}', MINIMUM_NODE_RESULT: '${{ needs.minimum-node.result }}',
+        NATIVE_RESULT: '${{ needs.native.result }}', UNITS_RESULT: '${{ needs.native-units.result }}',
+        HOMEBREW_RESULT: '${{ needs.native-homebrew.result }}',
+        WX_UNITS_RESULT: '${{ needs.native-units-wx.result }}', WX_NATIVE_RESULT: '${{ needs.native-wx.result }}',
+        MA_UNITS_RESULT: '${{ needs.native-units-ma.result }}', MA_NATIVE_RESULT: '${{ needs.native-ma.result }}',
+        MI_UNITS_RESULT: '${{ needs.native-units-mi.result }}', MI_NATIVE_RESULT: '${{ needs.native-mi.result }}',
+        MAC_ADMISSION_RESULT: '${{ needs.mac-admission.result }}',
+        INTENT_RESULT: '${{ needs.intent.result }}', REQUIRES_NATIVE: '${{ needs.intent.outputs.requires-native }}',
+      },
+      shell: 'bash',
+      run: [
+        'test "$INTENT_RESULT" = success',
+        'results=("$UNITS_RESULT" "$NATIVE_RESULT" "$WX_UNITS_RESULT" "$WX_NATIVE_RESULT"',
+        '  "$MA_UNITS_RESULT" "$MA_NATIVE_RESULT" "$MI_UNITS_RESULT" "$MI_NATIVE_RESULT" "$HOMEBREW_RESULT"',
+        '  "$MAC_ADMISSION_RESULT")',
+        'if test "$REQUIRES_NATIVE" = false; then',
+        "  printf 'Metadata-only edit: native assertions were not executed; this is not native passing evidence.\\n'",
+        '  test "$SOURCE_RESULT" = skipped',
+        '  test "$MINIMUM_NODE_RESULT" = skipped',
+        '  for result in "${results[@]}"; do test "$result" = skipped; done',
+        '  exit',
+        'fi',
+        'test "$REQUIRES_NATIVE" = true',
+        'test "$MINIMUM_NODE_RESULT" = success',
+        'printf \'Source freeze: %s\\nFour logical lanes / twenty-four required native producer parts: %s\\n\' "$SOURCE_RESULT" "$NATIVE_RESULT"',
+        "printf 'Provider-verified framework/validation is evaluated independently by the trusted observer.\\n'",
+        'test "$SOURCE_RESULT" = success',
+        'for result in "${results[@]}"; do test "$result" = success; done',
+        '',
+      ].join('\n'),
+    }],
+  };
+  return protocol === native.nativeFrameworkShardProtocol &&
+    digest(document.jobs?.['mac-admission'] ?? null) === digest(expectedMacAdmissionJob()) &&
+    digest(document.defaults?.run ?? null) === digest({ 'working-directory': 'source', shell: 'bash' }) &&
+    !Object.keys(document.env ?? {}).some(name =>
+      /^(?:GITHUB_|GH_TOKEN$|NODE_OPTIONS$|NODE_PATH$|ADMISSION_HEAD_SHA$)/u.test(name)) &&
+    // The exact producer dependency set is checked separately below.
+    digest(summary ?? null) === digest(expectedSummary);
+}
+
 export function inspectWorkflowTrust(workflows) {
   const result = inspectWorkflowPolicy(workflows);
   let nativeProtocol = null;
+  let nativeResourcePolicy = null;
   for (const selected of result.workflows.filter(item => item.file === native.nativeWorkflowContract.path)) {
     const jobs = selected.document.jobs;
     const sharded = jobs?.['native-units'] !== undefined;
@@ -149,6 +239,14 @@ export function inspectWorkflowTrust(workflows) {
       native.nativePlatformUnitFrameworkShardProtocol :
       sharded ? native.nativeLegacyFrameworkShardProtocol : null;
     nativeProtocol = protocol;
+    const resourcePolicy = selected.document.env?.SDLC_MAC_ADMISSION_POLICY;
+    const admission = resourcePolicy === macAdmissionResourcePolicy;
+    nativeResourcePolicy = resourcePolicy ?? null;
+    if ((resourcePolicy !== undefined &&
+        (!admission || !macAdmissionPolicyMatches(selected.document, protocol))) ||
+        (!admission && jobs?.['mac-admission'] !== undefined)) {
+      result.blockers.push({ file: selected.file, code: 'MAC_ADMISSION_POLICY_DIFFERS' });
+    }
     const expectedParts = protocol ? native.nativePrPartsForProtocol(protocol) : native.nativeLegacyPrParts;
     const keys = protocol ? [...new Set(expectedParts.map(part =>
       native.nativePartJobKey(part, protocol)))] : ['native'];
@@ -167,18 +265,19 @@ export function inspectWorkflowTrust(workflows) {
           const part = expectedParts.find(part => native.nativePartJobKey(part, protocol) === key);
           const needs = ['intent', 'source', ...(part.shard &&
             !native.nativeFrameworkUnitShardNames(part.target, protocol).includes(part.shard) ?
-            [native.nativePartJobKey({ ...part, shard: 'units' }, protocol)] : [])];
+            [native.nativePartJobKey({ ...part, shard: 'units' }, protocol)] : []),
+          ...(admission && key === 'native-mi' ? ['mac-admission'] : [])];
           return jobs[key]?.strategy?.['fail-fast'] !== false || jobs[key]?.['timeout-minutes'] !== 360 ||
             jobs[key]?.strategy?.matrix?.include?.some(row => native.nativePartJobKey(row, protocol) !== key) ||
             digest(jobs[key]?.needs ?? null) !== digest(needs);
         }) ||
         platformBarrier &&
           digest([...(jobs['producer-summary']?.needs ?? [])].sort()) !==
-            digest(['intent', 'minimum-node', 'source', ...keys].sort())) {
+            digest(['intent', 'minimum-node', 'source', ...keys, ...(admission ? ['mac-admission'] : [])].sort())) {
       result.blockers.push({ file: selected.file, code: 'NATIVE_COMPONENT_MATRIX_DIFFERS' });
     }
   }
-  return { ...result, nativeProtocol, complete: result.blockers.length === 0 };
+  return { ...result, nativeProtocol, nativeResourcePolicy, complete: result.blockers.length === 0 };
 }
 
 export function readTrustedJobContext(job, logs, {
@@ -586,7 +685,7 @@ async function sourceDefinitions(api, sha) {
   const bootstrapProtocol = sourceNativeBootstrapProtocol([{ file: 'scripts/toolchain-baseline.mjs',
     contents: await api.file(tree, 'scripts/toolchain-baseline.mjs') }]);
   return { tree, inventory, goSources, requirements, testPlans, files, adapterSource,
-    frameworkShards, shardProtocol: trust.nativeProtocol, bootstrapProtocol,
+    frameworkShards, shardProtocol: trust.nativeProtocol, resourcePolicy: trust.nativeResourcePolicy, bootstrapProtocol,
     coverage: { repositoryId: 'primary', sourceRevision: sha, requirements, testPlans },
     plan: testPlans.find(plan => plan.artifactId === 'public-readiness').contents };
 }
@@ -646,6 +745,7 @@ export function createPrReadinessHost({
       /^\.github\/actions\//u.test(file) ||
       /^test\/.*\.(?:mjs|js|cjs)$/u.test(file) && !/\.test\.(?:mjs|js|cjs)$/u.test(file))]);
     if (source.bootstrapProtocol !== null) paths.add('scripts/native-bootstrap-capability.mjs');
+    if (source.resourcePolicy === macAdmissionResourcePolicy) paths.add('scripts/macos-runner-admission.mjs');
     return [...paths].every(file => adopted.paths.get(file)?.sha &&
       source.tree.paths.get(file)?.sha === adopted.paths.get(file).sha);
   }

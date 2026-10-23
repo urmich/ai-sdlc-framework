@@ -380,6 +380,24 @@ had no dependency but waited for earlier dispatches; retain its complete
 38-assertion root closure and existing internal ordering/concurrency. This
 changes neither host capacity nor explicit targeted caller order.
 
+The PR workflow uses one Linux read-only admission coordinator before the
+Intel regression matrix. After ARM's own unit barrier, it observes the four
+ARM regression parts in the exact current repository/run/attempt/head context
+and releases Intel only after each has obtained an actual worker. A queued
+`started_at` placeholder is not allocation evidence; a runner or started step
+is required. Completed allocated parts also satisfy admission, so Intel need
+not wait for all ARM work to finish. Both Intel unit producers remain required.
+This avoids a one-second unit-completion race letting Intel occupy the shared
+Mac pool ahead of ARM's shorter delivery deadline.
+The coordinator never occupies a Mac VM while waiting, adds no native producer
+part and does not change the twenty-five-part assertion union, architecture
+coverage, resource allowances or command watchdogs. Its same-run metadata reads
+use an ephemeral read-only CI token, bounded polling and complete pagination;
+identity mismatches, unavailable reads and incomplete allocation fail explicitly.
+An admission receipt proves allocation only, not native correctness or latency.
+Release prepublication and default whole-native execution remain separate and
+unchanged. Fresh complete hosted measurements still decide delivery success.
+
 Reuse only verified immutable fixture inputs such as an unchanged payload
 build. Keep transactions, durability flushes, lock races, archival and cleanup
 real. Any runtime optimization of repeated reads/indexing must preserve revision,

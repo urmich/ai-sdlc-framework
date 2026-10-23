@@ -25,7 +25,8 @@ import { writePayloadFixture, fixtureCanonical, fixtureSHA, fixtureWindowsLaunch
 import { repositoryRoot } from '../scripts/test-runner.mjs';
 import { previousReleasePins } from '../scripts/release-bundle.mjs';
 import { nativePrParts, nativeLegacyPrParts, nativePartJobKey, nativeFrameworkShardPlan,
-  nativeResourceFacts } from '../scripts/native-validation.mjs';
+  nativeResourceFacts, nativePrPartsForProtocol, nativeFrameworkShardProtocols,
+  nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
 import { compileValidationInventory } from '../scripts/validation-inventory.mjs';
 import { expectedBodySdkRequirements } from './native-sdk-expectations.mjs';
 import { digest } from '../src/core.mjs';
@@ -1300,6 +1301,11 @@ test('T-PRD022 actual workflow graph applies semantic YAML, effective permission
   const workflows = await readWorkflowPolicySources(repositoryRoot);
   const positive = inspectWorkflowTrust(workflows);
   assert.equal(positive.complete, true, JSON.stringify(positive.blockers));
+  assert.equal(positive.nativeResourcePolicy, 'arm-regression-allocation-v1');
+  const producer = positive.workflows.find(item => item.file === '.github/workflows/ci.yml');
+  assert.deepEqual(producer.document.permissions, { contents: 'read' });
+  assert.deepEqual(producer.jobs.find(job => job.id === 'mac-admission').effectivePermissions,
+    { actions: 'read', contents: 'read' });
   for (const [file, edit, code] of [
     ['ci.yml', text => text.replace(checkoutPin, `"actions/checkout@v4"`), 'UNPINNED_ACTION'],
     ['ci.yml', text => text.replace(checkoutPin, `"unknown/action@${'f'.repeat(40)}"`), 'UNAPPROVED_ACTION'],
@@ -1363,6 +1369,7 @@ test('T-PRD022 actual workflow graph applies semantic YAML, effective permission
 
 test('T-PRD020 actual fork producer graph rejects secrets, OIDC, real homes and privileged cache reuse', async () => {
   const workflows = await readWorkflowPolicySources(repositoryRoot);
+  assert.equal(inspectWorkflowTrust(workflows).complete, true);
   for (const [file, edit, code] of [
     ['ci.yml', text => text.replace('  native:\n', '  native:\n    permissions: {"contents": "write", "id-token": "write"}\n'), 'EXCESS_JOB_PERMISSION'],
     ['ci.yml', text => text.replace('env:\n', 'env:\n  NPM_TOKEN: ${{ secrets.NPM_TOKEN }}\n'), 'UNAPPROVED_SECRET'],
@@ -1370,6 +1377,12 @@ test('T-PRD020 actual fork producer graph rejects secrets, OIDC, real homes and 
     ['ci.yml', text => text.replace('--candidate-dir .test-data/frozen-candidate', '--candidate-dir ~/.copilot'), 'UNOWNED_INSTALLATION_TARGET'],
     ['pr-readiness.yml', text => text.replace(checkoutPin, `actions/cache@${'a'.repeat(40)}`), 'PRIVILEGED_CACHE_RESTORE'],
     ['pr-readiness.yml', text => text.replace('persist-credentials: false', 'persist-credentials: true'), 'PERSISTED_CHECKOUT_CREDENTIALS'],
+    ['ci.yml', text => text.replace('      actions: read\n      contents: read\n',
+      '      actions: write\n      contents: read\n'), 'EXCESS_JOB_PERMISSION'],
+    ['ci.yml', text => text.replace('      actions: read\n      contents: read\n',
+      '      actions: read\n      contents: read\n      id-token: write\n'), 'EXCESS_JOB_PERMISSION'],
+    ['ci.yml', text => text.replace('GITHUB_TOKEN: ${{ github.token }}',
+      'GITHUB_TOKEN: ${{ secrets.PUBLICATION_TOKEN }}'), 'UNAPPROVED_SECRET'],
   ]) {
     const changed = structuredClone(workflows);
     const selected = changed.find(item => item.file === `.github/workflows/${file}`);
@@ -1551,6 +1564,12 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.deepEqual(ci.jobs.native.needs, ['intent', 'source', 'native-units']);
   assert.deepEqual(ci.jobs['native-units'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-homebrew'].needs, ['intent', 'source']);
+  assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v1');
+  assert.deepEqual(ci.jobs['mac-admission'].needs, ['intent', 'source', 'native-units-ma']);
+  assert.deepEqual(ci.jobs['native-ma'].needs, ['intent', 'source', 'native-units-ma']);
+  assert.deepEqual(ci.jobs['native-mi'].needs, ['intent', 'source', 'native-units-mi', 'mac-admission']);
+  assert.deepEqual(ci.jobs['native-units-ma'].needs, ['intent', 'source']);
+  assert.deepEqual(ci.jobs['native-units-mi'].needs, ['intent', 'source']);
   const keys = ['native-units', 'native', 'native-units-wx', 'native-wx',
     'native-units-ma', 'native-ma', 'native-units-mi', 'native-mi', 'native-homebrew'];
   const parts = keys.flatMap(key => ci.jobs[key].strategy.matrix.include);
@@ -1620,7 +1639,8 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     assert.equal(ci.jobs[key].strategy['fail-fast'], false);
     const part = ci.jobs[key].strategy.matrix.include[0];
     assert.deepEqual(ci.jobs[key].needs, ['intent', 'source',
-      ...(part.shard && part.shard !== 'units' ? [nativePartJobKey({ ...part, shard: 'units' })] : [])]);
+      ...(part.shard && part.shard !== 'units' ? [nativePartJobKey({ ...part, shard: 'units' })] : []),
+      ...(key === 'native-mi' ? ['mac-admission'] : [])]);
     if (part.shard === 'units') {
       assert.equal(ci.jobs[key].strategy.matrix.include.length, part.target === 'macos-x64' ? 2 : 1);
       assert.ok(ci.jobs[key].strategy.matrix.include.every(row =>
@@ -1650,7 +1670,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.equal(ci.jobs['minimum-node'].needs, 'intent');
   assert.equal(ci.jobs['minimum-node'].if, ci.jobs.native.if);
   assert.deepEqual(ci.jobs['producer-summary'].needs,
-    ['intent', 'minimum-node', 'source', ...keys]);
+    ['intent', 'minimum-node', 'source', ...keys, 'mac-admission']);
   const nativeSteps = ci.jobs.native.steps;
   const bootstrapIndex = nativeSteps.findIndex(step => step.name === 'Provision isolated native toolchain');
   const retainedIndex = nativeSteps.findIndex(step => step.name === 'Retain native bootstrap diagnostics');
@@ -1688,6 +1708,127 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
       text => text.replace('needs: [intent, source, native-units-wx]', `needs: ${needs}`),
       'Windows regression must depend on its own complete units job');
     assert.ok(inspectWorkflowTrust(altered).blockers.some(blocker => blocker.code === 'NATIVE_COMPONENT_MATRIX_DIFFERS'));
+  }
+  const documentSource = document => ({
+    file: '.github/workflows/ci.yml',
+    contents: Object.entries(document).map(([key, value]) =>
+      `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n',
+  });
+  const admissionStep = document => document.jobs['mac-admission'].steps
+    .find(step => step.name === 'Wait for actual ARM worker allocation');
+  for (const [label, mutate, code] of [
+    ['missing Intel admission edge', doc => { doc.jobs['native-mi'].needs.pop(); }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
+    ['missing Intel own unit barrier', doc => {
+      doc.jobs['native-mi'].needs = ['intent', 'source', 'mac-admission'];
+    }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
+    ['missing one Intel unit producer', doc => {
+      doc.jobs['native-units-mi'].strategy.matrix.include.pop();
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['missing coordinator with its resource marker retained', doc => {
+      delete doc.jobs['mac-admission'];
+      doc.jobs['native-mi'].needs.pop();
+      doc.jobs['producer-summary'].needs.pop();
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['missing resource marker', doc => { delete doc.env.SDLC_MAC_ADMISSION_POLICY; }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['unknown resource variant', doc => { doc.env.SDLC_MAC_ADMISSION_POLICY = 'unreviewed-v2'; }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['extra Mac VM', doc => { doc.jobs['mac-admission']['runs-on'] = 'macos-15'; }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['extra native part name', doc => { doc.jobs['mac-admission'].name = 'native-macos-arm64-admission'; }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['global unit barrier', doc => {
+      doc.jobs['mac-admission'].needs.push('native-units', 'native-units-mi');
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['ARM completion barrier', doc => {
+      doc.jobs['mac-admission'].needs = ['intent', 'source', 'native-ma'];
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['ARM unit barrier removed', doc => {
+      doc.jobs['native-ma'].needs = ['intent', 'source'];
+    }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
+    ['unfrozen checkout', doc => {
+      doc.jobs['mac-admission'].steps.find(step => step.name === 'Check out exact candidate').with.ref = '${{ github.head_ref }}';
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['persisted checkout credential', doc => {
+      doc.jobs['mac-admission'].steps.find(step => step.name === 'Check out exact candidate').with['persist-credentials'] = true;
+    }, 'PERSISTED_CHECKOUT_CREDENTIALS'],
+    ['missing caller context', doc => { doc.jobs['mac-admission'].steps.shift(); }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['forged caller context', doc => {
+      doc.jobs['mac-admission'].env.SDLC_HEAD_SHA = '${{ github.sha }}';
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['untrusted repository argument', doc => {
+      admissionStep(doc).run = admissionStep(doc).run.replace('"$GITHUB_REPOSITORY"', '"other/repository"');
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['unscoped attempt argument', doc => {
+      admissionStep(doc).run = admissionStep(doc).run.replace(' --attempt "$GITHUB_RUN_ATTEMPT"', '');
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['wrong source argument', doc => {
+      admissionStep(doc).env.ADMISSION_HEAD_SHA = '${{ github.sha }}';
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['unsafe API context', doc => { doc.env.GITHUB_API_URL = 'https://untrusted.invalid'; }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['runtime injection', doc => { doc.env.NODE_OPTIONS = '--import ./untrusted.mjs'; }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['queued timestamp fallback', doc => {
+      admissionStep(doc).run = 'node -e "console.log(jobs.every(job => job.started_at))"';
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['success-shaped fallback', doc => { admissionStep(doc).run += ' || true\n'; }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['writable Actions grant', doc => { doc.jobs['mac-admission'].permissions.actions = 'write'; }, 'EXCESS_JOB_PERMISSION'],
+    ['publication grant', doc => { doc.jobs['mac-admission'].permissions.contents = 'write'; }, 'EXCESS_JOB_PERMISSION'],
+    ['unreviewed step', doc => {
+      doc.jobs['mac-admission'].steps.push({ run: 'node unreviewed.mjs' });
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['wrong execution directory', doc => { doc.defaults.run['working-directory'] = '.'; }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['coordinator omitted from completeness', doc => {
+      doc.jobs['producer-summary'].needs.pop();
+    }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
+    ['coordinator result forged', doc => {
+      doc.jobs['producer-summary'].steps[0].env.MAC_ADMISSION_RESULT = 'success';
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['coordinator result ignored', doc => {
+      const step = doc.jobs['producer-summary'].steps[0];
+      step.run = step.run.replace(' "$MAC_ADMISSION_RESULT"', '');
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['completeness assertion bypassed', doc => {
+      const step = doc.jobs['producer-summary'].steps[0];
+      step.run = step.run.replace('for result in "${results[@]}"; do test "$result" = success; done', 'true');
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['completeness unexpectedly skipped', doc => {
+      doc.jobs['producer-summary'].if = '${{ false }}';
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+  ]) {
+    const document = structuredClone(ci);
+    mutate(document);
+    const changed = workflows.map(source => source.file === '.github/workflows/ci.yml' ?
+      documentSource(document) : source);
+    const rejected = inspectWorkflowTrust(changed);
+    assert.equal(rejected.complete, false, label);
+    assert.ok(rejected.blockers.some(blocker => blocker.code === code),
+      `${label}: ${JSON.stringify(rejected.blockers)}`);
+  }
+  for (const protocol of nativeFrameworkShardProtocols) {
+    const historical = structuredClone(ci);
+    delete historical.env.SDLC_MAC_ADMISSION_POLICY;
+    delete historical.jobs['mac-admission'];
+    for (const key of keys) delete historical.jobs[key];
+    const parts = nativePrPartsForProtocol(protocol);
+    const historicalKeys = [...new Set(parts.map(part => nativePartJobKey(part, protocol)))];
+    for (const key of historicalKeys) {
+      const rows = parts.filter(part => nativePartJobKey(part, protocol) === key);
+      const part = rows[0];
+      const unit = nativeFrameworkUnitShardNames(part.target, protocol).includes(part.shard);
+      const job = structuredClone(ci.jobs[part.component === 'homebrew' ? 'native-homebrew' :
+        unit ? 'native-units' : 'native']);
+      job.strategy.matrix.include = rows.map(row => ({ ...row,
+        os: { 'linux-x64': 'ubuntu-24.04', 'windows-x64': 'windows-2022',
+          'macos-arm64': 'macos-15', 'macos-x64': 'macos-15-intel' }[row.target],
+        architecture: row.target.split('-')[1] }));
+      job.needs = ['intent', 'source', ...(part.shard && !unit ?
+        [nativePartJobKey({ ...part, shard: 'units' }, protocol)] : [])];
+      historical.jobs[key] = job;
+    }
+    historical.jobs['producer-summary'].needs = ['intent', 'minimum-node', 'source', ...historicalKeys];
+    const summary = historical.jobs['producer-summary'].steps[0];
+    delete summary.env.MAC_ADMISSION_RESULT;
+    summary.run = summary.run.replace(' "$MAC_ADMISSION_RESULT"', '');
+    const replay = inspectWorkflowTrust([documentSource(historical)]);
+    assert.equal(replay.complete, true, `${protocol}: ${JSON.stringify(replay.blockers)}`);
+    assert.equal(replay.nativeProtocol, protocol);
+    assert.equal(replay.nativeResourcePolicy, null);
   }
   const freeze = ci.jobs.source.steps.find(step => step.name === 'Freeze exact source candidate');
   assert.match(freeze.run, /--phase candidate/u);

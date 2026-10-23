@@ -11,6 +11,7 @@ permissions:
   contents: read
 
 env:
+  SDLC_MAC_ADMISSION_POLICY: arm-regression-allocation-v1
   # Representative public regression input, not an installer version-support whitelist.
   SUPPORTED_PREVIOUS_REPOSITORY: urmich/ai-sdlc-framework
   SUPPORTED_PREVIOUS_VERSION: '0.3.1'
@@ -1079,8 +1080,57 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
+  mac-admission:
+    needs: [intent, source, native-units-ma]
+    if: ${{ needs.intent.outputs.requires-native == 'true' }}
+    name: Mac regression admission
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    env:
+      SDLC_REPOSITORY_ID: ${{ github.repository_id }}
+      SDLC_PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+      SDLC_HEAD_REPOSITORY_ID: ${{ github.event.pull_request.head.repo.id || '' }}
+      SDLC_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+      SDLC_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+      SDLC_MERGE_SHA: ${{ github.sha }}
+      SDLC_EVENT: ${{ github.event_name }}
+    steps:
+      - name: Record trusted execution context
+        working-directory: ${{ github.workspace }}
+        run: |
+          node -e 'const e=process.env;console.log("sdlc-run-context:"+JSON.stringify({repositoryId:e.SDLC_REPOSITORY_ID,prNumber:e.SDLC_PR_NUMBER||null,headRepositoryId:e.SDLC_HEAD_REPOSITORY_ID||null,headSha:e.SDLC_HEAD_SHA||null,baseSha:e.SDLC_BASE_SHA||null,mergeSha:e.SDLC_MERGE_SHA,event:e.SDLC_EVENT,runId:e.GITHUB_RUN_ID,attempt:e.GITHUB_RUN_ATTEMPT,platform:process.platform,architecture:process.arch}));'
+      - name: Check out exact candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: { path: source, ref: '${{ needs.source.outputs.source-commit }}', persist-credentials: false }
+      - name: Materialize committed source bytes
+        run: |
+          git config --local core.autocrlf false
+          git config --local core.eol lf
+          git -c core.autocrlf=false -c core.eol=lf checkout-index --force --all
+      - name: Select pinned native Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: '24.20.0', architecture: x64, check-latest: false }
+      - name: Wait for actual ARM worker allocation
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ADMISSION_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mkdir -p .test-data
+          node scripts/macos-runner-admission.mjs --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --head-sha "$ADMISSION_HEAD_SHA" --output .test-data/mac-admission.json
+      - name: Retain Mac admission observation
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mac-admission-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/.test-data/mac-admission.json
+          if-no-files-found: warn
+          retention-days: 90
+
   native-mi:
-    needs: [intent, source, native-units-mi]
+    needs: [intent, source, native-units-mi, mac-admission]
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
     name: native-${{ matrix.role }}
     strategy:
@@ -1339,7 +1389,7 @@ jobs:
     permissions: {}
     name: Native producer completeness
     if: ${{ always() }}
-    needs: [intent, minimum-node, source, native-units, native, native-units-wx, native-wx, native-units-ma, native-ma, native-units-mi, native-mi, native-homebrew]
+    needs: [intent, minimum-node, source, native-units, native, native-units-wx, native-wx, native-units-ma, native-ma, native-units-mi, native-mi, native-homebrew, mac-admission]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -1357,13 +1407,15 @@ jobs:
           MA_NATIVE_RESULT: ${{ needs.native-ma.result }}
           MI_UNITS_RESULT: ${{ needs.native-units-mi.result }}
           MI_NATIVE_RESULT: ${{ needs.native-mi.result }}
+          MAC_ADMISSION_RESULT: ${{ needs.mac-admission.result }}
           INTENT_RESULT: ${{ needs.intent.result }}
           REQUIRES_NATIVE: ${{ needs.intent.outputs.requires-native }}
         shell: bash
         run: |
           test "$INTENT_RESULT" = success
           results=("$UNITS_RESULT" "$NATIVE_RESULT" "$WX_UNITS_RESULT" "$WX_NATIVE_RESULT"
-            "$MA_UNITS_RESULT" "$MA_NATIVE_RESULT" "$MI_UNITS_RESULT" "$MI_NATIVE_RESULT" "$HOMEBREW_RESULT")
+            "$MA_UNITS_RESULT" "$MA_NATIVE_RESULT" "$MI_UNITS_RESULT" "$MI_NATIVE_RESULT" "$HOMEBREW_RESULT"
+            "$MAC_ADMISSION_RESULT")
           if test "$REQUIRES_NATIVE" = false; then
             printf 'Metadata-only edit: native assertions were not executed; this is not native passing evidence.\n'
             test "$SOURCE_RESULT" = skipped

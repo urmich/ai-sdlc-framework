@@ -22,7 +22,7 @@ export const workflowPermissionPolicies = Object.freeze({
     jobs: { intent: {}, 'minimum-node': read, source: read, 'native-units': read,
       native: read, 'native-units-wx': read, 'native-wx': read,
       'native-units-ma': read, 'native-ma': read, 'native-units-mi': read, 'native-mi': read,
-      'native-homebrew': read, 'producer-summary': {} } },
+      'native-homebrew': read, 'mac-admission': actionsRead, 'producer-summary': {} } },
   '.github/workflows/pr-policy-refresh.yml': { role: 'refresh', workflow: {},
     jobs: { refresh: {}, probe: statusWriter }, jobRoles: { probe: 'observer' } },
   '.github/workflows/pr-readiness.yml': { role: 'observer', workflow: statusWriter, jobs: { observe: statusWriter } },
