@@ -380,23 +380,37 @@ had no dependency but waited for earlier dispatches; retain its complete
 38-assertion root closure and existing internal ordering/concurrency. This
 changes neither host capacity nor explicit targeted caller order.
 
-The PR workflow uses one Linux read-only admission coordinator before the
-Intel regression matrix. After ARM's own unit barrier, it observes the four
+The PR workflow uses two Linux read-only allocation coordinators under
+`arm-regression-allocation-v2-priority-intel-bodies`. The first, `mac-admission`,
+runs after ARM's own unit barrier and observes the four
 ARM regression parts in the exact current repository/run/attempt/head context
-and releases Intel only after each has obtained an actual worker. A queued
+before releasing the three long Intel body parts. Both Intel unit producers
+remain required. ARM's genuine Homebrew producer retains its initial schedule;
+Intel's genuine Homebrew producer is deferred rather than occupying an initial
+shared Mac slot. The second coordinator, `intel-admission`, observes all three
+Intel body workers before releasing the separate Intel refresh and genuine
+Homebrew producers. It must not depend on body completion. Native part names,
+recipes, assertions, retention and cleanup remain unchanged.
+A queued
 `started_at` placeholder is not allocation evidence; a runner or started step
-is required. Completed allocated parts also satisfy admission, so Intel need
-not wait for all ARM work to finish. Both Intel unit producers remain required.
-This avoids a one-second unit-completion race letting Intel occupy the shared
-Mac pool ahead of ARM's shorter delivery deadline.
-The coordinator never occupies a Mac VM while waiting, adds no native producer
-part and does not change the twenty-five-part assertion union, architecture
-coverage, resource allowances or command watchdogs. Its same-run metadata reads
-use an ephemeral read-only CI token, bounded polling and complete pagination;
+is required. Completed allocated parts also satisfy admission; neither stage
+waits for its allocated parts to finish. Each helper invocation selects only
+the closed `arm-regressions` or `intel-bodies` group, defaulting to the former
+for historical callers. Retain the exact historical v1 resource graph and
+unmarked native v1-v4 replay rather than silently adopting new dependencies.
+Neither coordinator occupies a Mac VM while waiting or adds a native producer
+part. The policy does not change the twenty-five-part assertion union,
+architecture coverage, resource allowances or command watchdogs. Their same-run metadata reads
+use ephemeral read-only CI tokens, bounded polling and complete pagination;
 identity mismatches, unavailable reads and incomplete allocation fail explicitly.
-An admission receipt proves allocation only, not native correctness or latency.
+Both gates are included in producer completeness. Bind the split Intel refresh
+and Homebrew cleanup receipts to their actual selected-source job identities;
+stale historical job IDs cannot supply current proof. An admission receipt
+proves allocation only, not native correctness or latency.
 Release prepublication and default whole-native execution remain separate and
 unchanged. Fresh complete hosted measurements still decide delivery success.
+This prioritizes owned work within the existing shared pool; it does not claim
+that Intel Homebrew is the only provider bottleneck or erase provisioning gaps.
 
 Reuse only verified immutable fixture inputs such as an unchanged payload
 build. Keep transactions, durability flushes, lock races, archival and cleanup

@@ -164,8 +164,9 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
   const files = new Map(reporterPaths.map(file => [file,
     file.endsWith('.yml') ? ci : 'throw new Error("candidate reporter must never execute in the observer");\n']));
   assert.ok(['source', 'missing', 'mutated'].includes(admissionHelper));
-  if (parseWorkflow({ file: nativeWorkflowContract.path, contents: ci })
-    .env?.SDLC_MAC_ADMISSION_POLICY === 'arm-regression-allocation-v1' && admissionHelper !== 'missing') {
+  const workflow = parseWorkflow({ file: nativeWorkflowContract.path, contents: ci });
+  if (['arm-regression-allocation-v1', 'arm-regression-allocation-v2-priority-intel-bodies']
+    .includes(workflow.env?.SDLC_MAC_ADMISSION_POLICY) && admissionHelper !== 'missing') {
     const macAdmissionHelper = readFileSync(
       new URL('../scripts/macos-runner-admission.mjs', import.meta.url), 'utf8');
     files.set('scripts/macos-runner-admission.mjs', macAdmissionHelper +
@@ -224,7 +225,9 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
     surfacePaths: [...files.keys()],
   });
   assert.equal(inventory.complete, true, JSON.stringify(inventory.unresolved));
-  return { ...sourceTree(files), inventory, goSources, names, requirements, plan };
+  return { ...sourceTree(files), inventory, goSources, names, requirements, plan,
+    roleJobs: new Map(Object.entries(workflow.jobs).flatMap(([key, job]) =>
+      (job.strategy?.matrix?.include ?? []).map(row => [row.role, key]))) };
 }
 
 function candidateData(sourceCommit, version = '1.2.3', includePrevious = true) {
@@ -675,7 +678,10 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
       ].map(event => JSON.stringify(event)).join('\n') + '\n');
     }
   }
-  return { target, component, shard, frameworkShards, shardProtocol, role, context, specification, data, ImageOS, ImageVersion };
+  const jobKey = frameworkShards ? source.roleJobs.get(role) : 'native';
+  assert.equal(typeof jobKey, 'string', 'Cleanup identity must come from the exact source workflow role');
+  return { target, component, shard, frameworkShards, shardProtocol, role, jobKey,
+    context, specification, data, ImageOS, ImageVersion };
 }
 
 function cleanupData(lane, executionId = runId) {
@@ -688,7 +694,7 @@ function cleanupData(lane, executionId = runId) {
     github: { GITHUB_SERVER_URL: 'https://github.com', GITHUB_REPOSITORY: repository,
       GITHUB_REPOSITORY_ID: String(repositoryId), GITHUB_WORKSPACE: '/controlled-fixture',
       GITHUB_RUN_ID: String(executionId), GITHUB_RUN_ATTEMPT: '1',
-      GITHUB_JOB: lane.frameworkShards ? nativePartJobKey(lane, lane.shardProtocol) : 'native',
+      GITHUB_JOB: lane.jobKey,
       RUNNER_NAME: `controlled-${lane.role}`, RUNNER_ENVIRONMENT: 'github-hosted',
       RUNNER_OS: 'macOS', RUNNER_ARCH: lane.target === 'macos-arm64' ? 'ARM64' : 'X64' } };
   const request = { schemaVersion: 1, kind: 'owned-native-homebrew-prefix',

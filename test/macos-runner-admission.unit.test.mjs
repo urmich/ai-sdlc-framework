@@ -204,7 +204,37 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   assert.deepEqual(ci.jobs['native-ma'].needs, ['intent', 'source', 'native-units-ma']);
   assert.deepEqual(ci.jobs['native-units-ma'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-units-mi'].needs, ['intent', 'source']);
+  assert.deepEqual(ci.jobs['intel-admission'].needs, ['intent', 'source', 'native-units-mi', 'mac-admission']);
+  assert.deepEqual(ci.jobs['native-mi-refresh'].needs, ['intent', 'source', 'native-units-mi', 'intel-admission']);
+  assert.deepEqual(ci.jobs['native-homebrew'].needs, ['intent', 'source']);
+  assert.deepEqual(ci.jobs['native-homebrew-mi'].needs, ['intent', 'source', 'intel-admission']);
+  assert.deepEqual(ci.jobs['native-mi'].strategy.matrix.include.map(part => part.shard),
+    ['body-0', 'body-1', 'body-2']);
+  assert.equal(ci.jobs['native-mi-refresh'].strategy.matrix.include.length, 1);
+  assert.equal(ci.jobs['native-homebrew'].strategy.matrix.include[0].target, 'macos-arm64');
+  assert.equal(ci.jobs['native-homebrew'].strategy.matrix.include.length, 1);
+  assert.equal(ci.jobs['native-homebrew-mi'].strategy.matrix.include[0].target, 'macos-x64');
+  const intelGate = ci.jobs['intel-admission'];
+  assert.equal(intelGate.name, 'Intel body admission');
+  assert.equal(intelGate['runs-on'], 'ubuntu-24.04');
+  assert.equal(intelGate['timeout-minutes'], 10);
+  assert.deepEqual(intelGate.permissions, { actions: 'read', contents: 'read' });
+  assert.match(intelGate.steps.find(step => step.name === 'Wait for actual Intel body worker allocation').run,
+    /--group intel-bodies --output \.test-data\/intel-admission\.json/u);
+  const visiting = new Set();
+  const complete = new Set();
+  const visit = key => {
+    assert.ok(ci.jobs[key], `Unknown prerequisite ${key}`);
+    assert.ok(!visiting.has(key), `Dependency cycle at ${key}`);
+    if (complete.has(key)) return;
+    visiting.add(key);
+    for (const dep of [ci.jobs[key].needs ?? []].flat()) visit(dep);
+    visiting.delete(key);
+    complete.add(key);
+  };
+  for (const key of Object.keys(ci.jobs)) visit(key);
   assert.ok(ci.jobs['producer-summary'].needs.includes('mac-admission'));
+  assert.ok(ci.jobs['producer-summary'].needs.includes('intel-admission'));
   const summary = ci.jobs['producer-summary'].steps[0];
   assert.equal(summary.env.MAC_ADMISSION_RESULT, '${{ needs.mac-admission.result }}');
   assert.match(summary.run, /"\$MAC_ADMISSION_RESULT"/u);
@@ -233,6 +263,54 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
     /--attempt "\$GITHUB_RUN_ATTEMPT".*--head-sha "\$ADMISSION_HEAD_SHA"/u);
   assert.equal(criticalProfileBudget.maximumRootChecks, 27);
   assert.equal(criticalProfileBudget.maximumAssertions, 27);
+});
+
+test('T-MACADM012 closed Intel group admits three allocated long bodies without waiting for completion or short roles', () => {
+  const intel = jobs({ status: 'in_progress', runner_name: 'synthetic-worker' }).slice(0, 3)
+    .map((job, index) => ({ ...job, name: `native-macos-x64-framework-body-${index}` }));
+  const identity = { ...expected, group: 'intel-bodies' };
+  const queued = intel.map(job => ({ ...job, status: 'queued', runner_name: '' }));
+  assert.equal(evaluateMacAdmission(observation(queued), identity).admitted, false);
+  assert.equal(evaluateMacAdmission(observation(intel.slice(0, 2)), identity).admitted, false);
+  const shortRoles = ['native-macos-x64-framework-refresh', 'native-macos-x64-homebrew']
+    .map((name, index) => ({ ...jobs()[0], id: 99 + index, name }));
+  const result = evaluateMacAdmission(observation([...intel, ...shortRoles]), identity);
+  assert.equal(result.admitted, true);
+  assert.equal(result.group, 'intel-bodies');
+  assert.equal(result.parts.length, 3);
+  assert.equal(evaluateMacAdmission(observation(intel), expected).admitted, false);
+  assert.equal(evaluateMacAdmission(observation(jobs({ status: 'in_progress', runner_name: 'worker' })),
+    identity).admitted, false);
+  assert.throws(() => evaluateMacAdmission(observation(intel), { ...expected, group: 'arbitrary-jobs' }),
+    { code: 'ADMISSION_IDENTITY' });
+  assert.throws(() => evaluateMacAdmission(observation(intel), { ...expected, group: ['intel-bodies'] }),
+    { code: 'ADMISSION_IDENTITY' });
+  assert.throws(() => evaluateMacAdmission(observation(intel), { ...expected, group: null }),
+    { code: 'ADMISSION_IDENTITY' });
+  assert.throws(() => evaluateMacAdmission(observation([...intel, { ...intel[0], id: 90 }]), identity),
+    { code: 'ADMISSION_IDENTITY' });
+  assert.throws(() => evaluateMacAdmission(observation([
+    ...intel.slice(0, 2), { ...queued[2], status: 'completed', conclusion: 'cancelled' },
+  ]), identity), { code: 'ADMISSION_TERMINATED' });
+});
+
+test('T-MACADM013 Intel wait uses the same bounded attempt-scoped transport and cannot pass timeout cancellation or wrong identity', async () => {
+  const selectedJobs = jobs({ status: 'in_progress', runner_name: 'synthetic-worker' }).slice(0, 3)
+    .map((job, index) => ({ ...job, name: `native-macos-x64-framework-body-${index}` }));
+  const identity = { ...expected, group: 'intel-bodies' };
+  const ready = adapter({ selectedJobs });
+  assert.equal((await waitForMacAdmission(identity, ready.options)).admitted, true);
+  assert.deepEqual(ready.calls, [prefix, `${prefix}/jobs?per_page=100&page=1`]);
+  const queued = adapter({ selectedJobs: selectedJobs.map(job => ({ ...job, runner_name: '', status: 'queued' })) });
+  await assert.rejects(waitForMacAdmission(identity, queued.options), error =>
+    error.code === 'ADMISSION_TIMEOUT' && error.observation.group === 'intel-bodies');
+  const cancelled = adapter({ selectedJobs: [] });
+  const controller = new AbortController();
+  cancelled.options.signal = controller.signal;
+  cancelled.options.sleep = async () => controller.abort();
+  await assert.rejects(waitForMacAdmission(identity, cancelled.options), { code: 'ADMISSION_CANCELLED' });
+  const foreign = adapter({ selectedJobs: selectedJobs.map(job => ({ ...job, run_attempt: 1 })) });
+  await assert.rejects(waitForMacAdmission(identity, foreign.options), { code: 'ADMISSION_IDENTITY' });
 });
 
 test('T-MACADM010 cancellation and the overall deadline interrupt in-flight synthetic HTTP without admission', async () => {
@@ -279,6 +357,11 @@ test('T-MACADM011 CLI binds synthetic event context and owned receipt without cr
   assert.equal(receipt.observation, null);
   assert.equal(receipt.code, 'ADMISSION_IDENTITY');
   await fs.unlink(output);
+  await assert.rejects(execute(process.execPath, [...args, '--group', 'intel-bodies'], { env }), { code: 1 });
+  assert.equal(JSON.parse(await fs.readFile(output, 'utf8')).identity.group, 'intel-bodies');
+  await fs.unlink(output);
+  await assert.rejects(execute(process.execPath, [...args, '--group', 'arbitrary-jobs'], { env }), { code: 1 });
+  await assert.rejects(fs.stat(output), { code: 'ENOENT' });
   for (const invalid of [
     { ...env, GITHUB_RUN_ATTEMPT: '1', GITHUB_TOKEN: 'synthetic-never-log' },
     { ...env, GITHUB_REPOSITORY: 'other/repository', GITHUB_TOKEN: 'synthetic-never-log' },

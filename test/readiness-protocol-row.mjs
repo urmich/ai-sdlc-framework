@@ -5,7 +5,7 @@ import { canonical, digest } from '../src/core.mjs';
 import { observerApiFixture } from './readiness-observer-fixture.mjs';
 import { inspectWorkflowTrust, verifyOriginalNativeRows, verifyNativeCleanup,
   retainObserverResult } from '../scripts/pr-observer.mjs';
-import { nativePrPartsForProtocol, nativeWorkflowContract, nativePartJobKey,
+import { nativePrPartsForProtocol, nativeWorkflowContract,
   nativeFrameworkShardProtocol, nativeFourBodyFrameworkShardProtocol,
   nativePlatformUnitFrameworkShardProtocol, nativeLegacyFrameworkShardProtocol,
   nativeFrameworkShardPlan, replayNativeEvidence, verifyNativeShardUnitOrder } from '../scripts/native-validation.mjs';
@@ -59,7 +59,7 @@ export async function runProtocolRow(t, [shardProtocol, bootstrapProtocol]) {
     if (f.cleanupReports.has(part.role)) {
       const cleanup = verifyNativeCleanup(dictionary(f.cleanupReports.get(part.role)),
         { inventory: f.source.inventory, plan: f.source.plan,
-          ...part, bootstrapProtocol, shardProtocol, jobKey: nativePartJobKey(part, shardProtocol) });
+          ...part, bootstrapProtocol, shardProtocol, jobKey: part.jobKey });
       if (cleanup.prefix) prefixes.push(cleanup.prefix);
       else assert.equal(cleanup.status, 'not-required');
     }
@@ -204,7 +204,7 @@ export async function runProtocolRow(t, [shardProtocol, bootstrapProtocol]) {
   else cleanup.set('native-homebrew-prefix-cleanup.json', { status: 'removed', prefix: '/opt/abcde' });
   const macUnits = f.parts.get('macos-arm64-framework-units');
   assert.throws(() => verifyNativeCleanup(dictionary(cleanup),
-    { ...macUnits, jobKey: nativePartJobKey(macUnits, shardProtocol) }), { code: 'EVIDENCE' });
+    { ...macUnits, jobKey: macUnits.jobKey }), { code: 'EVIDENCE' });
   const output = path.join(f.root, 'versioned-parts-retained');
   const nativeParts = executions.map(part => {
     const artifact = f.artifacts.get(part.role);

@@ -3,8 +3,12 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
-const armNames = ['refresh', 'body-0', 'body-1', 'body-2']
-  .map(shard => `native-macos-arm64-framework-${shard}`);
+const admissionGroups = Object.freeze({
+  'arm-regressions': ['refresh', 'body-0', 'body-1', 'body-2']
+    .map(shard => `native-macos-arm64-framework-${shard}`),
+  'intel-bodies': ['body-0', 'body-1', 'body-2']
+    .map(shard => `native-macos-x64-framework-${shard}`),
+});
 const api = 'https://api.github.com';
 const maximumWaitMs = 8 * 60 * 1000;
 const maximumPages = 20;
@@ -19,10 +23,12 @@ function requireFact(condition, message) {
   if (!condition) fail('ADMISSION_IDENTITY', message);
 }
 function validateExpected(expected) {
+  const group = expected.group === undefined ? 'arm-regressions' : expected.group;
   requireFact(/^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/u.test(expected.repository ?? '') &&
     positive(expected.runId) && positive(expected.attempt) &&
     /^[a-f0-9]{40}$/u.test(expected.headSha ?? '') &&
-    ['pull_request', 'push', 'workflow_dispatch'].includes(expected.event),
+    ['pull_request', 'push', 'workflow_dispatch'].includes(expected.event) &&
+    typeof group === 'string' && Object.hasOwn(admissionGroups, group),
   'Admission requires an exact repository, run, attempt, source and supported event');
 }
 
@@ -38,6 +44,8 @@ function validateRun(run, expected) {
 export function evaluateMacAdmission({ run, jobs, complete }, expected) {
   validateExpected(expected);
   validateRun(run, expected);
+  const group = expected.group ?? 'arm-regressions';
+  const requiredNames = admissionGroups[group];
   requireFact(complete === true && Array.isArray(jobs), 'A complete attempt-scoped job list is required');
   const ids = new Set();
   const names = new Set();
@@ -48,16 +56,16 @@ export function evaluateMacAdmission({ run, jobs, complete }, expected) {
       job.run_url === `${api}/repos/${expected.repository}/actions/runs/${expected.runId}`,
     'Job identity is missing, duplicated or outside the selected run attempt');
     ids.add(job.id);
-    if (armNames.includes(job.name)) {
-      requireFact(!names.has(job.name), 'An ARM regression part has duplicate provider jobs');
+    if (requiredNames.includes(job.name)) {
+      requireFact(!names.has(job.name), 'A required Mac part has duplicate provider jobs');
       names.add(job.name);
     }
   }
-  const parts = armNames.map(name => {
+  const parts = requiredNames.map(name => {
     const job = jobs.find(item => item.name === name);
     if (!job) return { name, allocated: false, proof: 'missing' };
     requireFact(['queued', 'waiting', 'pending', 'requested', 'in_progress', 'completed'].includes(job.status),
-      'An ARM regression part has an unreadable provider status');
+      'A required Mac part has an unreadable provider status');
     const startedStep = Array.isArray(job.steps) && job.steps.some(step =>
       ['in_progress', 'completed'].includes(step.status) && step.conclusion !== 'skipped' &&
       timestamp(step.started_at));
@@ -68,11 +76,11 @@ export function evaluateMacAdmission({ run, jobs, complete }, expected) {
       allocated, proof: allocated ? runner ? 'runner' : 'started-step' : 'unallocated' };
   });
   const observation = { repository: expected.repository, runId: expected.runId,
-    attempt: expected.attempt, headSha: expected.headSha, event: expected.event, parts,
+    attempt: expected.attempt, headSha: expected.headSha, event: expected.event, group, parts,
     admitted: parts.every(part => part.allocated) };
   if (parts.some(part => !part.allocated && part.status === 'completed') ||
       !observation.admitted && (run.status === 'completed' || run.conclusion != null)) {
-    throw Object.assign(new Error('ARM admission ended with missing worker allocation'),
+    throw Object.assign(new Error('Mac admission ended with missing worker allocation'),
       { code: 'ADMISSION_TERMINATED', observation });
   }
   return observation;
@@ -225,14 +233,15 @@ async function main() {
   const flags = ['repository', 'run-id', 'attempt', 'head-sha', 'output'];
   for (let index = 2; index < process.argv.length; index += 2) {
     const flag = process.argv[index]?.slice(2);
-    requireFact(process.argv[index]?.startsWith('--') && flags.includes(flag) &&
+    requireFact(process.argv[index]?.startsWith('--') && [...flags, 'group'].includes(flag) &&
       options[flag] === undefined && process.argv[index + 1], 'Admission CLI options are invalid');
     options[flag] = process.argv[index + 1];
   }
   requireFact(flags.every(flag => options[flag]), 'Admission CLI requires all exact identity and output options');
   const env = process.env;
   const expected = { repository: options.repository, runId: Number(options['run-id']),
-    attempt: Number(options.attempt), headSha: options['head-sha'], event: env.GITHUB_EVENT_NAME };
+    attempt: Number(options.attempt), headSha: options['head-sha'], event: env.GITHUB_EVENT_NAME,
+    group: options.group ?? 'arm-regressions' };
   validateExpected(expected);
   requireFact(/^[1-9]\d*$/u.test(options['run-id']) && /^[1-9]\d*$/u.test(options.attempt) &&
     env.GITHUB_REPOSITORY === expected.repository && env.GITHUB_RUN_ID === options['run-id'] &&

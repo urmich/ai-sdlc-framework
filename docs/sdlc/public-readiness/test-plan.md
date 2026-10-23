@@ -1231,17 +1231,29 @@ the original subset. A new legitimate test must not erase preservation checks.
    unions including descendants, dependencies and exclusive resources. The new
    Intel producer has no unit prerequisite of its own. Every Intel regression
    must wait for both unit jobs, not a borrowed ARM/original-unit result.
-   Also require the Linux Mac-admission coordinator before Intel regression
-   dispatch. Observe all four ARM regression parts obtaining actual workers
+   Require the Linux `mac-admission` coordinator before the three long Intel
+   body parts dispatch, while retaining both Intel unit prerequisites. Observe
+   all four ARM regression parts obtaining actual workers
    in the exact same repository/run/attempt/head context before admission
-   completes. Reject queued placeholder timestamps, duplicates, mismatched
+   completes. Keep ARM genuine Homebrew initial; defer only Intel Homebrew.
+   Then require the Linux `intel-admission` coordinator to observe all three
+   actual Intel body workers before the separate Intel refresh and genuine
+   Homebrew producers dispatch. Neither coordinator may wait for body completion
+   or hold a Mac VM while waiting. Require the closed helper group selection,
+   exact new job identities and both coordinator results in completeness.
+   Reject queued placeholder timestamps, duplicates, mismatched
    identities, unavailable or incomplete provider pages and cancelled parts
    without allocation. Admission must not wait for allocated ARM parts to
    complete, consume a waiting Mac VM, add a native part or supply passing
    assertion credit. Exercise bounded timeout/cancellation without a passing
    fallback. Preserve ARM's own unit barrier, both Intel units and all
    twenty-five native parts and worker limits; verify real overlap and queues
-   again on the next frozen candidate.
+   again on the next frozen candidate. Verify the v2 split refresh/Homebrew
+   cleanup receipts bind their actual current `GITHUB_JOB` identities and
+   reject stale v1 bindings. Replay the exact v1 resource graph and unmarked
+   historical native graphs without borrowing new dependency or origin proof.
+   Configured priority is only a lead; provider allocation gaps remain in the
+   measured whole-lane span and cannot be converted into a passing estimate.
    Keep `native-framework-shards-v1` global-barrier and
    `native-framework-shards-v2-platform-units` twenty-part replay distinct,
    including their eighteen framework SDK origins; also retain v3's twenty-four

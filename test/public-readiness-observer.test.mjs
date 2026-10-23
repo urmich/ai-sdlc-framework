@@ -33,7 +33,7 @@ import { readTrustedMinimumNodeJob, renderObserverSummary, retainObserverResult,
   nativeLaneTimings, verifyNativeCleanup, verifyOriginalNativeRows, inspectWorkflowTrust } from '../scripts/pr-observer.mjs';
 import { nativeStageSelections, nativeConfigurationDigest, replayNativeEvidence,
   validateNativePreviousLifecycle, nativeWorkflowContract, nativeSpecification,
-  verifyNativeShardUnitOrder, nativePartJobKey, nativeFrameworkShardProtocol,
+  verifyNativeShardUnitOrder, nativeFrameworkShardProtocol,
   nativeLegacyFrameworkShardProtocol, nativeFourBodyFrameworkShardProtocol, nativeFrameworkShardPlan,
   nativePlatformUnitFrameworkShardProtocol, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
 import { testSpecificationDigest } from '../src/artifacts.mjs';
@@ -86,8 +86,14 @@ test('T-PRD021 source-bound role bootstrap preserves all producer origins and th
       const data = { ...Object.fromEntries(entries), texts: Object.fromEntries([...entries]
         .map(([file, value]) => [file, typeof value === 'string' ? value : canonical(value)])) };
       const expected = { inventory: f.source.inventory, plan: f.source.plan,
-        ...part, bootstrapProtocol: protocol, jobKey: nativePartJobKey(part) };
+        ...part, bootstrapProtocol: protocol, jobKey: part.jobKey };
       const checked = verifyNativeCleanup(data, expected);
+      if (['native-mi-refresh', 'native-homebrew-mi'].includes(part.jobKey)) {
+        const staleJob = structuredClone(data);
+        staleJob['native-homebrew-prefix-request.json'].binding.github.GITHUB_JOB =
+          part.component === 'homebrew' ? 'native-homebrew' : 'native-mi';
+        assert.throws(() => verifyNativeCleanup(staleJob, expected), { code: 'EVIDENCE' });
+      }
       if (checked.prefix) prefixes.push(checked.prefix);
       else {
         assert.equal(checked.status, 'not-required');
