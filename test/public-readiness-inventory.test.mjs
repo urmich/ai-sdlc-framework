@@ -792,9 +792,20 @@ test('T-PRD013 measured GitHub process partitions preserve every original assert
   assert.deepEqual(declarations.map(file => file.declared.assertionNamespace),
     [operationFamily, operationFamily, operationFamily,
       boundaryFamily, boundaryFamily, boundaryFamily, boundaryFamily]);
-  assert.deepEqual(declarations.map(file => file.cases.filter(test => !test.parents.length).length),
+  const snapshotId = 'assertion-2be026a15f5d572e8573f9b9a31de64fea9d53fec0ac215767c7bc378901c216';
+  const allCases = declarations.flatMap(file => file.cases);
+  const snapshot = allCases.filter(test => test.id === snapshotId);
+  assert.equal(snapshot.length, 1);
+  assert.equal(snapshot[0].file, boundaryFamily);
+  assert.equal(snapshot[0].name,
+    'fixture byte snapshots bound fresh reads and drain failures without caching or losing lock exclusions');
+  assert.deepEqual(snapshot[0].parents, []);
+  assert.equal(allCases.length, 144);
+  assert.equal(new Set(allCases.map(test => test.id)).size, allCases.length);
+  const originals = declarations.map(file => file.cases.filter(test => test.id !== snapshotId));
+  assert.deepEqual(originals.map(cases => cases.filter(test => !test.parents.length).length),
     [2, 1, 1, 1, 1, 1, 1]);
-  const assertions = declarations.flatMap(file => file.cases).map(test => ({
+  const assertions = originals.flat().map(test => ({
     id: test.id, parents: test.parents, name: test.name, definitionDigest: test.definitionDigest,
   })).sort((left, right) => left.id.localeCompare(right.id, 'en'));
   assert.equal(assertions.length, 143);

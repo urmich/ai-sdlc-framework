@@ -1194,6 +1194,16 @@ On Windows, recovery-guard creation `EPERM` is contention only after a fresh
 inspection proves an existing literal directory. Keep the existing owner/token
 checks and wait bounds; absent or non-directory guards retain the original
 permission failure. The focused regression remains PR-only.
+Before the unsafe-failure diagnostic callback starts, require four slots from
+the existing aggregate budget for its orchestration and held-worker observer
+processes. Exercise the actual Windows identity-ready/release/exit protocol
+without increasing the five-second capture or thirty-second case deadline,
+borrowing an identity or replacing the OS observation.
+The measured GitHub process-partition preservation test must keep the original
+143-assertion count, root vector and callback fingerprint unchanged. Validate
+the one new byte-snapshot regression by its exact ID, file, name and empty parent
+closure, and check all 144 current assertion IDs are unique before comparing
+the original subset. A new legitimate test must not erase preservation checks.
 
 ## 7. PR matrix procedure
 

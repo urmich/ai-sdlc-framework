@@ -648,6 +648,16 @@ Windows recovery-guard creation can report `EPERM` for an existing directory.
 Treat that case like existing-guard contention only after a fresh literal-
 directory inspection, retaining all owner/token checks. A missing or nonliteral
 guard keeps the original permission error; no wait or retry allowance grows.
+The unsafe-diagnostic worker-exit fixture reserves four existing aggregate
+worker slots before its timed callback: the orchestrator, nested runner, held
+worker and Windows process observer need admission together. This does not
+increase a host budget or extend the five-second identity capture or
+thirty-second case deadline. Keep the real held process handle, creation-time
+bound, release barrier and independently observed exit.
+The measured GitHub partition guard retains its original 143-assertion
+fingerprint and root vector. Account for the additional byte-snapshot regression
+by its exact ID, file, name and parent closure, and require all 144 current IDs
+to remain unique; do not rebase the original callback fingerprint.
 
 The standalone `validation-benchmark.mjs` adapter consumes explicitly owned
 baseline/candidate workspaces, worker budget, focused assertion-ID JSON and an

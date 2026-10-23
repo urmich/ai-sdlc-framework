@@ -1,6 +1,10 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [{"coverage": "process", "paths": ["scripts/test-runner.mjs", "scripts/test-worker.mjs"]}],
+  "groups": [{
+    "root": "T-PRD018 unsafe failure diagnostics terminate without hanging or manufacturing complete evidence",
+    "minimumSlots": 4
+  }],
   "resources": {
     "workers": 2,
     "names": [
