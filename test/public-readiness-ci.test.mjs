@@ -1301,12 +1301,14 @@ test('T-PRD022 actual workflow graph applies semantic YAML, effective permission
   const workflows = await readWorkflowPolicySources(repositoryRoot);
   const positive = inspectWorkflowTrust(workflows);
   assert.equal(positive.complete, true, JSON.stringify(positive.blockers));
-  assert.equal(positive.nativeResourcePolicy, 'arm-regression-allocation-v2-priority-intel-bodies');
+  assert.equal(positive.nativeResourcePolicy, 'arm-regression-allocation-v3-intel-homebrew-first');
   const producer = positive.workflows.find(item => item.file === '.github/workflows/ci.yml');
   assert.deepEqual(producer.document.permissions, { contents: 'read' });
   assert.deepEqual(producer.jobs.find(job => job.id === 'mac-admission').effectivePermissions,
     { actions: 'read', contents: 'read' });
   assert.deepEqual(producer.jobs.find(job => job.id === 'intel-admission').effectivePermissions,
+    { actions: 'read', contents: 'read' });
+  assert.deepEqual(producer.jobs.find(job => job.id === 'intel-homebrew-admission').effectivePermissions,
     { actions: 'read', contents: 'read' });
   for (const [file, edit, code] of [
     ['ci.yml', text => text.replace(checkoutPin, `"actions/checkout@v4"`), 'UNPINNED_ACTION'],
@@ -1566,14 +1568,17 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.deepEqual(ci.jobs.native.needs, ['intent', 'source', 'native-units']);
   assert.deepEqual(ci.jobs['native-units'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-homebrew'].needs, ['intent', 'source']);
-  assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v2-priority-intel-bodies');
+  assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v3-intel-homebrew-first');
   assert.deepEqual(ci.jobs['mac-admission'].needs, ['intent', 'source', 'native-units-ma']);
   assert.deepEqual(ci.jobs['native-ma'].needs, ['intent', 'source', 'native-units-ma']);
   assert.deepEqual(ci.jobs['native-mi'].needs, ['intent', 'source', 'native-units-mi', 'mac-admission']);
   assert.deepEqual(ci.jobs['native-units-ma'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-units-mi'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['intel-admission'].needs, ['intent', 'source', 'native-units-mi', 'mac-admission']);
-  assert.deepEqual(ci.jobs['native-mi-refresh'].needs, ['intent', 'source', 'native-units-mi', 'intel-admission']);
+  assert.deepEqual(ci.jobs['native-mi-refresh'].needs,
+    ['intent', 'source', 'native-units-mi', 'intel-homebrew-admission']);
+  assert.deepEqual(ci.jobs['intel-homebrew-admission'].needs,
+    ['intent', 'source', 'native-units-mi', 'intel-admission']);
   assert.deepEqual(ci.jobs['native-homebrew-mi'].needs, ['intent', 'source', 'intel-admission']);
   assert.deepEqual(ci.jobs['native-mi'].strategy.matrix.include.map(row => row.shard),
     ['body-0', 'body-1', 'body-2']);
@@ -1654,7 +1659,8 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     assert.deepEqual(ci.jobs[key].needs, ['intent', 'source',
       ...(part.shard && part.shard !== 'units' ? [nativePartJobKey({ ...part, shard: 'units' })] : []),
       ...(key === 'native-mi' ? ['mac-admission'] : []),
-      ...(['native-mi-refresh', 'native-homebrew-mi'].includes(key) ? ['intel-admission'] : [])]);
+      ...(key === 'native-mi-refresh' ? ['intel-homebrew-admission'] : []),
+      ...(key === 'native-homebrew-mi' ? ['intel-admission'] : [])]);
     if (part.shard === 'units') {
       assert.equal(ci.jobs[key].strategy.matrix.include.length, part.target === 'macos-x64' ? 2 : 1);
       assert.ok(ci.jobs[key].strategy.matrix.include.every(row =>
@@ -1684,7 +1690,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.equal(ci.jobs['minimum-node'].needs, 'intent');
   assert.equal(ci.jobs['minimum-node'].if, ci.jobs.native.if);
   assert.deepEqual(ci.jobs['producer-summary'].needs,
-    ['intent', 'minimum-node', 'source', ...keys, 'mac-admission', 'intel-admission']);
+    ['intent', 'minimum-node', 'source', ...keys, 'mac-admission', 'intel-admission', 'intel-homebrew-admission']);
   for (const [key, template] of [['native-mi-refresh', 'native-mi'], ['native-homebrew-mi', 'native-homebrew']]) {
     const recipe = structuredClone(ci.jobs[key]);
     recipe.needs = ci.jobs[template].needs;
@@ -1748,7 +1754,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
       doc.jobs['native-units-mi'].strategy.matrix.include.shift();
     }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
     ['refresh loses its explicit Intel unit barrier', doc => {
-      doc.jobs['native-mi-refresh'].needs = ['intent', 'source', 'intel-admission'];
+      doc.jobs['native-mi-refresh'].needs = ['intent', 'source', 'intel-homebrew-admission'];
     }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
     ['missing coordinator with its resource marker retained', doc => {
       delete doc.jobs['mac-admission'];
@@ -1816,7 +1822,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     ['completeness unexpectedly skipped', doc => {
       doc.jobs['producer-summary'].if = '${{ false }}';
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
-    ['missing Intel body admission edge on refresh', doc => {
+    ['missing Intel Homebrew admission edge on refresh', doc => {
       doc.jobs['native-mi-refresh'].needs.pop();
     }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
     ['early Intel Homebrew steals initial capacity', doc => {
@@ -1886,6 +1892,69 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     ['Intel refresh drops execution retention', doc => {
       doc.jobs['native-mi-refresh'].steps.pop();
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['refresh steals first Intel Homebrew allocation', doc => {
+      doc.jobs['native-mi-refresh'].needs = ['intent', 'source', 'native-units-mi', 'intel-admission'];
+    }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
+    ['Homebrew waits for its own allocation gate', doc => {
+      doc.jobs['native-homebrew-mi'].needs = ['intent', 'source', 'intel-homebrew-admission'];
+    }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
+    ['Homebrew admission waits for Homebrew completion', doc => {
+      doc.jobs['intel-homebrew-admission'].needs.push('native-homebrew-mi');
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['Homebrew admission creates refresh cycle', doc => {
+      doc.jobs['intel-homebrew-admission'].needs.push('native-mi-refresh');
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['Homebrew admission bypasses Intel bodies', doc => {
+      doc.jobs['intel-homebrew-admission'].needs = ['intent', 'source', 'native-units-mi', 'mac-admission'];
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['Homebrew admission loses Intel unit barrier', doc => {
+      doc.jobs['intel-homebrew-admission'].needs = ['intent', 'source', 'intel-admission'];
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['Homebrew admission missing', doc => {
+      delete doc.jobs['intel-homebrew-admission'];
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['Homebrew admission holds a Mac worker', doc => {
+      doc.jobs['intel-homebrew-admission']['runs-on'] = 'macos-15-intel';
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['Homebrew admission adds a native part', doc => {
+      doc.jobs['intel-homebrew-admission'].name = 'native-macos-x64-homebrew-admission';
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['Homebrew admission writable actions', doc => {
+      doc.jobs['intel-homebrew-admission'].permissions.actions = 'write';
+    }, 'EXCESS_JOB_PERMISSION'],
+    ['Homebrew admission writable contents', doc => {
+      doc.jobs['intel-homebrew-admission'].permissions.contents = 'write';
+    }, 'EXCESS_JOB_PERMISSION'],
+    ['Homebrew admission enables OIDC', doc => {
+      doc.jobs['intel-homebrew-admission'].permissions['id-token'] = 'write';
+    }, 'EXCESS_JOB_PERMISSION'],
+    ['Homebrew admission publication token', doc => {
+      doc.jobs['intel-homebrew-admission'].steps[4].env.GITHUB_TOKEN = '${{ secrets.PUBLICATION_TOKEN }}';
+    }, 'UNAPPROVED_SECRET'],
+    ['Homebrew admission unfrozen checkout', doc => {
+      doc.jobs['intel-homebrew-admission'].steps[1].with.ref = '${{ github.head_ref }}';
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['Homebrew admission forged caller head', doc => {
+      doc.jobs['intel-homebrew-admission'].env.SDLC_HEAD_SHA = '${{ github.sha }}';
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['Homebrew admission missing attempt binding', doc => {
+      const step = doc.jobs['intel-homebrew-admission'].steps[4];
+      step.run = step.run.replace(' --attempt "$GITHUB_RUN_ATTEMPT"', '');
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['Homebrew admission polls the body group', doc => {
+      const step = doc.jobs['intel-homebrew-admission'].steps[4];
+      step.run = step.run.replace('--group intel-homebrew', '--group intel-bodies');
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['Homebrew admission accepts queued timestamps', doc => {
+      doc.jobs['intel-homebrew-admission'].steps[4].run = 'node -e "console.log(jobs.every(job => job.started_at))"';
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
+    ['Homebrew admission ignored by completeness', doc => {
+      doc.jobs['producer-summary'].needs.pop();
+    }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
+    ['Homebrew admission result omitted', doc => {
+      const step = doc.jobs['producer-summary'].steps[0];
+      step.run = step.run.replace(' "$INTEL_HOMEBREW_ADMISSION_RESULT"', '');
+    }, 'MAC_ADMISSION_POLICY_DIFFERS'],
   ]) {
     const document = structuredClone(ci);
     mutate(document);
@@ -1896,7 +1965,27 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     assert.ok(rejected.blockers.some(blocker => blocker.code === code),
       `${label}: ${JSON.stringify(rejected.blockers)}`);
   }
+  const removeHomebrewPriority = document => {
+    delete document.jobs['intel-homebrew-admission'];
+    document.jobs['native-mi-refresh'].needs = ['intent', 'source', 'native-units-mi', 'intel-admission'];
+    document.jobs['producer-summary'].needs = document.jobs['producer-summary'].needs.filter(key =>
+      key !== 'intel-homebrew-admission');
+    const step = document.jobs['producer-summary'].steps[0];
+    delete step.env.INTEL_HOMEBREW_ADMISSION_RESULT;
+    step.run = step.run.replace(' "$INTEL_HOMEBREW_ADMISSION_RESULT"', '');
+  };
+  const admittedV2 = structuredClone(ci);
+  removeHomebrewPriority(admittedV2);
+  admittedV2.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v2-priority-intel-bodies';
+  const previousV2 = inspectWorkflowTrust([documentSource(admittedV2)]);
+  assert.equal(previousV2.complete, true, JSON.stringify(previousV2.blockers));
+  assert.equal(previousV2.nativeResourcePolicy, 'arm-regression-allocation-v2-priority-intel-bodies');
+  const orphanedGate = structuredClone(ci);
+  orphanedGate.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v2-priority-intel-bodies';
+  assert.equal(inspectWorkflowTrust([documentSource(orphanedGate)]).complete, false,
+    'Historical v2 cannot ignore an unadopted third gate');
   const removePriority = document => {
+    removeHomebrewPriority(document);
     document.jobs['native-mi'].strategy.matrix.include.unshift(
       ...document.jobs['native-mi-refresh'].strategy.matrix.include);
     document.jobs['native-homebrew'].strategy.matrix.include.push(

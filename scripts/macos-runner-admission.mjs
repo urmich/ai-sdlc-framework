@@ -8,6 +8,7 @@ const admissionGroups = Object.freeze({
     .map(shard => `native-macos-arm64-framework-${shard}`),
   'intel-bodies': ['body-0', 'body-1', 'body-2']
     .map(shard => `native-macos-x64-framework-${shard}`),
+  'intel-homebrew': ['native-macos-x64-homebrew'],
 });
 const api = 'https://api.github.com';
 const maximumWaitMs = 8 * 60 * 1000;

@@ -1190,6 +1190,12 @@ failure without starting another batch. The focused byte-snapshot root in
 is reread, lock files remain excluded and lock-like directories retain their
 contents. It remains PR-only. Qualify local timings independently of native
 lane acceptance.
+Require four existing aggregate slots before the retained-identity acceptance
+parent starts its four concurrent consumer contexts. Execute the complete
+original thirty-eight-assertion closure without changing callbacks, stress
+boundaries or internal concurrency, and verify the actual group allocation.
+The reservation must not increase the selected host pool or substitute for a
+fresh native whole-lane timing result.
 On Windows, recovery-guard creation `EPERM` is contention only after a fresh
 inspection proves an existing literal directory. Keep the existing owner/token
 checks and wait bounds; absent or non-directory guards retain the original
@@ -1237,10 +1243,13 @@ the original subset. A new legitimate test must not erase preservation checks.
    in the exact same repository/run/attempt/head context before admission
    completes. Keep ARM genuine Homebrew initial; defer only Intel Homebrew.
    Then require the Linux `intel-admission` coordinator to observe all three
-   actual Intel body workers before the separate Intel refresh and genuine
-   Homebrew producers dispatch. Neither coordinator may wait for body completion
+   actual Intel body workers before the genuine Intel Homebrew producer
+   dispatches. The Linux `intel-homebrew-admission` coordinator must then
+   observe that Homebrew producer's actual worker before Intel refresh may
+   dispatch. It must not wait for a Homebrew command or completion, and
+   Homebrew must not depend on its observer gate. No coordinator may wait for body completion
    or hold a Mac VM while waiting. Require the closed helper group selection,
-   exact new job identities and both coordinator results in completeness.
+   exact new job identities and all three coordinator results in completeness.
    Reject queued placeholder timestamps, duplicates, mismatched
    identities, unavailable or incomplete provider pages and cancelled parts
    without allocation. Admission must not wait for allocated ARM parts to
@@ -1250,7 +1259,7 @@ the original subset. A new legitimate test must not erase preservation checks.
    twenty-five native parts and worker limits; verify real overlap and queues
    again on the next frozen candidate. Verify the v2 split refresh/Homebrew
    cleanup receipts bind their actual current `GITHUB_JOB` identities and
-   reject stale v1 bindings. Replay the exact v1 resource graph and unmarked
+   reject stale v1 bindings. Replay the exact v1 and v2 resource graphs and unmarked
    historical native graphs without borrowing new dependency or origin proof.
    Configured priority is only a lead; provider allocation gaps remain in the
    measured whole-lane span and cannot be converted into a passing estimate.

@@ -135,10 +135,12 @@ async function mapReads(values, operation) {
 
 const macAdmissionResourcePolicy = 'arm-regression-allocation-v1';
 const intelPriorityResourcePolicy = 'arm-regression-allocation-v2-priority-intel-bodies';
-const admissionPolicies = [macAdmissionResourcePolicy, intelPriorityResourcePolicy];
+const intelHomebrewResourcePolicy = 'arm-regression-allocation-v3-intel-homebrew-first';
+const priorityPolicies = [intelPriorityResourcePolicy, intelHomebrewResourcePolicy];
+const admissionPolicies = [macAdmissionResourcePolicy, ...priorityPolicies];
 
 function resourceJobKey(part, protocol, resourcePolicy) {
-  if (resourcePolicy === intelPriorityResourcePolicy && part.target === 'macos-x64') {
+  if (priorityPolicies.includes(resourcePolicy) && part.target === 'macos-x64') {
     if (part.component === 'homebrew') return 'native-homebrew-mi';
     if (part.shard === 'refresh') return 'native-mi-refresh';
   }
@@ -191,10 +193,20 @@ function expectedMacAdmissionJob(group = 'arm-regressions') {
     job.steps[5].with.name = 'intel-admission-${{ github.run_id }}-${{ github.run_attempt }}';
     job.steps[5].with.path = 'source/.test-data/intel-admission.json';
   }
+  if (group === 'intel-homebrew') {
+    job.needs = ['intent', 'source', 'native-units-mi', 'intel-admission'];
+    job.name = 'Intel Homebrew admission';
+    job.steps[4].name = 'Wait for actual Intel Homebrew worker allocation';
+    job.steps[4].run = job.steps[4].run.replace('--output .test-data/mac-admission.json',
+      '--group intel-homebrew --output .test-data/intel-homebrew-admission.json');
+    job.steps[5].name = 'Retain Intel Homebrew admission observation';
+    job.steps[5].with.name = 'intel-homebrew-admission-${{ github.run_id }}-${{ github.run_attempt }}';
+    job.steps[5].with.path = 'source/.test-data/intel-homebrew-admission.json';
+  }
   return job;
 }
 
-function macAdmissionPolicyMatches(document, protocol, priority) {
+function macAdmissionPolicyMatches(document, protocol, priority, homebrewFirst) {
   const summary = document.jobs?.['producer-summary'];
   const expectedSummary = {
     permissions: {}, name: 'Native producer completeness', if: '${{ always() }}',
@@ -244,6 +256,12 @@ function macAdmissionPolicyMatches(document, protocol, priority) {
     reporting.run = reporting.run.replace('  "$MAC_ADMISSION_RESULT")',
       '  "$MAC_ADMISSION_RESULT" "$INTEL_ADMISSION_RESULT" "$MI_REFRESH_RESULT" "$MI_HOMEBREW_RESULT")');
   }
+  if (homebrewFirst) {
+    const reporting = expectedSummary.steps[0];
+    reporting.env.INTEL_HOMEBREW_ADMISSION_RESULT = '${{ needs.intel-homebrew-admission.result }}';
+    reporting.run = reporting.run.replace(' "$MI_HOMEBREW_RESULT")',
+      ' "$MI_HOMEBREW_RESULT" "$INTEL_HOMEBREW_ADMISSION_RESULT")');
+  }
   const sameRecipe = (left, right) => {
     if (!left || !right) return false;
     const copy = structuredClone(left);
@@ -255,6 +273,9 @@ function macAdmissionPolicyMatches(document, protocol, priority) {
     digest(document.jobs?.['mac-admission'] ?? null) === digest(expectedMacAdmissionJob()) &&
     (priority ? digest(document.jobs?.['intel-admission'] ?? null) ===
       digest(expectedMacAdmissionJob('intel-bodies')) : document.jobs?.['intel-admission'] === undefined) &&
+    (homebrewFirst ? digest(document.jobs?.['intel-homebrew-admission'] ?? null) ===
+      digest(expectedMacAdmissionJob('intel-homebrew')) :
+      document.jobs?.['intel-homebrew-admission'] === undefined) &&
     (!priority || sameRecipe(document.jobs?.['native-mi-refresh'], document.jobs?.['native-mi']) &&
       sameRecipe(document.jobs?.['native-homebrew-mi'], document.jobs?.['native-homebrew']) &&
       document.concurrency === undefined) &&
@@ -284,11 +305,13 @@ export function inspectWorkflowTrust(workflows) {
     nativeProtocol = protocol;
     const resourcePolicy = selected.document.env?.SDLC_MAC_ADMISSION_POLICY;
     const admission = admissionPolicies.includes(resourcePolicy);
-    const priority = resourcePolicy === intelPriorityResourcePolicy;
+    const priority = priorityPolicies.includes(resourcePolicy);
+    const homebrewFirst = resourcePolicy === intelHomebrewResourcePolicy;
     nativeResourcePolicy = resourcePolicy ?? null;
     if ((resourcePolicy !== undefined &&
-        (!admission || !macAdmissionPolicyMatches(selected.document, protocol, priority))) ||
+        (!admission || !macAdmissionPolicyMatches(selected.document, protocol, priority, homebrewFirst))) ||
         (!admission && (jobs?.['mac-admission'] !== undefined || jobs?.['intel-admission'] !== undefined)) ||
+        (!homebrewFirst && jobs?.['intel-homebrew-admission'] !== undefined) ||
         (!priority && (jobs?.['native-mi-refresh'] !== undefined || jobs?.['native-homebrew-mi'] !== undefined))) {
       result.blockers.push({ file: selected.file, code: 'MAC_ADMISSION_POLICY_DIFFERS' });
     }
@@ -312,7 +335,8 @@ export function inspectWorkflowTrust(workflows) {
             !native.nativeFrameworkUnitShardNames(part.target, protocol).includes(part.shard) ?
             [native.nativePartJobKey({ ...part, shard: 'units' }, protocol)] : []),
           ...(admission && key === 'native-mi' ? ['mac-admission'] : []),
-          ...(priority && ['native-mi-refresh', 'native-homebrew-mi'].includes(key) ? ['intel-admission'] : [])];
+          ...(priority && ['native-mi-refresh', 'native-homebrew-mi'].includes(key) ?
+            [homebrewFirst && key === 'native-mi-refresh' ? 'intel-homebrew-admission' : 'intel-admission'] : [])];
           return jobs[key]?.strategy?.['fail-fast'] !== false || jobs[key]?.['timeout-minutes'] !== 360 ||
             priority && (jobs[key]?.name !== 'native-${{ matrix.role }}' ||
               jobs[key]?.['runs-on'] !== '${{ matrix.os }}' ||
@@ -324,7 +348,8 @@ export function inspectWorkflowTrust(workflows) {
         platformBarrier &&
           digest([...(jobs['producer-summary']?.needs ?? [])].sort()) !==
             digest(['intent', 'minimum-node', 'source', ...keys, ...(admission ? ['mac-admission'] : []),
-              ...(priority ? ['intel-admission'] : [])].sort())) {
+              ...(priority ? ['intel-admission'] : []),
+              ...(homebrewFirst ? ['intel-homebrew-admission'] : [])].sort())) {
       result.blockers.push({ file: selected.file, code: 'NATIVE_COMPONENT_MATRIX_DIFFERS' });
     }
   }

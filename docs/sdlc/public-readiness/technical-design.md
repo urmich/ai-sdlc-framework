@@ -380,31 +380,35 @@ had no dependency but waited for earlier dispatches; retain its complete
 38-assertion root closure and existing internal ordering/concurrency. This
 changes neither host capacity nor explicit targeted caller order.
 
-The PR workflow uses two Linux read-only allocation coordinators under
-`arm-regression-allocation-v2-priority-intel-bodies`. The first, `mac-admission`,
+The PR workflow uses three Linux read-only allocation coordinators under
+`arm-regression-allocation-v3-intel-homebrew-first`. The first, `mac-admission`,
 runs after ARM's own unit barrier and observes the four
 ARM regression parts in the exact current repository/run/attempt/head context
 before releasing the three long Intel body parts. Both Intel unit producers
 remain required. ARM's genuine Homebrew producer retains its initial schedule;
 Intel's genuine Homebrew producer is deferred rather than occupying an initial
 shared Mac slot. The second coordinator, `intel-admission`, observes all three
-Intel body workers before releasing the separate Intel refresh and genuine
-Homebrew producers. It must not depend on body completion. Native part names,
+Intel body workers before releasing the genuine Intel Homebrew producer.
+The third, `intel-homebrew-admission`, observes that producer's actual worker
+allocation before releasing the separate Intel refresh. It waits neither for
+the Homebrew command to start nor for Homebrew completion. None of the gates
+may depend on its observed producer's completion. Native part names,
 recipes, assertions, retention and cleanup remain unchanged.
-A queued
-`started_at` placeholder is not allocation evidence; a runner or started step
-is required. Completed allocated parts also satisfy admission; neither stage
+A queued `started_at` placeholder is not allocation evidence; a runner or
+started step is required. Completed allocated parts also satisfy admission; no stage
 waits for its allocated parts to finish. Each helper invocation selects only
-the closed `arm-regressions` or `intel-bodies` group, defaulting to the former
-for historical callers. Retain the exact historical v1 resource graph and
-unmarked native v1-v4 replay rather than silently adopting new dependencies.
-Neither coordinator occupies a Mac VM while waiting or adds a native producer
+the closed `arm-regressions`, `intel-bodies` or `intel-homebrew` group,
+defaulting to the former for historical callers. Retain the exact historical
+v1 and v2 resource graphs and unmarked native v1-v4 replay rather than
+silently adopting new dependencies.
+No coordinator occupies a Mac VM while waiting or adds a native producer
 part. The policy does not change the twenty-five-part assertion union,
-architecture coverage, resource allowances or command watchdogs. Their same-run metadata reads
-use ephemeral read-only CI tokens, bounded polling and complete pagination;
+architecture coverage, resource allowances or command watchdogs. Their
+same-run metadata reads use ephemeral read-only CI tokens, bounded polling
+and complete pagination;
 identity mismatches, unavailable reads and incomplete allocation fail explicitly.
-Both gates are included in producer completeness. Bind the split Intel refresh
-and Homebrew cleanup receipts to their actual selected-source job identities;
+All three gates are included in producer completeness. Bind the split Intel
+refresh and Homebrew cleanup receipts to their actual selected-source job identities;
 stale historical job IDs cannot supply current proof. An admission receipt
 proves allocation only, not native correctness or latency.
 Release prepublication and default whole-native execution remain separate and
@@ -658,6 +662,12 @@ snapshot or validation result is reused. Read contiguous literal files in
 bounded batches of sixteen while keeping directory recursion sequential.
 Drain a failed batch before propagating its error and stop further dispatch;
 only lock files are excluded, not directories with lock-like names.
+The retained-identity acceptance parent reserves four slots from the existing
+aggregate budget before its four concurrent public-consumer contexts start.
+Keep its original thirty-eight assertions, callbacks and internal concurrency
+unchanged. This is conservative resource admission within the selected pool,
+not an additional worker allowance or a timing pass; retain actual admission
+and complete hosted execution observations.
 Windows recovery-guard creation can report `EPERM` for an existing directory.
 Treat that case like existing-guard contention only after a fresh literal-
 directory inspection, retaining all owner/token checks. A missing or nonliteral

@@ -1,6 +1,10 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
-  "deferred": {"declaration": "test", "dispatch": "parent", "parent": "retained identity acceptance through existing public consumers"}
+  "deferred": {"declaration": "test", "dispatch": "parent", "parent": "retained identity acceptance through existing public consumers"},
+  "groups": [{
+    "root": "retained identity acceptance through existing public consumers",
+    "minimumSlots": 4
+  }]
 };
 import nodeTest from 'node:test';
 import assert from 'node:assert/strict';

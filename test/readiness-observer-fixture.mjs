@@ -165,7 +165,8 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
     file.endsWith('.yml') ? ci : 'throw new Error("candidate reporter must never execute in the observer");\n']));
   assert.ok(['source', 'missing', 'mutated'].includes(admissionHelper));
   const workflow = parseWorkflow({ file: nativeWorkflowContract.path, contents: ci });
-  if (['arm-regression-allocation-v1', 'arm-regression-allocation-v2-priority-intel-bodies']
+  if (['arm-regression-allocation-v1', 'arm-regression-allocation-v2-priority-intel-bodies',
+    'arm-regression-allocation-v3-intel-homebrew-first']
     .includes(workflow.env?.SDLC_MAC_ADMISSION_POLICY) && admissionHelper !== 'missing') {
     const macAdmissionHelper = readFileSync(
       new URL('../scripts/macos-runner-admission.mjs', import.meta.url), 'utf8');
