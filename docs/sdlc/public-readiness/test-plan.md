@@ -1157,10 +1157,29 @@ functional and timing observations remain separate from native acceptance.
 The preservation guard must verify both the exact outer dispatch and the
 original callback reconstructed from the actual exported scenario; changing
 only the expected wrapper fingerprint does not establish preserved assertions.
-Broker socket-close observation may follow command completion. Bound the
-closed lease by the actual post-command broker inspection, reject absent,
-premature or future inspection evidence, and retain both observer timestamps.
-Do not substitute a timing tolerance or claim clock skew from missing evidence.
+Require the actual lease to remain live after scenario cleanup and the same
+lease to be closed when inspected after child exit. Check each observer's own
+interval, not UTC ordering between the worker, command observer and broker.
+Reject absent or premature command-side inspection and reversed intervals;
+retain child and broker timestamps without adding a tolerance or claiming
+clock skew from missing evidence.
+
+Standalone install/update must reuse the current runtime dispatcher for the
+ordinary launch path, while keeping its fresh post-activation tree, runtime
+and layout checks. Controlled protocol-only archives and observed child dispatch
+prove this locally without executing a synthetic PE or claiming native acceptance.
+Tree verification reads every literal file in bounded batches of sixteen,
+retains sorted byte/mode results and sequential directory traversal, and drains
+all dispatched reads before reporting a failure. Cover successful bytes,
+failed-batch draining, active tampering and the original source guards.
+Fixture byte snapshots may hash freshly read buffers directly; preserve every
+read, lock-file exclusion, sorted path and before/after equality assertion,
+without caching mutable Store state. Qualify local timings independently of
+native lane acceptance.
+On Windows, recovery-guard creation `EPERM` is contention only after a fresh
+inspection proves an existing literal directory. Keep the existing owner/token
+checks and wait bounds; absent or non-directory guards retain the original
+permission failure. The focused regression remains PR-only.
 
 ## 7. PR matrix procedure
 

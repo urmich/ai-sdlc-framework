@@ -307,14 +307,9 @@ async function runtimeMain(argv) {
     process.stdout.write(`${JSON.stringify(activation)}\n`);
     return 0;
   }
-  // Never resolve "sdlc" through PATH, and never hold the channel lock during framework maintenance.
-  installPhase('runtime-launch', 'begin');
-  const result = spawnSync(activation.launcher, args, {
-    stdio: 'inherit', env: { ...process.env, SDLC_NODE: node },
-  });
-  if (result.error) throw result.error;
-  installPhase('runtime-launch', 'end');
-  return result.status ?? 1;
+  // Keep the fresh launch guards without starting another verifier process.
+  return runtimeMain(['launch', '--root', path.dirname(path.dirname(activation.launcher)),
+    '--node', activation.node, '--', ...args]);
 }
 
 export async function main(argv) {

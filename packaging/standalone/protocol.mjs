@@ -149,21 +149,35 @@ export async function treeEntries(root, prefix = '') {
   const stat = await fs.lstat(directory);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Distribution directory is not a literal directory');
   const entries = [];
-  for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
-    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
-    safePath(relative);
+  const children = await fs.readdir(directory, { withFileTypes: true });
+  for (let offset = 0; offset < children.length;) {
+    const entry = children[offset];
     if (entry.isDirectory()) {
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      safePath(relative);
       const nested = await treeEntries(root, relative);
       if (!nested.length) throw new Error(`Unlisted empty distribution directory: ${relative}`);
       entries.push(...nested);
+      offset++;
+      continue;
     }
-    else if (entry.isFile()) {
+    const batch = [];
+    while (offset < children.length && !children[offset].isDirectory() && batch.length < 16) {
+      batch.push(children[offset++]);
+    }
+    const results = await Promise.allSettled(batch.map(async entry => {
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      safePath(relative);
+      if (!entry.isFile()) throw new Error(`Unsupported distribution entry: ${relative}`);
       const current = await fs.lstat(path.join(root, relative));
       if (!current.isFile() || current.isSymbolicLink()) throw new Error('Distribution entry changed type');
-      entries.push({ path: relative, data: await fs.readFile(path.join(root, relative)),
+      return { path: relative, data: await fs.readFile(path.join(root, relative)),
         mode: process.platform === 'win32' ? ['package/bin/sdlc.mjs', 'bin/sdlc', 'install.sh'].includes(relative) ? 0o755 : 0o644 :
-          current.mode & 0o777 });
-    } else throw new Error(`Unsupported distribution entry: ${relative}`);
+          current.mode & 0o777 };
+    }));
+    const failure = results.find(result => result.status === 'rejected');
+    if (failure) throw failure.reason;
+    entries.push(...results.map(result => result.value));
   }
   return entries.sort((a, b) => comparePath(a.path, b.path));
 }

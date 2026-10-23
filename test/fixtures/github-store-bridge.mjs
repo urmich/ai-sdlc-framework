@@ -1028,7 +1028,8 @@ export async function durableBytes(f) {
     for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
       const file = path.join(directory, entry.name);
       if (entry.isDirectory()) await walk(file);
-      else if (!entry.name.endsWith('.lock')) files.push([path.relative(f.root, file), digest(await fs.readFile(file))]);
+      else if (!entry.name.endsWith('.lock')) files.push([path.relative(f.root, file),
+        createHash('sha256').update(await fs.readFile(file)).digest('hex')]);
     }
   }
   await walk(f.store.runtime);

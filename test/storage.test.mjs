@@ -1,5 +1,8 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
+  "applicability": [
+    {"names": ["T-16 Windows guard-create contention requires an existing literal guard and preserves real denial"], "platforms": ["windows-x64"], "owner": "maintainer", "reason": "Windows may deny creating a recovery-guard directory while another owner is removing it; genuine permission denial must still fail.", "prerequisites": ["Windows guard-create error semantics"]}
+  ],
   "surfaces": [{"coverage": "direct", "paths": ["src/core.mjs", "src/files.mjs", "src/git.mjs", "src/store.mjs", "src/schemas.mjs", "src/audit.mjs", "src/validation-evidence.mjs"]}],
   "variants": [
     {"expression": "scenario", "names": ["settling-metadata", "changing-content", "changing-identity", "changing-size", "continued-churn"]}
@@ -623,6 +626,41 @@ test('T-16 a changing recovery-guard owner remains contention without stealing o
   }
   assert.equal(await withLock(lock, () => 'guard available'), 'guard available');
 });
+test('T-16 Windows guard-create contention requires an existing literal guard and preserves real denial',
+  { skip: process.platform !== 'win32' }, async t => {
+    const f = await fixture(t);
+    const lock = path.join(f.root, 'guard-create.lock');
+    const guard = `${lock}.recovery-guard`;
+    const ownerFile = path.join(guard, 'owner.json');
+    const owner = { token: 'live-guard', host: os.hostname(), pid: process.pid };
+    await writeJson(ownerFile, owner);
+    const mkdir = fsPromises.mkdir;
+    const denied = Object.assign(new Error('controlled guard creation denied'),
+      { code: 'EPERM', path: guard, syscall: 'mkdir' });
+    const mocked = t.mock.method(fsPromises, 'mkdir', async (directory, ...args) => {
+      if (directory === guard) throw denied;
+      return mkdir(directory, ...args);
+    });
+    syncBuiltinESMExports();
+    let entered = false;
+    try {
+      await assert.rejects(withLock(lock, () => { entered = true; }, { waitMs: 0 }),
+        { code: 'LOCK_BUSY' });
+      assert.deepEqual(await readJson(ownerFile), owner);
+      await fs.rm(guard, { recursive: true });
+      await assert.rejects(withLock(lock, () => { entered = true; }, { waitMs: 0 }),
+        error => error === denied);
+      await fs.writeFile(guard, 'not a directory');
+      await assert.rejects(withLock(lock, () => { entered = true; }, { waitMs: 0 }),
+        error => error === denied);
+      assert.equal(await fs.readFile(guard, 'utf8'), 'not a directory');
+      assert.equal(entered, false);
+      await assert.rejects(fs.lstat(lock), { code: 'ENOENT' });
+    } finally {
+      mocked.mock.restore();
+      syncBuiltinESMExports();
+    }
+  });
 test('T-16 a changing lock owner during inspection remains contention without removing its replacement', async t => {
   const f = await fixture(t);
   const lock = path.join(f.root, 'changing-lock-owner.lock');

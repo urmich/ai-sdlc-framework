@@ -225,7 +225,17 @@ async function withRecoveryGuard(file, action) {
     const guard = `${file}.recovery-guard`;
     try { await fs.mkdir(guard, { mode: 0o700 }); }
     catch (error) {
-      if (error.code === 'EEXIST') {
+      let existingGuard = error.code === 'EEXIST';
+      if (!existingGuard && process.platform === 'win32' && error.code === 'EPERM') {
+        // A guard being removed can still occupy its name on Windows.
+        let stat;
+        try { stat = await fs.lstat(guard); }
+        catch (inspectionError) {
+          if (inspectionError.code !== 'ENOENT') throw error;
+        }
+        existingGuard = stat?.isDirectory() && !stat.isSymbolicLink();
+      }
+      if (existingGuard) {
         const owner = await readJson(path.join(guard, 'owner.json'), {
           optional: true,
           limit: 2048,

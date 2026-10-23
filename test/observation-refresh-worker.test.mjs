@@ -33,7 +33,8 @@ test('T-PRD010 refresh controller owns one closed budgeted child and rejects for
     ...[
       ['schemaVersion', 2], ['status', 'NotRun'], ['cleaned', false], ['scope', 'refresh'],
       ['sourceDigest', '0'.repeat(64)], ['groupId', '0'.repeat(64)], ['nonce', 'foreign'],
-      ['pid', outcome.pid + 1], ['slot', 'not-a-slot'], ['finishedAt', 'not-a-time'],
+      ['pid', outcome.pid + 1], ['slot', 'not-a-slot'],
+      ['startedAt', 'not-a-time'], ['finishedAt', 'not-a-time'],
       ['fixtureRoot', result.root], ['extra', true],
     ].map(([key, value]) => report => {
       report.stdout = encode({ ...outcome, [key]: value });
@@ -64,16 +65,33 @@ test('T-PRD010 refresh controller owns one closed budgeted child and rejects for
   const closedAt = new Date(start + 2).toISOString();
   const observedAt = new Date(start + 3).toISOString();
   const lateReport = { ...result.report, finishedAt: commandFinishedAt,
-    stdout: encode({ ...outcome, finishedAt: commandFinishedAt }) };
+    stdout: encode({ ...outcome, startedAt: new Date(start).toISOString(), finishedAt: commandFinishedAt }) };
   const lateLeases = [{ ...result.leases[0], finishedAt: closedAt }];
   const lateExpected = { ...result.expected, leaseObservedAt: observedAt };
   await validateRefreshWorkerResult(lateReport, lateExpected, lateLeases);
+  await validateRefreshWorkerResult(lateReport, lateExpected,
+    [{ ...lateLeases[0], finishedAt: new Date(start + 4).toISOString() }]);
   await assert.rejects(validateRefreshWorkerResult(lateReport, lateExpected,
-    [{ ...lateLeases[0], finishedAt: new Date(start + 4).toISOString() }]));
+    [{ ...lateLeases[0], finishedAt: new Date(start - 1).toISOString() }]));
   await assert.rejects(validateRefreshWorkerResult(lateReport,
     { ...lateExpected, leaseObservedAt: new Date(start).toISOString() }, lateLeases));
   await assert.rejects(validateRefreshWorkerResult(lateReport,
     { ...lateExpected, leaseObservedAt: undefined }, lateLeases));
+  const independentReport = { ...lateReport, finishedAt: new Date(start + 10).toISOString(),
+    stdout: encode({ ...outcome, startedAt: new Date(start + 3).toISOString(),
+      finishedAt: new Date(start + 5).toISOString() }) };
+  const independentExpected = { ...lateExpected, leaseObservedAt: new Date(start + 11).toISOString() };
+  await validateRefreshWorkerResult(independentReport, independentExpected, lateLeases);
+  for (const offset of [-60000, 60000]) {
+    await validateRefreshWorkerResult({ ...independentReport,
+      stdout: encode({ ...outcome, startedAt: new Date(start + offset).toISOString(),
+        finishedAt: new Date(start + offset + 1).toISOString() }) }, independentExpected, lateLeases);
+  }
+  await assert.rejects(validateRefreshWorkerResult({ ...independentReport,
+    stdout: encode({ ...outcome, startedAt: new Date(start + 6).toISOString(),
+      finishedAt: new Date(start + 5).toISOString() }) }, independentExpected, lateLeases));
+  await assert.rejects(validateRefreshWorkerResult({ ...independentReport,
+    startedAt: new Date(start + 12).toISOString() }, independentExpected, lateLeases));
   await fs.mkdir(outcome.fixtureRoot);
   await assert.rejects(validateRefreshWorkerResult(result.report, result.expected, result.leases));
   await fs.rmdir(outcome.fixtureRoot);

@@ -122,7 +122,7 @@ export async function validateRefreshWorkerResult(report, expected, leases) {
   const outcome = JSON.parse(report.stdout);
   assert.equal(report.stdout, `${JSON.stringify(outcome)}\n`, 'Exactly one closed JSON refresh result is required');
   closed(outcome, ['schemaVersion', 'scope', 'sourceDigest', 'groupId', 'nonce', 'status',
-    'cleaned', 'pid', 'slot', 'lease', 'fixtureRoot', 'finishedAt', 'preload']);
+    'cleaned', 'pid', 'slot', 'lease', 'fixtureRoot', 'startedAt', 'finishedAt', 'preload']);
   assert.equal(outcome.schemaVersion, 1);
   for (const key of ['scope', 'sourceDigest', 'groupId', 'nonce']) assert.equal(outcome[key], expected[key]);
   closed(outcome.preload, ['url', 'sourceDigest']);
@@ -144,14 +144,12 @@ export async function validateRefreshWorkerResult(report, expected, leases) {
   const { finishedAt: liveFinishedAt, ...live } = outcome.lease;
   assert.equal(liveFinishedAt, null);
   assert.deepEqual(observed, live);
-  assert.ok(timestamp(report.startedAt) <= timestamp(outcome.lease.startedAt) &&
-    timestamp(outcome.lease.startedAt) <= timestamp(outcome.finishedAt) &&
-    timestamp(outcome.finishedAt) <= timestamp(report.finishedAt));
+  // Each observer owns its clock; causal ownership comes from matching live/closed broker states and exit.
+  assert.ok(timestamp(report.startedAt) <= timestamp(report.finishedAt), 'Command observer interval is reversed');
+  assert.ok(timestamp(outcome.startedAt) <= timestamp(outcome.finishedAt), 'Worker interval is reversed');
   const leaseObservedAt = timestamp(expected.leaseObservedAt);
   assert.ok(timestamp(report.finishedAt) <= leaseObservedAt, 'Inspect the lease after command completion');
-  // The broker observes socket closure independently of the command observer.
-  assert.ok(timestamp(finishedAt) >= timestamp(outcome.finishedAt) &&
-    timestamp(finishedAt) <= leaseObservedAt, 'Actual child lease must be closed by its broker inspection');
+  assert.ok(timestamp(outcome.lease.startedAt) <= timestamp(finishedAt), 'Broker lease interval is reversed');
   assert.equal(typeof outcome.fixtureRoot, 'string');
   assert.equal(path.dirname(outcome.fixtureRoot), expected.fixtureParent);
   assert.match(path.basename(outcome.fixtureRoot), /^[a-f0-9-]{36}$/u);
@@ -196,8 +194,10 @@ async function runOwnedRefresh(t, scope) {
     });
     leases = await readGroups(budget, groupId);
     expected.leaseObservedAt = new Date().toISOString();
+    const child = report.complete && report.exitCode === 0 ? JSON.parse(report.stdout) : null;
     t.diagnostic?.(JSON.stringify({ refreshLeaseObservation: {
       sourceDigest, groupId, nonce, pid: report.pid, commandFinishedAt: report.finishedAt,
+      child: child && { startedAt: child.startedAt, finishedAt: child.finishedAt, liveLease: child.lease },
       observedAt: expected.leaseObservedAt, leases } }));
     const outcome = await validateRefreshWorkerResult(report, expected, leases);
     assert.equal(await refreshIdentity(scope), sourceDigest, 'Refresh sources changed during execution');
@@ -273,6 +273,7 @@ async function workerMain() {
   assert.equal(await refreshIdentity(scope), sourceDigest);
   assert.equal(groupId, digest({ scope, sourceDigest, nonce }));
   const allocation = await acquireTestWorker(1, { groupId });
+  const startedAt = new Date().toISOString();
   const hooks = [];
   const cleanupFailures = [];
   let primary;
@@ -297,10 +298,11 @@ async function workerMain() {
     assert.equal(leases.length, 1);
     assert.equal(leases[0].pid, process.pid);
     assert.equal(leases[0].slot, allocation.slot);
+    assert.equal(leases[0].finishedAt, null, 'Confirm the actual lease is live after scenario cleanup');
     console.log(JSON.stringify({ schemaVersion: 1, scope, sourceDigest, groupId, nonce,
       status: 'Passed', cleaned: true, pid: process.pid, slot: allocation.slot,
       lease: leases[0], fixtureRoot: result.fixtureRoot, preload: await preloadIdentity(),
-      finishedAt: new Date().toISOString() }));
+      startedAt, finishedAt: new Date().toISOString() }));
   } finally { allocation.close(); }
 }
 

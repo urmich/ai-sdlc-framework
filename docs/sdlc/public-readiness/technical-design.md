@@ -595,11 +595,31 @@ retains its owned evidence. No new timeout, grace, process allowance, CI part
 or reduced iteration/durability boundary is introduced; child setup, execution,
 retention and cleanup remain inside whole-root and whole-lane measurements.
 The preservation guard binds the outer dispatch and reconstructs the original
-callback fingerprint from the actual exported scenario. The command observer
-and broker socket-close observer are independent: the same owned closed lease
-must be bounded by an actual post-command broker inspection, not an assumed
-ordering between those observers or an added grace interval. Retain that
-inspection timestamp with the closed lease, including on validation failure.
+callback fingerprint from the actual exported scenario. Confirm the actual
+lease is live after scenario cleanup, then match that same closed lease after
+child exit. The worker, command observer and broker own separate clock domains:
+check their individual intervals without cross-observer UTC comparisons or an
+added grace interval. Retain child and broker timing with the actual inspection,
+including on validation failure.
+
+Standalone activation hands its exact version to the existing launch path in
+the current runtime process instead of starting another verifier process.
+The launch path still freshly verifies the activated tree and runtime and
+revalidates the owned layout before invoking the framework; no verification
+result is cached or skipped. Channel locks remain released before maintenance.
+Tree verification batches at most sixteen independent literal-file reads per
+directory while preserving each path/type/byte/mode check. Directory recursion
+stays sequential, results retain their original sorted inventory and all
+dispatched reads settle before the first failure is reported. Writes, flushes,
+denial policy and watchdogs are unchanged.
+The test-only durable-byte snapshot hashes the fresh file buffer directly,
+avoiding canonical JSON encoding of its bytes. Its directory walk, exclusions,
+sorted paths and byte-preservation comparisons remain unchanged; no mutable
+snapshot or validation result is reused.
+Windows recovery-guard creation can report `EPERM` for an existing directory.
+Treat that case like existing-guard contention only after a fresh literal-
+directory inspection, retaining all owner/token checks. A missing or nonliteral
+guard keeps the original permission error; no wait or retry allowance grows.
 
 The standalone `validation-benchmark.mjs` adapter consumes explicitly owned
 baseline/candidate workspaces, worker budget, focused assertion-ID JSON and an
