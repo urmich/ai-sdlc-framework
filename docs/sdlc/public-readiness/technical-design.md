@@ -595,6 +595,11 @@ termination. The 1,000ms settlement bound includes root close and observed group
 disappearance. No delayed destructive signal follows ownership loss. Uncertain
 writers keep the primary timeout/overflow failure and prevent fixture deletion;
 the raw 4MiB stream limits and native negative-control outcomes stay intact.
+Darwin can report `EPERM` while a signaled group's zombies are being reaped.
+Read-only group probes may therefore continue within the original deadline,
+without treating denial as absence: root close plus `ESRCH` are still required.
+A denial that persists to the deadline remains an explicit failed cleanup;
+termination-signal denial is not converted into success or retried.
 Validation commands publish rejected-stop uncertainty before allowing read-only
 root/output drainage within the remaining original settlement deadline. Natural
 exit codes and complete output remain distinct from cleanup success; no second
@@ -639,6 +644,23 @@ the real-build fallback. Pure policy, unit, refresh and unrelated selections
 do not prepare it. Metadata constructors, owned paths, environment lifecycle
 and tester/context generation stay fresh. No assertion-time real launcher,
 reproduction, nondeterminism or cold-build call is replaced.
+The producer retains fixture-only observations in an existing top-level JSON
+upload path: real attempt/completion counters, actual source/recipe/configuration
+bindings, six input pins and canonical digest linkage. No paths, credentials,
+archive bytes or native-pass assertion are serialized. Consumers emit a
+separate provided-or-successful-absent-fallback receipt only after validation
+and private copying; rejected or failed work has no success receipt. Transport
+context shape stays unchanged, and observation persistence failures propagate.
+Observation snapshots use a dedicated owned checkpoint writer: exclusive
+initial creation, ordered atomic updates and no overwrite of a pre-existing
+foreign record. Immutable artifact outputs keep their exclusive writer.
+The negative-readiness test may reuse only root-local immutable serialized
+nonlocal producer input bytes. An independent original-constructor reference
+and byte/isolation checks precede reuse; each variant reconstructs its own
+mutable manifest, readers, facts and verifier closures. Finite-local inputs,
+all consumer invocations and fresh source/content/configuration/SDK-origin
+verification remain unchanged. This is test-input preparation, not a production
+cache or reuse of evaluations, capabilities, verifier results or admission.
 
 Native fixture setup transports its verified candidate/source/artifact identity
 in a dedicated context, never a reporter control. Only the exact distribution

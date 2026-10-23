@@ -179,11 +179,11 @@ const verifyBundle = options => verifyProductionBundle({ ...options, verifyEvide
 
 test.beforeEach(async context => {
   if (context.name === 'T-PRD057 two archive targets retain four mandatory native execution platforms without Linux standalone support') return;
-  fixtureSetup ??= prepareReleaseFixture();
+  fixtureSetup ??= prepareReleaseFixture(context);
   await fixtureSetup;
 });
 
-async function prepareReleaseFixture() {
+async function prepareReleaseFixture(context) {
   root = path.resolve('.test-data', `release-unit-${randomUUID()}`);
   await fs.mkdir(path.join(root, 'scratch'), { recursive: true });
   originalTmp = process.env.TMPDIR;
@@ -192,6 +192,7 @@ async function prepareReleaseFixture() {
   for (const key of Object.keys(originalPreviousEnvironment)) delete process.env[key];
   process.env.TMPDIR = path.join(root, 'scratch');
   const portable = await materializeSyntheticReleaseInputs({ root });
+  context.diagnostic(JSON.stringify(portable.consumption));
   payload = portable.payload;
   const pe = syntheticReleaseLauncher();
   const launcher = path.join(root, 'nonexecutable-PE-test-fixture');

@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import { frozenDistributionContext } from './frozen-distribution-fixture.mjs';
-import { prepareSelectedSyntheticReleaseFixture, syntheticReleaseContextVariable } from './synthetic-release-fixture.mjs';
+import { needsSyntheticReleaseFixture, prepareObservedSyntheticReleaseFixture,
+  syntheticReleaseContextVariable } from './synthetic-release-fixture.mjs';
 import { assertCommittedSourceInputs } from './committed-source-inputs.mjs';
 import path from 'node:path';
 import os from 'node:os';
@@ -9,6 +10,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { canonical, digest, id, requireThat, SdlcError } from '../src/core.mjs';
+import { atomicWrite } from '../src/files.mjs';
 import { parseTestPlan, testSpecificationDigest } from '../src/artifacts.mjs';
 import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
   createEvidenceBundle, renderReadinessReport, requireReadinessEvaluation,
@@ -213,6 +215,21 @@ async function writeCanonicalJson(file, contents) {
   const handle = await fs.open(file, 'wx');
   try { await handle.writeFile(contents); await handle.sync(); }
   finally { await handle.close(); }
+}
+
+export function createNativeObservationCheckpoint(file, producer) {
+  let claimed = false;
+  let queue = Promise.resolve();
+  return value => {
+    const contents = canonical(safe({ ...value, producer }));
+    queue = queue.then(async () => {
+      if (!claimed) {
+        await writeCanonicalJson(file, contents);
+        claimed = true;
+      } else await atomicWrite(file, Buffer.from(contents));
+    });
+    return queue;
+  };
 }
 
 export function nativeSpecification({ plan, inventory, goSources, target, profile, component = 'full', shard = null,
@@ -1672,6 +1689,16 @@ export async function runNativeValidation(options) {
     candidateReady = true;
     if (phase === 'validation') {
     environment.SDLC_TEST_REPORT_CONTEXT = JSON.stringify(context);
+    const syntheticNeeded = needsSyntheticReleaseFixture(inputs.stages, target);
+    const persistSyntheticObservation = createNativeObservationCheckpoint(
+      path.join(directory, 'synthetic-release-fixture-evidence.json'),
+      { jobRef: context.jobRef, runId: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT });
+    const prepareSyntheticObservation = () => prepareObservedSyntheticReleaseFixture({
+      stages: inputs.stages, target, directory: path.join(scratch, 'synthetic-release-fixture'), environment,
+      expectedSourceCommit: revision, expectedTree: tree,
+      writeEvidence: persistSyntheticObservation,
+    });
+    if (!syntheticNeeded) await prepareSyntheticObservation();
     if (component !== 'homebrew' && (part === undefined ||
       !nativeFrameworkUnitShardNames(target).includes(shard))) {
     const windows = archiveRecord(candidate, 'windows-x64');
@@ -1703,10 +1730,7 @@ export async function runNativeValidation(options) {
       directory: environment.SDLC_RELEASE_DIR,
       targets: environment.SDLC_DISTRIBUTION_TARGETS.split(','), context, kind: fixtureKind,
     }));
-    const syntheticRelease = await prepareSelectedSyntheticReleaseFixture({
-      stages: inputs.stages, target, directory: path.join(scratch, 'synthetic-release-fixture'), environment,
-      expectedSourceCommit: revision, expectedTree: tree,
-    });
+    const syntheticRelease = syntheticNeeded ? await prepareSyntheticObservation() : null;
     if (syntheticRelease) {
       environment[syntheticReleaseContextVariable] = JSON.stringify(syntheticRelease);
     }

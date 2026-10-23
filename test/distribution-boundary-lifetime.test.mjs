@@ -71,6 +71,9 @@ function controlled(mode = 'absent', { automatic = false, broker = false, budget
         }
         assert.equal(signal, 0, 'No destructive signal after losing root ownership');
         if (mode === 'unknown') return false;
+        if ((mode === 'probe-denied-drain' && present) || mode === 'probe-denied-persistent') {
+          throw Object.assign(new Error('Owned group probe is denied'), { code: 'EPERM' });
+        }
         if (!present) throw Object.assign(new Error('Absent'), { code: 'ESRCH' });
         return true;
       } },
@@ -78,7 +81,7 @@ function controlled(mode = 'absent', { automatic = false, broker = false, budget
     delay: async milliseconds => {
       assert.equal(milliseconds, 10);
       clock += milliseconds;
-      if (mode === 'drain' || mode === 'root-open' || mode === 'term-exit-zero') present = false;
+      if (['drain', 'root-open', 'term-exit-zero', 'probe-denied-drain'].includes(mode)) present = false;
     },
     setTimeout(callback, milliseconds) {
       const timer = { callback, milliseconds, active: true };
@@ -148,7 +151,7 @@ test('T-51 raw boundary preserves exact streams numeric exits errors and the fix
 });
 
 test('T-51 raw timeout and output overflow bound root close and fail closed on uncertain ownership', async () => {
-  for (const mode of ['drain', 'term-exit-zero', 'persistent', 'denied', 'signal-unverified', 'unknown', 'root-open', 'lost-root', 'overflow', 'overflow-persistent']) {
+  for (const mode of ['drain', 'term-exit-zero', 'probe-denied-drain', 'probe-denied-persistent', 'persistent', 'denied', 'signal-unverified', 'unknown', 'root-open', 'lost-root', 'overflow', 'overflow-persistent']) {
     const h = controlled(mode === 'overflow' ? 'drain' : mode === 'overflow-persistent' ? 'persistent' : mode);
     const pending = h.executeBoundaryCommand('owned', []);
     const child = h.children[0];
@@ -163,7 +166,15 @@ test('T-51 raw timeout and output overflow bound root close and fail closed on u
         assert.equal(error.code, 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER');
         assert.equal(Buffer.byteLength(error.stdout), 4 * 1024 * 1024);
       } else if (mode !== 'lost-root') assert.match(error.message, /^Command failed:/u);
-      assert.equal(error.cleanup.survivorsVerified, ['drain', 'term-exit-zero', 'overflow'].includes(mode));
+      assert.equal(error.cleanup.survivorsVerified, ['drain', 'term-exit-zero', 'probe-denied-drain', 'overflow'].includes(mode));
+      if (mode.startsWith('probe-denied')) {
+        assert.ok(error.cleanup.probeDeniedCount > 0);
+        assert.equal(error.killed, true);
+        if (mode === 'probe-denied-persistent') {
+          assert.equal(error.cleanup.error.code, 'EPERM');
+          assert.equal(h.clock(), 1000);
+        }
+      }
       if (mode === 'term-exit-zero') {
         assert.equal(error.code, 0);
         assert.equal(error.signal, null);
@@ -177,7 +188,7 @@ test('T-51 raw timeout and output overflow bound root close and fail closed on u
     });
     assert.ok(h.clock() <= 1000, 'Root close and group disappearance share one bounded settlement window');
     assert.equal(h.signals.filter(signal => signal === 'SIGTERM').length, mode === 'lost-root' ? 0 : 1);
-    if (!['drain', 'term-exit-zero', 'overflow'].includes(mode)) assert.equal(child.unreferenced, true);
+    if (!['drain', 'term-exit-zero', 'probe-denied-drain', 'overflow'].includes(mode)) assert.equal(child.unreferenced, true);
   }
   const h = controlled('persistent', { automatic: true });
   const lifetime = { cleanupSafe: true };
@@ -287,7 +298,8 @@ if(process.argv[2]==='root'){
           pid: child.pid, exitCode: error.code, signal: error.signal, killed: error.killed,
           cleanupOutcome: error.cleanup.outcome, signalSent: error.cleanup.signalSent,
           rootExitObserved: error.cleanup.rootExitObserved,
-          survivorsVerified: error.cleanup.survivorsVerified, cleanupCode: error.cleanup.error?.code }));
+          survivorsVerified: error.cleanup.survivorsVerified, cleanupCode: error.cleanup.error?.code,
+          probeDeniedCount: error.cleanup.probeDeniedCount ?? 0 }));
         assert.equal(error.cleanup.survivorsVerified, true);
         // The fixture reaps its writer and exits zero; the expired watchdog still rejects.
         assert.equal(error.code, 0);

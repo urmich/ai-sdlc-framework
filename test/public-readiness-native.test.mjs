@@ -42,6 +42,7 @@ import { sourceNativeBootstrapProtocol, nativeBootstrapCapability, bootstrapRequ
   requireNativeBootstrapCapability, nativeSdkRequirements, nativeSdkContextMatches,
   nativeBootstrapRequirements, probeNativeSdk, requireNativeCryptoEnvironment } from '../scripts/native-bootstrap-capability.mjs';
 import { nativeComponentSelection } from '../scripts/native-components.mjs';
+import { expectedBodySdkRequirements } from './native-sdk-expectations.mjs';
 
 test('T-PRD015 refresh SDK dispatch omits unused commands while historical and other roles probe exact tools in order', async () => {
   const request = { target: 'macos-arm64', profile: 'pr', component: 'framework', shard: 'refresh',
@@ -241,33 +242,15 @@ test('T-PRD015 v4 unit runtime is required while unused SDK schema and prefix ev
   }
   const inventory = await compileValidationInventory(repositoryRoot);
   const plan = await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
-  const pythonConsumerFiles = new Set([
-    'test/public-readiness-ci.test.mjs', 'test/public-readiness-consumer.test.mjs',
-    'test/public-readiness-observer.test.mjs', 'test/public-readiness-native.test.mjs',
-    'test/public-readiness-docs.test.mjs',
-  ]);
-  const goLauncherRoots = new Set([
-    'T-51 native Go launcher preserves paths, streams, arguments, working directory and child exit code',
-    'T-51 reproducible launcher builds cannot delegate to an ambient GOCACHEPROG',
-  ]);
   for (const target of ['linux-x64', 'windows-x64', 'macos-arm64', 'macos-x64']) {
     const assignment = nativeFrameworkShardPlan({ inventory, plan, target });
-    const pythonConsumers = new Set(inventory.cases.filter(assertion =>
-      !assertion.parents.length && assertion.applicability.platforms.includes(target) &&
-      pythonConsumerFiles.has(assertion.file)).map(assertion => assertion.id));
-    const goConsumers = new Set(inventory.cases.filter(assertion =>
-      !assertion.parents.length && assertion.applicability.platforms.includes(target) &&
-      (assertion.file === 'test/winget-launcher-native.test.mjs' && goLauncherRoots.has(assertion.name) ||
-        assertion.file === 'test/public-readiness-ci.test.mjs' && assertion.name ===
-          'T-PRD015 actual pinned Go, Python schema and static validators execute valid and invalid owned inputs'))
-      .map(assertion => assertion.id));
     for (const part of assignment.parts.filter(part => part.shard.startsWith('body-'))) {
       const request = { inventory, plan, assignment, target, ...part, profile: 'pr', component: 'framework',
         protocol: nativeBootstrapProtocol };
       const required = nativeBootstrapRequirements(request);
-      assert.deepEqual(required, { go: part.assertionIds.some(id => goConsumers.has(id)),
-        python: part.assertionIds.some(id => pythonConsumers.has(id)),
-        schema: part.shard === assignment.toolShard, homebrew: false, ownedPrefix: false });
+      const expected = expectedBodySdkRequirements(inventory, target, part);
+      assert.equal(expected.schema, part.shard === assignment.toolShard);
+      assert.deepEqual(required, { ...expected, homebrew: false, ownedPrefix: false });
       const calls = [];
       await probeNativeSdk(request, async command => {
         calls.push(command.name);

@@ -9,7 +9,8 @@ export const validationDeclarations = {
         "T-PRD057 portable synthetic recipe preserves all six original codec bytes and prepares once only for selected consumers",
         "T-PRD057 supplied portable setup rejects source recipe bytes layout links and missing inputs before consumer writes",
         "T-PRD057 portable consumers copy independently and never inspect an unregistered private canary",
-        "T-PRD057 real release consumers retain fresh metadata and assertion-time builders with portable setup"
+        "T-PRD057 real release consumers retain fresh metadata and assertion-time builders with portable setup",
+        "T-PRD057 producer observations retain actual counters and consumer receipts without changing transport"
       ],
       "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
       "owner": "maintainer",
@@ -18,7 +19,8 @@ export const validationDeclarations = {
     }
   ],
   "groups": [
-    {"root": "T-PRD057 real release consumers retain fresh metadata and assertion-time builders with portable setup", "minimumSlots": 3}
+    {"root": "T-PRD057 real release consumers retain fresh metadata and assertion-time builders with portable setup", "minimumSlots": 3},
+    {"root": "T-PRD057 producer observations retain actual counters and consumer receipts without changing transport", "minimumSlots": 3}
   ]
 };
 import test from 'node:test';
@@ -34,6 +36,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { canonical, readTarGzip, sha256, tarGzip, zip } from '../packaging/standalone/archive.mjs';
 import { platformEntries } from '../packaging/standalone/protocol.mjs';
 import { prepareSyntheticReleaseFixture, prepareSelectedSyntheticReleaseFixture,
+  prepareObservedSyntheticReleaseFixture,
   materializeSyntheticReleaseInputs, syntheticReleaseContextVariable, releaseFixturePureRoot } from '../scripts/synthetic-release-fixture.mjs';
 import { filterFrozenFixtureTransport } from '../scripts/frozen-fixture-transport.mjs';
 import { executeValidationCommand } from '../scripts/validation-tools.mjs';
@@ -42,7 +45,7 @@ const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const execute = promisify(execFile);
 const forbidden = () => { throw new Error('PORTABLE_SETUP_BUILDER_MUST_NOT_RUN'); };
 
-async function fixture(t) {
+async function fixture(t, { registeredSnapshot = false } = {}) {
   const owner = path.join(ROOT, '.test-data', `sr-${randomUUID().slice(0, 8)}`);
   const sourceRoot = path.join(owner, 's');
   await fs.mkdir(sourceRoot, { recursive: true });
@@ -71,24 +74,53 @@ async function fixture(t) {
     'packaging/standalone/install.ps1': '# Controlled fixture\n',
     'packaging/standalone/sdlc': '#!/bin/sh\n',
   };
-  const files = Object.keys(sources).sort();
+  const payloadFiles = Object.keys(sources).sort();
+  let files = [...payloadFiles];
+  const modes = new Map(files.map(file => [file, file === 'bin/sdlc.mjs' ? '100755' : '100644']));
+  if (registeredSnapshot) {
+    const index = (await execute('git', ['ls-files', '--stage', '-z'],
+      { cwd: ROOT, env: environment, maxBuffer: 8 * 1024 * 1024 })).stdout;
+    files = [];
+    for (const record of index.split('\0').filter(Boolean)) {
+      const match = /^(100644|100755) [a-f0-9]+ 0\t(.+)$/su.exec(record);
+      assert.ok(match, 'Runner snapshot requires registered regular source');
+      const file = match[2];
+      if (file.split('/').some(part => ['.git', '.test-data', 'node_modules'].includes(part))) continue;
+      const input = path.join(ROOT, ...file.split('/'));
+      const stat = await fs.lstat(input);
+      assert.ok(stat.isFile() && !stat.isSymbolicLink());
+      sources[file] = await fs.readFile(input);
+      modes.set(file, match[1]);
+      files.push(file);
+    }
+    sources['test/observation-sibling.test.mjs'] = `import test from 'node:test';
+import assert from 'node:assert/strict';
+test('owned observation sibling excludes fixture transport', () => {
+  assert.equal(process.env.SDLC_SYNTHETIC_RELEASE_FIXTURE_CONTEXT, undefined);
+  assert.equal(process.env.SDLC_TEST_REPORT_CONTEXT, undefined);
+});
+`;
+    files.push('test/observation-sibling.test.mjs');
+    modes.set('test/observation-sibling.test.mjs', '100644');
+    files.sort();
+  }
   for (const file of files) {
     const selected = path.join(sourceRoot, ...file.split('/'));
     await fs.mkdir(path.dirname(selected), { recursive: true });
     await fs.writeFile(selected, sources[file]);
-    await fs.chmod(selected, file === 'bin/sdlc.mjs' ? 0o755 : 0o644);
+    await fs.chmod(selected, modes.get(file) === '100755' ? 0o755 : 0o644);
   }
   const hashes = (await git(['hash-object', '-w', '--no-filters', '--stdin-paths'],
     files.map(file => JSON.stringify(file)).join('\n') + '\n')).stdout.trim().split('\n');
   await git(['update-index', '-z', '--index-info'], files.map((file, index) =>
-    `${file === 'bin/sdlc.mjs' ? '100755' : '100644'} ${hashes[index]}\t${file}\0`).join(''));
+    `${modes.get(file)} ${hashes[index]}\t${file}\0`).join(''));
   const tree = (await git(['write-tree'])).stdout.trim();
   const revision = (await git(['commit-tree', tree, '-m', `Owned synthetic source ${randomUUID()}`])).stdout.trim();
   await git(['update-ref', 'HEAD', revision]);
   const data = path.join(sourceRoot, '.test-data');
   await fs.mkdir(data);
-  const entries = files.map(file => ({ path: `package/${file}`, data: Buffer.from(sources[file]),
-    mode: file === 'bin/sdlc.mjs' ? 0o755 : 0o644 }));
+  const entries = payloadFiles.map(file => ({ path: `package/${file}`, data: Buffer.from(sources[file]),
+    mode: modes.get(file) === '100755' ? 0o755 : 0o644 }));
   const payload = tarGzip(entries);
   const calls = [];
   const packageBuilder = async options => {
@@ -352,18 +384,188 @@ test('T-PRD057 real release consumers retain fresh metadata and assertion-time b
   assert.deepEqual(pure.calls, []);
   const consumer = await run('consumer', '^release preparation cannot attribute', true);
   assert.equal(consumer.result.exitCode, 0, consumer.result.stdout + consumer.result.stderr);
+  const receipts = output => output.split('\n').map(line => /^\s*#\s*(\{.*\})$/u.exec(line)?.[1])
+    .filter(Boolean).map(line => JSON.parse(line))
+    .filter(value => value.kind === 'synthetic-release-fixture-consumption');
+  assert.deepEqual(receipts(pure.result.stdout), []);
+  assert.deepEqual(receipts(consumer.result.stdout).map(value => [value.mode, value.contextDigest, value.copies]),
+    [['provided', sha256(canonical(f.context)), 6]]);
   assert.equal(consumer.calls.filter(call => call.metadata === 'release-descriptor.json').length, 4);
   assert.deepEqual(consumer.calls.filter(call => call.metadata === 'release-descriptor.json')
     .map(call => call.revision), ['a'.repeat(40), 'a'.repeat(40), 'b'.repeat(40), 'b'.repeat(40)]);
   const absent = await run('absent', '^release preparation cannot attribute', false);
   assert.notEqual(absent.result.exitCode, 0);
+  assert.deepEqual(receipts(absent.result.stdout), []);
   assert.ok(absent.calls.some(call => call.npmPack));
   const realBuilder = await run('real-builder', '^T-PRD063 future Mac output', true);
   assert.notEqual(realBuilder.result.exitCode, 0);
+  assert.equal(receipts(realBuilder.result.stdout)[0]?.mode, 'provided');
   assert.ok(realBuilder.calls.some(call => /^(?:go|go\.exe)$/iu.test(call.command ?? '')));
   assert.equal(f.calls.length, 2);
   t.diagnostic(JSON.stringify({ kind: 'controlled-codec-only-no-native-or-package-equivalence',
     producerBuilds: f.calls.map(call => call.kind), freshDescriptors: 4,
     pureExit: pure.result.exitCode, consumerExit: consumer.result.exitCode,
     absentExit: absent.result.exitCode, realBuilderExit: realBuilder.result.exitCode }));
+});
+
+test('T-PRD057 producer observations retain actual counters and consumer receipts without changing transport', async t => {
+  const { createNativeObservationCheckpoint } = await import('../scripts/native-validation.mjs');
+  const f = await fixture(t);
+  const root = name => ({ file: 'test/release-ci.test.mjs', name, parents: [],
+    applicability: { platforms: ['linux-x64'] } });
+  const stages = [{ name: 'regression', cases: [root('consumer one'), root('consumer two')] }];
+  const report = path.join(f.data, 'synthetic-release-fixture-evidence.json');
+  const producer = { jobRef: 'controlled-job', runId: '123', attempt: '1' };
+  const persist = createNativeObservationCheckpoint(report, producer);
+  const snapshots = [];
+  const context = await prepareObservedSyntheticReleaseFixture({ ...f.options, stages, target: 'linux-x64',
+    directory: path.join(f.data, 'observed'), writeEvidence: async value => {
+      snapshots.push(value);
+      await persist(value);
+    } });
+  const evidence = JSON.parse(await fs.readFile(report, 'utf8'));
+  assert.equal(evidence.fixtureOnly, true);
+  assert.equal(evidence.nativePass, false);
+  assert.equal(evidence.completed, true);
+  assert.deepEqual(evidence.producer, producer);
+  assert.ok(evidence.finishedAt >= evidence.startedAt);
+  assert.deepEqual(evidence.counters, { prepare: { attempts: 1, completions: 1 },
+    package: { attempts: 1, completions: 1 }, platform: { attempts: 1, completions: 1 } });
+  assert.equal(snapshots[0].completed, false);
+  assert.equal(snapshots[0].counters.prepare.attempts, 0);
+  assert.ok(snapshots.some(value => value.counters.package.attempts === 1 && value.counters.package.completions === 0));
+  const { root: sourcePath, ...origin } = context.sourceOrigin;
+  assert.deepEqual(evidence.sourceOrigin, origin);
+  assert.deepEqual(evidence.configuration, context.configuration);
+  assert.deepEqual(evidence.inputs, context.files.map(({ role, sha256, size, mode }) => ({ role, sha256, size, mode })));
+  assert.equal(evidence.contextDigest, sha256(canonical(context)));
+  assert.equal(evidence.inputSetDigest, sha256(canonical(evidence.inputs)));
+  assert.equal(evidence.configurationDigest, sha256(canonical(context.configuration)));
+  assert.ok(!JSON.stringify(evidence).includes(f.owner));
+  assert.deepEqual(Object.keys(context).sort(),
+    ['configuration', 'directory', 'files', 'kind', 'schemaVersion', 'sourceOrigin']);
+  const provided = await materializeSyntheticReleaseInputs({ ...await f.consumer('provided-receipt'),
+    environment: { ...f.environment, [syntheticReleaseContextVariable]: JSON.stringify(context) } });
+  assert.equal(provided.consumption.mode, 'provided');
+  assert.equal(provided.consumption.contextDigest, evidence.contextDigest);
+  assert.equal(provided.consumption.inputSetDigest, evidence.inputSetDigest);
+  assert.equal(provided.consumption.configurationDigest, evidence.configurationDigest);
+  assert.equal(provided.consumption.fixtureOnly, true);
+  assert.equal(provided.consumption.nativePass, false);
+  assert.ok(!JSON.stringify(provided.consumption).includes(f.owner));
+  const fallback = await materializeSyntheticReleaseInputs({ ...await f.consumer('fallback-receipt'),
+    environment: f.environment, packageBuilder: f.options.packageBuilder, platformBuilder: f.options.platformBuilder });
+  assert.equal(fallback.consumption.mode, 'absent-fallback');
+  assert.equal(fallback.consumption.contextDigest, null);
+  assert.equal(fallback.consumption.inputSetDigest, evidence.inputSetDigest);
+  for (const [index, selected] of [[{ name: 'unit', cases: [root('consumer')] }],
+    [{ name: 'regression', cases: [root(releaseFixturePureRoot)] }],
+    [{ name: 'regression', cases: [{ ...root('unrelated'), file: 'test/unrelated.test.mjs' }] }]].entries()) {
+    let unused;
+    const unusedReport = path.join(f.data, `unneeded-${index}.json`);
+    const persistUnused = createNativeObservationCheckpoint(unusedReport, producer);
+    assert.equal(await prepareObservedSyntheticReleaseFixture({ ...f.options, stages: selected, target: 'linux-x64',
+      packageBuilder: forbidden, platformBuilder: forbidden, writeEvidence: async value => {
+        unused = value;
+        await persistUnused(value);
+      } }), null);
+    assert.equal(unused.needed, false);
+    assert.equal(unused.completed, true);
+    assert.deepEqual(unused.counters, { prepare: { attempts: 0, completions: 0 },
+      package: { attempts: 0, completions: 0 }, platform: { attempts: 0, completions: 0 } });
+    assert.equal(unused.contextDigest, null);
+    assert.equal(JSON.parse(await fs.readFile(unusedReport, 'utf8')).completed, true);
+  }
+  const foreign = path.join(f.data, 'foreign-observation.json');
+  await fs.writeFile(foreign, canonical({ foreign: true }), { flag: 'wx' });
+  const persistForeign = createNativeObservationCheckpoint(foreign, producer);
+  await assert.rejects(persistForeign({ completed: false }), { code: 'EEXIST' });
+  assert.deepEqual(JSON.parse(await fs.readFile(foreign, 'utf8')), { foreign: true });
+  const writeFailure = new Error('OBSERVATION_WRITE_DENIED');
+  const before = f.calls.length;
+  await assert.rejects(prepareObservedSyntheticReleaseFixture({ ...f.options, stages, target: 'linux-x64',
+    directory: path.join(f.data, 'writer-failure'), writeEvidence: () => { throw writeFailure; } }),
+  error => error === writeFailure);
+  assert.equal(f.calls.length, before);
+  let failed;
+  const buildFailure = new Error('CONTROLLED_PACKAGE_FAILURE');
+  await assert.rejects(prepareObservedSyntheticReleaseFixture({ ...f.options, stages, target: 'linux-x64',
+    directory: path.join(f.data, 'builder-failure'), packageBuilder: () => { throw buildFailure; },
+    writeEvidence: value => { failed = value; } }), error => error === buildFailure);
+  assert.equal(failed.completed, false);
+  assert.deepEqual(failed.counters, { prepare: { attempts: 1, completions: 0 },
+    package: { attempts: 1, completions: 0 }, platform: { attempts: 0, completions: 0 } });
+  assert.equal(failed.contextDigest, null);
+  const runner = await fixture(t, { registeredSnapshot: true });
+  const runnerEvidence = path.join(runner.data, 'runner-evidence');
+  await fs.mkdir(runnerEvidence);
+  const denied = path.join(runnerEvidence, 'denied.jsonl');
+  const guard = path.join(runnerEvidence, 'guard.mjs');
+  await fs.writeFile(guard, `
+    import cp from 'node:child_process';
+    import fs from 'node:fs';
+    import { promisify } from 'node:util';
+    import { syncBuiltinESMExports } from 'node:module';
+    const check = (command, args = []) => {
+      const values = Array.isArray(args) ? args : [];
+      if (command === 'git' || command === process.execPath && !values.includes('pack') &&
+          !values.some(value => /npm-cli\\.js$/u.test(value))) return;
+      fs.appendFileSync(${JSON.stringify(denied)}, 'DENIED_BUILD\\n');
+      throw new Error('RUNNER_FIXTURE_BUILD_DENIED');
+    };
+    const original = cp.execFile;
+    const asyncOriginal = promisify(original);
+    cp.execFile = function(command, args, ...rest) { check(command, args); return original.call(this, command, args, ...rest); };
+    cp.execFile[promisify.custom] = (command, args, ...rest) => { check(command, args); return asyncOriginal(command, args, ...rest); };
+    for (const name of ['spawn', 'spawnSync', 'execFileSync', 'exec', 'execSync']) {
+      const original = cp[name];
+      cp[name] = function(command, args, ...rest) { check(command, args); return original.call(this, command, args, ...rest); };
+    }
+    syncBuiltinESMExports();
+  `);
+  runner.environment.NODE_OPTIONS = [runner.environment.NODE_OPTIONS, `--import=${pathToFileURL(guard).href}`]
+    .filter(Boolean).join(' ');
+  let runnerObservation;
+  const persistRunner = createNativeObservationCheckpoint(
+    path.join(runnerEvidence, 'synthetic-release-fixture-evidence.json'), producer);
+  const runnerContext = await prepareObservedSyntheticReleaseFixture({ ...runner.options,
+    sourceRoot: runner.sourceRoot + path.sep,
+    directory: path.join(runner.data, 'runner-observed'), stages, target: 'linux-x64',
+    writeEvidence: async value => {
+      runnerObservation = value;
+      await persistRunner(value);
+    } });
+  const environment = { ...runner.environment,
+    [syntheticReleaseContextVariable]: JSON.stringify(runnerContext) };
+  for (const key of Object.keys(environment)) {
+    if (key === 'NODE_TEST_CONTEXT' || key.startsWith('SDLC_TEST_REPORT_')) delete environment[key];
+  }
+  environment.SDLC_TEST_REPORT_FILE = path.join(runnerEvidence, 'consumer-report.json');
+  const result = await executeValidationCommand({ name: 'observed-runner', command: process.execPath,
+    args: ['scripts/test-runner.mjs', 'targeted', '--workers', '1', '--name',
+      '^(release preparation cannot attribute|owned observation sibling)',
+      'test/release-ci.test.mjs', 'test/observation-sibling.test.mjs'],
+    cwd: runner.sourceRoot, environment, outputDir: runnerEvidence, signal: t.signal });
+  assert.equal(result.complete, true, result.diagnostic);
+  assert.equal(result.exitCode, 0, result.stdout + result.stderr);
+  const originalReport = JSON.parse(await fs.readFile(environment.SDLC_TEST_REPORT_FILE, 'utf8'));
+  assert.equal(originalReport.complete, true);
+  assert.equal(originalReport.summary.counts.tests, 2);
+  assert.equal(originalReport.summary.counts.passed, 2);
+  assert.equal(originalReport.summary.counts.skipped, 0);
+  const diagnostics = originalReport.diagnostics.map(row => {
+    try { return JSON.parse(row.message); } catch { return null; }
+  }).filter(value => value?.kind === 'synthetic-release-fixture-consumption');
+  assert.equal(diagnostics.length, 1);
+  assert.equal(diagnostics[0].mode, 'provided');
+  assert.equal(diagnostics[0].contextDigest, runnerObservation.contextDigest);
+  assert.equal(diagnostics[0].inputSetDigest, runnerObservation.inputSetDigest);
+  await assert.rejects(fs.lstat(denied), { code: 'ENOENT' });
+  if (process.env.SDLC_TEST_EVIDENCE_ROOT) {
+    const retained = path.resolve(process.env.SDLC_TEST_EVIDENCE_ROOT, `producer-observation-${randomUUID()}.json`);
+    assert.equal(path.relative(ROOT, retained).split(path.sep)[0], '.test-data');
+    await fs.writeFile(retained, canonical(evidence), { flag: 'wx' });
+    await fs.cp(runnerEvidence, path.resolve(process.env.SDLC_TEST_EVIDENCE_ROOT,
+      `observed-runner-${randomUUID()}`), { recursive: true, force: false, errorOnExist: true });
+  }
 });

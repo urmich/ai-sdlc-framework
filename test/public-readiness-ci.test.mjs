@@ -24,8 +24,10 @@ import { generateManifests } from '../packaging/winget/generate.mjs';
 import { writePayloadFixture, fixtureCanonical, fixtureSHA, fixtureWindowsLauncher } from './winget-payload-fixture.mjs';
 import { repositoryRoot } from '../scripts/test-runner.mjs';
 import { previousReleasePins } from '../scripts/release-bundle.mjs';
-import { nativePrParts, nativeLegacyPrParts, nativePartJobKey,
+import { nativePrParts, nativeLegacyPrParts, nativePartJobKey, nativeFrameworkShardPlan,
   nativeResourceFacts } from '../scripts/native-validation.mjs';
+import { compileValidationInventory } from '../scripts/validation-inventory.mjs';
+import { expectedBodySdkRequirements } from './native-sdk-expectations.mjs';
 import { digest } from '../src/core.mjs';
 import { evaluateApproval, evaluateConversations, sharedStatusKeys, planStatusUpdate, reconcileStatusKey,
   reconcilePrReadiness, statusContexts, normalStatusLimit, disposableStatusLimits,
@@ -1582,8 +1584,22 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.equal(outputs.protocol, nativeBootstrapProtocol);
   const tools = JSON.parse(outputs.tools);
   assert.deepEqual(Object.keys(tools).sort(), parts.map(part => part.role).sort());
-  assert.equal(Object.values(tools).filter(value => value.go).length, 4);
-  assert.equal(Object.values(tools).filter(value => value.python).length, 17);
+  const inventory = await compileValidationInventory(repositoryRoot);
+  const plan = await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
+  const assignments = new Map([...new Set(parts.map(part => part.target))].map(target =>
+    [target, nativeFrameworkShardPlan({ inventory, plan, target })]));
+  const expectedRoles = { go: [], python: [], schema: [] };
+  for (const part of parts) {
+    const expected = part.shard?.startsWith('body-') ?
+      expectedBodySdkRequirements(inventory, part.target,
+        assignments.get(part.target).parts.find(selected => selected.shard === part.shard)) :
+      { go: false, python: part.shard?.startsWith('units') ?? false, schema: false };
+    for (const tool of Object.keys(expectedRoles)) if (expected[tool]) expectedRoles[tool].push(part.role);
+  }
+  for (const [tool, roles] of Object.entries(expectedRoles)) {
+    assert.deepEqual(Object.entries(tools).filter(([, value]) => value[tool]).map(([role]) => role).sort(),
+      roles.sort(), `Only source-selected roles may require ${tool}`);
+  }
   assert.equal(Object.values(tools).filter(value => value.schema).length, 4);
   assert.equal(Object.values(tools).filter(value => value.ownedPrefix).length, 2);
   assert.equal(Object.values(tools).filter(value => value.crypto).length, 4);

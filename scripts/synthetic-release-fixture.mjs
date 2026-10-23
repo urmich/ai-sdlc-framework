@@ -22,6 +22,18 @@ const requireInput = (condition, message) => {
 const git = async (root, args) => (await execute('git', args,
   { cwd: root, maxBuffer: 8 * 1024 * 1024 })).stdout;
 
+async function observe(observer, event, fields = {}) {
+  if (observer === undefined) return;
+  requireInput(typeof observer === 'function', 'observation requires an in-process callback');
+  await observer({ event, observedAt: new Date().toISOString(), ...fields });
+}
+
+function inputIdentities(bytes, config) {
+  return specifications(config).map(({ role }) => ({
+    role, sha256: sha256(bytes.get(role)), size: bytes.get(role).length, mode: '0644',
+  }));
+}
+
 export function syntheticReleaseLauncher() {
   const pe = Buffer.alloc(256);
   pe.write('MZ');
@@ -126,8 +138,9 @@ async function verifyPortable(bytes, config, sourceRoot) {
 }
 
 async function buildPortable({ directory, sourceRoot, environment,
-  packageBuilder = buildPackage, platformBuilder = buildPlatforms }) {
+  packageBuilder = buildPackage, platformBuilder = buildPlatforms, onObservation }) {
   const config = await configuration(sourceRoot, environment);
+  await observe(onObservation, 'configuration', { configuration: config });
   const work = path.join(directory, 'building');
   await fs.mkdir(work);
   const temporary = Object.fromEntries(['TMPDIR', 'TMP', 'TEMP'].map(key => [key, process.env[key]]));
@@ -137,11 +150,15 @@ async function buildPortable({ directory, sourceRoot, environment,
     // The packager's comparison reads process temp settings, not only its child environment.
     for (const key of Object.keys(temporary)) process.env[key] = scratch;
     const buildEnvironment = { ...environment, TMPDIR: scratch, TMP: scratch, TEMP: scratch };
+    await observe(onObservation, 'package-attempt');
     const payload = await packageBuilder({ outputDir: path.join(work, 'npm'), environment: buildEnvironment });
+    await observe(onObservation, 'package-complete');
     const launcher = path.join(work, 'nonexecutable-PE-test-fixture');
     await fs.writeFile(launcher, syntheticReleaseLauncher(), { flag: 'wx', mode: 0o644 });
+    await observe(onObservation, 'platform-attempt');
     const built = await platformBuilder({ artifact: payload.artifact, outputDir: path.join(work, 'current'),
       windowsLauncher: launcher, sourceCommit: config.currentRevision, targets: config.targets, environment: buildEnvironment });
+    await observe(onObservation, 'platform-complete');
     const currentBytes = await fs.readFile(payload.artifact);
     const previousBytes = tarGzip(previousEntries(readTarGzip(currentBytes)));
     const bytes = new Map([['current-payload', currentBytes], ['previous-payload', previousBytes]]);
@@ -164,15 +181,19 @@ async function buildPortable({ directory, sourceRoot, environment,
 }
 
 export async function prepareSyntheticReleaseFixture({ directory, sourceRoot = ROOT,
-  environment = process.env, expectedSourceCommit, expectedTree, ...builders }) {
+  environment = process.env, expectedSourceCommit, expectedTree, onObservation, ...builders }) {
+  await observe(onObservation, 'prepare-attempt');
   requireInput(typeof directory === 'string' && path.isAbsolute(directory) &&
     directory === path.resolve(directory), 'preparation requires a literal absolute directory');
   await literal(path.dirname(directory), sourceRoot, true);
   const origin = await sourceOrigin(sourceRoot);
   requireInput((expectedSourceCommit === undefined || origin.revision === expectedSourceCommit) &&
     (expectedTree === undefined || origin.tree === expectedTree), 'producer source differs from its selected native source');
+  const publicOrigin = { revision: origin.revision, tree: origin.tree,
+    indexDigest: origin.indexDigest, registeredDigest: origin.registeredDigest };
+  await observe(onObservation, 'source-origin', { sourceOrigin: publicOrigin });
   await fs.mkdir(directory);
-  const { bytes, config } = await buildPortable({ directory, sourceRoot, environment, ...builders });
+  const { bytes, config } = await buildPortable({ directory, sourceRoot, environment, onObservation, ...builders });
   const files = [];
   for (const spec of specifications(config)) {
     const file = path.join(directory, ...spec.relative.split('/'));
@@ -268,13 +289,20 @@ export async function materializeSyntheticReleaseInputs({ root, sourceRoot = ROO
     await fs.chmod(destination, 0o644);
   }
   const data = bytes.get('current-payload');
+  const identities = inputIdentities(bytes, config);
+  const consumption = { schemaVersion: 1, kind: 'synthetic-release-fixture-consumption',
+    fixtureOnly: true, nativePass: false,
+    mode: supplied === undefined ? 'absent-fallback' : 'provided',
+    contextDigest: supplied === undefined ? null : sha256(canonical(JSON.parse(supplied))),
+    inputSetDigest: sha256(canonical(identities)), configurationDigest: sha256(canonical(config)),
+    copies: destinations.size };
   return { payload: { artifact: destinations.get('current-payload'), schemaVersion: 1,
     name: identity.manifest.name, version: identity.manifest.version,
     filename: identity.manifest.payload.filename, sha256: sha256(data), size: data.length,
     unpackedSize: identity.entries.reduce((total, entry) => total + entry.data.length, 0),
     files: identity.entries.map(entry => ({ path: entry.path.slice('package/'.length), size: entry.data.length }))
       .sort((a, b) => a.path.localeCompare(b.path)) },
-    previousArtifact: destinations.get('previous-payload') };
+    previousArtifact: destinations.get('previous-payload'), consumption };
 }
 
 export function needsSyntheticReleaseFixture(stages, target) {
@@ -285,4 +313,53 @@ export function needsSyntheticReleaseFixture(stages, target) {
 
 export async function prepareSelectedSyntheticReleaseFixture({ stages, target, ...options }) {
   return needsSyntheticReleaseFixture(stages, target) ? prepareSyntheticReleaseFixture(options) : null;
+}
+
+export async function prepareObservedSyntheticReleaseFixture({ stages, target, writeEvidence, ...options }) {
+  requireInput(typeof writeEvidence === 'function', 'producer observation requires an evidence writer');
+  const evidence = { schemaVersion: 1, kind: 'synthetic-release-fixture-preparation',
+    fixtureOnly: true, nativePass: false, target,
+    needed: needsSyntheticReleaseFixture(stages, target), startedAt: new Date().toISOString(),
+    finishedAt: null, completed: false, sourceOrigin: null, configuration: null,
+    contextDigest: null, configurationDigest: null, inputSetDigest: null, inputs: [],
+    counters: { prepare: { attempts: 0, completions: 0 }, package: { attempts: 0, completions: 0 },
+      platform: { attempts: 0, completions: 0 } } };
+  let observationFailure;
+  const persist = async () => {
+    try { await writeEvidence(structuredClone(evidence)); }
+    catch (error) { observationFailure = error; throw error; }
+  };
+  await persist();
+  let context;
+  let failure;
+  try {
+    context = await prepareSelectedSyntheticReleaseFixture({ ...options, stages, target,
+      onObservation: async event => {
+        if (event.event === 'prepare-attempt') evidence.counters.prepare.attempts++;
+        if (event.event === 'package-attempt') evidence.counters.package.attempts++;
+        if (event.event === 'package-complete') evidence.counters.package.completions++;
+        if (event.event === 'platform-attempt') evidence.counters.platform.attempts++;
+        if (event.event === 'platform-complete') evidence.counters.platform.completions++;
+        if (event.event === 'source-origin') evidence.sourceOrigin = event.sourceOrigin;
+        if (event.event === 'configuration') evidence.configuration = event.configuration;
+        await persist();
+      } });
+    if (context) {
+      evidence.counters.prepare.completions++;
+      evidence.contextDigest = sha256(canonical(context));
+      evidence.configurationDigest = sha256(canonical(context.configuration));
+      evidence.inputs = context.files.map(({ role, sha256, size, mode }) => ({ role, sha256, size, mode }));
+      evidence.inputSetDigest = sha256(canonical(evidence.inputs));
+    }
+  } catch (error) { failure = error; }
+  if (observationFailure) throw observationFailure;
+  evidence.finishedAt = new Date().toISOString();
+  evidence.completed = !failure;
+  try { await persist(); }
+  catch (error) {
+    if (failure) throw new AggregateError([failure, error], 'Synthetic preparation and evidence persistence failed');
+    throw error;
+  }
+  if (failure) throw failure;
+  return context;
 }

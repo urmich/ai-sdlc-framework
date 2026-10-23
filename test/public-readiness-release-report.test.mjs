@@ -33,11 +33,16 @@ function stage(definition) {
 }
 
 function fixture({ legacyLocal = false, finiteCase = localSanity.specification.cases[0], affectedOutcome,
-  localProfile = localSanity.specification.profile, retainedObjects = [] } = {}) {
+  localProfile = localSanity.specification.profile, retainedObjects = [], preparedInputs, captureInputs } = {}) {
+  if (preparedInputs) assert.ok(preparedInputs instanceof Map && preparedInputs.size === definitions.length &&
+    !legacyLocal && affectedOutcome === undefined && retainedObjects.length === 0);
   const bytes = new Map();
   const facts = new Map();
   const expectations = {};
   const verifiers = {};
+  const producerConstructions = { local: 0, nonlocal: 0 };
+  const consumerVerificationCalls = [];
+  let constructing = true;
   const manifest = { schemaVersion: 1, kind: 'repository-readiness-inputs',
     candidate: { sourceCommit, testSpecDigest: testSpecificationDigest(plan) },
     checkpoints: {}, releaseHistory: [], limitations: ['Controlled producer fixtures are not actual hosted/native readiness'] };
@@ -88,15 +93,28 @@ function fixture({ legacyLocal = false, finiteCase = localSanity.specification.c
       startedAt: observedAt, observedAt, finishedAt: observedAt,
       sequence: results.length, complete: true,
       exitCode: definition.mode === 'automated' ? failed ? 1 : 0 : null, results };
-    const verify = input => facts.get(input.reportDigest) ?? null;
+    const verify = input => {
+      if (!constructing) consumerVerificationCalls.push({ id, reportDigest: input.reportDigest });
+      return facts.get(input.reportDigest) ?? null;
+    };
     facts.set(digest(Buffer.from(canonical(raw))), { verifierId: 'controlled-host', reportDigest: digest(Buffer.from(canonical(raw))),
       context, sourceTime: observedAt, sourceSequence: raw.sequence });
-    const report = normalizeExecutionReport(raw, context, verify);
     const selection = { profile: specification.profile, executions: [{ id: executionId, context }], now,
       policy: { maxAgeMs: 3_600_000, revisionPolicy: 'exact', verifierIds: ['controlled-host'] } };
-    const evaluation = evaluateReadiness(specification, [report], selection);
-    assert.equal(evaluation.status, failed ? 'Failed' : 'Passed', definition.id);
-    const ref = retain(id, `reports/${id}.json`, createEvidenceBundle(evaluation, index === 0 ? retainedObjects : []));
+    let bundle;
+    if (!local && preparedInputs) {
+      const serialized = preparedInputs.get(id);
+      assert.equal(typeof serialized, 'string', `Missing serialized producer input: ${id}`);
+      bundle = JSON.parse(serialized);
+    } else {
+      const report = normalizeExecutionReport(raw, context, verify);
+      const evaluation = evaluateReadiness(specification, [report], selection);
+      assert.equal(evaluation.status, failed ? 'Failed' : 'Passed', definition.id);
+      bundle = createEvidenceBundle(evaluation, index === 0 ? retainedObjects : []);
+      producerConstructions[local ? 'local' : 'nonlocal']++;
+    }
+    const ref = retain(id, `reports/${id}.json`, bundle);
+    if (!local && captureInputs) captureInputs.set(id, bytes.get(ref.filename).toString('utf8'));
     const destination = local || legacyLocal && stage(definition) === 'PR' &&
       !nativeCases.has(definition.id) ? 'L' : stage(definition);
     (manifest.checkpoints[destination] ??= []).push(ref);
@@ -119,7 +137,9 @@ function fixture({ legacyLocal = false, finiteCase = localSanity.specification.c
   const read = async ref => bytes.get(ref.filename);
   const input = { manifest, plan, read, expectations, verifiers, localInventory, now,
     benchmarkVerifier: observation, protectionVerifier: observation, releaseVerifier: observation };
-  return { input, manifest, bytes, expectations, verifiers, read };
+  constructing = false;
+  return { input, manifest, bytes, expectations, verifiers, read,
+    producerConstructions, consumerVerificationCalls, facts };
 }
 
 test('T-PRD037 joined readable readiness retains the complete canonical denominator, timings, protections and failed original recovery', async () => {
@@ -146,10 +166,69 @@ test('T-PRD037 joined readable readiness retains the complete canonical denomina
   assert.deepEqual([...f.bytes].map(([name, bytes]) => [name, digest(bytes)]), before);
 });
 
-test('T-PRD054 saved Passed summaries, partial local scope, missing and stale evidence cannot manufacture joined readiness', async () => {
+test('T-PRD054 saved Passed summaries, partial local scope, missing and stale evidence cannot manufacture joined readiness', async t => {
+  const reference = fixture();
+  const preparedInputs = new Map();
+  const seed = fixture({ captureInputs: preparedInputs });
+  assert.equal(preparedInputs.size, definitions.length);
+  assert.deepEqual([...seed.bytes], [...reference.bytes], 'Prepared bytes must match the original constructor');
+  assert.deepEqual(seed.manifest, reference.manifest);
+  assert.deepEqual(seed.expectations, reference.expectations);
+  const snapshot = f => digest({ manifest: f.manifest, expectations: f.expectations,
+    bytes: [...f.bytes].map(([file, bytes]) => [file, digest(bytes)]), facts: [...f.facts] });
+  const referenceBefore = snapshot(reference);
+  const seedBefore = snapshot(seed);
+  const preparedBefore = digest([...preparedInputs]);
+  const identities = new Set([reference.manifest, reference.input, reference.bytes, reference.expectations,
+    reference.verifiers, reference.facts, reference.read, seed.manifest, seed.input, seed.bytes,
+    seed.expectations, seed.verifiers, seed.facts, seed.read,
+    ...reference.bytes.values(), ...seed.bytes.values(), ...Object.values(reference.verifiers),
+    ...Object.values(seed.verifiers), ...reference.facts.values(), ...seed.facts.values()]);
+  const own = value => {
+    assert.equal(identities.has(value), false, 'A variant must never share mutable fixture or verifier state');
+    identities.add(value);
+  };
+  const make = (options = {}) => {
+    // Only serialized producer inputs are reused; every origin fact and SDK consumer run stays fresh.
+    const f = fixture({ ...options, preparedInputs });
+    for (const value of [f.manifest, f.input, f.bytes, f.expectations, f.verifiers, f.facts, f.read,
+      ...f.bytes.values(), ...Object.values(f.verifiers), ...f.facts.values()]) own(value);
+    for (const id of preparedInputs.keys()) {
+      const ref = Object.values(f.manifest.checkpoints).flat().find(ref => ref.id === id);
+      assert.ok(ref);
+      assert.deepEqual(f.bytes.get(ref.filename), reference.bytes.get(ref.filename), id);
+      assert.equal(f.bytes.get(ref.filename).toString('utf8'), preparedInputs.get(id), id);
+      assert.deepEqual(f.expectations[id], reference.expectations[id], id);
+    }
+    assert.deepEqual(f.producerConstructions, { local: 1, nonlocal: 0 });
+    const first = f.manifest.checkpoints.PR[0];
+    const bytes = f.bytes.get(first.filename);
+    const original = bytes[0];
+    bytes[0] ^= 1;
+    assert.equal(reference.bytes.get(first.filename)[0], original);
+    assert.equal(seed.bytes.get(first.filename)[0], original);
+    bytes[0] = original;
+    return f;
+  };
+  const runs = [];
+  const compose = async (mode, f) => {
+    const result = await composeReadinessReport(f.input);
+    const absentLocal = ['no-origin', 'no-expectation', 'missing', 'corrupt', 'missing-local',
+      'missing-source', 'wrong-profile'].includes(mode);
+    const rejectedCandidate = ['wrong-current-source', 'wrong-current-content', 'wrong-current-configuration'].includes(mode);
+    assert.equal(f.consumerVerificationCalls.length, rejectedCandidate ? 0 :
+      definitions.length + Number(!absentLocal), mode);
+    for (const call of f.consumerVerificationCalls) assert.ok(f.facts.has(call.reportDigest), mode);
+    assert.equal(snapshot(reference), referenceBefore, 'A variant cannot mutate the original reference');
+    assert.equal(snapshot(seed), seedBefore, 'A variant cannot mutate prepared fixture inputs or origin facts');
+    assert.equal(digest([...preparedInputs]), preparedBefore);
+    runs.push({ mode, status: result.report.status, producerConstructions: f.producerConstructions,
+      consumerVerificationCalls: f.consumerVerificationCalls });
+    return result;
+  };
   for (const mode of ['no-origin', 'no-expectation', 'missing', 'corrupt', 'stale',
     'wrong-current-source', 'wrong-current-content', 'wrong-current-configuration']) {
-    const f = fixture();
+    const f = make();
     const ref = f.manifest.checkpoints.PR[0];
     if (mode === 'no-origin') delete f.verifiers[ref.id];
     if (mode === 'no-expectation') delete f.expectations[ref.id];
@@ -159,16 +238,16 @@ test('T-PRD054 saved Passed summaries, partial local scope, missing and stale ev
     if (mode === 'wrong-current-source') f.manifest.candidate.sourceCommit = 'f'.repeat(40);
     if (mode === 'wrong-current-content') f.manifest.candidate.sourceDigest = 'f'.repeat(64);
     if (mode === 'wrong-current-configuration') f.manifest.candidate.configurationDigest = 'f'.repeat(64);
-    const { report } = await composeReadinessReport(f.input);
+    const { report } = await compose(mode, f);
     assert.equal(report.status, 'NotRun', mode);
     const pr = report.checkpoints.find(row => row.stage === 'PR');
     assert.equal(pr.status, 'NotRun', mode);
     assert.equal(pr.totals.required, 76, mode);
     assert.ok(pr.cases.some(row => row.status === 'NotRun'), mode);
   }
-  const partial = fixture();
+  const partial = make();
   partial.manifest.checkpoints.L = [];
-  const { report } = await composeReadinessReport(partial.input);
+  const { report } = await compose('missing-local', partial);
   const local = report.checkpoints.find(row => row.stage === 'L');
   assert.equal(local.status, 'NotRun');
   assert.equal(local.totals.required, 1);
@@ -177,13 +256,26 @@ test('T-PRD054 saved Passed summaries, partial local scope, missing and stale ev
     const finiteCase = structuredClone(localSanity.specification.cases[0]);
     if (mode === 'missing-assertion') finiteCase.assertions.pop();
     if (mode === 'foreign-selector') finiteCase.assertions[0].selector.name = 'A different source assertion';
-    const changed = fixture({ finiteCase, ...(mode === 'wrong-profile' ? { localProfile: 'an-opt-in-profile' } : {}) });
+    const changed = make({ finiteCase, ...(mode === 'wrong-profile' ? { localProfile: 'an-opt-in-profile' } : {}) });
     if (mode === 'missing-source') delete changed.input.localInventory;
-    const result = await composeReadinessReport(changed.input);
+    const result = await compose(mode, changed);
     const sanity = result.report.checkpoints.find(row => row.stage === 'L');
     assert.equal(sanity.status, 'NotRun', mode);
     assert.ok(sanity.blockers.length, mode);
   }
+  assert.equal(runs.length, 13);
+  assert.ok(runs.every(run => run.status === 'NotRun'));
+  assert.deepEqual(reference.producerConstructions, { local: 1, nonlocal: definitions.length });
+  assert.deepEqual(seed.producerConstructions, { local: 1, nonlocal: definitions.length });
+  t.diagnostic(JSON.stringify({ fixtureRuns: runs, fixtureProof: {
+    serializedNonlocalInputs: preparedInputs.size, byteEquivalentToOriginal: true, isolatedVariants: runs.length,
+    originalNonlocalProducerConstructions: 13 * definitions.length,
+    preparedNonlocalProducerConstructions: seed.producerConstructions.nonlocal,
+    referenceNonlocalProducerConstructions: reference.producerConstructions.nonlocal,
+    variantNonlocalProducerConstructions: runs.reduce((sum, run) => sum + run.producerConstructions.nonlocal, 0),
+    localProducerConstructions: 2 + runs.reduce((sum, run) => sum + run.producerConstructions.local, 0),
+    consumerCompositions: runs.length,
+  } }));
 });
 
 test('T-PRD054 legacy broad local observations cannot satisfy finite sanity or orphan required PR regressions', async () => {

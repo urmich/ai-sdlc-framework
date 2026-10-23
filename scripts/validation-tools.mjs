@@ -264,6 +264,7 @@ async function settleOwnedProcessGroup(childClosed, cleanup, signalError, deadli
   childClosed.then(() => { closed = true; cleanup.rootExitObserved = true; });
   for (;;) {
     let absent = false;
+    let probeError;
     try {
       if (process.kill(-cleanup.pid, 0) !== true) {
         throw Object.assign(new Error('Owned process group termination could not be verified.'),
@@ -271,6 +272,11 @@ async function settleOwnedProcessGroup(childClosed, cleanup, signalError, deadli
       }
     } catch (error) {
       if (error.code === 'ESRCH') absent = true;
+      // Darwin may deny a probe while the signaled group's zombies are reaped.
+      else if (error.code === 'EPERM') {
+        probeError = error;
+        cleanup.probeDeniedCount = (cleanup.probeDeniedCount ?? 0) + 1;
+      }
       else throw error;
     }
     if (signalError) throw signalError;
@@ -281,6 +287,7 @@ async function settleOwnedProcessGroup(childClosed, cleanup, signalError, deadli
       return;
     }
     if (performance.now() >= deadline) {
+      if (probeError) throw probeError;
       throw Object.assign(new Error('Owned process group or root close remains unsettled after its bounded termination settlement.'),
         { code: 'STOP_TIMEOUT' });
     }

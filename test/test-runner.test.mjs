@@ -173,7 +173,7 @@ test('T-PRD018 command cancellation settles the owned group before return and fa
       delay: async milliseconds => {
         assert.equal(milliseconds, 10);
         clock += milliseconds;
-        if (['persistent', 'missing', 'root-never-closes'].includes(mode)) return;
+        if (['persistent', 'denied', 'missing', 'root-never-closes'].includes(mode)) return;
         observedDrain('draining');
         await released;
         present = false;
@@ -247,7 +247,13 @@ test('T-PRD018 command cancellation settles the owned group before return and fa
         assert.equal(report.cleanup.outcome, 'uncertain');
         assert.equal(report.cleanup.error.code, code);
         assert.ok(report.causes.some(cause => cause.type === 'cleanup' && cause.code === code));
-        if (!['persistent', 'root-never-closes'].includes(mode)) assert.equal(signals.filter(signal => signal === 0).length, 1);
+        if (mode === 'denied') {
+          assert.equal(clock, 1000);
+          assert.ok(report.cleanup.probeDeniedCount > 0);
+          assert.ok(signals.filter(signal => signal === 0).length > 1);
+        } else if (!['persistent', 'root-never-closes'].includes(mode)) {
+          assert.equal(signals.filter(signal => signal === 0).length, 1);
+        }
       } else {
         assert.equal(report.cleanup.outcome, 'group-exited');
         assert.equal(signals.at(-1), 0);

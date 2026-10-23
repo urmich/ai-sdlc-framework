@@ -432,10 +432,34 @@ cover codec byte/mode equivalence, once-only preparation, rejection and private
 copy/canary isolation, fresh metadata and retained builder boundaries; nested
 consumer checks reserve three worker slots. These controls do not establish
 authentic npm/compiler/native equivalence or a native lane speedup.
+The T-PRD054 negative-readiness root may prepare identical serialized nonlocal
+producer inputs once within that root, plus an independent original-constructor
+reference. Every one of its 13 variants receives private manifests, maps,
+buffers, origin facts and verifier closures; finite-local evidence stays fresh.
+Byte equivalence, mutation isolation and unchanged ordered consumer queries are
+asserted. All consumer compositions, stale/missing/finite cases, canonical
+definitions and unit prerequisites remain required. No SDK evaluation,
+capability, verifier outcome or consumer result is reused across variants.
+Retain a top-level `synthetic-release-fixture-evidence.json` with fixture-only,
+non-passing observations: actual preparation/package/platform attempt and
+completion counters, source/recipe/configuration identities, all six
+role/hash/size/mode pins and canonical context/input-set digests. Unneeded
+selections record zero preparation. Persistence failures remain explicit.
+The real producer checkpoint writer exclusively claims its first snapshot,
+serializes subsequent atomic replacements and refuses an existing foreign file.
+Both needed and unneeded multi-snapshot paths exercise that actual writer;
+immutable final-output writers remain exclusive.
+Consumer diagnostics distinguish verified provided-input copies from a
+successful absent-input build fallback and link their digests to the producer
+record. Invalid supplied input and failed fallback emit no success receipt.
+These receipts do not authorize native or provider passing credit, and cannot
+backfill missing historical preparation or consumption evidence.
 Bootstrap regressions derive Go needs from applicable selected schema and genuine
 launcher root identities, not a fixed body position; unit Go omission and all
 missing/invented-tool refusals remain. Retained release-setup comparison outputs
 use invocation-unique directories and preserve earlier failed and passing files.
+The CI-wiring regression independently checks the exact source-selected
+Go/Python/schema role sets rather than fixed global Go/Python totals.
 Fixture snapshots use only registered Git index paths, including intent-to-add
 source files, never arbitrary untracked workspace data. A one-commit snapshot
 without the historical object or alternates must execute the two representative
@@ -466,6 +490,12 @@ group; the bounded 1,000ms teardown covers both root close and group
 disappearance, not additional permitted execution. After root ownership is lost,
 only read-only settlement is allowed. Unknown termination retains the primary
 failure and owned fixture rather than racing recursive deletion against writers.
+An `EPERM` group-existence probe remains uncertain, never proof of absence.
+After an owned termination request, read-only reinspection may continue within
+the same one-second deadline; success still requires both root close and
+observed `ESRCH`. Persistent denial fails with its actual error. Controlled
+regressions cover transient probe denial followed by reaping and permanent
+denial without a second signal or an extended grace period.
 Raw stdout/stderr, numeric negative-control exits and the 4MiB per-stream limit
 remain unchanged. An expired watchdog remains failed even when a root catches
 termination, reaps its descendant and exits zero; preserve that actual root
