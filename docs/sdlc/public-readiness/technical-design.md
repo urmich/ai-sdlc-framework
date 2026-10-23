@@ -630,10 +630,20 @@ directory while preserving each path/type/byte/mode check. Directory recursion
 stays sequential, results retain their original sorted inventory and all
 dispatched reads settle before the first failure is reported. Writes, flushes,
 denial policy and watchdogs are unchanged.
+Core distribution loading and replacement preflight also read independent
+inputs in batches of at most sixteen. Preserve each fresh bounded read and
+path/identity/ownership check, result order and the original first error.
+Drain every dispatched read before returning failure and do not start a later
+batch after a failure. All preflight completes before mutation; the existing
+ordered writes, immediate concurrent-edit checks, rollback, locks and durability
+flushes remain unchanged.
 The test-only durable-byte snapshot hashes the fresh file buffer directly,
 avoiding canonical JSON encoding of its bytes. Its directory walk, exclusions,
 sorted paths and byte-preservation comparisons remain unchanged; no mutable
-snapshot or validation result is reused.
+snapshot or validation result is reused. Read contiguous literal files in
+bounded batches of sixteen while keeping directory recursion sequential.
+Drain a failed batch before propagating its error and stop further dispatch;
+only lock files are excluded, not directories with lock-like names.
 Windows recovery-guard creation can report `EPERM` for an existing directory.
 Treat that case like existing-guard contention only after a fresh literal-
 directory inspection, retaining all owner/token checks. A missing or nonliteral

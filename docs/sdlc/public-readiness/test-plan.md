@@ -1172,10 +1172,24 @@ Tree verification reads every literal file in bounded batches of sixteen,
 retains sorted byte/mode results and sequential directory traversal, and drains
 all dispatched reads before reporting a failure. Cover successful bytes,
 failed-batch draining, active tampering and the original source guards.
+Exercise bounded fresh distribution and replacement-preflight reads through the
+actual installer. Require at most sixteen in-flight reads, drain a failing
+batch before reporting its original error and stop later dispatch. A failed
+read must cause no installation writes. Preserve the original input/result
+order, path and ownership validation, immediate concurrent-edit checks,
+ordered writes, rollback, locks and every durability flush. The focused
+`T-23 installation read batches drain failures before writes and stop further dispatch`
+root in `test/cli-install.test.mjs` is PR-only, with Node/Git/owned-filesystem
+fixtures; it does not expand the twenty-seven-assertion critical budget.
 Fixture byte snapshots may hash freshly read buffers directly; preserve every
 read, lock-file exclusion, sorted path and before/after equality assertion,
-without caching mutable Store state. Qualify local timings independently of
-native lane acceptance.
+without caching mutable Store state. Bound contiguous literal-file reads to
+sixteen, retain sequential directory traversal and drain before propagating
+failure without starting another batch. The focused byte-snapshot root in
+`test/github-existing-consumer-boundaries.unit.test.mjs` checks a changed file
+is reread, lock files remain excluded and lock-like directories retain their
+contents. It remains PR-only. Qualify local timings independently of native
+lane acceptance.
 On Windows, recovery-guard creation `EPERM` is contention only after a fresh
 inspection proves an existing literal directory. Keep the existing owner/token
 checks and wait bounds; absent or non-directory guards retain the original

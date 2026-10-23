@@ -14,7 +14,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { fixture, artifact, coding, cli, grant, orient } from './helpers.mjs';
-import { cleanInstall, install, uninstall, doctor, BLOCK_START, canonicalInstalledText } from '../src/install.mjs';
+import { cleanInstall, install, uninstall, doctor, distribution, BLOCK_START, canonicalInstalledText } from '../src/install.mjs';
 import { registerArtifact } from '../src/artifacts.mjs';
 import { aggregate, check } from '../src/checks.mjs';
 import { readJson, writeJson } from '../src/files.mjs';
@@ -28,6 +28,84 @@ test('T-38 installed framework text uses canonical LF without changing source', 
   const source = Buffer.from('first\r\nsecond\rthird\n');
   assert.equal(canonicalInstalledText(source).toString('utf8'), 'first\nsecond\nthird\n');
   assert.equal(source.toString('utf8'), 'first\r\nsecond\rthird\n');
+});
+
+test('T-23 installation read batches drain failures before writes and stop further dispatch', async t => {
+  for (const phase of ['source', 'destination']) {
+    const f = await fixture(t);
+    const prepared = await distribution(f.home);
+    const targets = new Set([...prepared.files.keys()].map(relative =>
+      path.join(f.home, relative)));
+    const source = path.resolve('src') + path.sep;
+    const method = phase === 'source' ? 'open' : 'lstat';
+    const original = fsPromises[method];
+    const started = [];
+    const seen = new Set();
+    const releases = [];
+    const batchStarted = Promise.withResolvers();
+    const firstFailed = Promise.withResolvers();
+    const releaseAll = Promise.withResolvers();
+    const failure = new Error(`Controlled ${phase} read failure`);
+    let active = 0;
+    let peak = 0;
+    let settled = false;
+    let mutations = 0;
+    const mocked = t.mock.method(fsPromises, method, async (file, ...options) => {
+      const selected = typeof file === 'string' && (phase === 'source' ?
+        file.startsWith(source) : targets.has(file));
+      if (!selected || seen.has(file)) return original(file, ...options);
+      seen.add(file);
+      const index = started.length;
+      const release = Promise.withResolvers();
+      releases.push(release);
+      started.push(file);
+      active++;
+      peak = Math.max(peak, active);
+      if (started.length === 16) batchStarted.resolve();
+      try {
+        await Promise.race([release.promise, releaseAll.promise]);
+        if (index === 0) {
+          firstFailed.resolve();
+          throw failure;
+        }
+        return await original(file, ...options);
+      } finally {
+        active--;
+      }
+    });
+    syncBuiltinESMExports();
+    const work = install(f.store, { fault: async () => { mutations++; } })
+      .then(value => { settled = true; return { value }; },
+        error => { settled = true; return { error }; });
+    let timer;
+    try {
+      await Promise.race([batchStarted.promise, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`The ${phase} read batch did not fill`)), 10000);
+      })]);
+      clearTimeout(timer);
+      assert.equal(active, 16);
+      releases[0].resolve();
+      await firstFailed.promise;
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(settled, false, 'The remaining dispatched reads must drain');
+      assert.equal(mutations, 0);
+      for (const release of releases.slice(1)) release.resolve();
+      const result = await work;
+      assert.equal(result.error, failure);
+      assert.equal(active, 0);
+      assert.equal(peak, 16);
+      assert.equal(started.length, 16, 'No later batch may start after a read failure');
+      assert.equal(mutations, 0);
+    } finally {
+      clearTimeout(timer);
+      releaseAll.resolve();
+      await work;
+      mocked.mock.restore();
+      syncBuiltinESMExports();
+    }
+    await assert.rejects(fs.lstat(path.join(f.home, 'sdlc/bin/sdlc.mjs')), { code: 'ENOENT' });
+    await assert.rejects(fs.lstat(path.join(f.home, 'sdlc/install-manifest.json')), { code: 'ENOENT' });
+  }
 });
 
 test('T-23 install/update/uninstall preserve user files, paths with spaces, modified assets and runtime', async t => {

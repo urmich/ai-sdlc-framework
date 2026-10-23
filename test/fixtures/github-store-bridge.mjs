@@ -1025,11 +1025,26 @@ export async function bridgeFixture(t) {
 export async function durableBytes(f) {
   const files = [];
   async function walk(directory) {
-    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
-      const file = path.join(directory, entry.name);
-      if (entry.isDirectory()) await walk(file);
-      else if (!entry.name.endsWith('.lock')) files.push([path.relative(f.root, file),
-        createHash('sha256').update(await fs.readFile(file)).digest('hex')]);
+    const entries = await fs.readdir(directory, { withFileTypes: true });
+    for (let index = 0; index < entries.length;) {
+      const entry = entries[index];
+      if (entry.isDirectory()) {
+        await walk(path.join(directory, entry.name));
+        index++;
+        continue;
+      }
+      const batch = [];
+      while (index < entries.length && !entries[index].isDirectory() && batch.length < 16) {
+        const next = entries[index++];
+        if (!next.name.endsWith('.lock')) batch.push(path.join(directory, next.name));
+      }
+      const snapshots = await Promise.allSettled(batch.map(async file =>
+        [path.relative(f.root, file),
+          createHash('sha256').update(await fs.readFile(file)).digest('hex')]));
+      for (const snapshot of snapshots) {
+        if (snapshot.status === 'rejected') throw snapshot.reason;
+        files.push(snapshot.value);
+      }
     }
   }
   await walk(f.store.runtime);

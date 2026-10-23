@@ -157,6 +157,18 @@ async function filesUnder(root, prefix = '') {
   }
   return result;
 }
+async function readInstallInputs(entries, read) {
+  const values = [];
+  const batchSize = 16;
+  for (let offset = 0; offset < entries.length; offset += batchSize) {
+    const batch = await Promise.allSettled(entries.slice(offset, offset + batchSize).map(read));
+    for (const result of batch) {
+      if (result.status === 'rejected') throw result.reason;
+      values.push(result.value);
+    }
+  }
+  return values;
+}
 export function canonicalInstalledText(content) {
   return Buffer.from(content.toString('utf8').replace(/\r\n?/gu, '\n'));
 }
@@ -220,22 +232,26 @@ async function distributionOperation(home, sourceRoot) {
     return Buffer.from(text);
   };
   for (const directory of ['bin', 'src']) {
-    for (const relative of await filesUnder(path.join(sourceRoot, directory))) {
+    const entries = await filesUnder(path.join(sourceRoot, directory));
+    const contents = await readInstallInputs(entries, relative =>
+      readBytes(path.join(sourceRoot, directory, relative), LIMITS.artifact));
+    for (const [index, relative] of entries.entries()) {
       const target = path.posix.join('sdlc', directory, relative.split(path.sep).join('/'));
-      files.set(target, canonicalInstalledText(
-        await readBytes(path.join(sourceRoot, directory, relative), LIMITS.artifact)));
+      files.set(target, canonicalInstalledText(contents[index]));
     }
   }
   files.set('sdlc/package.json',
     canonicalInstalledText(await readBytes(path.join(sourceRoot, 'package.json'), LIMITS.artifact)));
   for (const directory of ['skills', 'templates', 'instructions']) {
-    for (const relative of await filesUnder(path.join(sourceRoot, 'assets', directory))) {
-      const target = directory === 'skills' ?
-        path.posix.join(directory, relative.split(path.sep).join('/')) :
-        path.posix.join('sdlc', directory, relative.split(path.sep).join('/'));
-      const content = await readBytes(path.join(sourceRoot, 'assets', directory, relative));
-      files.set(target, directory === 'skills' ? render(content) : canonicalInstalledText(content));
-    }
+    const additions = await readInstallInputs(
+      await filesUnder(path.join(sourceRoot, 'assets', directory)), async relative => {
+        const target = directory === 'skills' ?
+          path.posix.join(directory, relative.split(path.sep).join('/')) :
+          path.posix.join('sdlc', directory, relative.split(path.sep).join('/'));
+        const content = await readBytes(path.join(sourceRoot, 'assets', directory, relative));
+        return [target, directory === 'skills' ? render(content) : canonicalInstalledText(content)];
+      });
+    for (const [target, content] of additions) files.set(target, content);
   }
   const hooks = await readJson(path.join(sourceRoot, 'assets', 'hooks', 'sdlc.json'));
   for (const handlers of Object.values(hooks.hooks)) for (const handler of handlers) {
@@ -243,10 +259,12 @@ async function distributionOperation(home, sourceRoot) {
     handler.args = [...handler.args.map(arg => arg === '__SDLC_ENTRY__' ? entry : arg), '--home', home];
   }
   files.set('hooks/sdlc.json', Buffer.from(`${canonical(hooks)}\n`));
-  for (const relative of await filesUnder(path.join(sourceRoot, 'docs'))) {
+  const documents = await filesUnder(path.join(sourceRoot, 'docs'));
+  const documentContents = await readInstallInputs(documents, relative =>
+    readBytes(path.join(sourceRoot, 'docs', relative), LIMITS.artifact));
+  for (const [index, relative] of documents.entries()) {
     files.set(path.posix.join('sdlc', 'docs', relative.split(path.sep).join('/')),
-      canonicalInstalledText(await readBytes(path.join(sourceRoot, 'docs', relative),
-        LIMITS.artifact)));
+      canonicalInstalledText(documentContents[index]));
   }
   for (const name of ['README.md', 'CONTRIBUTING.md', 'SUPPORT.md', 'SECURITY.md',
     'CODE_OF_CONDUCT.md', 'OWNERSHIP.md', 'RELEASING.md', 'CHANGELOG.md', 'LICENSE']) {
@@ -304,13 +322,13 @@ async function installLocked(store, {
     requireThat(!owned || (previous && owned.text === previous.instructionsBlock), 'INSTALL_CONFLICT', 'Modified/unowned instructions block preserved');
     const nextInstructions = owned ? original.slice(0, owned.start) + block + original.slice(owned.end) :
       `${original}${original && !original.endsWith('\n') ? '\n' : ''}${original ? '\n' : ''}${block}\n`;
-    const changes = [];
-    for (const [relative, content] of files) {
+    const inspected = await readInstallInputs([...files], async ([relative, content]) => {
       const target = await safePath(store.home, relative);
       const before = await exists(target) ? await readBytes(target, LIMITS.artifact) : null;
       requireThat(!before || previous?.files?.[relative] === digest(before), 'INSTALL_CONFLICT', `Modified or unowned file preserved: ${relative}`);
-      if (!before || !before.equals(content)) changes.push({ relative, target, before, content });
-    }
+      return !before || !before.equals(content) ? { relative, target, before, content } : null;
+    });
+    const changes = inspected.filter(Boolean);
     for (const [relative, hash] of Object.entries(previous?.files ?? {})) {
       if (files.has(relative)) continue;
       const target = await safePath(store.home, relative);

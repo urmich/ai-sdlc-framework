@@ -75,8 +75,92 @@ export const validationDeclarations = {
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fsPromises from 'node:fs/promises';
+import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { syncBuiltinESMExports } from 'node:module';
 import { recordArtifact } from '../src/validation.mjs';
 import { bridgeFixture, durableBytes } from './fixtures/github-store-bridge.mjs';
+import { fixture } from './helpers.mjs';
+
+test('fixture byte snapshots bound fresh reads and drain failures without caching or losing lock exclusions', async t => {
+  const f = await fixture(t);
+  const directory = path.join(f.store.runtime, 'snapshot-batch');
+  await fsPromises.mkdir(directory);
+  const names = Array.from({ length: 32 }, (_, index) =>
+    path.join(directory, `file-${String(index).padStart(2, '0')}.txt`));
+  for (const file of names) await fsPromises.writeFile(file, path.basename(file));
+  const selected = new Set(names);
+  const readFile = fsPromises.readFile;
+  const batchStarted = Promise.withResolvers();
+  const firstFailed = Promise.withResolvers();
+  const releaseAll = Promise.withResolvers();
+  const releases = [];
+  const failure = new Error('Controlled snapshot read failure');
+  let active = 0;
+  let peak = 0;
+  let settled = false;
+  const mocked = t.mock.method(fsPromises, 'readFile', async (file, ...options) => {
+    if (!selected.has(file)) return readFile(file, ...options);
+    const index = releases.length;
+    const release = Promise.withResolvers();
+    releases.push(release);
+    active++;
+    peak = Math.max(peak, active);
+    if (releases.length === 16) batchStarted.resolve();
+    try {
+      await Promise.race([release.promise, releaseAll.promise]);
+      if (index === 0) {
+        firstFailed.resolve();
+        throw failure;
+      }
+      return await readFile(file, ...options);
+    } finally {
+      active--;
+    }
+  });
+  syncBuiltinESMExports();
+  const work = durableBytes(f).then(value => { settled = true; return { value }; },
+    error => { settled = true; return { error }; });
+  let timer;
+  try {
+    await Promise.race([batchStarted.promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('The snapshot read batch did not fill')), 10000);
+    })]);
+    clearTimeout(timer);
+    assert.equal(active, 16);
+    releases[0].resolve();
+    await firstFailed.promise;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(settled, false);
+    for (const release of releases.slice(1)) release.resolve();
+    const result = await work;
+    assert.equal(result.error, failure);
+    assert.equal(active, 0);
+    assert.equal(peak, 16);
+    assert.equal(releases.length, 16);
+  } finally {
+    clearTimeout(timer);
+    releaseAll.resolve();
+    await work;
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+  }
+  await fsPromises.writeFile(path.join(directory, 'ignored.lock'), 'Not snapshot content');
+  const nested = path.join(directory, 'nested.lock');
+  await fsPromises.mkdir(nested);
+  await fsPromises.writeFile(path.join(nested, 'kept.txt'), 'Keep directory content');
+  const before = await durableBytes(f);
+  const changed = path.relative(f.root, names[0]);
+  await fsPromises.writeFile(names[0], 'Fresh replacement bytes');
+  const after = await durableBytes(f);
+  assert.equal(after.some(([file]) => file === path.relative(f.root, path.join(directory, 'ignored.lock'))), false);
+  assert.ok(after.some(([file]) => file === path.relative(f.root, path.join(nested, 'kept.txt'))));
+  assert.deepEqual(after.find(([file]) => file === changed), [changed,
+    createHash('sha256').update('Fresh replacement bytes').digest('hex')]);
+  assert.deepEqual(after.filter(([file]) => file !== changed), before.filter(([file]) => file !== changed));
+  assert.deepEqual(after, [...after].sort(([left], [right]) => left.localeCompare(right)));
+});
 
 const base = '/repos/bridge-owner/bridge-repo';
 const revision = 'f'.repeat(40);
