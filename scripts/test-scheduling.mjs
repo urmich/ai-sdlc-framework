@@ -10,6 +10,11 @@ export const measuredFilePriorities = Object.freeze([
   'public-readiness-observer.test.mjs',
   'public-readiness-ci.test.mjs',
   'public-readiness-evidence.test.mjs',
+  'github-provider-consumers.test.mjs',
+  'package.test.mjs',
+  'pr-facts-archive-recovery.test.mjs',
+  'distribution-channels.test.mjs',
+  'test-runner.test.mjs',
   'github-retained-identity-acceptance.test.mjs',
   'validation-catalog.test.mjs',
   'winget-launcher-native.test.mjs',
@@ -25,7 +30,7 @@ export const measuredFilePriorities = Object.freeze([
   'deployment-revisions.test.mjs', 'pr-publication.test.mjs',
 ]);
 export const validationSchedulingPolicy = Object.freeze({
-  schemaVersion: 5, algorithm: 'source-bound-ready-root-v5',
+  schemaVersion: 6, algorithm: 'source-bound-ready-root-v6',
   groupProtocol: validationGroupProtocol,
   priorities: measuredFilePriorities, hints: 'exact-assertion-and-source-digest; no nested double-counting',
   hostedUnits: 'complete-unit-test-files-plus-automated-plan-unit-root-closure',
@@ -37,10 +42,17 @@ export const validationSchedulingPolicy = Object.freeze({
     files: 'process-isolated-root-closures; dynamic-shared-ready-pool; minimum-and-exclusive-before-module-setup',
     nested: 'awaited-parent-yield; ancestor-token-loan; restore-before-return' }),
 });
-const previousSchedulingPolicy = Object.freeze({
+const source63SchedulingPolicy = Object.freeze({
   ...validationSchedulingPolicy,
-  schemaVersion: 4, algorithm: 'source-bound-ready-root-v4',
+  schemaVersion: 5, algorithm: 'source-bound-ready-root-v5',
   priorities: Object.freeze(measuredFilePriorities.filter(file =>
+    !['github-provider-consumers.test.mjs', 'package.test.mjs', 'pr-facts-archive-recovery.test.mjs',
+      'distribution-channels.test.mjs', 'test-runner.test.mjs'].includes(file))),
+});
+const previousSchedulingPolicy = Object.freeze({
+  ...source63SchedulingPolicy,
+  schemaVersion: 4, algorithm: 'source-bound-ready-root-v4',
+  priorities: Object.freeze(source63SchedulingPolicy.priorities.filter(file =>
     !['public-readiness-ci.test.mjs', 'public-readiness-evidence.test.mjs'].includes(file))),
 });
 const middleSchedulingPolicy = Object.freeze({
@@ -54,7 +66,8 @@ const priorSchedulingPolicy = Object.freeze({
   schemaVersion: 2, algorithm: 'source-bound-ready-root-v2',
   priorities: Object.freeze(middleSchedulingPolicy.priorities.filter(file => file !== 'validation-catalog.test.mjs')),
 });
-const knownPolicies = new Set([validationSchedulingPolicy, previousSchedulingPolicy, middleSchedulingPolicy, priorSchedulingPolicy]);
+const knownPolicies = new Set([validationSchedulingPolicy, source63SchedulingPolicy,
+  previousSchedulingPolicy, middleSchedulingPolicy, priorSchedulingPolicy]);
 export function validationSchedulingPolicyDigest(policy = validationSchedulingPolicy) {
   requireThat(knownPolicies.has(policy), 'EVIDENCE', 'Scheduling policy must be current or independently source-selected');
   return digest(policy);

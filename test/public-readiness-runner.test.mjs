@@ -1647,6 +1647,9 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
       'test/public-readiness-ci.test.mjs'),
     discoverDeclarations("import test from 'node:test';test('unchanged retained evidence family',()=>{});",
       'test/public-readiness-evidence.test.mjs'),
+    ...['github-provider-consumers.test.mjs', 'package.test.mjs', 'pr-facts-archive-recovery.test.mjs',
+      'distribution-channels.test.mjs', 'test-runner.test.mjs'].map(file =>
+      discoverDeclarations("import test from 'node:test';test('unchanged measured tail family',()=>{});", `test/${file}`)),
   ];
   const inventory = { complete: true, files: declarations.map(source =>
     ({ file: source.file, sourceDigest: source.sourceDigest })), cases: declarations.flatMap(source => source.cases) };
@@ -1657,10 +1660,15 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
   ] });
   assert.ok(selected.units.cases.some(test => test.name === 'unit family without local binding'));
   assert.ok(selected.units.cases.some(test => test.name === 'T-PRD008 selected planned unit'));
-  assert.deepEqual(selected.regression.files.slice(0, 7), [
+  assert.deepEqual(selected.regression.files.slice(0, 12), [
     'test/observation-retention-refresh.test.mjs',
     'test/public-readiness-ci.test.mjs',
     'test/public-readiness-evidence.test.mjs',
+    'test/github-provider-consumers.test.mjs',
+    'test/package.test.mjs',
+    'test/pr-facts-archive-recovery.test.mjs',
+    'test/distribution-channels.test.mjs',
+    'test/test-runner.test.mjs',
     'test/github-retained-identity-acceptance.test.mjs',
     'test/validation-catalog.test.mjs',
     'test/winget-launcher-native.test.mjs',
@@ -1686,16 +1694,27 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
     ['public-readiness-release-report.test.mjs', 'release-report'],
     ['public-readiness-ci.test.mjs', 'ci'],
     ['public-readiness-evidence.test.mjs', 'evidence'],
+    ['github-provider-consumers.test.mjs', 'consumers'],
+    ['package.test.mjs', 'package'],
+    ['pr-facts-archive-recovery.test.mjs', 'recovery'],
+    ['distribution-channels.test.mjs', 'distribution'],
+    ['test-runner.test.mjs', 'runner'],
   ]) await fs.writeFile(path.join(f.root, 'test', file),
     "import test from 'node:test';import {appendFile} from 'node:fs/promises';" +
     `test('dispatch ${value}',()=>appendFile(${JSON.stringify(marker)},'${value}\\n'));`);
   const result = await f.invoke(['full', '--workers', '1']);
   assert.equal(result.exitCode, 0, result.stdout + result.stderr);
   assert.deepEqual((await fs.readFile(marker, 'utf8')).trim().split(/\r?\n/u),
-    ['retention', 'observer', 'ci', 'evidence', 'retained-identity', 'catalog',
+    ['retention', 'observer', 'ci', 'evidence', 'consumers', 'package', 'recovery',
+      'distribution', 'runner', 'retained-identity', 'catalog',
       'native-launcher', 'release-report', 'operation']);
   const source = await fs.readFile(new URL('../scripts/test-scheduling.mjs', import.meta.url), 'utf8');
-  const previous = source.replace("  'public-readiness-ci.test.mjs',\n", '')
+  const source63 = ['github-provider-consumers.test.mjs', 'package.test.mjs', 'pr-facts-archive-recovery.test.mjs',
+    'distribution-channels.test.mjs', 'test-runner.test.mjs'].reduce((contents, file) =>
+    contents.replace(`  '${file}',\n`, ''), source)
+    .replace("schemaVersion: 6, algorithm: 'source-bound-ready-root-v6'",
+      "schemaVersion: 5, algorithm: 'source-bound-ready-root-v5'");
+  const previous = source63.replace("  'public-readiness-ci.test.mjs',\n", '')
     .replace("  'public-readiness-evidence.test.mjs',\n", '')
     .replace("schemaVersion: 5, algorithm: 'source-bound-ready-root-v5'",
       "schemaVersion: 4, algorithm: 'source-bound-ready-root-v4'");
@@ -1708,6 +1727,9 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
       "schemaVersion: 2, algorithm: 'source-bound-ready-root-v2'");
   const selectedPolicy = contents => sourceValidationSchedulingPolicy([{ file: 'scripts/test-scheduling.mjs', contents }]);
   assert.equal(selectedPolicy(source), validationSchedulingPolicy);
+  assert.equal(selectedPolicy(source63).schemaVersion, 5);
+  assert.equal(validationSchedulingPolicyDigest(selectedPolicy(source63)),
+    'fada90e8f91f761ecb98a11fafc0d0409d1f14d295339d94ee9547855df6ec58');
   assert.equal(selectedPolicy(previous).schemaVersion, 4);
   assert.equal(validationSchedulingPolicyDigest(selectedPolicy(previous)),
     '2273d5335dc6b8bdb7034af1dfde42a2843c1df35345188cb97d3285d0151d64');
@@ -1726,6 +1748,8 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
     source.replace("  'public-readiness-release-report.test.mjs',\n", ''),
     source.replace("  'public-readiness-ci.test.mjs',\n", ''),
     source.replace("  'public-readiness-evidence.test.mjs',\n", ''),
+    ...['github-provider-consumers.test.mjs', 'package.test.mjs', 'pr-facts-archive-recovery.test.mjs',
+      'distribution-channels.test.mjs', 'test-runner.test.mjs'].map(file => source.replace(`  '${file}',\n`, '')),
     source.replace('export const measuredFilePriorities', 'const measuredFilePriorities') +
       '\n// export const measuredFilePriorities = Object.freeze([]);\n',
     source + '\nexport const validationGroupProtocol = "forged";\n',

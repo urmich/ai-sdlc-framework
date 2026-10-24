@@ -1071,7 +1071,10 @@ not complete before the cutoff. Do not claim a whole-lane speedup before complet
 hosted results.
 Preserve initial observation refresh/regression and observer priorities, then
 prioritize the unchanged CI-input and retained-evidence families under implicit
-policy v5. Keep the measured retained-identity acceptance family, catalog,
+policy v6. Next prioritize provider consumers, reproducible packaging,
+facts/archive recovery, distribution lifecycle and runner probes, in that order,
+without changing their real commands, negative controls or causal closures.
+Keep the measured retained-identity acceptance family, catalog,
 unchanged native WinGet launcher family and joined release-report family in
 their relative order for shards owning those files, ahead of shorter families.
 Verify both hosted
@@ -1163,9 +1166,11 @@ partial write; do not catch or retry invalid JSON, relax a barrier or extend its
 deadline to conceal incomplete publication.
 The PR-only `T-PRD074 archived scheduling reconstructs only its authenticated
 captured literal policy without current-credit fallback` root in
-`test/public-readiness-observer.test.mjs` checks current v5 and exact historical
-v4/v3/v2 archives and all three historical policies' sharded SDK evidence.
-Preserve the exact original v4 digest
+`test/public-readiness-observer.test.mjs` checks current v6 and exact historical
+v5/v4/v3/v2 archives and all four historical policies' sharded SDK evidence.
+Preserve the exact original v5 digest
+`fada90e8f91f761ecb98a11fafc0d0409d1f14d295339d94ee9547855df6ec58`,
+the exact original v4 digest
 `2273d5335dc6b8bdb7034af1dfde42a2843c1df35345188cb97d3285d0151d64`, the
 exact original v3 digest `6274c99ad21f86dff3a67164c7f486bcb35cae3e9fcf67fb71deec2c72859c3f`
 and v2 digest `0217489f1d88ac4649cee4e85b81777276297c70c140e4ab9346eef2770ee6db`.

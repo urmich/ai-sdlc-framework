@@ -169,7 +169,11 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
     { file: 'test/public-readiness-release-report.test.mjs', stage: 'regression',
       id: 'T-FIX-PRIORITY-REPORT', name: 'T-FIX-PRIORITY-REPORT controlled report root' },
     { file: 'test/public-readiness-evidence.test.mjs', stage: 'regression',
-      id: 'T-FIX-PRIORITY-EVIDENCE', name: 'T-FIX-PRIORITY-EVIDENCE controlled evidence root' });
+      id: 'T-FIX-PRIORITY-EVIDENCE', name: 'T-FIX-PRIORITY-EVIDENCE controlled evidence root' },
+    ...[['github-provider-consumers.test.mjs', 'CONSUMERS'], ['package.test.mjs', 'PACKAGE'],
+      ['pr-facts-archive-recovery.test.mjs', 'RECOVERY'], ['test-runner.test.mjs', 'RUNNER']]
+      .map(([file, id]) => ({ file: `test/${file}`, stage: 'regression',
+        id: `T-FIX-PRIORITY-${id}`, name: `T-FIX-PRIORITY-${id} controlled tail root` })));
   if (bootstrapProtocol === nativeBootstrapProtocol) names.push({
     file: 'test/public-readiness-release-consumer.test.mjs', stage: 'regression', id: 'T-PRD041',
     name: 'T-PRD041 retained signed fixtures use the actual verifier for payload signature certificate and transparency failures',
