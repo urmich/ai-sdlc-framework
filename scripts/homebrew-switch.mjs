@@ -2,22 +2,33 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { finished } from 'node:stream/promises';
 import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import {
   advanceSwitchState, captureSwitchState, findInstalledKeg, finishSwitchState,
-  linkState, ownsLauncher, resolveHomebrewCandidate, verifyCapturedKegs,
+  linkState, ownsLauncher, resolveHomebrewCandidate, restoreCapturedUpgradeLinks, verifyCapturedKegs,
 } from '../packaging/homebrew/switch-state.mjs';
 
 const execute = promisify(execFile);
 export function runHomebrewCommand(command, args, { input = '', ...options } = {}) {
   const pending = execute(command, args, options);
-  pending.child.stdin?.end(input);
-  return pending;
+  const inputStream = pending.child.stdin;
+  const written = inputStream ? finished(inputStream, { readable: false, cleanup: true }) : Promise.resolve();
+  inputStream?.end(input?.length === 0 ? undefined : input);
+  return Promise.allSettled([pending, written]).then(([result, stdin]) => {
+    if (result.status === 'rejected') throw result.reason;
+    if (stdin.status === 'rejected') throw stdin.reason;
+    return result.value;
+  });
 }
 const formulaName = value => typeof value === 'string' &&
   /^(?:[a-zA-Z0-9][a-zA-Z0-9_-]*\/[a-zA-Z0-9][a-zA-Z0-9_-]*\/)?[a-zA-Z0-9][a-zA-Z0-9@+_.-]*$/u.test(value);
 const owned = ownsLauncher;
+const hookEvents = ['sessionStart', 'userPromptSubmitted', 'preToolUse', 'postToolUse',
+  'postToolUseFailure', 'preCompact', 'agentStop', 'sessionEnd'];
 
 export async function assertNativeMacHost(run = runHomebrewCommand, env = process.env) {
   if (process.platform !== 'darwin' || !['arm64', 'x64'].includes(process.arch)) {
@@ -94,7 +105,8 @@ export async function promoteHomebrewLink({
 
 async function brewContext(brew, environment, run) {
   const env = { ...environment, HOMEBREW_NO_AUTO_UPDATE: '1', HOMEBREW_NO_ANALYTICS: '1',
-    HOMEBREW_NO_INSTALL_CLEANUP: '1', HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: '1' };
+    HOMEBREW_NO_INSTALL_CLEANUP: '1', HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: '1',
+    ...(environment.SDLC_HOMEBREW_PREFIX_PROOF ? { HOMEBREW_NO_INSTALL_FROM_API: '1' } : {}) };
   const runBrew = args => run(brew, args, { env, maxBuffer: 8 * 1024 * 1024 });
   await assertNativeMacHost(run, env);
   const prefix = await fs.realpath((await runBrew(['--prefix'])).stdout.trim());
@@ -114,6 +126,29 @@ async function nodeIdentity(node, run, env) {
   return runtime.execPath;
 }
 
+export async function resolveHomebrewRuntime({ keg, cellar, runBrew, capturedState }) {
+  const captured = capturedState?.kegs.find(record => record.path === keg && record.role === 'live');
+  if (capturedState && !captured) throw new Error('The installed channel is not in the captured live dependency closure');
+  const receipt = captured?.receipt ??
+    JSON.parse(await fs.readFile(path.join(keg, 'INSTALL_RECEIPT.json'), 'utf8'));
+  if (!Array.isArray(receipt.runtime_dependencies)) throw new Error('Missing installed channel runtime dependencies');
+  const dependencies = receipt.runtime_dependencies.filter(dependency =>
+    dependency.declared_directly !== false && /^node@\d+$/u.test(dependency.full_name));
+  if (dependencies.length !== 1 || Number(dependencies[0].full_name.slice(5)) < 22) {
+    throw new Error('The installed channel must record exactly one direct Node 22+ runtime dependency');
+  }
+  const formula = dependencies[0].full_name;
+  const runtimeKeg = await findInstalledKeg(runBrew, formula, cellar);
+  if (captured) {
+    const dependency = captured.dependencies.find(record => record.fullName === formula && record.requiredLive);
+    if (!dependency || dependency.currentKeg !== runtimeKeg ||
+        !capturedState.kegs.some(record => record.path === runtimeKeg && record.role === 'live')) {
+      throw new Error('The retained Node runtime differs from the captured live dependency');
+    }
+  }
+  return { formula, keg: runtimeKeg, node: path.join(runtimeKeg, 'bin', 'node') };
+}
+
 export async function verifyHomebrewHooks({ doctor, forbiddenKegs = [], node, run = runHomebrewCommand,
   environment = process.env, executeHooks = false }) {
   if (!doctor.installed || !Array.isArray(doctor.findings) || doctor.findings.length) {
@@ -121,11 +156,20 @@ export async function verifyHomebrewHooks({ doctor, forbiddenKegs = [], node, ru
   }
   const hooks = JSON.parse(await fs.readFile(path.join(doctor.home, 'hooks', 'sdlc.json'), 'utf8'));
   const copiedCli = path.join(doctor.home, 'sdlc', 'bin', 'sdlc.mjs');
-  const handlers = Object.values(hooks.hooks).flat();
-  if (!handlers.length) throw new Error('Installed hook commands are missing');
-  for (const handler of handlers) {
+  assert.deepEqual(Object.keys(hooks.hooks ?? {}).sort(), [...hookEvents].sort(),
+    'All eight installed hook events are required');
+  const sessionId = executeHooks ? `consumer-hooks-${randomUUID()}` : null;
+  const strictSessionId = executeHooks ? `${sessionId}-strict` : null;
+  let orientationGeneration = 0;
+  // Serialization can reorder the hook map, but cannot reorder a session lifecycle.
+  for (const event of hookEvents) {
+    const handlers = hooks.hooks[event];
+    assert.equal(handlers.length, 1, 'Each installed event must select exactly one owned command');
+    const [handler] = handlers;
     if (!Array.isArray(handler.args) || handler.args[0] !== copiedCli ||
         typeof handler.exec !== 'string') throw new Error('Hook does not invoke the copied Copilot-home CLI');
+    assert.deepEqual(handler.args, [copiedCli, ...(event === 'preToolUse' ? ['gate'] : ['hook', event]),
+      '--home', doctor.home], 'Installed hook event routes to the wrong handler/home');
     for (const argument of [handler.exec, ...handler.args]) {
       if (typeof argument !== 'string' ||
           forbiddenKegs.some(keg => keg && argument.includes(keg))) {
@@ -136,8 +180,45 @@ export async function verifyHomebrewHooks({ doctor, forbiddenKegs = [], node, ru
       throw new Error('Hook-bound Node differs from the independently retained runtime');
     }
     if (executeHooks) {
-      const { stdout } = await run(handler.exec, handler.args, { env: environment, input: '{}\n' });
-      for (const line of stdout.trim().split('\n').filter(Boolean)) JSON.parse(line);
+      const prompt = `Isolated installed ${event} contract`;
+      const payload = { sessionId, cwd: doctor.home, prompt, toolName: 'view',
+        toolArgs: { path: path.join(doctor.home, 'copilot-instructions.md') },
+        toolResult: { textResultForLlm: 'Owned consumer hook fixture' } };
+      const response = JSON.parse((await run(handler.exec, handler.args,
+        { env: environment, input: `${JSON.stringify(payload)}\n` })).stdout);
+      // The executable intentionally fails open. A strict companion call must
+      // complete the same installed handler without that catch-all boundary.
+      const strict = 'import {pathToFileURL} from "node:url";' +
+        'const entry=process.argv[1];process.argv=[process.execPath,...process.argv.slice(1)];' +
+        'const {runCli}=await import(pathToFileURL(entry.replace(/[\\\\/]bin[\\\\/]sdlc\\.mjs$/,"/src/cli.mjs")).href);' +
+        'const {result,exitCode}=await runCli();process.stdout.write(JSON.stringify(result));process.exitCode=exitCode;';
+      const strictPayload = { ...payload, sessionId: strictSessionId };
+      const expected = JSON.parse((await run(handler.exec, ['--input-type=module', '--eval', strict, ...handler.args],
+        { env: environment, input: `${JSON.stringify(strictPayload)}\n` })).stdout);
+      assert.deepEqual(response, expected, `Installed ${event} response differs from its non-fail-open handler`);
+      if (event === 'sessionStart') {
+        assert.match(response.additionalContext ?? '', /AI SDLC lifecycle stages are advisory/u);
+      } else assert.deepEqual(response, {}, `Unexpected installed ${event} response`);
+      if (['sessionStart', 'preCompact', 'sessionEnd'].includes(event)) {
+        orientationGeneration++;
+        for (const observedSessionId of [sessionId, strictSessionId]) {
+          const session = JSON.parse(await fs.readFile(path.join(doctor.home, 'sdlc', 'runtime',
+            'sessions', `${observedSessionId}.json`), 'utf8'));
+          assert.equal(session.sessionId, observedSessionId);
+          assert.equal(session.orientationGeneration, orientationGeneration);
+          assert.equal(session.orientationReason, event);
+          assert.equal(session.acknowledgedToken, null);
+        }
+      } else if (event === 'userPromptSubmitted') {
+        for (const observedSessionId of [sessionId, strictSessionId]) {
+          const receipts = path.join(doctor.home, 'sdlc', 'runtime', 'sessions', observedSessionId, 'receipts');
+          const names = await fs.readdir(receipts);
+          assert.equal(names.length, 1, 'Installed prompt hook did not capture its isolated input');
+          const receipt = JSON.parse(await fs.readFile(path.join(receipts, names[0]), 'utf8'));
+          assert.equal(receipt.sessionId, observedSessionId);
+          assert.equal(receipt.source, event);
+        }
+      }
     }
   }
 }
@@ -161,7 +242,7 @@ export async function verifyCopiedHomebrewInstallation({
 export async function switchToHomebrew({
   brew = 'brew', formula = 'urmich/ai-sdlc-framework/ai-sdlc-framework',
   home, previousFormula, purgeExisting = false, environment = process.env,
-  run = runHomebrewCommand,
+  run = runHomebrewCommand, upgradePackage = false,
 } = {}) {
   if (!formulaName(formula) || (previousFormula && !formulaName(previousFormula))) {
     throw new Error('Invalid Homebrew formula name');
@@ -175,11 +256,26 @@ export async function switchToHomebrew({
     const requestedCandidate = await resolveHomebrewCandidate(runBrew, formula, cellar);
     state.requestedCandidate = requestedCandidate;
     await advanceSwitchState(state, 'installing-new-channel');
-    await runBrew(['install', '--formula', '--skip-link', formula]);
+    if (upgradePackage) {
+      if (!state.targetKeg) throw new Error('A real Homebrew upgrade requires an installed previous keg');
+      if (!state.kegs.some(keg => keg.path === requestedCandidate.keg)) {
+        await runBrew(['upgrade', '--formula', formula]);
+      }
+    } else await runBrew(['install', '--formula', '--skip-link', formula]);
     if ((await resolveHomebrewCandidate(runBrew, formula, cellar)).keg !== requestedCandidate.keg) {
       throw new Error('Homebrew candidate identity changed during installation');
     }
     newKeg = await findInstalledKeg(runBrew, formula, cellar, { expectedKeg: requestedCandidate.keg });
+    if (upgradePackage && owned(await linkState(path.join(prefix, 'bin', 'sdlc')), newKeg)) {
+      // brew upgrade links its result. Restore the captured link until the
+      // copied-home verification below admits the normal promotion boundary.
+      await runBrew(['unlink', formula]);
+      if (state.capturedLink.kind !== 'absent') {
+        if (!owned(state.capturedLink, state.previousKeg)) throw new Error('Unidentified captured upgrade link');
+        await fs.symlink(state.capturedLink.target, path.join(prefix, 'bin', 'sdlc'));
+      }
+      await restoreCapturedUpgradeLinks(state, newKeg);
+    }
     const receipt = JSON.parse(await fs.readFile(path.join(newKeg, 'INSTALL_RECEIPT.json'), 'utf8'));
     if (receipt.source?.versions?.stable !== requestedCandidate.version) {
       throw new Error('Installed candidate receipt does not match the requested version');
@@ -209,8 +305,7 @@ export async function switchToHomebrew({
       throw new Error('Homebrew opt does not point to the requested candidate after promotion');
     }
     await advanceSwitchState(state, 'verifying-promoted-channel');
-    const runtimeKeg = await findInstalledKeg(runBrew, 'node@22', cellar);
-    const node = path.join(runtimeKeg, 'bin', 'node');
+    const { node } = await resolveHomebrewRuntime({ keg: newKeg, cellar, runBrew });
     await verifyCopiedHomebrewInstallation({ home: doctor.home, node, frameworkVersion: pkg.version,
       forbiddenKegs: [newKeg, state.previousKeg], run, environment: env });
     await verifyCapturedKegs(state);
@@ -247,11 +342,11 @@ export async function switchFromHomebrew({
   let result;
   try {
     if (!state.targetKeg) throw new Error('There is no installed Homebrew channel to replace');
-    const runtimeKeg = await findInstalledKeg(runBrew, 'node@22', cellar);
-    const node = await nodeIdentity(path.join(runtimeKeg, 'bin', 'node'), run, env);
+    const runtime = await resolveHomebrewRuntime({ keg: state.targetKeg, cellar, runBrew, capturedState: state });
+    const node = await nodeIdentity(runtime.node, run, env);
     await advanceSwitchState(state, 'retaining-node');
-    await runBrew(['tab', '--installed-on-request', '--formula', 'node@22']);
-    const retained = JSON.parse(await fs.readFile(path.join(runtimeKeg, 'INSTALL_RECEIPT.json'), 'utf8'));
+    await runBrew(['tab', '--installed-on-request', '--formula', runtime.formula]);
+    const retained = JSON.parse(await fs.readFile(path.join(runtime.keg, 'INSTALL_RECEIPT.json'), 'utf8'));
     if (retained.installed_on_request !== true) throw new Error('Homebrew did not retain Node independently of the formula');
     state.retainedNode = node;
     await advanceSwitchState(state, 'installing-replacement');

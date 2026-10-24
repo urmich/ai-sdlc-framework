@@ -1,3 +1,7 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "direct", "paths": ["src/current-evidence.mjs"]}]
+};
 import test from 'node:test';
 import { lookupOperation } from '../src/validation-evidence.mjs';
 import assert from 'node:assert/strict';

@@ -16,5 +16,5 @@ else
   node=$(command -v node) || { echo 'AI SDLC requires Node.js 22+ on PATH' >&2; exit 1; }
 fi
 test -f "$node" && test -x "$node" || { echo 'Node.js is not an executable file' >&2; exit 1; }
-node=$("$node" -e 'if(Number(process.versions.node.split(".")[0])<22)throw Error("AI SDLC requires Node.js 22+");process.stdout.write(process.execPath)') || exit 1
+node=$("$node" -e 'if(Number(process.versions.node.split(".")[0])<22)throw Error("AI SDLC requires Node.js 22+");const fs=require("node:fs");if(fs.realpathSync(process.argv[1])!==fs.realpathSync(process.execPath))throw Error("Selected Node.js runtime changed or is shadowed");process.stdout.write(process.execPath)' "$node") || exit 1
 exec "$node" "$root/package/packaging/standalone/runtime.mjs" launch --root "$root" --node "$node" -- "$@"

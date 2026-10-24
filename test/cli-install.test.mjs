@@ -1,13 +1,20 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "process", "paths": ["bin/sdlc.mjs", "src/cli.mjs", "src/install.mjs", "src/hooks.mjs", "src/checks.mjs"]}]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import * as fs from 'node:fs/promises';
+import fsPromises from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { randomUUID } from 'node:crypto';
 import { fixture, artifact, coding, cli, grant, orient } from './helpers.mjs';
-import { cleanInstall, install, uninstall, doctor, BLOCK_START, canonicalInstalledText } from '../src/install.mjs';
+import { cleanInstall, install, uninstall, doctor, distribution, BLOCK_START, canonicalInstalledText } from '../src/install.mjs';
 import { registerArtifact } from '../src/artifacts.mjs';
 import { aggregate, check } from '../src/checks.mjs';
 import { readJson, writeJson } from '../src/files.mjs';
@@ -21,6 +28,84 @@ test('T-38 installed framework text uses canonical LF without changing source', 
   const source = Buffer.from('first\r\nsecond\rthird\n');
   assert.equal(canonicalInstalledText(source).toString('utf8'), 'first\nsecond\nthird\n');
   assert.equal(source.toString('utf8'), 'first\r\nsecond\rthird\n');
+});
+
+test('T-23 installation read batches drain failures before writes and stop further dispatch', async t => {
+  for (const phase of ['source', 'destination']) {
+    const f = await fixture(t);
+    const prepared = await distribution(f.home);
+    const targets = new Set([...prepared.files.keys()].map(relative =>
+      path.join(f.home, relative)));
+    const source = path.resolve('src') + path.sep;
+    const method = phase === 'source' ? 'open' : 'lstat';
+    const original = fsPromises[method];
+    const started = [];
+    const seen = new Set();
+    const releases = [];
+    const batchStarted = Promise.withResolvers();
+    const firstFailed = Promise.withResolvers();
+    const releaseAll = Promise.withResolvers();
+    const failure = new Error(`Controlled ${phase} read failure`);
+    let active = 0;
+    let peak = 0;
+    let settled = false;
+    let mutations = 0;
+    const mocked = t.mock.method(fsPromises, method, async (file, ...options) => {
+      const selected = typeof file === 'string' && (phase === 'source' ?
+        file.startsWith(source) : targets.has(file));
+      if (!selected || seen.has(file)) return original(file, ...options);
+      seen.add(file);
+      const index = started.length;
+      const release = Promise.withResolvers();
+      releases.push(release);
+      started.push(file);
+      active++;
+      peak = Math.max(peak, active);
+      if (started.length === 16) batchStarted.resolve();
+      try {
+        await Promise.race([release.promise, releaseAll.promise]);
+        if (index === 0) {
+          firstFailed.resolve();
+          throw failure;
+        }
+        return await original(file, ...options);
+      } finally {
+        active--;
+      }
+    });
+    syncBuiltinESMExports();
+    const work = install(f.store, { fault: async () => { mutations++; } })
+      .then(value => { settled = true; return { value }; },
+        error => { settled = true; return { error }; });
+    let timer;
+    try {
+      await Promise.race([batchStarted.promise, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`The ${phase} read batch did not fill`)), 10000);
+      })]);
+      clearTimeout(timer);
+      assert.equal(active, 16);
+      releases[0].resolve();
+      await firstFailed.promise;
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(settled, false, 'The remaining dispatched reads must drain');
+      assert.equal(mutations, 0);
+      for (const release of releases.slice(1)) release.resolve();
+      const result = await work;
+      assert.equal(result.error, failure);
+      assert.equal(active, 0);
+      assert.equal(peak, 16);
+      assert.equal(started.length, 16, 'No later batch may start after a read failure');
+      assert.equal(mutations, 0);
+    } finally {
+      clearTimeout(timer);
+      releaseAll.resolve();
+      await work;
+      mocked.mock.restore();
+      syncBuiltinESMExports();
+    }
+    await assert.rejects(fs.lstat(path.join(f.home, 'sdlc/bin/sdlc.mjs')), { code: 'ENOENT' });
+    await assert.rejects(fs.lstat(path.join(f.home, 'sdlc/install-manifest.json')), { code: 'ENOENT' });
+  }
 });
 
 test('T-23 install/update/uninstall preserve user files, paths with spaces, modified assets and runtime', async t => {
@@ -115,6 +200,66 @@ test('T-23 partial installation rolls back only its own unchanged writes', async
   assert.equal(await fs.readFile(instructions, 'utf8'), 'Keep user instructions');
   assert.match(await fs.readFile(path.join(f.home, 'sdlc/bin/sdlc.mjs'), 'utf8'), /concurrent user edit/u);
 });
+
+test('T-PRD023 competing installs and interrupted rollback preserve unowned content, runtime and the other fixture', async t => {
+  const first = await fixture(t);
+  const second = await fixture(t);
+  const outside = path.join(os.tmpdir(), `sdlc-unowned-${randomUUID()}.json`);
+  await fs.writeFile(outside, '{"outside":"preserved"}\n', { flag: 'wx' });
+  t.after(() => fs.unlink(outside));
+  const settings = await Promise.all([first, second].map(async f => {
+    const file = path.join(f.home, 'user-settings.json');
+    await fs.writeFile(file, '{"user":"preserved"}\n', { flag: 'wx' });
+    const runtime = path.join(f.home, 'sdlc', 'runtime', 'user-sentinel.json');
+    await fs.writeFile(runtime, '{"runtime":"preserved"}\n', { flag: 'wx' });
+    return { file, runtime };
+  }));
+  const entered = [Promise.withResolvers(), Promise.withResolvers()];
+  const secondCompleted = Promise.withResolvers();
+  const wait = async promise => {
+    const timeout = new AbortController();
+    try {
+      return await Promise.race([promise, delay(20000, null, { signal: timeout.signal, ref: false })
+        .then(() => { throw new Error('Independent installer did not reach its owned-resource barrier'); })]);
+    } finally { timeout.abort(); }
+  };
+  let injected = false;
+  const failed = install(first.store, { fault: async relative => {
+    if (relative !== 'sdlc/bin/sdlc.mjs') return;
+    entered[0].resolve();
+    await wait(entered[1].promise);
+    await wait(secondCompleted.promise);
+    await fs.appendFile(path.join(first.home, relative), '\n// preserved concurrent user modification\n');
+    injected = true;
+    throw new Error('Interrupted owned installation');
+  } });
+  const failedOutcome = failed.then(() => null, error => error);
+  try {
+    const success = await install(second.store, { fault: async relative => {
+      if (relative !== 'sdlc/bin/sdlc.mjs') return;
+      entered[1].resolve();
+      await wait(entered[0].promise);
+    } });
+    assert.equal(success.installed, true);
+  } finally {
+    entered[0].resolve();
+    entered[1].resolve();
+    secondCompleted.resolve();
+    await failedOutcome;
+  }
+  const failure = await failedOutcome;
+  assert.equal(failure?.code, 'INSTALL_FAILED');
+  assert.equal(injected, true);
+  assert.match(await fs.readFile(path.join(first.home, 'sdlc/bin/sdlc.mjs'), 'utf8'),
+    /preserved concurrent user modification/u);
+  await uninstall(second.store);
+  for (const { file, runtime } of settings) {
+    assert.equal(await fs.readFile(file, 'utf8'), '{"user":"preserved"}\n');
+    assert.equal(await fs.readFile(runtime, 'utf8'), '{"runtime":"preserved"}\n');
+  }
+  assert.equal(await fs.readFile(outside, 'utf8'), '{"outside":"preserved"}\n');
+});
+
 test('T-46 explicit purge removes all framework traces but preserves unrelated Copilot content', async t => {
   const f = await fixture(t, { initialize: false });
   const instructions = path.join(f.home, 'copilot-instructions.md');
@@ -184,7 +329,8 @@ test('T-46 clean install purges the previous framework and installs the new pack
   assert.equal(await fs.readFile(oldRuntime, 'utf8'), '{"old":true}\n');
   const incompleteSource = path.join(f.root, 'incomplete-package');
   for (const directory of ['bin', 'src', 'assets/skills',
-    'assets/templates', 'assets/instructions', 'assets/hooks', 'docs']) {
+    'assets/templates', 'assets/instructions', 'assets/hooks',
+    'docs/reference', 'docs/integrations']) {
     await fs.mkdir(path.join(incompleteSource, directory), { recursive: true });
   }
   await fs.writeFile(path.join(incompleteSource, 'assets/hooks/sdlc.json'),
@@ -192,9 +338,13 @@ test('T-46 clean install purges the previous framework and installs the new pack
   await fs.writeFile(path.join(incompleteSource, 'assets/instructions.md'), '');
   await fs.writeFile(path.join(incompleteSource,
     'assets/lifecycle-intent.md'), '');
-  await fs.writeFile(path.join(incompleteSource, 'docs/cli.md'), '');
+  for (const name of ['README.md', 'CONTRIBUTING.md', 'SUPPORT.md', 'SECURITY.md',
+    'CODE_OF_CONDUCT.md', 'OWNERSHIP.md', 'RELEASING.md', 'CHANGELOG.md', 'LICENSE']) {
+    await fs.writeFile(path.join(incompleteSource, name), '');
+  }
+  await fs.writeFile(path.join(incompleteSource, 'docs/reference/cli.md'), '');
   await fs.writeFile(path.join(incompleteSource,
-    'docs/provider-adapters.md'), '');
+    'docs/integrations/provider-adapters.md'), '');
   await fs.writeFile(path.join(incompleteSource, 'package.json'), JSON.stringify({
     name: 'ai-sdlc-framework',
     version: '9.9.9',
@@ -202,7 +352,7 @@ test('T-46 clean install purges the previous framework and installs the new pack
   }));
   await assert.rejects(cleanInstall(f.store, {
     sourceRoot: incompleteSource,
-  }), { code: 'INSTALL' });
+  }), { code: 'INSTALL', message: /missing docs\/integrations\/github-adapters\.md/u });
   assert.equal(await fs.readFile(oldRuntime, 'utf8'), '{"old":true}\n');
   await assert.rejects(execute(process.execPath, [
     path.join(f.home, 'sdlc/bin/sdlc.mjs'),
@@ -307,18 +457,45 @@ test('T-46 purge recovers invalid locks and unlinks runtime redirects without fo
 test('T-46 purge does not steal a newly populated live lock', async t => {
   const f = await fixture(t, { initialize: false });
   const lock = path.join(f.home, '.ai-sdlc-framework.install.lock');
-  await fs.writeFile(lock, '');
-  const writer = delay(20).then(() => fs.writeFile(lock, JSON.stringify({
+  const content = path.join(f.store.runtime, 'live-owner.json');
+  const owner = JSON.stringify({
     host: os.hostname(),
     pid: process.pid,
     token: 'live-owner',
-  })));
-  await assert.rejects(uninstall(f.store, { purge: true }),
-    { code: 'LOCK_BUSY' });
-  await writer;
-  assert.equal(JSON.parse(await fs.readFile(lock, 'utf8')).token,
-    'live-owner');
-  await fs.unlink(lock);
+  });
+  await fs.writeFile(content, '{"preserve":true}\n');
+  await fs.writeFile(lock, '');
+  const open = fsPromises.open;
+  let populated = false;
+  const mocked = t.mock.method(fsPromises, 'open', async (file, ...options) => {
+    const handle = await open(file, ...options);
+    if (file === lock && !populated) {
+      const read = handle.read.bind(handle);
+      t.mock.method(handle, 'read', async (...readOptions) => {
+        if (!populated) {
+          populated = true;
+          await fs.writeFile(lock, owner);
+        }
+        return read(...readOptions);
+      });
+    }
+    return handle;
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(uninstall(f.store, { purge: true }),
+      { code: 'LOCK_BUSY' });
+    assert.equal(populated, true);
+    assert.equal(await fs.readFile(lock, 'utf8'), owner);
+    await assert.rejects(uninstall(f.store, { purge: true }),
+      { code: 'LOCK_BUSY' });
+    assert.equal(await fs.readFile(lock, 'utf8'), owner);
+    assert.equal(await fs.readFile(content, 'utf8'), '{"preserve":true}\n');
+  } finally {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+    await fs.unlink(lock);
+  }
 });
 test('T-46 purge validates every parent before removing any owned content', async t => {
   const f = await fixture(t, { initialize: false });

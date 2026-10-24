@@ -1,16 +1,38 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "applicability": [
+    {"names": ["T-16 Windows guard-create contention requires an existing literal guard and preserves real denial"], "platforms": ["windows-x64"], "owner": "maintainer", "reason": "Windows may deny creating a recovery-guard directory while another owner is removing it; genuine permission denial must still fail.", "prerequisites": ["Windows guard-create error semantics"]}
+  ],
+  "surfaces": [{"coverage": "direct", "paths": ["src/core.mjs", "src/files.mjs", "src/git.mjs", "src/store.mjs", "src/schemas.mjs", "src/audit.mjs", "src/validation-evidence.mjs"]}],
+  "variants": [
+    {"expression": "scenario", "names": ["settling-metadata", "changing-content", "changing-identity", "changing-size", "continued-churn"]}
+  ],
+  "plannedCases": [
+    {"id": "T-PRD010", "selectors": [
+      {"name": "T-PRD010 real JSON entry reads overlap within sixteen slots and admit every sorted record", "parents": []}
+    ]},
+    {"id": "T-PRD013", "selectors": [
+      {"name": "T-PRD013 JSON entry failures and consumer exits drain dispatched reads without admitting queued files", "parents": []},
+      {"name": "T-PRD013 real archived history retains original records and rejects changed identities and active conflicts", "parents": []},
+      {"name": "T-PRD013 active events are checked on both transaction reads", "parents": []},
+      {"name": "T-PRD013 bounded reads allocate for observed bytes while preserving short-read and growth failures", "parents": []}
+    ]}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import fsPromises from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
+import { subscribe, unsubscribe } from 'node:diagnostics_channel';
 import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fixture, grant, observeFixtureRepository } from './helpers.mjs';
-import { canonical, digest } from '../src/core.mjs';
-import { atomicWrite, readBytes, readJson, updateJson, withLock, writeJson, safePath } from '../src/files.mjs';
-import { identity } from '../src/git.mjs';
+import { canonical, digest, LIMITS } from '../src/core.mjs';
+import { atomicWrite, readBytes, readJson, readJsonEntries, updateJson, withLock, writeJson, safePath } from '../src/files.mjs';
+import { identity, selectedFetchRemote, selectedPushRemote, validateBinding } from '../src/git.mjs';
 import { Store, orderRecordRemovals } from '../src/store.mjs';
 import { validateRecord } from '../src/schemas.mjs';
 import { repositoryObservationKey, pullRequestObservationKey } from '../src/repository-observations.mjs';
@@ -19,6 +41,483 @@ import { attachMonitor, readMonitor } from '../src/monitors.mjs';
 import { currentCycle, currentTestEvidence, stagePassed } from '../src/authority.mjs';
 import { currentArtifact, currentDeployment } from '../src/current-evidence.mjs';
 import { formatAudit, recordAudit, replayAudit } from '../src/audit.mjs';
+import { prepareValidationHistory, validateRetainedPayload } from '../src/validation-evidence.mjs';
+
+test('T-PRD010 canonical encoding reuses only property-name bytes within each fresh call', t => {
+  const value = { rows: Array.from({ length: 32 }, (_, index) => ({
+    repeatedProperty: index, nested: { otherProperty: index + 1 },
+  })) };
+  const expected = `{"rows":[${value.rows.map((row, index) =>
+    `{"nested":{"otherProperty":${index + 1}},"repeatedProperty":${index}}`).join(',')}]}`;
+  const encodedNames = new Map();
+  const stringify = JSON.stringify;
+  t.mock.method(JSON, 'stringify', function (item, ...args) {
+    if (['rows', 'nested', 'repeatedProperty', 'otherProperty'].includes(item)) {
+      encodedNames.set(item, (encodedNames.get(item) ?? 0) + 1);
+    }
+    return Reflect.apply(stringify, this, [item, ...args]);
+  });
+  assert.equal(canonical(value), expected);
+  assert.equal(canonical(value), expected);
+  assert.deepEqual([...encodedNames.values()], [2, 2, 2, 2],
+    'Property-name encodings are local to one call, never reused with another input');
+  value.rows[0].repeatedProperty = 99;
+  assert.notEqual(canonical(value), expected, 'Values are always read and encoded afresh');
+  assert.equal(canonical(JSON.parse('{"__proto__":{"value":1},"2":2,"10":10}')),
+    '{"10":10,"2":2,"__proto__":{"value":1}}');
+  assert.equal(canonical([, 1]), '[,1]', 'Existing sparse-array byte identity is retained');
+  assert.equal(canonical({ value: '"\\\n\u2028\ud800' }),
+    `{"value":${stringify('"\\\n\u2028\ud800')}}`);
+  for (const invalid of [NaN, Infinity, undefined, Object.create(null), new Date()]) {
+    assert.throws(() => canonical(invalid), { code: 'INPUT' });
+  }
+});
+
+test('T-PRD013 active events are checked on both transaction reads', async t => {
+  const f = await fixture(t);
+  const { event } = await grant(f, 'scope-inclusion', { itemId: 'record-read-probe' });
+  const file = f.store.recordPath(f.workItemId, event.id);
+  const checkpointFile = path.join(f.store.workPath(f.workItemId), 'checkpoint.json');
+  const original = await fs.readFile(file);
+  const checkpoint = await fs.readFile(checkpointFile);
+  const changed = { ...event, effect: { itemId: 'altered-record-read-probe' } };
+  await writeJson(file, changed);
+  try {
+    await assert.rejects(f.store.records(f.workItemId), { code: 'DIGEST' });
+  } finally {
+    await fs.writeFile(file, original);
+  }
+  let actionReached = false;
+  try {
+    await assert.rejects(f.store.transaction(f.workItemId, async tx => {
+      actionReached = true;
+      assert.deepEqual(tx.get(event.id), event);
+      await writeJson(file, changed);
+    }), { code: 'DIGEST' });
+    assert.equal(actionReached, true);
+    assert.deepEqual(await fs.readFile(checkpointFile), checkpoint);
+  } finally {
+    await fs.writeFile(file, original);
+  }
+});
+
+test('T-PRD018 payload key classification never reuses value validation or crosses calls', t => {
+  const key = 'ordinaryRepeatedField';
+  const value = { rows: Array.from({ length: 32 }, (_, index) => ({ [key]: index })) };
+  const replace = String.prototype.replace;
+  let classifications = 0;
+  t.mock.method(String.prototype, 'replace', function (pattern, ...args) {
+    if (String(this) === key && pattern?.source === '([a-z0-9])([A-Z])') classifications++;
+    return Reflect.apply(replace, this, [pattern, ...args]);
+  });
+  validateRetainedPayload(value);
+  validateRetainedPayload(value);
+  assert.equal(classifications, 2, 'Every call independently classifies its repeated keys');
+  value.rows[1][key] = 'ACCESS_TOKEN=owned-fixture-value';
+  assert.throws(() => validateRetainedPayload(value), { code: 'UNSAFE' });
+  assert.throws(() => validateRetainedPayload({ rows: [
+    { token: '[redacted]' }, { token: 'owned-fixture-value' },
+  ] }), { code: 'UNSAFE' });
+  validateRetainedPayload({ token: '[redacted]' });
+});
+
+async function waitForStorageReadBarrier(promise) {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Storage read barrier was not reached')), 10000);
+    })]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+test('T-PRD010 real JSON entry reads overlap within sixteen slots and admit every sorted record', async t => {
+  const f = await fixture(t);
+  const directory = path.join(f.root, 'entry-overlap');
+  await fs.mkdir(directory);
+  const names = Array.from({ length: 33 }, (_, index) => `${String(index).padStart(2, '0')}.json`);
+  const expected = names.map((name, index) => ({ name, record: { index } }));
+  for (const { name, record } of [...expected].reverse()) {
+    await fs.writeFile(path.join(directory, name), JSON.stringify(record));
+  }
+  await fs.writeFile(path.join(directory, 'ignored.txt'), 'not JSON');
+  const gates = Array.from({ length: 3 }, () => Promise.withResolvers());
+  const ready = Array.from({ length: 3 }, () => Promise.withResolvers());
+  const started = [];
+  const closed = [];
+  const draining = [];
+  const admitted = [];
+  let active = 0;
+  let maximum = 0;
+  const open = fsPromises.open;
+  const mocked = t.mock.method(fsPromises, 'open', async (selected, ...options) => {
+    const handle = await open(selected, ...options);
+    if (path.dirname(selected) !== directory) return handle;
+    const name = path.basename(selected);
+    const index = names.indexOf(name);
+    const batch = Math.floor(index / 16);
+    const drained = Promise.withResolvers();
+    draining.push(drained.promise);
+    const read = handle.read.bind(handle);
+    const close = handle.close.bind(handle);
+    let entered = false;
+    handle.read = async (...args) => {
+      if (!entered) {
+        entered = true;
+        active++;
+        maximum = Math.max(maximum, active);
+        started.push(name);
+        if (started.length === Math.min((batch + 1) * 16, names.length)) ready[batch].resolve();
+      }
+      await gates[batch].promise;
+      return read(...args);
+    };
+    handle.close = async () => {
+      try { return await close(); }
+      finally {
+        if (entered) active--;
+        closed.push(name);
+        drained.resolve();
+      }
+    };
+    return handle;
+  });
+  syncBuiltinESMExports();
+  const reading = (async () => {
+    for await (const entry of readJsonEntries(directory)) {
+      assert.equal(active, 0, 'A batch must settle before record admission');
+      admitted.push(entry);
+    }
+  })().then(() => ({ error: null }), error => ({ error }));
+  try {
+    for (let batch = 0; batch < gates.length; batch++) {
+      await waitForStorageReadBarrier(ready[batch].promise);
+      const start = batch * 16;
+      const end = Math.min(start + 16, names.length);
+      assert.deepEqual([...started].sort(), names.slice(0, end));
+      assert.deepEqual([...closed].sort(), names.slice(0, start));
+      assert.deepEqual(admitted, expected.slice(0, start));
+      assert.equal(active, end - start);
+      assert.ok(maximum <= 16);
+      gates[batch].resolve();
+    }
+    const result = await reading;
+    if (result.error) throw result.error;
+    assert.deepEqual(admitted, expected);
+    assert.deepEqual([...closed].sort(), names);
+    assert.equal(new Set(started).size, names.length);
+    assert.equal(active, 0);
+  } finally {
+    for (const gate of gates) gate.resolve();
+    await reading;
+    await Promise.allSettled(draining);
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+  }
+  const alias = path.join(f.root, 'entry-overlap-alias');
+  await fs.symlink(directory, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  const internal = path.join(directory, 'internal');
+  await fs.mkdir(internal);
+  const linkedRecord = { index: 'internal' };
+  const target = path.join(internal, 'target.json');
+  await fs.writeFile(target, JSON.stringify(linkedRecord));
+  await fs.symlink(target, path.join(directory, 'linked.json'), 'file');
+  const aliased = [];
+  for await (const entry of readJsonEntries(alias)) aliased.push(entry);
+  assert.deepEqual(aliased, [...expected, { name: 'linked.json', record: linkedRecord }]);
+  const outside = path.join(f.root, 'outside-entry.json');
+  await fs.writeFile(outside, '{"outside":true}');
+  await fs.symlink(outside, path.join(directory, '00-escape.json'), 'file');
+  await assert.rejects(readJsonEntries(alias).next(), { code: 'PATH' });
+  await fs.unlink(path.join(directory, '00-escape.json'));
+  const canonicalDirectory = await fs.realpath(directory);
+  const readdir = fsPromises.readdir;
+  let replaced = false;
+  const staleListing = t.mock.method(fsPromises, 'readdir', async (selected, ...options) => {
+    const entries = await readdir(selected, ...options);
+    if (selected === canonicalDirectory && !replaced) {
+      const listed = entries.find(entry =>
+        (typeof entry === 'string' ? entry : entry.name) === names[0]);
+      assert.ok(listed);
+      if (typeof listed !== 'string') assert.equal(listed.isSymbolicLink(), false);
+      const file = path.join(canonicalDirectory, names[0]);
+      await fs.unlink(file);
+      await fs.symlink(outside, file, 'file');
+      replaced = true;
+    }
+    return entries;
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(readJsonEntries(alias).next(), { code: 'PATH' });
+    assert.equal(replaced, true);
+  } finally {
+    staleListing.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
+
+test('T-PRD013 JSON entry failures and consumer exits drain dispatched reads without admitting queued files', async t => {
+  const f = await fixture(t);
+  for (const outcome of ['malformed', 'oversized', 'io', 'break', 'consumer-throw']) {
+    const directory = path.join(f.root, `entry-${outcome}`);
+    await fs.mkdir(directory);
+    const names = Array.from({ length: 17 }, (_, index) => `${String(index).padStart(2, '0')}.json`);
+    for (const name of names) await fs.writeFile(path.join(directory, name), '{"value":1}');
+    const failure = ['malformed', 'oversized', 'io'].includes(outcome);
+    const firstFailure = path.join(directory, names[1]);
+    if (outcome === 'malformed') await fs.writeFile(firstFailure, '{');
+    if (outcome === 'oversized') await fs.writeFile(firstFailure, JSON.stringify('x'.repeat(64)));
+    const ioError = Object.assign(new Error('Owned fixture read failed'), { code: 'EIO' });
+    const laterError = Object.assign(new Error('Later ordered fixture read failed'), { code: 'EACCES' });
+    const consumerError = new Error('Owned fixture admission failed');
+    const ready = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const releaseFirstFailure = Promise.withResolvers();
+    const firstClosed = Promise.withResolvers();
+    const laterFailed = Promise.withResolvers();
+    const opened = [];
+    const closed = [];
+    const draining = [];
+    const admitted = [];
+    let active = 0;
+    let settled = false;
+    const open = fsPromises.open;
+    const mocked = t.mock.method(fsPromises, 'open', async (selected, ...options) => {
+      if (path.dirname(selected) !== directory) return open(selected, ...options);
+      const drained = Promise.withResolvers();
+      draining.push(drained.promise);
+      let handle;
+      try { handle = await open(selected, ...options); }
+      catch (error) { drained.resolve(); throw error; }
+      const name = path.basename(selected);
+      const close = handle.close.bind(handle);
+      active++;
+      opened.push(name);
+      handle.close = async () => {
+        try { return await close(); }
+        finally {
+          active--;
+          closed.push(name);
+          drained.resolve();
+          if (name === names[1]) firstClosed.resolve();
+        }
+      };
+      if (opened.length === 16) ready.resolve();
+      if (failure && name === names[3]) {
+        await handle.close();
+        laterFailed.resolve();
+        throw laterError;
+      }
+      await (failure && name === names[1] ? releaseFirstFailure.promise : release.promise);
+      if (outcome === 'io' && name === names[1]) {
+        await handle.close();
+        throw ioError;
+      }
+      return handle;
+    });
+    syncBuiltinESMExports();
+    const reading = (async () => {
+      for await (const entry of readJsonEntries(directory, { limit: 64 })) {
+        admitted.push(entry.name);
+        if (outcome === 'break') break;
+        if (outcome === 'consumer-throw') throw consumerError;
+      }
+    })().then(() => { settled = true; return { error: null }; },
+      error => { settled = true; return { error }; });
+    try {
+      await waitForStorageReadBarrier(ready.promise);
+      assert.deepEqual([...opened].sort(), names.slice(0, 16), outcome);
+      assert.deepEqual(admitted, []);
+      if (failure) {
+        await waitForStorageReadBarrier(laterFailed.promise);
+        releaseFirstFailure.resolve();
+        await waitForStorageReadBarrier(firstClosed.promise);
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(settled, false, 'A failed read must not leave dispatched siblings pending');
+        assert.equal(active, 14);
+      } else {
+        assert.equal(active, 16);
+      }
+      release.resolve();
+      const result = await reading;
+      if (outcome === 'malformed') assert.equal(result.error?.code, 'JSON');
+      if (outcome === 'oversized') assert.equal(result.error?.code, 'CAPACITY');
+      if (outcome === 'io') assert.equal(result.error, ioError);
+      if (outcome === 'consumer-throw') assert.equal(result.error, consumerError);
+      if (outcome === 'break') assert.equal(result.error, null);
+      assert.deepEqual(admitted, names.slice(0, 1), outcome);
+      assert.deepEqual([...closed].sort(), names.slice(0, 16), outcome);
+      assert.equal(active, 0, outcome);
+    } finally {
+      releaseFirstFailure.resolve();
+      release.resolve();
+      await reading;
+      await Promise.allSettled(draining);
+      mocked.mock.restore();
+      syncBuiltinESMExports();
+    }
+  }
+});
+
+test('T-PRD013 real archived history retains original records and rejects changed identities and active conflicts', async t => {
+  const f = await fixture(t);
+  const directory = path.join(f.store.workPath(f.workItemId), 'evidence');
+  const operation = {
+    type: 'operation', id: 'repository-observation-archived-operation',
+    workItemId: f.workItemId, repositoryId: 'primary', class: 'build',
+    action: { class: 'build' }, target: 'owned-fixture-build',
+    status: 'succeeded', correlationKey: 'archived-build',
+    requestFingerprint: digest('archived fixture request'), dispatchBound: true,
+    handle: 'fixture-run', evidenceRef: 'fixture:archived-build',
+  };
+  const eventContent = {
+    type: 'event', id: 'event-archived', workItemId: f.workItemId,
+    schemaVersion: 1, sequence: 1, kind: 'scope-inclusion',
+    effect: { itemId: 'archived-item' }, sourceReceiptId: 'receipt-archived',
+    sourceReceiptDigest: digest('fixture receipt'), inputDigest: digest('fixture input'),
+    sessionId: f.sessionId, repositoryIds: ['primary'], snapshots: [],
+    occurredAt: new Date(f.clock.now()).toISOString(),
+  };
+  const event = { ...eventContent, digest: digest(eventContent) };
+  const evidence = {
+    type: 'test-evidence', id: 'evidence-archived', workItemId: f.workItemId,
+    cycleId: 'cycle-archived', testId: 'T-archived', status: 'Passed',
+    observedAt: new Date(f.clock.now()).toISOString(),
+    evidenceRef: 'fixture:archived-test',
+  };
+  const records = [operation, event, evidence, ...Array.from({ length: 14 }, (_, index) => ({
+    type: 'pr', id: `pr-archived-${index}`, workItemId: f.workItemId,
+    provider: 'fixture', connection: 'fixture', repositoryId: 'primary',
+    sourceRef: 'refs/heads/feature', targetRef: 'refs/heads/main',
+    sourceRevision: 'a'.repeat(40), targetRevision: 'b'.repeat(40),
+    prId: String(index), state: 'active',
+  }))];
+  for (const record of records) {
+    validateRecord(record);
+    await writeJson(path.join(directory, `${record.id}.json`), record);
+  }
+  const originalBytes = await Promise.all(records.map(record =>
+    fs.readFile(path.join(directory, `${record.id}.json`))));
+  const loaded = await f.store.load(f.workItemId);
+  assert.deepEqual([...loaded.operationHistory.values()], [operation]);
+  assert.deepEqual([...loaded.archivedTestEvidence.values()], [evidence]);
+  assert.equal(loaded.records.some(record => records.some(archived => archived.id === record.id)), false);
+  const history = await prepareValidationHistory(f.store, f.workItemId, loaded.records);
+  assert.deepEqual([...history.events.values()], [event]);
+  assert.deepEqual([...history.operations.values()], [operation]);
+  assert.deepEqual([...history.evidence.values()], [evidence]);
+  for (const [original, invalid, code] of [
+    [operation, { ...operation, workItemId: 'wi-other' }, 'BINDING'],
+    [operation, { ...operation, id: 'operation-wrong-locator' }, 'OPERATION'],
+    [operation, { ...operation, status: 'running' }, 'OPERATION'],
+    [operation, { ...operation, unexpected: true }, 'INPUT'],
+    [event, { ...event, workItemId: 'wi-other' }, 'BINDING'],
+    [event, { ...event, id: 'event-wrong-locator' }, 'BINDING'],
+    [event, { ...event, effect: { itemId: 'changed-item' } }, 'DIGEST'],
+    [evidence, { ...evidence, workItemId: 'wi-other' }, 'BINDING'],
+    [evidence, { ...evidence, id: 'evidence-wrong-locator' }, 'BINDING'],
+    [evidence, { ...evidence, status: 'successful' }, 'INPUT'],
+  ]) {
+    const file = path.join(directory, `${original.id}.json`);
+    try {
+      await writeJson(file, invalid);
+      await assert.rejects(f.store.load(f.workItemId), { code });
+    } finally {
+      await writeJson(file, original);
+    }
+  }
+  const activeFile = f.store.recordPath(f.workItemId, operation.id);
+  await writeJson(activeFile, operation);
+  assert.deepEqual((await f.store.load(f.workItemId)).operationHistory.get(operation.id), operation);
+  await writeJson(activeFile, { ...operation, status: 'failed' });
+  await assert.rejects(f.store.load(f.workItemId), { code: 'ID_CONFLICT' });
+  await fs.unlink(activeFile);
+  const unrelated = path.join(directory, 'repository-observation-unrelated.json');
+  await fs.writeFile(unrelated, '{');
+  await assert.rejects(f.store.load(f.workItemId), { code: 'JSON' });
+  await fs.writeFile(unrelated, JSON.stringify('x'.repeat(LIMITS.workingSet + 1)));
+  await assert.rejects(f.store.load(f.workItemId), { code: 'CAPACITY' });
+  await fs.unlink(unrelated);
+  assert.deepEqual((await f.store.load(f.workItemId)).operationHistory.get(operation.id), operation);
+  assert.deepEqual(await Promise.all(records.map(record =>
+    fs.readFile(path.join(directory, `${record.id}.json`)))), originalBytes);
+});
+
+test('T-PRD013 bounded reads allocate for observed bytes while preserving short-read and growth failures', async t => {
+  const f = await fixture(t);
+  const cases = [
+    ...[0, 1, 1024, 65535, 65536, 65537].map(size => ({ name: `stable-${size}`, size })),
+    { name: 'short-reads', size: 1024, shortReads: true },
+    { name: 'growing-within-limit', size: 4, growth: 4, limit: 64, code: 'STALE' },
+    { name: 'growing-beyond-limit', size: 4, growth: 80, limit: 64, code: 'CAPACITY' },
+  ];
+  for (const entry of cases) {
+    entry.file = path.join(f.root, `${entry.name}.bin`);
+    entry.bytes = Buffer.alloc(entry.size, 0x61);
+    entry.reads = [];
+    entry.closed = false;
+    await fs.writeFile(entry.file, entry.bytes);
+  }
+  const open = fsPromises.open;
+  const mocked = t.mock.method(fsPromises, 'open', async (selected, ...options) => {
+    const handle = await open(selected, ...options);
+    const entry = cases.find(item => item.file === selected);
+    if (!entry) return handle;
+    const read = handle.read.bind(handle);
+    const close = handle.close.bind(handle);
+    handle.read = async (buffer, offset, length, position) => {
+      if (entry.growth && !entry.grown) {
+        entry.grown = true;
+        const writer = await open(entry.file, 'a');
+        try { await writer.writeFile(Buffer.alloc(entry.growth, 0x62)); }
+        finally { await writer.close(); }
+      }
+      const result = await read(buffer, offset,
+        entry.shortReads ? Math.min(length, 17) : length, position);
+      entry.reads.push({ allocated: buffer.length, position, bytesRead: result.bytesRead });
+      return result;
+    };
+    handle.close = async () => {
+      try { return await close(); }
+      finally { entry.closed = true; }
+    };
+    return handle;
+  });
+  syncBuiltinESMExports();
+  try {
+    for (const entry of cases) {
+      if (entry.growth) {
+        await assert.rejects(readBytes(entry.file, entry.limit), { code: entry.code });
+        assert.equal((await fs.stat(entry.file)).size, entry.size + entry.growth, entry.name);
+        assert.equal(entry.reads[0].allocated, entry.size + 1, entry.name);
+        assert.ok(entry.reads.slice(1).some(read => read.allocated > entry.size + 1),
+          'A file exceeding its observed size must leave the small-file allocation path');
+        const bytesRead = entry.reads.reduce((total, read) => total + read.bytesRead, 0);
+        assert.ok(bytesRead >= (entry.code === 'CAPACITY' ? entry.limit + 1 : entry.size + entry.growth),
+          'Growth must be read and rejected rather than silently truncated');
+      } else {
+        assert.deepEqual(await readBytes(entry.file), entry.bytes, entry.name);
+        assert.ok(entry.reads.every(read =>
+          read.allocated <= Math.min(65536, entry.size + 1)),
+        'Small stable files must not allocate full 64 KiB read buffers');
+        assert.deepEqual(entry.reads.at(-1), {
+          allocated: 1, position: entry.size, bytesRead: 0,
+        }, entry.name);
+        assert.equal(entry.reads.reduce((total, read) => total + read.bytesRead, 0),
+          entry.size, entry.name);
+        if (entry.shortReads) {
+          assert.ok(entry.reads.filter(read => read.bytesRead > 0).length > 1);
+        }
+      }
+      assert.equal(entry.closed, true, entry.name);
+    }
+  } finally {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
 
 test('T-16 canonical data, atomic replacement, and deterministic write-boundary failures preserve old/new state', async t => {
   const f = await fixture(t);
@@ -156,6 +655,72 @@ test('T-16 a changing recovery-guard owner remains contention without stealing o
   }
   assert.equal(await withLock(lock, () => 'guard available'), 'guard available');
 });
+test('T-16 Windows guard-create contention requires an existing literal guard and preserves real denial',
+  { skip: process.platform !== 'win32' }, async t => {
+    const f = await fixture(t);
+    const lock = path.join(f.root, 'guard-create.lock');
+    const guard = `${lock}.recovery-guard`;
+    const ownerFile = path.join(guard, 'owner.json');
+    const owner = { token: 'live-guard', host: os.hostname(), pid: process.pid };
+    await writeJson(ownerFile, owner);
+    const mkdir = fsPromises.mkdir;
+    const denied = Object.assign(new Error('controlled guard creation denied'),
+      { code: 'EPERM', path: guard, syscall: 'mkdir' });
+    const mocked = t.mock.method(fsPromises, 'mkdir', async (directory, ...args) => {
+      if (directory === guard) throw denied;
+      return mkdir(directory, ...args);
+    });
+    syncBuiltinESMExports();
+    let entered = false;
+    try {
+      await assert.rejects(withLock(lock, () => { entered = true; }, { waitMs: 0 }),
+        { code: 'LOCK_BUSY' });
+      assert.deepEqual(await readJson(ownerFile), owner);
+      await fs.rm(guard, { recursive: true });
+      await assert.rejects(withLock(lock, () => { entered = true; }, { waitMs: 0 }),
+        error => error === denied);
+      await fs.writeFile(guard, 'not a directory');
+      await assert.rejects(withLock(lock, () => { entered = true; }, { waitMs: 0 }),
+        error => error === denied);
+      assert.equal(await fs.readFile(guard, 'utf8'), 'not a directory');
+      assert.equal(entered, false);
+      await assert.rejects(fs.lstat(lock), { code: 'ENOENT' });
+    } finally {
+      mocked.mock.restore();
+      syncBuiltinESMExports();
+    }
+  });
+test('T-16 a changing lock owner during inspection remains contention without removing its replacement', async t => {
+  const f = await fixture(t);
+  const lock = path.join(f.root, 'changing-lock-owner.lock');
+  const owner = { token: 'original', host: os.hostname(), pid: process.pid };
+  await writeJson(lock, owner);
+  const lstat = fsPromises.lstat;
+  let changed = false;
+  let actionRan = false;
+  const mocked = t.mock.method(fsPromises, 'lstat', async (file, options) => {
+    const stat = await lstat(file, options);
+    if (file === lock && options?.bigint && !changed) {
+      await writeJson(lock, { ...owner, token: 'replacement' });
+      changed = true;
+    }
+    return stat;
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(withLock(lock, () => { actionRan = true; },
+      { waitMs: 0 }), { code: 'LOCK_BUSY' });
+    assert.equal(changed, true);
+    assert.equal(actionRan, false);
+    assert.equal((await readJson(lock)).token, 'replacement');
+    await assert.rejects(fs.stat(`${lock}.recovery-guard`), { code: 'ENOENT' });
+  } finally {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+  }
+  await fs.unlink(lock);
+  assert.equal(await withLock(lock, () => 'lock available'), 'lock available');
+});
 test('T-48 batch work-item locks are acquired before any invalidation action', async t => {
   const f = await fixture(t);
   const secondWorkItem = 'wi-z-second-lock';
@@ -180,6 +745,232 @@ test('T-48 batch work-item locks are acquired before any invalidation action', a
   assert.equal(actionRan, false);
   release();
   await held;
+});
+test('T-19 manifest binding checks fresh paths and branch without unused revision reads', async t => {
+  const f = await fixture(t);
+  const calls = [];
+  const observe = ({ process: child }) => {
+    child.once('close', () => {
+      if (child.spawnargs[0] === 'git') calls.push(child.spawnargs.slice(1));
+    });
+  };
+  subscribe('child_process', observe);
+  try {
+    const unborn = await f.store.manifest(f.workItemId);
+    assert.equal(unborn.coordinator.root, f.repo);
+    assert.deepEqual(calls.map(args => args[2]), ['rev-parse', 'symbolic-ref'],
+      'An unborn manifest binding needs current paths and branch, not a revision');
+    await f.runGit('commit', '--allow-empty', '-qm', 'Advance manifest binding fixture');
+    calls.length = 0;
+    const committed = await f.store.manifest(f.workItemId);
+    assert.deepEqual(committed.metadata, unborn.metadata);
+    assert.deepEqual(calls.map(args => args[2]), ['rev-parse', 'symbolic-ref']);
+    await f.runGit('checkout', '-qb', 'feature/manifest-same-head');
+    calls.length = 0;
+    await assert.rejects(f.store.manifest(f.workItemId), { code: 'BINDING' });
+    assert.deepEqual(calls.map(args => args[2]), ['rev-parse', 'symbolic-ref']);
+  } finally {
+    unsubscribe('child_process', observe);
+  }
+});
+
+test('T-19 manifest binding guards recheck the branch after all canonical path checks', async t => {
+  const f = await fixture(t);
+  await f.runGit('commit', '--allow-empty', '-qm', 'Create manifest binding race fixture');
+  await f.runGit('branch', 'feature/manifest-path-race');
+  const gitDir = await fs.realpath(path.join(f.repo, '.git'));
+  const realpath = fsPromises.realpath;
+  let checks = 0;
+  const mocked = t.mock.method(fsPromises, 'realpath', async (...args) => {
+    const resolved = await realpath(...args);
+    if (resolved === gitDir && ++checks === 2) {
+      await f.runGit('checkout', '-q', 'feature/manifest-path-race');
+    }
+    return resolved;
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(f.store.manifest(f.workItemId), { code: 'BINDING' });
+    assert.equal(checks, 2, 'Both common-directory and Git-directory checks must precede the branch read');
+  } finally {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
+
+test('T-19 remote selection validates fresh bindings without unused revision queries', async t => {
+  const f = await fixture(t);
+  const member = await identity(f.repo, 'primary');
+  const calls = [];
+  const observe = ({ process: child }) => {
+    child.once('close', () => {
+      if (child.spawnargs[0] === 'git') calls.push(child.spawnargs.slice(1));
+    });
+  };
+  subscribe('child_process', observe);
+  try {
+    assert.deepEqual(await selectedFetchRemote(member), {
+      selectedRemoteName: 'origin', fetchURLs: ['https://example.invalid/repository.git'],
+    });
+    assert.deepEqual(calls.map(args => args[2]), ['rev-parse', 'symbolic-ref', 'remote', 'remote'],
+      'An unborn remote selection needs fresh paths and branch, not an unused HEAD');
+    calls.length = 0;
+    assert.deepEqual(await selectedPushRemote(member, 'origin'), {
+      selectedRemoteName: 'origin', pushURLs: ['https://example.invalid/repository.git'],
+    });
+    assert.deepEqual(calls.map(args => args[2]), ['rev-parse', 'symbolic-ref', 'remote', 'remote']);
+    await f.runGit('commit', '--allow-empty', '-qm', 'Advance remote binding fixture');
+    await f.runGit('remote', 'set-url', 'origin', 'https://example.invalid/current.git');
+    calls.length = 0;
+    assert.deepEqual(await selectedFetchRemote(member, undefined, 'origin'), {
+      selectedRemoteName: 'origin', fetchURLs: ['https://example.invalid/current.git'],
+    });
+    assert.deepEqual(calls.map(args => args[2]), ['rev-parse', 'symbolic-ref', 'remote', 'remote']);
+    await f.runGit('checkout', '-qb', 'feature/remote-same-head');
+    calls.length = 0;
+    await assert.rejects(selectedFetchRemote(member), { code: 'BINDING' });
+    assert.deepEqual(calls.map(args => args[2]), ['rev-parse', 'symbolic-ref']);
+  } finally {
+    unsubscribe('child_process', observe);
+  }
+});
+
+test('T-19 remote selection preserves late branch and linked-worktree guards', async t => {
+  const f = await fixture(t);
+  await f.runGit('commit', '--allow-empty', '-qm', 'Create remote binding race fixture');
+  const member = await identity(f.repo, 'primary');
+  await f.runGit('branch', 'feature/remote-path-race');
+  const gitDir = await fs.realpath(path.join(f.repo, '.git'));
+  const realpath = fsPromises.realpath;
+  let checks = 0;
+  const mocked = t.mock.method(fsPromises, 'realpath', async (...args) => {
+    const resolved = await realpath(...args);
+    if (resolved === gitDir && ++checks === 2) {
+      await f.runGit('checkout', '-q', 'feature/remote-path-race');
+    }
+    return resolved;
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(selectedPushRemote(member, 'origin'), { code: 'BINDING' });
+    assert.equal(checks, 2);
+  } finally {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+  }
+  const linked = path.join(f.root, 'linked remote worktree');
+  await f.runGit('worktree', 'add', '-q', '-b', 'feature/remote-linked', linked, 'HEAD');
+  const linkedMember = await identity(linked, 'primary');
+  assert.equal(linkedMember.linkedWorktree, true);
+  assert.deepEqual(await selectedFetchRemote(linkedMember), {
+    selectedRemoteName: 'origin', fetchURLs: ['https://example.invalid/repository.git'],
+  });
+  await f.runGit('-C', linked, 'checkout', '-q', '--detach');
+  await assert.rejects(selectedFetchRemote(linkedMember), { code: 'BINDING' });
+});
+
+test('Git identity batches fresh path queries and preserves unborn and linked worktrees', async t => {
+  const f = await fixture(t);
+  await f.runGit('add', '.sdlc');
+  await f.runGit('commit', '-qm', 'Create owned identity fixture');
+  const nested = path.join(f.repo, 'nested folder');
+  await fs.mkdir(nested);
+  const calls = [];
+  const observe = ({ process: child }) => {
+    child.once('close', () => calls.push(child.spawnargs.slice(1)));
+  };
+  let original;
+  subscribe('child_process', observe);
+  try {
+    original = await identity(nested, 'primary');
+  } finally {
+    unsubscribe('child_process', observe);
+  }
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls[0], ['--no-pager', '--no-optional-locks', 'rev-parse',
+    '--path-format=absolute', '--show-toplevel', '--git-common-dir', '--absolute-git-dir']);
+  assert.equal(original.root, await fs.realpath(f.repo));
+  assert.equal(original.commonDir, await fs.realpath(path.join(f.repo, '.git')));
+  assert.equal(original.linkedWorktree, false);
+  assert.equal(original.head, await f.runGit('rev-parse', 'HEAD'));
+
+  await f.runGit('commit', '--allow-empty', '-qm', 'Advance owned identity fixture');
+  const changed = await identity(nested, 'primary');
+  assert.notEqual(changed.head, original.head);
+  assert.equal(changed.head, await f.runGit('rev-parse', 'HEAD'));
+  assert.equal(changed.branch, original.branch);
+  const worktree = path.join(f.root, 'identity linked tree');
+  await f.runGit('worktree', 'add', '-qb', 'feature/identity-linked', worktree);
+  const linked = await identity(worktree, 'primary');
+  assert.equal(linked.root, await fs.realpath(worktree));
+  assert.equal(linked.commonDir, original.commonDir);
+  assert.equal(linked.branch, 'refs/heads/feature/identity-linked');
+  assert.equal(linked.head, changed.head);
+  assert.equal(linked.linkedWorktree, true);
+
+  const unborn = path.join(f.root, 'identity unborn');
+  await f.runGit('init', '-q', unborn);
+  await f.runGit('-C', unborn, 'symbolic-ref', 'HEAD', 'refs/heads/feature/unborn');
+  const empty = await identity(unborn, 'primary');
+  assert.equal(empty.branch, 'refs/heads/feature/unborn');
+  assert.equal(empty.head, null);
+  assert.equal(empty.linkedWorktree, false);
+  await f.runGit('checkout', '-q', '--detach', changed.head);
+  await assert.rejects(identity(f.repo, 'primary'), { code: 'BINDING' });
+});
+test('Git binding proves the current exact ref without trusting its stored branch or HEAD', async t => {
+  const f = await fixture(t);
+  await f.runGit('add', '.sdlc');
+  await f.runGit('commit', '-qm', 'Create owned binding fixture');
+  const original = await identity(f.repo, 'primary');
+  const calls = [];
+  const observe = ({ process: child }) => {
+    child.once('close', () => calls.push(child.spawnargs.slice(1)));
+  };
+  let current;
+  subscribe('child_process', observe);
+  try {
+    current = await validateBinding(original);
+  } finally {
+    unsubscribe('child_process', observe);
+  }
+  assert.deepEqual(current, original);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1], ['--no-pager', '--no-optional-locks', 'for-each-ref',
+    '--count=1', '--format=%(HEAD)%00%(refname)%00%(objectname)', '--', original.branch]);
+
+  await f.runGit('commit', '--allow-empty', '-qm', 'Advance owned binding fixture');
+  const advanced = await validateBinding(original);
+  assert.notEqual(advanced.head, original.head);
+  assert.equal(advanced.head, await f.runGit('rev-parse', 'HEAD'));
+  await f.runGit('checkout', '-qb', 'feature/binding-same-head');
+  assert.equal(await f.runGit('rev-parse', 'HEAD'), advanced.head);
+  await assert.rejects(validateBinding(original), { code: 'BINDING' });
+
+  await f.runGit('checkout', '-qb', 'feature/binding-prefix/child');
+  await assert.rejects(validateBinding({ ...original, branch: 'refs/heads/feature/binding-prefix' }),
+    { code: 'BINDING' });
+  await f.runGit('checkout', '-q', original.branch.slice('refs/heads/'.length));
+  await assert.rejects(validateBinding({ ...original, branch: `${original.branch}\0` }),
+    { code: 'BINDING' });
+
+  const worktree = path.join(f.root, 'binding linked tree');
+  await f.runGit('worktree', 'add', '-qb', 'feature/binding-linked', worktree);
+  const linked = await identity(worktree, 'primary');
+  assert.deepEqual(await validateBinding(linked), linked);
+  const unborn = path.join(f.root, 'binding unborn');
+  await f.runGit('init', '-q', unborn);
+  await f.runGit('-C', unborn, 'symbolic-ref', 'HEAD', 'refs/heads/binding/unborn');
+  const empty = await identity(unborn, 'primary');
+  assert.equal(empty.head, null);
+  assert.deepEqual(await validateBinding(empty), empty);
+
+  await f.runGit('symbolic-ref', 'refs/heads/binding-alias', original.branch);
+  await f.runGit('symbolic-ref', 'HEAD', 'refs/heads/binding-alias');
+  const alias = await identity(f.repo, 'primary');
+  assert.deepEqual(await validateBinding(alias), alias);
+  await f.runGit('checkout', '-q', '--detach', advanced.head);
+  await assert.rejects(validateBinding(original), { code: 'BINDING' });
 });
 test('T-19 bindings resolve linked worktrees and refuse stale branch authority', async t => {
   const f = await fixture(t);

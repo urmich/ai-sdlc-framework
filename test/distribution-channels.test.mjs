@@ -1,18 +1,39 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "applicability": [
+    {"options": "{skip:process.platform==='win32'}", "platforms": ["linux-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "POSIX shell/runtime rejection contracts; Windows has separate PowerShell/cmd and PE assertions.", "prerequisites": ["Native POSIX shell and Node runtime"]},
+    {"options": "{skip:process.platform!=='darwin'}", "platforms": ["macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Actual legacy-to-shared Mac installer migration requires each native Mac architecture.", "prerequisites": ["Verified shared Mac candidate and legacy fixture"]},
+    {"options": "{skip:!hostTarget||process.platform==='win32'&&!windowsLauncher}", "excludeNames": ["T-51 npm-denied standalone lifecycle preserves unrelated content and runtime until explicit purge"], "platforms": ["windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Supported standalone distributions require their native host; missing Windows launcher is blocked, not an exemption.", "prerequisites": ["Frozen supported archive", "Real Windows PE launcher on Windows", "Isolated channel and Copilot home"]},
+    {"names": ["T-51 npm-denied standalone lifecycle preserves unrelated content and runtime until explicit purge"], "platforms": ["macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Real network-and-npm denial uses the supported Mac adapter. Windows network denial has no validated adapter and remains a separate explicit limitation, not a native Windows pass.", "prerequisites": ["Verified Mac network negative controls", "Isolated standalone archive lifecycle"]}
+  ],
+  "groups": [{
+    "root": "T-51 npm-denied standalone lifecycle preserves unrelated content and runtime until explicit purge",
+    "minimumSlots": 4
+  }],
+  "surfaces": [
+    {"coverage": "direct", "paths": ["scripts/package-platforms.mjs", "scripts/verify-platform-package.mjs", "packaging/standalone/archive.mjs", "packaging/standalone/protocol.mjs"]},
+    {"coverage": "process", "paths": ["packaging/standalone/install.sh", "packaging/standalone/install.ps1", "packaging/standalone/runtime.mjs", "packaging/standalone/sdlc"]}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
+import childProcess, { execFile } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { promisify } from 'node:util';
 import { buildPackage } from '../scripts/package.mjs';
 import { buildPlatforms, renderChecksums, writeReleaseMetadata } from '../scripts/package-platforms.mjs';
 import { verifyPlatformPackage, verifyRelease, verifyReleaseChecksums } from '../scripts/verify-platform-package.mjs';
 import { canonical, inventory, readTarGzip, readZip, sha256, tarGzip, zip } from '../packaging/standalone/archive.mjs';
-import { extractEntries, isPrerelease, platformEntries, TARGETS, verifyEntries, verifyTree } from '../packaging/standalone/protocol.mjs';
+import { ARCHIVE_TARGETS, EXECUTION_PLATFORMS, archiveTarget, extractEntries, isPrerelease, platformEntries, TARGETS, treeEntries, verifyEntries, verifyTree } from '../packaging/standalone/protocol.mjs';
 import { activateChannel, layoutPathsOverlap, runtimePreflight, validateChannelHome } from '../packaging/standalone/runtime.mjs';
 import { isolatedNpmEnvironment } from './npm-environment.mjs';
 import { createNetworkBoundary, deniedEnvironment, networkAdapter, verifyNetworkNegativeControls } from './distribution-network-boundary.mjs';
+import { processDiagnostic } from '../scripts/validation-tools.mjs';
+import { buildDistributionFixture, prepareDistributionFixture } from '../scripts/frozen-distribution-fixture.mjs';
 
 const execute = promisify(execFile);
 const hostTarget = Object.keys(TARGETS).find(target =>
@@ -24,34 +45,27 @@ let payload;
 let nativeEntries;
 let originalTmp;
 let originalCopilotHome;
+const boundaryLifetimes = [];
 const windowsLauncher = process.env.SDLC_WINDOWS_LAUNCHER;
 const targets = process.env.SDLC_DISTRIBUTION_TARGETS?.split(',') ??
-  (windowsLauncher ? Object.keys(TARGETS) : Object.keys(TARGETS).filter(target => target !== 'windows-x64'));
+  [...ARCHIVE_TARGETS.filter(target => target !== 'windows-x64' || windowsLauncher),
+    ...(process.platform === 'linux' ? ['linux-x64'] : [])];
 
 test.before(async () => {
   root = path.resolve('.test-data', `distribution-${randomUUID()}`);
-  await fs.mkdir(path.join(root, 'scratch'), { recursive: true });
   originalTmp = process.env.TMPDIR;
-  process.env.TMPDIR = path.join(root, 'scratch');
   originalCopilotHome = process.env.COPILOT_HOME;
+  const frozen = process.env.SDLC_RELEASE_DIR !== undefined ||
+    process.env.SDLC_DISTRIBUTION_FIXTURE_CONTEXT !== undefined ?
+    await prepareDistributionFixture({ root, targets, windowsLauncher }) : null;
+  await fs.mkdir(path.join(root, 'scratch'), { recursive: true });
+  process.env.TMPDIR = path.join(root, 'scratch');
   process.env.COPILOT_HOME = path.join(root, 'default copilot home');
   environment = await isolatedNpmEnvironment(root);
   environment.TMPDIR = process.env.TMPDIR;
-  payload = await buildPackage({ outputDir: path.join(root, 'npm'), environment });
-  built = await buildPlatforms({ artifact: payload.artifact, outputDir: path.join(root, 'release'),
-    windowsLauncher, environment, targets,
-    sourceCommit: process.env.SDLC_RELEASE_SOURCE_COMMIT });
-  if (process.env.SDLC_RELEASE_DIR) {
-    const candidate = await verifyRelease({ outputDir: process.env.SDLC_RELEASE_DIR, targets, rebuild: false });
-    assert.equal(candidate.descriptor.sourceCommit, built.descriptor.sourceCommit);
-    assert.equal(candidate.descriptor.payload.sha256, payload.sha256);
-    for (const archive of built.archives) {
-      assert.equal(candidate.descriptor.files.find(file => file.filename === archive.filename)?.sha256, archive.sha256);
-      archive.artifact = path.join(process.env.SDLC_RELEASE_DIR, archive.filename);
-    }
-  }
-  if (hostTarget && targets.includes(hostTarget)) {
-    const archive = built.archives.find(item => item.target === hostTarget);
+  ({ payload, built } = frozen ?? await prepareDistributionFixture({ root, environment, targets, windowsLauncher }));
+  if (hostTarget && targets.includes(archiveTarget(hostTarget))) {
+    const archive = built.archives.find(item => item.target === archiveTarget(hostTarget));
     const bytes = await fs.readFile(archive.artifact);
     nativeEntries = hostTarget === 'windows-x64' ? readZip(bytes) : readTarGzip(bytes);
   }
@@ -62,6 +76,9 @@ test.after(async () => {
   else process.env.TMPDIR = originalTmp;
   if (originalCopilotHome === undefined) delete process.env.COPILOT_HOME;
   else process.env.COPILOT_HOME = originalCopilotHome;
+  if (boundaryLifetimes.some(lifetime => !lifetime.cleanupSafe)) {
+    throw new Error('Network boundary cleanup FAILED; fixture retained because owned writers are not proven stopped.');
+  }
   if (root) await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -83,11 +100,25 @@ function commandFor(source, args) {
     { executable: '/bin/sh', args: [path.join(source, 'install.sh'), ...args] };
 }
 
-async function installer(f, args, env = environment, run = execute) {
+async function installer(f, args, env = environment, run = execute, diagnostic) {
   const command = commandFor(f.source, [...args, '--channel-root', f.channelRoot, '--home', f.home]);
-  const result = await run(command.executable, command.args,
-    { env: { ...env, SDLC_NODE: process.execPath }, maxBuffer: 4 * 1024 * 1024 });
-  return JSON.parse(result.stdout);
+  let result;
+  try {
+    result = await run(command.executable, command.args,
+      { env: { ...env, SDLC_NODE: process.execPath }, maxBuffer: 4 * 1024 * 1024 });
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    try {
+      if (diagnostic) diagnostic({ test: 'T-51', phase: args[0],
+        exitCode: Number.isInteger(error.code) ? error.code : null,
+        signal: typeof error.signal === 'string' ? error.signal : null, killed: error.killed === true,
+        error: processDiagnostic(error),
+        stdout: processDiagnostic(error.stdout ?? result?.stdout ?? ''),
+        stderr: processDiagnostic(error.stderr ?? result?.stderr ?? '') });
+    } finally {
+      throw error;
+    }
+  }
 }
 
 async function verifyRetainedHookRuntime(f, removedRoots) {
@@ -122,6 +153,15 @@ test('T-51 explicit native CI target must match actual native Node runtime', asy
 });
 
 test('T-51 independent builds reproduce exact npm payload, archives, descriptor and checksum bytes', async () => {
+  // Compilation/reproducibility is the behavior here, never reusable setup.
+  const baseline = process.env.SDLC_RELEASE_DIR !== undefined ?
+    await buildDistributionFixture({
+      root: path.join(root, 'independent baseline'), environment, targets, windowsLauncher }) :
+    { payload, built };
+  await verifyIndependentBuilds(baseline);
+});
+
+async function verifyIndependentBuilds({ payload, built }) {
   const secondPayload = await buildPackage({ outputDir: path.join(root, 'npm second'), environment });
   assert.equal(secondPayload.sha256, payload.sha256);
   const second = await buildPlatforms({ artifact: secondPayload.artifact, outputDir: path.join(root, 'release second'),
@@ -139,10 +179,13 @@ test('T-51 independent builds reproduce exact npm payload, archives, descriptor 
       expectedPlatform: target.platform, expectedArch: target.arch });
     assert.equal(result.payloadSha256, payload.sha256);
     assert.equal(result.inventoryDigest, built.descriptor.payload.inventoryDigest);
+    for (const expectedArch of target.architectures ?? [target.arch]) {
+      assert.equal((await verifyPlatformPackage({ artifact: archive.artifact, expectedArch })).verified, true);
+    }
     await assert.rejects(verifyPlatformPackage({ artifact: archive.artifact,
-      expectedArch: target.arch === 'x64' ? 'arm64' : 'x64' }), /Wrong platform/u);
+      expectedArch: target.architectures ? 'riscv64' : target.arch === 'x64' ? 'arm64' : 'x64' }), /Wrong platform/u);
   }
-});
+}
 
 test('T-51 ZIP and tar codecs reject duplicates, traversal, truncation, corruption and nonfiles', () => {
   const entries = [{ path: 'LICENSE', data: Buffer.from('fixture\n'), mode: 0o644 },
@@ -179,6 +222,204 @@ test('T-51 wrappers reject extra, missing, duplicate, changed and wrong-platform
   assert.throws(() => verifyEntries(entries, { expectedPlatform: 'darwin' }), /Wrong platform/u);
   assert.throws(() => platformEntries(payloadBytes, 'windows-x64'), /native launcher/u);
 });
+
+function versionedPayload(bytes, version) {
+  return tarGzip(readTarGzip(bytes).map(entry => entry.path === 'package/package.json' ?
+    { ...entry, data: Buffer.from(JSON.stringify({ ...JSON.parse(entry.data), version })) } : entry));
+}
+
+test('T-PRD057 future shared Mac inventory resolves one deterministic archive for both CPUs', async () => {
+  const original = await fs.readFile(payload.artifact);
+  const bytes = versionedPayload(original, '0.5.0');
+  const directory = path.join(root, 'future-shared-inventory');
+  await fs.mkdir(directory);
+  const artifact = path.join(directory, 'ai-sdlc-framework-0.5.0.tgz');
+  const filename = 'ai-sdlc-framework-0.5.0-macos.tar.gz';
+  await fs.writeFile(artifact, bytes);
+  const encoded = tarGzip(platformEntries(bytes, 'macos').entries);
+  assert.deepEqual(tarGzip(platformEntries(bytes, 'macos').entries.reverse()), encoded);
+  await fs.writeFile(path.join(directory, filename), encoded);
+  const options = { outputDir: directory, artifact, sourceCommit: built.descriptor.sourceCommit, targets: ['macos'] };
+  const first = await writeReleaseMetadata(options);
+  assert.deepEqual(await writeReleaseMetadata(options), first);
+  assert.deepEqual(first.descriptor.files.map(file => file.filename),
+    ['ai-sdlc-framework-0.5.0-macos.tar.gz', 'ai-sdlc-framework-0.5.0.tgz']);
+  for (const expectedArch of ['arm64', 'x64']) {
+    const result = await verifyPlatformPackage({ artifact: path.join(directory, filename), expectedPlatform: 'darwin', expectedArch });
+    assert.equal(result.target, 'macos');
+    assert.equal(result.sha256, sha256(encoded));
+  }
+  assert.equal((await verifyRelease({ outputDir: directory, targets: ['macos'], rebuild: false })).verified, true);
+  await assert.rejects(buildPlatforms({ artifact, outputDir: path.join(root, 'stale-mac-target'),
+    targets: ['macos-arm64', 'macos-x64'] }), /unique supported/u);
+  await assert.rejects(fs.stat(path.join(root, 'stale-mac-target')), { code: 'ENOENT' });
+  assert.equal(sha256(await fs.readFile(payload.artifact)), sha256(original));
+});
+
+test('T-PRD058 shared v2 has one expanded payload, no embedded archives or native runtime, and exact wrappers', async () => {
+  const payloadBytes = await fs.readFile(payload.artifact);
+  const shared = platformEntries(payloadBytes, 'macos');
+  assert.deepEqual(shared.platform.architectures, ['arm64', 'x64']);
+  assert.equal(shared.platform.schemaVersion, 2);
+  assert.equal(shared.platform.platform, 'darwin');
+  assert.equal(Object.hasOwn(shared.platform, 'arch'), false);
+  assert.deepEqual(shared.entries.filter(entry => !entry.path.startsWith('package/')).map(entry => entry.path).sort(),
+    ['LICENSE', 'bin/sdlc', 'install.sh', 'payload-manifest.json', 'platform.json']);
+  assert.deepEqual(shared.entries.filter(entry => entry.path.startsWith('package/')),
+    readTarGzip(payloadBytes));
+  for (const expectedArch of ['arm64', 'x64']) {
+    assert.equal(verifyEntries(readTarGzip(tarGzip(shared.entries)), { expectedPlatform: 'darwin', expectedArch }).target, 'macos');
+  }
+  assert.throws(() => verifyEntries(shared.entries.map(entry => entry.path === 'package/src/install.mjs' ?
+    { ...entry, data: Buffer.concat([entry.data, Buffer.from('\nmodified')]) } : entry)), /mismatch/u);
+  assert.throws(() => verifyEntries(shared.entries.filter(entry => entry.path !== 'package/README.md')), /mismatch/u);
+  assert.throws(() => verifyEntries([...shared.entries, shared.entries[0]]), /Duplicate/u);
+  assert.throws(() => verifyEntries(shared.entries.map(entry => entry.path === 'bin/sdlc' ?
+    { ...entry, mode: 0o644 } : entry)), /mismatch/u);
+  for (const extra of ['nested-old-macos-arm64.tar.gz', 'bin/node', 'bin/node.exe', 'bin/unlisted-launcher']) {
+    assert.throws(() => verifyEntries([...shared.entries,
+      { path: extra, data: Buffer.from('extra executable'), mode: 0o755 }]), /mismatch/u);
+  }
+  for (const extra of [
+    { path: 'package/bin/node', data: Buffer.from('runtime') },
+    { path: 'package/old-macos-x64.tar.gz', data: Buffer.from('nested archive') },
+    { path: 'package/bin/universal2', data: Buffer.from('cafebabe', 'hex') },
+  ]) {
+    const maliciousPayload = tarGzip([...readTarGzip(payloadBytes), { ...extra, mode: 0o755 }]);
+    assert.throws(() => platformEntries(maliciousPayload, 'macos'), /nested archives or bundled native/u);
+  }
+  for (const mutate of [
+    value => { value.architectures = ['arm64']; },
+    value => { value.architectures.reverse(); },
+    value => { value.architectures.push('x64'); },
+    value => { value.arch = 'arm64'; },
+    value => { value.schemaVersion = 3; },
+  ]) {
+    const metadata = structuredClone(shared.platform);
+    mutate(metadata);
+    const entries = shared.entries.map(entry => entry.path === 'platform.json' ?
+      { ...entry, data: Buffer.from(canonical(metadata)) } : entry);
+    assert.throws(() => verifyEntries(entries), /Wrong platform|mismatch/u);
+  }
+  assert.throws(() => verifyEntries(shared.entries, { expectedArch: 'riscv64' }), /Wrong platform/u);
+  assert.deepEqual(EXECUTION_PLATFORMS, ['linux-x64', 'windows-x64', 'macos-arm64', 'macos-x64']);
+});
+
+test('T-PRD059 runtime version, Node identity and native-host fixtures reject before destination writes', async t => {
+  const payloadBytes = await fs.readFile(payload.artifact);
+  const target = process.platform === 'darwin' ? 'macos' : hostTarget;
+  if (target === 'windows-x64' && !windowsLauncher) {
+    await assert.rejects(runtimePreflight({ node: path.join(root, 'missing-node.exe') }), { code: 'ENOENT' });
+  } else {
+    const source = path.join(root, 'native-preflight-source');
+    await extractEntries(platformEntries(payloadBytes, target,
+      target === 'windows-x64' ? await fs.readFile(windowsLauncher) : undefined).entries, source);
+    const channelRoot = path.join(root, 'native-preflight-channel');
+    const home = path.join(root, 'native-preflight-home');
+    const activate = node => activateChannel({ sourceRoot: source, channelRoot, home, node });
+    await assert.rejects(activate(path.join(root, 'missing-node')), { code: 'ENOENT' });
+    const shadow = path.join(root, 'shadowed-node');
+    await fs.writeFile(shadow, 'not the selected executable');
+    await assert.rejects(activate(shadow), /shadowed/u);
+    const version = Object.getOwnPropertyDescriptor(process.versions, 'node');
+    try {
+      Object.defineProperty(process.versions, 'node', { ...version, value: '21.0.0' });
+      await assert.rejects(activate(process.execPath), /Node.js 22/u);
+    } finally { Object.defineProperty(process.versions, 'node', version); }
+    const machine = t.mock.method(os, 'machine', () => process.arch === 'x64' ? 'arm64' : 'x86_64');
+    try { await assert.rejects(activate(process.execPath), /native host/u); }
+    finally { machine.mock.restore(); }
+    const unsupported = t.mock.method(os, 'machine', () => 'unsupported-cpu');
+    try { await assert.rejects(activate(process.execPath), /native host/u); }
+    finally { unsupported.mock.restore(); }
+    await assert.rejects(runtimePreflight({ platform: 'unsupported-os' }), /wrong platform/u);
+    await assert.rejects(fs.stat(channelRoot), { code: 'ENOENT' });
+    await assert.rejects(fs.stat(home), { code: 'ENOENT' });
+    assert.equal(await runtimePreflight(), await fs.realpath(process.execPath));
+  }
+  if (process.platform !== 'darwin') {
+    const source = path.join(root, 'wrong-host-shared-mac');
+    await extractEntries(platformEntries(payloadBytes, 'macos').entries, source);
+    const channelRoot = path.join(root, 'wrong-host-shared-channel');
+    const home = path.join(root, 'wrong-host-shared-home');
+    await assert.rejects(activateChannel({ sourceRoot: source, channelRoot, home }), /Wrong platform/u);
+    await assert.rejects(fs.stat(channelRoot), { code: 'ENOENT' });
+    await assert.rejects(fs.stat(home), { code: 'ENOENT' });
+  }
+});
+
+test('T-PRD059 translated Mac runtime fixture cannot satisfy native preflight', async t => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const machine = t.mock.method(os, 'machine', () => process.arch === 'x64' ? 'x86_64' : 'arm64');
+  const translated = t.mock.method(childProcess, 'spawnSync', (command, args) => {
+    assert.equal(command, '/usr/sbin/sysctl');
+    assert.deepEqual(args, ['-in', 'sysctl.proc_translated']);
+    return { status: 0, stdout: '1\n' };
+  });
+  try {
+    Object.defineProperty(process, 'platform', { ...platform, value: 'darwin' });
+    syncBuiltinESMExports();
+    await assert.rejects(runtimePreflight(), /Rosetta/u);
+  } finally {
+    Object.defineProperty(process, 'platform', platform);
+    translated.mock.restore();
+    machine.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
+
+test('T-PRD059 POSIX installer and launcher reject a Node forwarding wrapper before home/channel writes',
+  { skip: process.platform === 'win32' }, async () => {
+    const f = await fixture();
+    const node = path.join(f.directory, 'forwarding-node');
+    await fs.writeFile(node, `#!/bin/sh\nexec '${process.execPath.replaceAll("'", "'\\''")}' "$@"\n`, { mode: 0o755 });
+    const command = commandFor(f.source, ['install', '--channel-root', f.channelRoot, '--home', f.home]);
+    const env = { ...environment, SDLC_NODE: node };
+    await assert.rejects(execute(command.executable, command.args, { env }), /shadowed/u);
+    await assert.rejects(execute(path.join(f.source, 'bin/sdlc'), ['doctor', '--home', f.home], { env }), /shadowed/u);
+    await assert.rejects(fs.stat(f.channelRoot), { code: 'ENOENT' });
+    assert.deepEqual(await fs.readdir(f.home), ['copilot-instructions.md']);
+  });
+
+test('T-PRD062 legacy Mac v1 reads retain old bytes while shared readers enforce exact inventory', async () => {
+  const bytes = versionedPayload(await fs.readFile(payload.artifact), '0.3.0');
+  for (const arch of ['arm64', 'x64']) {
+    const legacy = platformEntries(bytes, `macos-${arch}`);
+    const archive = tarGzip(legacy.entries);
+    const before = sha256(archive);
+    const verified = verifyEntries(readTarGzip(archive), { expectedPlatform: 'darwin', expectedArch: arch });
+    assert.equal(verified.platform.schemaVersion, 1);
+    assert.equal(verified.platform.arch, arch);
+    assert.equal(verified.manifest.version, '0.3.0');
+    assert.deepEqual(verified.entries.find(entry => entry.path === verified.manifest.payload.filename).data, bytes);
+    assert.equal(sha256(archive), before);
+    assert.throws(() => verifyEntries(legacy.entries, { expectedArch: arch === 'x64' ? 'arm64' : 'x64' }), /Wrong platform/u);
+  }
+});
+
+test('T-PRD062 native Mac legacy v1 fixture updates to shared v2 without rewriting old version or losing rollback',
+  { skip: process.platform !== 'darwin' }, async () => {
+    const f = await fixture();
+    const originalPayload = await fs.readFile(payload.artifact);
+    const legacy = platformEntries(versionedPayload(originalPayload, '0.3.0'), `macos-${process.arch}`);
+    const source = path.join(f.directory, 'legacy-v1');
+    await extractEntries(legacy.entries, source);
+    const before = inventory(await treeEntries(source));
+    await activateChannel({ sourceRoot: source, channelRoot: f.channelRoot, home: f.home });
+    const oldVersion = path.join(f.channelRoot, 'versions', '0.3.0');
+    assert.deepEqual(inventory((await verifyTree(oldVersion)).entries), before);
+    const selected = await activateChannel({ sourceRoot: f.source, channelRoot: f.channelRoot, home: f.home });
+    assert.equal((await verifyTree(path.dirname(path.dirname(selected.launcher)))).platform.schemaVersion, 2);
+    assert.deepEqual(inventory((await verifyTree(oldVersion)).entries), before);
+    assert.equal(await fs.readlink(path.join(f.channelRoot, 'current')), `versions/${built.descriptor.version}`);
+    await activateChannel({ sourceRoot: source, channelRoot: f.channelRoot, home: f.home });
+    assert.equal(await fs.readlink(path.join(f.channelRoot, 'current')), 'versions/0.3.0');
+    assert.deepEqual(await fs.readdir(f.home), ['copilot-instructions.md']);
+    await installer(f, ['install']);
+    assert.equal((await installer(f, ['update'])).changedFiles.length, 0);
+    assert.equal((await installer(f, ['uninstall'])).uninstalled, true);
+    assert.equal((await fs.readFile(path.join(f.home, 'copilot-instructions.md'), 'utf8')).trimEnd(), 'Keep user instructions.');
+  });
 
 test('T-51 external verification rejects absent, malformed, swapped and unbound checksums', async () => {
   const directory = path.join(root, 'tampered release');
@@ -226,6 +467,9 @@ test('T-52 anonymous single-asset verification binds the saved prepublication ev
 test('T-51 metadata finalization consumes generator artifact records without circular descriptor inputs', async () => {
   const directory = path.join(root, 'metadata release');
   await fs.cp(built.outputDir, directory, { recursive: true });
+  for (const file of built.descriptor.files.filter(file => file.kind !== 'archive')) {
+    await fs.rm(path.join(directory, file.filename));
+  }
   const file = path.join(root, 'candidate-fixture.yaml');
   const contents = Buffer.from('fixture: generator-contract\n');
   await fs.writeFile(file, contents);
@@ -299,7 +543,9 @@ test('T-51 network adapters sanitize executable references and fail closed on un
 test('T-51 npm-denied standalone lifecycle preserves unrelated content and runtime until explicit purge',
   { skip: !hostTarget || process.platform === 'win32' && !windowsLauncher }, async t => {
     const f = await fixture();
-    const boundary = await createNetworkBoundary({ directory: f.directory, environment });
+    const lifetime = { cleanupSafe: true };
+    boundaryLifetimes.push(lifetime);
+    const boundary = await createNetworkBoundary({ directory: f.directory, environment, trace: true, lifetime });
     if (boundary.status === 'NotRun') {
       const reason = `T-51 network-denied lifecycle NotRun: ${boundary.reason}`;
       t.diagnostic(reason);
@@ -309,7 +555,25 @@ test('T-51 npm-denied standalone lifecycle preserves unrelated content and runti
     }
     const controls = await verifyNetworkNegativeControls(boundary, f.directory);
     t.diagnostic(JSON.stringify({ test: 'T-51', status: 'enforced', ...controls }));
-    const runInstaller = args => installer(f, args, boundary.environment, boundary.execute);
+    const run = async (command, args, options) => {
+      let result;
+      let failure;
+      try { result = await boundary.execute(command, args, options); return result; }
+      catch (error) { failure = error; throw error; }
+      finally {
+        try {
+          t.diagnostic(JSON.stringify({ test: 'T-51', phase: 'boundary-invocation',
+            ...(failure?.boundaryDiagnostics ?? result?.boundaryDiagnostics),
+            stderr: processDiagnostic(failure?.stderr ?? result?.stderr ?? ''),
+            ...(failure?.cleanup ? { cleanup: failure.cleanup } : {}) }));
+        } catch (diagnosticError) {
+          if (failure) failure.boundaryDiagnosticError = processDiagnostic(diagnosticError);
+          else throw diagnosticError;
+        }
+      }
+    };
+    const runInstaller = args => installer(f, args, boundary.environment, run,
+      observation => t.diagnostic(JSON.stringify(observation)));
     const first = await runInstaller(['install']);
     assert.equal(first.installed, true);
     assert.match(first.nextAction, /Restart Copilot CLI/u);
@@ -324,12 +588,12 @@ test('T-51 npm-denied standalone lifecycle preserves unrelated content and runti
       { executable: 'powershell.exe', args: ['-NoProfile', '-NonInteractive', '-File',
         path.join(f.channelRoot, 'current.ps1'), 'doctor', '--home', f.home] } :
       { executable: path.join(f.channelRoot, 'current/bin/sdlc'), args: ['doctor', '--home', f.home] };
-    assert.equal(JSON.parse((await boundary.execute(current.executable, current.args)).stdout).installed, true);
+    assert.equal(JSON.parse((await run(current.executable, current.args)).stdout).installed, true);
     if (process.platform !== 'win32') {
       const linked = path.join(f.directory, 'user bin/sdlc');
       await fs.mkdir(path.dirname(linked));
       await fs.symlink(path.relative(path.dirname(linked), current.executable), linked);
-      assert.equal(JSON.parse((await boundary.execute(linked, ['doctor', '--home', f.home])).stdout).installed, true);
+      assert.equal(JSON.parse((await run(linked, ['doctor', '--home', f.home])).stdout).installed, true);
     }
     const update = await runInstaller(['update']);
     assert.equal(update.changedFiles.length, 0);

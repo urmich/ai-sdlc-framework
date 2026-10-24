@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { sha256 } from '../packaging/standalone/archive.mjs';
 import { ROOT, emptyDirectory, validateInitialHomebrewFormula, writeJson } from './release-bundle.mjs';
+import { verifyHomebrewPrefixOwnership } from './native-homebrew-prefix.mjs';
 
 const execute = promisify(execFile);
 
@@ -53,7 +54,20 @@ export async function verifyHomebrewQuality({ candidate, formulaPath, mode, cand
     if (!['ENOENT', 'ENOTDIR', 'EACCES'].includes(error.code)) throw error;
     throw blocked(`Homebrew audit/style executable is unavailable: ${error.code}`);
   });
-  if (!contained(localRoot, executable)) throw blocked('Homebrew audit/style cannot use a system or external Homebrew prefix');
+  let ownedPrefix;
+  if (!contained(localRoot, executable)) {
+    if (!environment.SDLC_HOMEBREW_PREFIX_PROOF) {
+      throw blocked('Homebrew audit/style cannot use a system or external Homebrew prefix');
+    }
+    const verified = await verifyHomebrewPrefixOwnership({
+      bootstrapDirectory: environment.SDLC_HOMEBREW_PREFIX_PROOF, repositoryRoot: path.resolve(ROOT),
+      target: `macos-${process.arch}`, environment,
+    });
+    ownedPrefix = verified.prefix;
+    if (executable !== path.join(ownedPrefix, 'bin', 'brew')) {
+      throw blocked('Homebrew audit/style executable differs from its verified owned prefix');
+    }
+  }
   await fs.access(executable, fs.constants.X_OK).catch(error => {
     if (!['ENOENT', 'EACCES'].includes(error.code)) throw error;
     throw blocked(`Homebrew audit/style executable cannot run: ${error.code}`);
@@ -98,8 +112,9 @@ export async function verifyHomebrewQuality({ candidate, formulaPath, mode, cand
   try {
     const prefix = await fs.realpath(await command(['--prefix']));
     const repository = await fs.realpath(await command(['--repository']));
-    if (!contained(localRoot, prefix) || !contained(localRoot, repository)) {
-      throw blocked('Homebrew audit/style requires both prefix and repository inside this checkout .test-data');
+    if (ownedPrefix ? prefix !== ownedPrefix || repository !== ownedPrefix :
+      !contained(localRoot, prefix) || !contained(localRoot, repository)) {
+      throw blocked('Homebrew audit/style prefix and repository must match the owned allocation or checkout .test-data');
     }
     result.brewVersion = await command(['--version']);
     const parent = await literalDirectories(repository, ['Library', 'Taps', 'local']);

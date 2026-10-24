@@ -1,3 +1,12 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "variants": [
+    {"expression": "`delayed local operation preserves dispatch source A under selection B${interrupted ? ' through terminal recovery' : ''}`", "domains": {"interrupted ? ' through terminal recovery' : ''": ["", " through terminal recovery"]}},
+    {"expression": "`Store STAGING equal-time ${outcomes.join('/')} stays Failed after reload and delayed older events`", "domains": {"outcomes.join('/')": ["Failed/Passed", "Passed/Failed"]}},
+    {"expression": "`${referenced ? 'referenced' : 'inline'} NotRun pending/running evidence keeps immutable dispatch source without completion credit`", "domains": {"referenced ? 'referenced' : 'inline'": ["inline", "referenced"]}},
+    {"expression": "`${referenced ? 'referenced' : 'inline'} late progress cannot replace tied-time terminal Passed Failed or cancelled NotRun`", "domains": {"referenced ? 'referenced' : 'inline'": ["inline", "referenced"]}}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
@@ -113,7 +122,7 @@ test('public CLI and Store retain all 2265 synthetic NotRun slots in 36 thin-cyc
 });
 
 test('current canonical 133-case plan retains each core variant and separate execution checkpoint', async t => {
-  const contents = await fs.readFile(path.resolve('docs', 'github-integration', 'test-plan.md'), 'utf8');
+  const contents = await fs.readFile(path.resolve('docs', 'sdlc', 'github-integration', 'test-plan.md'), 'utf8');
   const f = await largeFixture(t, contents);
   const state = await f.store.load(f.workItemId);
   const cycle = currentCycle(state.records, state.checkpoint);

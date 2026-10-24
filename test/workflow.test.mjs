@@ -1,3 +1,7 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "direct", "paths": ["src/decisions.mjs", "src/policy.mjs", "src/recovery.mjs", "src/staging.mjs", "src/artifacts.mjs"]}]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';

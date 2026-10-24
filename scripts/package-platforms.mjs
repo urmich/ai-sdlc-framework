@@ -5,10 +5,10 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { buildPackage } from './package.mjs';
 import { canonical, comparePath, safePath, sha256, tarGzip, zip } from '../packaging/standalone/archive.mjs';
-import { isPrerelease, payloadIdentity, platformEntries, TARGETS } from '../packaging/standalone/protocol.mjs';
+import { ARCHIVE_TARGETS, EXECUTION_PLATFORMS, isPrerelease, payloadIdentity, platformEntries, TARGETS } from '../packaging/standalone/protocol.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
-export { canonical, sha256, TARGETS };
+export { canonical, sha256, TARGETS, ARCHIVE_TARGETS, EXECUTION_PLATFORMS };
 
 function filenameOnly(filename) {
   safePath(filename);
@@ -42,7 +42,7 @@ export function renderChecksums(descriptor, descriptorBytes = canonical(descript
 }
 
 export async function writeReleaseMetadata({ outputDir, artifact, sourceCommit, metadataFiles = [],
-  targets = Object.keys(TARGETS) }) {
+  targets = ARCHIVE_TARGETS }) {
   const directory = path.resolve(outputDir);
   const outputStat = await fs.lstat(directory);
   if (!outputStat.isDirectory() || outputStat.isSymbolicLink()) throw new Error('Release output must be a literal directory');
@@ -64,7 +64,7 @@ export async function writeReleaseMetadata({ outputDir, artifact, sourceCommit, 
   };
   await add(manifest.payload.filename, 'archive', payloadBytes);
   for (const target of targets) {
-    if (!TARGETS[target]) throw new Error(`Unsupported platform: ${target}`);
+    if (!TARGETS[target] || target.startsWith('macos-')) throw new Error(`Unsupported archive target: ${target}; use macos for new Mac archives`);
     const filename = `${manifest.name}-${manifest.version}-${target}.${TARGETS[target].extension}`;
     await add(filename, 'archive', await fs.readFile(path.join(directory, filename)));
   }
@@ -90,8 +90,9 @@ export async function writeReleaseMetadata({ outputDir, artifact, sourceCommit, 
 
 export async function buildPlatforms({ artifact, outputDir = path.join(ROOT, 'dist'),
   windowsLauncher, metadataFiles = [], sourceCommit, environment = process.env,
-  targets = Object.keys(TARGETS) } = {}) {
-  if (!targets.length || new Set(targets).size !== targets.length || targets.some(target => !TARGETS[target])) {
+  targets = ARCHIVE_TARGETS } = {}) {
+  if (!targets.length || new Set(targets).size !== targets.length ||
+      targets.some(target => !TARGETS[target] || target.startsWith('macos-'))) {
     throw new Error('Select unique supported platform targets');
   }
   const output = path.resolve(outputDir);
@@ -134,7 +135,8 @@ export async function buildPlatforms({ artifact, outputDir = path.join(ROOT, 'di
     }
     const metadata = await writeReleaseMetadata({ outputDir: output, artifact, sourceCommit, metadataFiles, targets });
     return { ...metadata, outputDir: output, payload: manifest.payload, archives,
-      complete: targets.length === Object.keys(TARGETS).length };
+      archiveTargets: [...targets], executionPlatforms: [...EXECUTION_PLATFORMS],
+      complete: targets.length === ARCHIVE_TARGETS.length && ARCHIVE_TARGETS.every(target => targets.includes(target)) };
   } finally {
     if (ownedPayload) await fs.rm(ownedPayload, { recursive: true, force: true });
   }

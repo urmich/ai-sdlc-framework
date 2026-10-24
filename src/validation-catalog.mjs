@@ -78,7 +78,8 @@ export async function flushValidationObjects(store, workItemId, context) {
     await store.fault('validation:object');
   }
 }
-export function validateTestDefinitions(tests, { inline = false } = {}) {
+export function validateTestDefinitions(tests, { inline = false, requireUnitFirst = true } = {}) {
+  requireThat(typeof requireUnitFirst === 'boolean', 'INPUT', 'Invalid definition validation policy');
   requireThat(Array.isArray(tests) && tests.length > 0 &&
     (!inline || tests.length <= 100), 'INPUT',
   inline ? 'Provide 1..100 required test definitions' : 'Provide complete required test definitions');
@@ -100,7 +101,7 @@ export function validateTestDefinitions(tests, { inline = false } = {}) {
     text(test.expected, 'expected', 2000);
     if (test.mode === 'manual') requireThat(test.owner === 'user', 'HOST', 'Manual tests belong to the user');
   }
-  requireThat(tests.some(test => test.checkpoint === 'pre-review' && test.level === 'unit'),
+  requireThat(!requireUnitFirst || tests.some(test => test.checkpoint === 'pre-review' && test.level === 'unit'),
     'INPUT', 'The required pre-Review local sequence must begin with unit tests');
 }
 export function buildTestCatalog(workItemId, specification) {

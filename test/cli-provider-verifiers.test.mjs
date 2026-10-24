@@ -1,3 +1,9 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "applicability": [
+    {"names": ["initialized Store accepts a real selected-home alias, not a different home"], "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "The actual host must permit an owned directory link; inability is a capability blocker, not success.", "prerequisites": ["Create an owned directory junction or symbolic link without OS policy changes"]}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';

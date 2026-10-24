@@ -151,6 +151,16 @@ Automatically maintain in-scope documents and briefly report each logical batch.
 Report unrelated discoveries. Out-of-scope execution and documentation each
 require the user's explicit instruction; neither implies the other or changes
 scope classification. Scope inclusion is a distinct user decision.
+
+For requirements-to-tests coverage, use the installed phase skills and
+`sdlc/templates/pr-coverage.md`. The CLI's `coverage prepare/inspect` derives a
+versioned PR-description section in memory from the canonical documents/tests
+and identifies uncovered ACs or planned bindings. Do not create coverage/index/
+binding/policy sidecars, invent passing execution, or silently publish metadata.
+Refresh for the actual source and include it only in an authorized PR create/
+update. The required `framework/coverage` CI guardrail is this framework
+repository's own policy; installing/using the framework does not modify a
+consumer's CI/CD, branch rules or access.
 For a new canonical Requirements, Test Plan or Technical Design file, first
 plan/register its exact phase-appropriate repository path, create only that
 document, then finalize registration with its content digest. In

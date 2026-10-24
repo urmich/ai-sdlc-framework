@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { canonical, readTarGzip, readZip, sha256 } from '../packaging/standalone/archive.mjs';
-import { DIGEST, isPrerelease, parseCanonical, payloadIdentity, TARGETS, verifyEntries } from '../packaging/standalone/protocol.mjs';
+import { ARCHIVE_TARGETS, EXECUTION_PLATFORMS, DIGEST, isPrerelease, parseCanonical, payloadIdentity, TARGETS, verifyEntries } from '../packaging/standalone/protocol.mjs';
 import { buildPlatforms, commandOptions, renderChecksums } from './package-platforms.mjs';
 import { buildPackage } from './package.mjs';
 
@@ -88,7 +88,7 @@ export async function verifyPlatformPackage({ artifact, descriptor, checksums,
 }
 
 export async function verifyRelease({ outputDir = path.join(ROOT, 'dist'), windowsLauncher,
-  environment = process.env, targets = Object.keys(TARGETS), rebuild = true, sourceCommit } = {}) {
+  environment = process.env, targets = ARCHIVE_TARGETS, rebuild = true, sourceCommit } = {}) {
   const directory = path.resolve(outputDir);
   const release = await verifyReleaseChecksums({ outputDir: directory });
   if (rebuild && release.descriptor.sourceCommit !== (sourceCommit ??
@@ -125,7 +125,8 @@ export async function verifyRelease({ outputDir = path.join(ROOT, 'dist'), windo
       }
     } finally { await fs.rm(scratch, { recursive: true, force: true }); }
   }
-  return { verified: true, complete: targets.length === Object.keys(TARGETS).length,
+  return { verified: true, complete: targets.length === ARCHIVE_TARGETS.length && ARCHIVE_TARGETS.every(target => targets.includes(target)),
+    archiveTargets: [...targets], executionPlatforms: [...EXECUTION_PLATFORMS],
     ...release, archives: results, rebuilt: rebuild };
 }
 

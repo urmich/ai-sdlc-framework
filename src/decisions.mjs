@@ -47,6 +47,21 @@ async function validatePublicationDecision(kind, effect, tx) {
       'PR publication consent requires an independent hosted repository observation');
     await requirePublicationSourceObservation(tx.metadata, tx.all(),
       hostedObservation, effect.sourceRepositoryURL);
+    if (effect.descriptionDigest !== undefined) {
+      requireThat((await validateBinding(member)).head === effect.sourceRevision,
+        'STALE', 'Description publication consent must name the current bound commit');
+      if (effect.publicationAction === 'pr-update') requireThat(tx.all().some(record =>
+        record.type === 'pr-observation' && record.state === 'active' &&
+        record.repositoryId === repositoryId &&
+        record.localRepositoryPath === member.root &&
+        record.remoteRepositoryURL === selectedUrl &&
+        (record.sourceRepositoryURL ?? record.remoteRepositoryURL) === effect.sourceRepositoryURL &&
+        record.pullRequestRef === effect.prId &&
+        record.sourceRevision === effect.sourceRevision &&
+        record.sourceBranchRef === effect.sourceRef &&
+        record.targetBranchRef === effect.targetRef), 'EVIDENCE',
+      'Description update consent requires an independently observed matching PR');
+    }
   } else {
     const selected = await selectedPushRemote(member, undefined, effect.target);
     selectedUrl = validateSelectedPushRemote(selected);

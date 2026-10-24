@@ -14,7 +14,9 @@ export function validateEffect(kind, effect, { strict = false } = {}) {
     'configDigest', 'deploymentId', 'artifactId', 'outcome', 'rules', 'scope', 'lifetime', 'grant', 'repositoryId',
     'sourceRef', 'targetRef', 'draft', 'itemId', 'revokes', 'lifecycleStatus', 'reason', 'confirmation', 'host', 'testIds',
     'owner', 'status', 'evidenceRef', 'summary', 'blockingFindings', 'remoteUrlDigest', 'sourceRevision', 'force', 'delete',
-    'localRepositoryPath', 'remoteRepositoryURL', 'sourceRepositoryURL']);
+    'localRepositoryPath', 'remoteRepositoryURL', 'sourceRepositoryURL',
+    'publicationAction', 'prId', 'descriptionDigest', 'coverageDigest',
+    'previousDescriptionDigest', 'descriptionVersion']);
   const cycleFields = ['cycleId', 'candidateDigest', 'testSpecDigest', 'configDigest', 'target'];
   const kindFields = {
     approval: ['transition'],
@@ -24,7 +26,9 @@ export function validateEffect(kind, effect, { strict = false } = {}) {
     'out-of-scope-documentation': ['itemId'],
     'scope-inclusion': ['itemId'],
     'pr-publication': ['repositoryId', 'sourceRef', 'targetRef', 'draft',
-      'localRepositoryPath', 'remoteRepositoryURL', 'sourceRepositoryURL', 'target'],
+      'localRepositoryPath', 'remoteRepositoryURL', 'sourceRepositoryURL', 'target',
+      'publicationAction', 'sourceRevision', 'prId', 'descriptionDigest',
+      'coverageDigest', 'previousDescriptionDigest', 'descriptionVersion'],
     'dev-authorization': [...cycleFields, 'completedStage'],
     'review-result': ['cycleId', 'candidateDigest', 'testSpecDigest', 'configDigest', 'status', 'evidenceRef', 'summary', 'blockingFindings', 'completedStage'],
     'staging-promotion': [...cycleFields, 'completedStage', 'deploymentId'],
@@ -89,6 +93,30 @@ export function validateEffect(kind, effect, { strict = false } = {}) {
     'INPUT', 'New PR publication consent must identify the selected hosted destination and source repository');
     for (const field of ['target', 'localRepositoryPath', 'remoteRepositoryURL',
       'sourceRepositoryURL']) if (effect[field] !== undefined) text(effect[field], field, 4096);
+    if (['publicationAction', 'sourceRevision', 'prId', 'descriptionDigest',
+      'coverageDigest', 'previousDescriptionDigest', 'descriptionVersion']
+      .some(field => effect[field] !== undefined)) {
+      choice(effect.publicationAction, ['pr-create', 'pr-update'], 'description publication action');
+      requireThat(typeof effect.sourceRevision === 'string' &&
+        /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(effect.sourceRevision),
+      'INPUT', 'Description consent requires the full source revision');
+      for (const field of ['descriptionDigest', 'coverageDigest']) requireThat(
+        typeof effect[field] === 'string' && /^[a-f0-9]{64}$/u.test(effect[field]),
+      'INPUT', `Description consent requires ${field}`);
+      requireThat(effect.scope?.actions?.length === 1 &&
+        effect.scope.actions[0] === effect.publicationAction, 'INPUT',
+      'Description consent must separately scope PR creation or update');
+      if (effect.publicationAction === 'pr-update') {
+        text(effect.prId, 'PR ID');
+        text(effect.descriptionVersion, 'current PR description version', 200);
+        requireThat(typeof effect.previousDescriptionDigest === 'string' &&
+          /^[a-f0-9]{64}$/u.test(effect.previousDescriptionDigest), 'INPUT',
+        'Description update consent requires the previous body digest');
+      } else requireThat(effect.prId === undefined &&
+        effect.previousDescriptionDigest === undefined &&
+        effect.descriptionVersion === undefined, 'INPUT',
+      'PR creation consent cannot identify an existing description');
+    }
   }
   if (kind === 'permission') {
     choice(effect.grant, ['push', 'merge', 'auto-merge', 'policy-bypass', 'prod-execution', 'artifact-location'], 'permission');
@@ -155,6 +183,14 @@ export function matchesScope(event, action, records = []) {
     if (!fields.every(field => event.effect[field] === action[field]) ||
         !publicationDestination(records, action,
           { push: action.class === 'push' })) return false;
+    const descriptionFields = ['descriptionDigest', 'coverageDigest',
+      'previousDescriptionDigest', 'descriptionVersion'];
+    if (descriptionFields.some(field => action[field] !== undefined ||
+      event.effect[field] !== undefined)) {
+      if (event.effect.publicationAction !== action.class ||
+          ['sourceRevision', 'prId', ...descriptionFields].some(field =>
+            event.effect[field] !== action[field])) return false;
+    }
   }
   for (const key of ['itemId', 'operationId', 'environment', 'target',
     'owner', 'host']) {
@@ -264,6 +300,15 @@ export function testCheckpoint(test) {
   if (test.environment === 'STAGING') return 'STAGING';
   return test.level === 'review' ? 'review' : 'pre-review';
 }
+function unexpiredTestEvidence(evidence, clock) {
+  if (evidence?.sourceObservedAt !== undefined &&
+      (!Number.isFinite(Date.parse(evidence.sourceObservedAt)) ||
+        Date.parse(evidence.sourceObservedAt) > clock.now())) return null;
+  if (evidence?.sourceExpiresAt !== undefined && evidence.sourceExpiresAt !== null &&
+      (!Number.isFinite(Date.parse(evidence.sourceExpiresAt)) ||
+        Date.parse(evidence.sourceExpiresAt) < clock.now())) return null;
+  return evidence;
+}
 export function currentTestEvidence(cycle, records, test, clock = Date) {
   if (assurancePending(cycle, records)) return null;
   if (cycle?.invalidatedEnvironments?.includes(test.environment)) return null;
@@ -273,12 +318,20 @@ export function currentTestEvidence(cycle, records, test, clock = Date) {
       operationMatchesCurrentSource(cycle, record) &&
       ['dispatching', 'submitted', 'running', 'uncertain']
         .includes(record.status))) return null;
-  const evidence = reduceTestHistory(testHistory(cycle, records, test.id), {
-    sourceTime: result => result.operationId ?
+  const history = testHistory(cycle, records, test.id);
+  const provenance = result => result.operationId ? `operation:${result.operationId}` :
+    result.eventId ? `event:${result.eventId}` : null;
+  const normalized = result => Boolean(result.retainedPayloadRef &&
+    result.executionProducerKey && result.sourceObservedAt !== undefined);
+  const normalizedCompanions = new Set(history.filter(normalized).map(provenance).filter(Boolean));
+  const currentProvenance = result => normalized(result) ||
+    !normalizedCompanions.has(provenance(result));
+  const evidence = reduceTestHistory(history, {
+    sourceTime: result => result.sourceObservedAt ?? (result.operationId ?
       lookupOperation(records, result.operationId)?.updatedAt ?? result.observedAt :
       result.eventId ? records.find(record => record.id === result.eventId)?.occurredAt ?? result.observedAt :
-        result.observedAt,
-    eligible: result => result.cycleId === cycle.id &&
+        result.observedAt),
+    eligible: result => currentProvenance(result) && result.cycleId === cycle.id &&
       result.candidateDigest === cycle.candidateDigest &&
       result.testSpecDigest === cycle.testSpecDigest &&
       !(result.status === 'NotRun' && ['dispatching', 'submitted', 'running'].includes(result.operationState) &&
@@ -304,8 +357,8 @@ export function currentTestEvidence(cycle, records, test, clock = Date) {
       record.type === 'operation' && record.status === 'succeeded');
     if (!currentDeployment(cycle, records, deployment, 'STAGING')) return null;
     const observations = [];
-    for (const candidate of testHistory(cycle, records, test.id).filter(record =>
-      record.type === 'test-evidence' &&
+    for (const candidate of history.filter(record =>
+      currentProvenance(record) && record.type === 'test-evidence' &&
       record.testId === test.id &&
       record.cycleId === cycle.id &&
       record.candidateDigest === cycle.candidateDigest &&
@@ -347,7 +400,7 @@ export function currentTestEvidence(cycle, records, test, clock = Date) {
         }
         observations.push({
           evidence: candidate,
-          observedAt: operation.updatedAt,
+          observedAt: candidate.sourceObservedAt ?? operation.updatedAt,
         });
         continue;
       }
@@ -364,7 +417,7 @@ export function currentTestEvidence(cycle, records, test, clock = Date) {
           record.effect.outcome === candidate.status);
         if (event) observations.push({
           evidence: candidate,
-          observedAt: event.occurredAt,
+          observedAt: candidate.sourceObservedAt ?? event.occurredAt,
         });
       }
     }
@@ -441,9 +494,9 @@ export function currentTestEvidence(cycle, records, test, clock = Date) {
         },
       });
     }
-    return reduceTestHistory(observations.map(item =>
+    return unexpiredTestEvidence(reduceTestHistory(observations.map(item =>
       ({ ...item.evidence, observedAt: item.observedAt })),
-    { eligible: result => observationAfterReset(cycle, records, result) });
+    { eligible: result => observationAfterReset(cycle, records, result) }), clock);
   }
   if (!evidence || evidence.cycleId !== cycle.id || evidence.candidateDigest !== cycle.candidateDigest ||
     evidence.testSpecDigest !== cycle.testSpecDigest) return null;
@@ -468,7 +521,7 @@ export function currentTestEvidence(cycle, records, test, clock = Date) {
           operation.target !== deployment.target) return null;
     }
   }
-  return evidence;
+  return unexpiredTestEvidence(evidence, clock);
 }
 export function stagePassed(cycle, records, environment, clock = Date) {
   if (cycle?.pendingPlanSync || assurancePending(cycle, records)) return false;

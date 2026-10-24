@@ -48,26 +48,62 @@ export function strings(value, label, max = 100) {
   return value;
 }
 export function canonical(value) {
-  if (value === null || typeof value === 'boolean' || typeof value === 'string') return JSON.stringify(value);
-  if (typeof value === 'number') {
-    requireThat(Number.isFinite(value), 'INPUT', 'Non-finite JSON number');
-    return JSON.stringify(value);
+  const encodedKeys = new Map();
+  function encode(item) {
+    if (item === null || typeof item === 'boolean' || typeof item === 'string') return JSON.stringify(item);
+    if (typeof item === 'number') {
+      requireThat(Number.isFinite(item), 'INPUT', 'Non-finite JSON number');
+      return JSON.stringify(item);
+    }
+    if (Array.isArray(item)) return `[${item.map(encode).join(',')}]`;
+    requireThat(item && Object.getPrototypeOf(item) === Object.prototype, 'INPUT', 'Only plain JSON data is supported');
+    let result = '{';
+    const keys = Object.keys(item).sort();
+    for (let index = 0; index < keys.length; index++) {
+      const key = keys[index];
+      let name = encodedKeys.get(key);
+      if (name === undefined) {
+        name = JSON.stringify(key);
+        if (encodedKeys.size < 128 && key.length <= 128 && name.length <= 256) encodedKeys.set(key, name);
+      }
+      result += `${index ? ',' : ''}${name}:${encode(item[key])}`;
+    }
+    return result + '}';
   }
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  requireThat(value && Object.getPrototypeOf(value) === Object.prototype, 'INPUT', 'Only plain JSON data is supported');
-  return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+  return encode(value);
 }
 export function digest(value) {
   return createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : canonical(value)).digest('hex');
 }
 export function byteSize(value) { return Buffer.byteLength(canonical(value)); }
-const sensitiveKey = /^(?:rawPrompt|fullPrompt|prompt|rawProviderResponse|providerPayload|accessToken|access_token|clientSecret|client_secret|password|authorization|credentials|secret|headers|token|sig|signature|apiKey|api_key)$/iu;
-const credentialQueryKey = /^(?:sig|signature|token|access[_-]?token|client[_-]?secret|api[_-]?key|key|password|authorization|x-amz-(?:signature|credential|security-token))$/iu;
-const credentialAssignment = /(?<![\p{L}\p{N}_])(?:\\?["'])?(?:rawPrompt|fullPrompt|prompt|rawProviderResponse|providerPayload|accessToken|access_token|clientSecret|client_secret|password|authorization|credentials|secret|headers|token|sig|signature|apiKey|api_key|x-amz-(?:signature|credential|security-token))(?:\\?["'])?\s*[:=]/iu;
+const sensitiveKey = /^(?:rawPrompt|fullPrompt|prompt|rawProviderResponse|providerPayload|accessToken|access_token|clientSecret|client_secret|password|authorization|credentials|secret|headers|token|sig|signature|apiKey|api_key|jwt)$/iu;
+const credentialQueryKey = /^(?:sig|signature|token|jwt|access[_-]?token|client[_-]?secret|api[_-]?key|key|password|authorization|x-amz-(?:signature|credential|security-token))$/iu;
+const credentialAssignment = /(?<![\p{L}\p{N}_])(?:\\?["'])?(?:rawPrompt|fullPrompt|prompt|rawProviderResponse|providerPayload|accessToken|access_token|clientSecret|client_secret|password|authorization|credentials|secret|headers|token|sig|signature|apiKey|api_key|jwt|x-amz-(?:signature|credential|security-token))(?:\\?["'])?\s*[:=]/iu;
 const credentialAssignments = new RegExp(credentialAssignment.source, 'giu');
 const queryPair = /([?&]([^=&#\s"'\\]+)=)([^&#\s<>;,]+)/gu;
 const webUrl = /https?:\/\/[^\s<>`]+/giu;
 const redactedValue = /^\[redacted(?::[a-f0-9]{64})?\]$/iu;
+const jwtToken = /(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{8,}={0,2})\.([A-Za-z0-9_-]+={0,2})\.([A-Za-z0-9_-]*={0,2})(?![A-Za-z0-9_-])/gu;
+function jwtHeader(value) {
+  if (value.length > 4096) return true;
+  try {
+    const decoded = Buffer.from(value, 'base64url').toString('utf8');
+    if (!/^[\t\n\r ]*\{/u.test(decoded)) return false;
+    const header = JSON.parse(decoded);
+    return Boolean(header && typeof header === 'object' && !Array.isArray(header) &&
+      typeof header.alg === 'string' && header.alg.trim());
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    return false;
+  }
+}
+function hasJwt(value) {
+  return [...value.matchAll(jwtToken)].some(match => jwtHeader(match[1]));
+}
+function redactJwtText(value) {
+  return value.replace(jwtToken, (match, header) =>
+    jwtHeader(header) ? `[redacted:${digest(match)}]` : match);
+}
 function decodeCredentialText(value) {
   try { return decodeURIComponent(value); }
   catch {
@@ -90,7 +126,8 @@ function hasCredentialClue(value) {
   for (let attempt = 0; attempt < 3; attempt++) {
     if ([...current.matchAll(credentialAssignments)].some(match =>
       !redactedValue.test(current.slice(match.index + match[0].length).trim())) ||
-      /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|(?:ghp|github_pat)_[a-zA-Z0-9_]{20,}/iu.test(current)) return true;
+      /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|(?:ghp|github_pat)_[a-zA-Z0-9_]{20,}/iu.test(current) ||
+      hasJwt(current)) return true;
     const decoded = decodeCredentialText(current);
     if (decoded === current) break;
     current = decoded;
@@ -99,12 +136,13 @@ function hasCredentialClue(value) {
 }
 function redactCredentialUrls(value) {
   return value.replace(webUrl, match => {
-    const trailing = match.match(/[,;.)}]+$/u)?.[0] ?? '';
-    const candidate = match.slice(0, match.length - trailing.length);
+    const safeMatch = redactJwtText(match);
+    const trailing = safeMatch.match(/[,;.)}]+$/u)?.[0] ?? '';
+    const candidate = safeMatch.slice(0, safeMatch.length - trailing.length);
     let url;
     try { url = new URL(candidate); }
     catch { return `[unparseable-url:${digest(candidate)}]${trailing}`; }
-    let changed = Boolean(url.username || url.password);
+    let changed = safeMatch !== match || Boolean(url.username || url.password);
     url.username = '';
     url.password = '';
     if (hasCredentialClue(url.pathname)) {
@@ -135,11 +173,11 @@ function redactCredentialQueries(value) {
       !redactedValue.test(queryValue) ? `${prefix}[redacted]` : pair);
 }
 function redactPlainText(value) {
-  return redactCredentialQueries(value)
+  return redactJwtText(redactCredentialQueries(value)
     .replace(/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|$)/giu,
       match => `[redacted:${digest(match)}]`)
     .replace(/(?:ghp|github_pat)_[A-Za-z0-9_]{20,}/giu,
-      match => `[redacted:${digest(match)}]`);
+      match => `[redacted:${digest(match)}]`));
 }
 function redactTextUrls(value) {
   const assigned = redactSensitiveAssignments(value);
@@ -238,62 +276,92 @@ export function unsafeSummaryContent(value) {
     sensitiveKey.test(key) ||
     unsafeSummaryContent(item));
 }
-export function safeSummary(value) {
-  if (typeof value === 'string') {
-    if (/^\s*[\[{]/u.test(value)) {
-      try {
-        const parsed = JSON.parse(value);
-        if (parsed && typeof parsed === 'object') {
-          return unsafeSummaryContent(parsed) ?
-            JSON.stringify(safeSummary(parsed)) : value;
-        }
-      } catch {
-        // Continue with safe treatment of a fragment or malformed value.
+// Text markers require punctuation; object-key redaction still precedes value traversal.
+const richSummaryText = /[^A-Za-z0-9 ]/u;
+function safeSummaryText(value) {
+  if (!/[\[{]/u.test(value)) return redactTextUrls(value);
+  if (/^\s*[\[{]/u.test(value)) {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object') {
+        return unsafeSummaryContent(parsed) ?
+          JSON.stringify(safeSummary(parsed)) : value;
       }
+    } catch {
+      // Continue with safe treatment of a fragment or malformed value.
     }
-    let result = '';
-    let start = 0;
-    const assignments = sensitiveAssignmentSpans(value);
-    let assignmentIndex = 0;
-    const urls = [...value.matchAll(webUrl)].map(match =>
-      [match.index, match.index + match[0].length]);
-    for (let index = 0; index < value.length; index++) {
-      if (value[index] !== '{' && value[index] !== '[') continue;
-      while (assignmentIndex < assignments.length &&
-          index >= assignments[assignmentIndex].end) assignmentIndex++;
-      const assignment = assignments[assignmentIndex];
-      if (assignment && index >= assignment.start &&
-          index < assignment.end) {
-        index = assignment.end - 1;
-        continue;
-      }
-      const containingUrl = urls.find(([from, to]) => index >= from && index < to);
-      if (containingUrl) {
-        index = containingUrl[1] - 1;
-        continue;
-      }
-      const end = jsonFragmentEnd(value, index);
-      if (end < 0) continue;
-      const fragment = value.slice(index, end + 1);
-      let parsed;
-      try {
-        parsed = JSON.parse(fragment);
-      } catch { continue; }
-      result += redactTextUrls(value.slice(start, index));
-      const sanitized = safeSummary(parsed);
-      result += unsafeSummaryContent(parsed) ? JSON.stringify(sanitized) : fragment;
-      start = end + 1;
-      index = end;
-    }
-    return result + redactTextUrls(value.slice(start));
   }
-  if (Array.isArray(value)) return value.map(safeSummary);
+  let result = '';
+  let start = 0;
+  const assignments = sensitiveAssignmentSpans(value);
+  let assignmentIndex = 0;
+  const urls = [...value.matchAll(webUrl)].map(match =>
+    [match.index, match.index + match[0].length]);
+  for (let index = 0; index < value.length; index++) {
+    if (value[index] !== '{' && value[index] !== '[') continue;
+    while (assignmentIndex < assignments.length &&
+        index >= assignments[assignmentIndex].end) assignmentIndex++;
+    const assignment = assignments[assignmentIndex];
+    if (assignment && index >= assignment.start &&
+        index < assignment.end) {
+      index = assignment.end - 1;
+      continue;
+    }
+    const containingUrl = urls.find(([from, to]) => index >= from && index < to);
+    if (containingUrl) {
+      index = containingUrl[1] - 1;
+      continue;
+    }
+    const end = jsonFragmentEnd(value, index);
+    if (end < 0) continue;
+    const fragment = value.slice(index, end + 1);
+    let parsed;
+    try {
+      parsed = JSON.parse(fragment);
+    } catch { continue; }
+    result += redactTextUrls(value.slice(start, index));
+    const sanitized = safeSummary(parsed);
+    result += unsafeSummaryContent(parsed) ? JSON.stringify(sanitized) : fragment;
+    start = end + 1;
+    index = end;
+  }
+  return result + redactTextUrls(value.slice(start));
+}
+const summaryTextCacheEntries = 256;
+const summaryTextCacheBytes = 64 * 1024;
+function summarizeValue(value, cache) {
+  if (typeof value === 'string') {
+    if (!richSummaryText.test(value)) return value;
+    const cached = cache.texts.get(value);
+    if (cached !== undefined) return cached;
+    const sanitized = safeSummaryText(value);
+    const remaining = summaryTextCacheBytes - cache.bytes;
+    if (cache.texts.size < summaryTextCacheEntries &&
+        value.length + sanitized.length <= remaining) {
+      const bytes = Buffer.byteLength(value) + Buffer.byteLength(sanitized);
+      if (bytes <= remaining) {
+        cache.texts.set(value, sanitized);
+        cache.bytes += bytes;
+      }
+    }
+    return sanitized;
+  }
+  if (Array.isArray(value)) return value.map(item => summarizeValue(item, cache));
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(Object.entries(value).map(([key, item]) =>
     [key, sensitiveKey.test(key) ?
       (typeof item === 'string' && redactedValue.test(item) ?
         item : `[redacted:${digest(item === undefined ? 'undefined' : item)}]`) :
-      safeSummary(item)]));
+      summarizeValue(item, cache)]));
+}
+export function safeSummary(value) {
+  if (typeof value === 'string') return richSummaryText.test(value) ? safeSummaryText(value) : value;
+  if (!value || typeof value !== 'object') return value;
+  return summarizeValue(value, { texts: new Map(), bytes: 0 });
+}
+export function createSummarySanitizer() {
+  const cache = { texts: new Map(), bytes: 0 };
+  return value => summarizeValue(value, cache);
 }
 export function shellArgument(value) {
   if (/^[a-zA-Z0-9._:/\\-]+$/u.test(value)) return value;

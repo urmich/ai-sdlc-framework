@@ -1,6 +1,31 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "direct", "paths": ["src/validation-evidence.mjs", "src/core.mjs"]}]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reduceTestHistory, sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
+import { LIMITS, createSummarySanitizer, digest, safeSummary } from '../src/core.mjs';
+import { reduceTestHistory, sanitizeExecutionPayload, validateRetainedPayload } from '../src/validation-evidence.mjs';
+
+test('T-PRD037 markerless payload text retains core redaction without impossible structured scans', t => {
+  const value = 'owned-markerless-path/0123456789abcdef';
+  const replace = String.prototype.replace;
+  let headerScans = 0;
+  t.mock.method(String.prototype, 'replace', function (pattern, ...args) {
+    if (String(this) === value && pattern?.source.includes('Proxy-Authorization')) headerScans++;
+    return Reflect.apply(replace, this, [pattern, ...args]);
+  });
+  validateRetainedPayload(value);
+  assert.equal(headerScans, 0);
+  const jwt = `${Buffer.from('{"alg":"HS256"}').toString('base64url')}.opaque.payload`;
+  assert.throws(() => validateRetainedPayload(jwt), { code: 'UNSAFE' },
+    'Markerless text must still use the existing core redactor');
+  for (const unsafe of [
+    'Authorization: owned-fixture-value',
+    'ACCESS_TOKEN=owned-fixture-value',
+    'result {"password":"owned-fixture-value"}',
+  ]) assert.throws(() => validateRetainedPayload(unsafe), { code: 'UNSAFE' });
+});
 
 function permutations(items) {
   return items.length ? items.flatMap((item, index) =>
@@ -55,6 +80,245 @@ test('retained payload bytes, not just locators, are sanitized', () => {
   assert.doesNotMatch(JSON.stringify(retained), /fixture-private-value/u);
   assert.match(JSON.stringify(retained), /redacted/u);
   assert.throws(() => sanitizeExecutionPayload(Buffer.from([0xff, 0xfe])), { code: 'UNSAFE' });
+});
+
+test('T-PRD037 repeated summary text is sanitized once per traversal without reusing another call', () => {
+  const text = 'Read https://example.invalid/run?token=fixture-value&view=summary';
+  const matchAll = String.prototype.matchAll;
+  let scans = 0;
+  String.prototype.matchAll = function (...args) {
+    if (String(this) === text) scans++;
+    return Reflect.apply(matchAll, this, args);
+  };
+  try {
+    const expected = safeSummary(text);
+    const once = scans;
+    assert.ok(once > 0, 'The observer must see the actual text sanitizer');
+    assert.doesNotMatch(expected, /fixture-value/u);
+    assert.match(expected, /view=summary/u);
+    scans = 0;
+    assert.deepEqual(safeSummary({ first: text, nested: { second: text }, list: [text] }),
+      { first: expected, nested: { second: expected }, list: [expected] });
+    assert.equal(scans, once, 'Identical text must not repeat pure parsing in one traversal');
+    scans = 0;
+    assert.deepEqual(safeSummary({ first: text, second: text }),
+      { first: expected, second: expected });
+    assert.equal(scans, once, 'A separate call must sanitize its inputs again');
+    assert.match(safeSummary({ password: text, visible: text }).password,
+      /^\[redacted:[a-f0-9]{64}\]$/u);
+  } finally {
+    String.prototype.matchAll = matchAll;
+  }
+  const texts = Array.from({ length: 512 }, (_, index) =>
+    `https://example.invalid/run/${index}?token=fixture-${index}&view=summary`);
+  const large = `${'ordinary diagnostic '.repeat(5000)}${text}`;
+  assert.deepEqual(safeSummary({ texts, large, tail: [text, text] }), {
+    texts: texts.map(safeSummary),
+    large: safeSummary(large),
+    tail: [safeSummary(text), safeSummary(text)],
+  });
+});
+
+test('T-PRD037 retained text summaries reuse only identical strings inside one bounded sanitization', () => {
+  const text = 'https://example.invalid/retained-summary/fixture?view=summary';
+  const matchAll = String.prototype.matchAll;
+  let scans = 0;
+  String.prototype.matchAll = function (...args) {
+    if (String(this) === text) scans++;
+    return Reflect.apply(matchAll, this, args);
+  };
+  try {
+    assert.equal(safeSummary(text), text);
+    const once = scans;
+    assert.ok(once > 0);
+    for (let call = 0; call < 2; call++) {
+      scans = 0;
+      assert.doesNotThrow(() => validateRetainedPayload([text, text, text]));
+      assert.equal(scans, once, 'Only pure summary scans are shared, never another invocation');
+    }
+    scans = 0;
+    assert.doesNotThrow(() => validateRetainedPayload({ first: text, nested: { second: text } }));
+    assert.equal(scans, once, 'Ancestor summaries reuse the same invocation-owned text work');
+    const changed = [text, `${text}&token=fixture-private-value`];
+    assert.throws(() => validateRetainedPayload(changed), { code: 'UNSAFE' });
+    assert.throws(() => validateRetainedPayload(Array(65537).fill(text)), { code: 'CAPACITY' });
+    const summarize = createSummarySanitizer();
+    let reads = 0;
+    const source = { get detail() { return ++reads === 1 ? text : `${text}&token=fixture-private-value`; } };
+    const first = summarize(source);
+    assert.equal(reads, 1);
+    first.detail = 'caller mutation';
+    assert.deepEqual(summarize({ detail: text }), { detail: text });
+    const second = summarize(source);
+    assert.equal(reads, 2);
+    assert.doesNotMatch(second.detail, /fixture-private-value/u);
+    assert.match(summarize({ password: text }).password, /^\[redacted:[a-f0-9]{64}\]$/u);
+  } finally {
+    String.prototype.matchAll = matchAll;
+  }
+});
+
+test('T-PRD037 plain summary literals avoid rich-text scans without bypassing sensitive keys or limits', () => {
+  const literals = ['', 'Passed', 'NotRun', 'provider', 'linux', 'x64',
+    'Original behavior remains observable', 'a'.repeat(64)];
+  const selected = new Set(literals);
+  const matchAll = String.prototype.matchAll;
+  let scans = 0;
+  String.prototype.matchAll = function (...args) {
+    if (selected.has(String(this))) scans++;
+    return Reflect.apply(matchAll, this, args);
+  };
+  try {
+    for (const text of literals) assert.equal(safeSummary(text), text);
+    assert.deepEqual(safeSummary({ values: literals }), { values: literals });
+    assert.equal(scans, 0, 'Policy-inert literals must not enter rich-text scanners');
+    const protectedKeys = safeSummary({ password: 'Passed', token: literals.at(-1) });
+    for (const value of Object.values(protectedKeys)) {
+      assert.match(value, /^\[redacted:[a-f0-9]{64}\]$/u);
+    }
+  } finally {
+    String.prototype.matchAll = matchAll;
+  }
+  for (const text of [
+    'rawPrompt: fixture-private-value; visible tail',
+    'https://example.invalid/run?token=fixture-private-value&view=public',
+    '{"password":"fixture-private-value","safe":"visible"}',
+    'ghp_' + 'a'.repeat(32),
+    '-----BEGIN PRIVATE KEY-----\nfixture-private-value\n-----END PRIVATE KEY-----',
+  ]) {
+    assert.notEqual(safeSummary(text), text);
+    assert.doesNotMatch(safeSummary(text), /fixture-private-value/u);
+  }
+  assert.throws(() => sanitizeExecutionPayload(Buffer.alloc(LIMITS.artifact + 1, 0x61)),
+    { code: 'CAPACITY' });
+});
+
+test('T-PRD037 decoded JWT non-object headers avoid JSON parsing without changing redaction policy', () => {
+  const token = header => `${Buffer.from(header).toString('base64url')}.opaque.payload`;
+  const ordinary = Array.from({ length: 64 }, (_, index) => token(`ordinary-not-json-${index}`));
+  const parse = JSON.parse;
+  let scans = 0;
+  JSON.parse = function (value, ...args) {
+    if (typeof value === 'string' && value.startsWith('ordinary-not-json-')) scans++;
+    return Reflect.apply(parse, this, [value, ...args]);
+  };
+  try {
+    assert.deepEqual(safeSummary(ordinary), ordinary);
+    assert.equal(scans, 0, 'Decoded non-object headers must not incur failed JSON parses');
+  } finally {
+    JSON.parse = parse;
+  }
+  for (const header of [
+    '{"alg":"HS256"}',
+    ' \r\n\t{"extra":true,"alg":" none "}',
+    '{"alg":"\\u0048S256"}',
+  ]) {
+    const jwt = token(header);
+    assert.equal(safeSummary(jwt), `[redacted:${digest(jwt)}]`);
+  }
+  for (const header of [
+    '{}', '{"alg":""}', '{"alg":" "}', '{"alg":false}', '{"alg":5}',
+    '[{"alg":"HS256"}]', 'null', '"HS256"', '{"alg":',
+    '\ufeff{"alg":"HS256"}', '\u00a0{"alg":"HS256"}',
+  ]) {
+    const text = token(header);
+    assert.equal(safeSummary(text), text);
+  }
+  const oversized = `${'a'.repeat(4097)}.opaque.payload`;
+  assert.equal(safeSummary(oversized), `[redacted:${digest(oversized)}]`);
+});
+
+test('T-PRD037 punctuation-only diagnostics skip fragment discovery but retain scalar redaction', () => {
+  const jwt = `${Buffer.from('{"alg":"HS256"}').toString('base64url')}.opaque.payload`;
+  const examples = [
+    ['test/public-readiness-observer.test.mjs:810 (linux-x64)', null],
+    ['worker\'s "visible" diagnostic — complete', null],
+    ['password=fixture-private-value; visible tail',
+      `password=[redacted:${digest('fixture-private-value')}]; visible tail`],
+    [`worker returned ${jwt}`, `worker returned [redacted:${digest(jwt)}]`],
+    ['ghp_' + 'a'.repeat(32), `[redacted:${digest('ghp_' + 'a'.repeat(32))}]`],
+    ['https://example.invalid/run?token=fixture-private-value&view=public',
+      'https://example.invalid/run?token=[redacted]&view=public'],
+  ];
+  const matchAll = String.prototype.matchAll;
+  for (const [source, expected] of examples) {
+    let assignmentScans = 0;
+    String.prototype.matchAll = function (expression) {
+      if (String(this) === source && expression.source.includes('rawPrompt')) assignmentScans++;
+      return Reflect.apply(matchAll, this, [expression]);
+    };
+    try {
+      assert.equal(safeSummary(source), expected ?? source);
+      assert.equal(assignmentScans, 1, 'No duplicate assignment scan for fragment discovery');
+    } finally {
+      String.prototype.matchAll = matchAll;
+    }
+  }
+  const encoded = 'capture {"password":"fixture-private-value"} end';
+  assert.doesNotMatch(safeSummary(encoded), /fixture-private-value/u);
+  assert.doesNotMatch(safeSummary('capture {"\\u0070assword":"fixture-private-value"} end'),
+    /fixture-private-value/u);
+  for (const fragment of [
+    "log{'AWS_SECRET_ACCESS_KEY':'fixture-private-value'}end",
+    'log{"AWS_SECRET_ACCESS_KEY":\'fixture-private-value\'}end',
+    'capture {"AWS_SECRET_ACCESS_KEY":"unterminated',
+  ]) {
+    assert.throws(() => sanitizeExecutionPayload(Buffer.from(JSON.stringify({ log: fragment }))),
+      { code: 'UNSAFE' });
+  }
+  assert.throws(() => sanitizeExecutionPayload(Buffer.from([0xff, 0xfe])), { code: 'UNSAFE' });
+});
+
+test('T-PRD037 JWT diagnostics and signed query links are sanitized without changing case outcomes', () => {
+  const jwt = [
+    JSON.stringify({ alg: 'HS256', typ: 'JWT' }),
+    JSON.stringify({ sub: 'synthetic-fixture', purpose: 'not-a-real-credential' }),
+    'synthetic-signature',
+  ].map(value => Buffer.from(value).toString('base64url')).join('.');
+  const unsigned = jwt.slice(0, jwt.lastIndexOf('.') + 1);
+  const cases = [{ testId: 'T-one', status: 'Passed',
+    assertions: [{ name: 'Original behavior remains observable', passed: true }] }];
+  const source = {
+    detail: `Worker returned ${jwt}`,
+    nested: [JSON.stringify({ detail: jwt })],
+    links: [
+      `https://example.invalid/run?jwt=${jwt}&view=summary`,
+      `https://example.invalid/run?%6a%77%74=${jwt.replaceAll('.', '%2E')}`,
+      `https://example.invalid/run?trace=${jwt}`,
+      `https://example.invalid/run?trace=${unsigned}`,
+    ],
+    jwt: 'synthetic-opaque-token',
+    safe: 'release 1.2.3 and package/service.mjs',
+    cases,
+  };
+  assert.throws(() => validateRetainedPayload(source), { code: 'UNSAFE' });
+  for (const retained of [
+    safeSummary(source),
+    sanitizeExecutionPayload(Buffer.from(JSON.stringify(source))),
+  ]) {
+    assert.equal(JSON.stringify(retained).includes(jwt), false);
+    assert.equal(JSON.stringify(retained).includes(unsigned), false);
+    assert.equal(JSON.stringify(retained).includes('synthetic-opaque-token'), false);
+    assert.equal(JSON.stringify(retained).includes(jwt.replaceAll('.', '%2E')), false);
+    assert.match(JSON.stringify(retained), /redacted/u);
+    assert.deepEqual(retained.cases, cases);
+    assert.equal(retained.safe, source.safe);
+    assert.doesNotThrow(() => validateRetainedPayload(retained));
+  }
+});
+
+test('T-PRD037 JWT-bearing assertion identity is rejected rather than rewritten as passing proof', () => {
+  const jwt = [
+    JSON.stringify({ alg: 'none', typ: 'JWT' }),
+    JSON.stringify({ sub: 'synthetic-identity-fixture' }),
+    '',
+  ].map(value => Buffer.from(value).toString('base64url')).join('.');
+  const source = { cases: [{ testId: 'T-one', status: 'Passed',
+    assertions: [{ name: `Verify ${jwt}`, passed: true }] }] };
+  assert.throws(() => sanitizeExecutionPayload(Buffer.from(JSON.stringify(source))),
+    { code: 'UNSAFE' });
+  assert.equal(source.cases[0].status, 'Passed');
+  assert.equal(source.cases[0].assertions[0].name, `Verify ${jwt}`);
 });
 
 test('declared sanitizer covers environment secrets and HTTP session headers without changing assertions', () => {

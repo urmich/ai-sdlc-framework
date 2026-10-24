@@ -10,6 +10,7 @@ export const MAPPABLE_FIELDS = new Set([
   'recipient', 'contentDigest', 'remoteRepositoryURL',
   'sourceRepositoryURL', 'prId', 'paths', 'stages',
   'implicitEnvironments', 'toolOptions', 'preservesChanges',
+  'descriptionDigest', 'coverageDigest', 'previousDescriptionDigest', 'descriptionVersion',
 ]);
 const BOOLEAN_FIELDS = new Set(['draft', 'force', 'delete', 'preservesChanges']);
 const ARRAY_FIELDS = new Set(['paths', 'stages', 'implicitEnvironments']);

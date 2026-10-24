@@ -87,6 +87,12 @@ launcher to a payload-free channel root is not supported.
 The generator consumes the Windows archive record **before** the outer release
 descriptor exists, avoiding an archive/descriptor/manifest digest cycle:
 
+The following historical 0.3.0 schema illustration contains placeholders, not
+current release pins or a usable community submission. Actual generation must
+use the selected future candidate's verified version, archive and approved
+destination; published historical records are not rewritten.
+
+<!-- historical:start -->
 ```json
 {
   "version": "0.3.0",
@@ -100,6 +106,7 @@ descriptor exists, avoiding an archive/descriptor/manifest digest cycle:
   "archivePath": "dist/ai-sdlc-framework-0.3.0-windows-x64.zip"
 }
 ```
+<!-- historical:end -->
 
 `releaseRepository` must explicitly identify the approved **public** GitHub asset
 repository; it is not inferred from a possibly private source repository.
@@ -254,15 +261,16 @@ Integration requirements for the shared packager / CI owner:
    rebuild verification. Never rebuild the framework payload for WinGet.
 3. Generate stable manifests only after the ZIP digest exists; place their
    descriptor-ready records into the shared immutable release bundle.
-4. The [current release scope](../../docs/release-ci.md) requires deterministic
-   Windows x64 cross-build/PE checks, host-run Go **pre-JS payload-integrity**
-   tests against the exact ZIP, and URL/metadata contract plus official
-   JSON-schema validation. It deliberately does
-   **not** execute the Windows launcher or WinGet client. Native Windows remains
-   `NotRun`, and manifests remain `contract-validated`, not `repository-ready`.
-   If native Windows validation is requested later, separately run launcher
-   tests, `--native` validation and portable lifecycle smoke; cross-build success
-   must never substitute for that evidence.
+4. The future [release scope](../../docs/releases/release-ci.md) requires fresh
+   Windows x64 R-PRE execution, including the real PE launcher, Windows
+   PowerShell/cmd and installed hooks, as well as deterministic launcher builds,
+   Go **pre-JS payload-integrity** tests and pinned official JSON-schema checks.
+   After publication, a separate clean Windows consumer must anonymously fetch
+   those exact bytes and perform an authentic prior-version upgrade. Cross-build
+   or manifest success never substitutes for native execution. WinGet community
+   submission, client availability and corporate-device access remain separately
+   reported `NotRun` prerequisites unless actually exercised with authorization;
+   no policy bypass is implied.
 5. Retain local/native validation separately from community submission and
    later anonymous WinGet discovery/install evidence. No remote mutation is
    performed by the build, generator, validator, or local test suite.
@@ -275,10 +283,10 @@ network dependencies. This is schema evidence only:
 macOS cross-compilation and fixture tests cannot establish native Windows
 installation, WinGet community acceptance, or client availability.
 
-Only after implementation and required native macOS/Homebrew validation complete
+Only after the four required native R-PRE reports pass
 does the release pipeline generate and validate a deterministic
-[T-60 Windows tester handoff](../../docs/release-ci.md#t-60-windows-tester-handoff)
+[T-60 Windows tester handoff](../../docs/releases/release-ci.md#t-60-windows-tester-handoff)
 against the final candidate digests. Prompt generation is not native execution:
-its native status stays `NotRun`, and final content remains `PendingIntegration`.
-The Windows job validates only deferred input identity, including the launcher
-digest. Pending T-60 completeness prevents publication.
+that prompt's own native status stays `NotRun`. It neither grants publication
+authority nor substitutes for the mandatory native Windows R-PRE/R-POST jobs.
+Missing prompt content still blocks the sealed publication handoff.
