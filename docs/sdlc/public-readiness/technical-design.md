@@ -187,6 +187,14 @@ references/cycles and resource declarations before dispatch. Prerequisites must
 finish successfully; declared minimum/exclusive allocation is acquired before
 timed execution. Completion releases capacity for other ready groups; failure
 and cancellation block dependents without suppressing original diagnostics.
+Under policy v7, each admission pass stably orders pending groups by declared
+`minimumSlots` descending, retaining input order for equal demand. Skip groups
+with unmet dependencies, insufficient available capacity or an exclusive-resource
+conflict; admit the next fitting eligible group instead of stopping the pass.
+Larger eligible groups get first consideration and smaller fitting work
+backfills remaining capacity. This preserves AC-202.6's dynamic shared pool,
+with no idle capacity barrier, padding, extra token reservation or whole-host
+exclusion. Cancellation still drains already-running work as before.
 CPU/memory/resource limits and explicit validated overrides bound the pool,
 and nested producers share the same aggregate budget.
 
@@ -238,13 +246,17 @@ Archived native reconstruction selects the scheduling policy from the existing
 authenticated `definition.sourceFiles` entry for `scripts/test-scheduling.mjs`.
 The non-executing declaration tokenizer requires exact token-normalized
 fingerprints for the exported protocol, priority table and complete policy
-initializers. Current live execution uses literal v6; historical reconstruction
-also retains the exact v5, v4, v3 and v2 contracts and their original digests. Missing,
+initializers. Current live execution uses literal v7; its complete budget binds
+declared-demand-first ready backfill. Historical reconstruction retains
+the exact v6, v5, v4, v3 and v2 contracts, original file-admission budget labels
+and digests. Missing,
 unknown, duplicate, spoofed or computed contracts fail `EVIDENCE`. Do not
 execute captured code, accept a report policy flag or try alternate digests.
 Thread that source-selected policy through ordering, configuration and original
 group validation without rewriting old reports or renewing historical credit.
 Live capture and execution continue to require the current policy.
+Historical replay validates captured definitions and reports, not the live
+ready-pool runtime; retain old group IDs, order, protocol and execution records.
 
 Split independent top-level scenarios into coherent file processes, retaining
 stable case IDs. Each has unique Git/home/cache/temp roots. Do not enable blanket
@@ -393,12 +405,15 @@ without changing command watchdogs, owned-process settlement or other limits.
 Configured host fan-out, an isolated shard time or an elapsed-work estimate is
 not a passing latency result; fresh complete hosted measurements are required.
 Keep the existing observation refresh/regression and observer priorities first.
-Under implicit policy v6, keep the unchanged CI-input and retained-evidence
+Under implicit policy v7, keep the unchanged v6 priority table: CI-input and retained-evidence
 families next, then prioritize provider consumers, reproducible packaging,
 facts/archive recovery, distribution lifecycle and runner probes, in that order,
 where those files belong to the selected shard, before shorter families.
 Distribution stays ahead of runner probes because its measured long roots are
 longer; this ordering is a lead, not a predicted latency gain.
+File/group selection metadata is unchanged. Parallel admission considers
+declared demand first, so strict actual start order across unequal demands is
+not promised; equal-demand ties retain the input order.
 Preserve the relative retained-identity acceptance, catalog, native
 WinGet launcher and joined release-report prefix in shards that own those files.
 The catalog's independent long root can use the three remaining ARM slots while
@@ -406,8 +421,9 @@ the retained guard reserves four of the existing seven. Retain the complete
 38-assertion closure, callback ordering/concurrency and every catalog root.
 This changes neither host capacity, shard ownership nor explicit targeted
 caller order. Actual overlap and whole-lane improvement require native proof.
-Priority v6 changes only that implicit file order; it does not cache cold Go
-builds, prune lifecycle/failure probes, alter assertions or replace historical policies.
+Policy v7 changes admission semantics, not that file order, declared minima,
+workloads or shard ownership. It does not cache cold Go builds, prune
+lifecycle/failure probes, alter assertions or replace historical policies.
 
 The PR workflow uses five Linux read-only allocation coordinators under
 `arm-regression-allocation-v4-retained-first`. After ARM's own unit barrier,

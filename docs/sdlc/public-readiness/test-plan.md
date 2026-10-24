@@ -796,11 +796,21 @@ completeness rather than silently excluding work.
 | Actual public routes, effective provider policy and published consumers | Declared A / R-POST procedure and authorized host | These are not fork PR publication/admin actions or default local prerequisites. Require actual accessible destinations/effects; fixture success is separate. |
 
 Within a ready-work pool, acquire declared minimum/exclusive resources before
-starting a group's timed callback. Free capacity is available to the next ready
-group, rather than reserved indefinitely for a completed sibling branch.
+starting a group's timed callback. Under policy v7, each admission pass stably
+orders pending groups by declared `minimumSlots` descending, retaining input
+order for equal demand. Skip unmet dependencies, insufficient available capacity
+and exclusive conflicts; smaller fitting eligible groups backfill rather than
+waiting behind a group that cannot start. Larger eligible groups receive first
+consideration without an idle capacity barrier, padding, extra token reservation
+or whole-host exclusion. This retains AC-202.6's dynamic shared capacity.
 Nested producers share the same aggregate allocation. Dependencies require
 successful prerequisite completion; failure/cancellation blocks dependents
 explicitly while preserving diagnostics for independently executable work.
+Cancellation still drains already-running work. The existing pure ready-group
+contract covers demand-first fitting admission, the one-slot peer-arrival
+counterexample and independent backfill past an exclusive conflict; its peer
+barrier must complete before safety cleanup. The separate policy/archive tests
+do not establish runtime correctness or a native timing gain.
 Reject unknown dependency/resource references and dependency cycles before
 dispatch. Cleanup releases only the owning group's resources and awaits its
 children.
@@ -1071,7 +1081,7 @@ not complete before the cutoff. Do not claim a whole-lane speedup before complet
 hosted results.
 Preserve initial observation refresh/regression and observer priorities, then
 prioritize the unchanged CI-input and retained-evidence families under implicit
-policy v6. Next prioritize provider consumers, reproducible packaging,
+policy v7, preserving the exact v6 priority table. Next prioritize provider consumers, reproducible packaging,
 facts/archive recovery, distribution lifecycle and runner probes, in that order,
 without changing their real commands, negative controls or causal closures.
 Keep the measured retained-identity acceptance family, catalog,
@@ -1079,7 +1089,9 @@ unchanged native WinGet launcher family and joined release-report family in
 their relative order for shards owning those files, ahead of shorter families.
 Verify both hosted
 selection order and actual implicit dispatch; explicit targeted caller order
-remains unchanged. Earlier dispatch is not itself proof of a native speedup.
+remains unchanged. Single-worker/equal-demand dispatch preserves that order;
+parallel admission need not start unequal-demand groups in strict file order.
+Earlier dispatch is not itself proof of a native speedup.
 Verify the actual producer's requested/capacity fields and shared
 nested-allocation bounds; the default local gate and 32-slot ceiling do not
 change. Account for the personal-account limit of five concurrent hosted Mac
@@ -1166,9 +1178,11 @@ partial write; do not catch or retry invalid JSON, relax a barrier or extend its
 deadline to conceal incomplete publication.
 The PR-only `T-PRD074 archived scheduling reconstructs only its authenticated
 captured literal policy without current-credit fallback` root in
-`test/public-readiness-observer.test.mjs` checks current v6 and exact historical
-v5/v4/v3/v2 archives and all four historical policies' sharded SDK evidence.
-Preserve the exact original v5 digest
+`test/public-readiness-observer.test.mjs` checks current v7 and exact historical
+v6/v5/v4/v3/v2 archives and all five historical policies' sharded SDK evidence.
+Preserve the exact original v6 digest
+`abc5f21ad9e5b998a0f0ce3341ced66f3784d7122e8d72d7cd5a6b67e9fb609a`,
+the exact original v5 digest
 `fada90e8f91f761ecb98a11fafc0d0409d1f14d295339d94ee9547855df6ec58`,
 the exact original v4 digest
 `2273d5335dc6b8bdb7034af1dfde42a2843c1df35345188cb97d3285d0151d64`, the
@@ -1180,6 +1194,12 @@ and source digests. Unknown or forged source, duplicate or comment-spoofed
 declarations, untrusted expressions, malformed budgets, opposite known group
 policies and unauthenticated archives must reject. Never rewrite old evidence,
 execute candidate source, weaken a digest check or renew historical credit.
+The v7 budget explicitly binds declared-demand-first ready backfill;
+historical v6 through v2 retain their original complete budget labels. Reject
+old-version/new-budget and new-version/old-budget hybrids, including a v7 report
+with a known v6 group-policy digest. The rejected unpublished v7 capacity-barrier
+label is not a historical policy. Historical reconstruction does not execute
+the live ready-pool scheduler or rename old admission semantics.
 
 The PR-only `T-PRD013 active events are checked on both transaction reads`
 root in `test/storage.test.mjs` preserves event-digest rejection after removing

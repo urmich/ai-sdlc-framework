@@ -30,7 +30,7 @@ export const measuredFilePriorities = Object.freeze([
   'deployment-revisions.test.mjs', 'pr-publication.test.mjs',
 ]);
 export const validationSchedulingPolicy = Object.freeze({
-  schemaVersion: 6, algorithm: 'source-bound-ready-root-v6',
+  schemaVersion: 7, algorithm: 'source-bound-ready-root-v7',
   groupProtocol: validationGroupProtocol,
   priorities: measuredFilePriorities, hints: 'exact-assertion-and-source-digest; no nested double-counting',
   hostedUnits: 'complete-unit-test-files-plus-automated-plan-unit-root-closure',
@@ -39,11 +39,17 @@ export const validationSchedulingPolicy = Object.freeze({
     defaults: 'max(1,min(16,cpu,floor(memory/1GiB)))',
     producerLimit: '2*capacity+1', controlLimit: '2*capacity+1',
     residentLimit: '3*capacity', orchestrationLimit: '4*capacity+2',
-    files: 'process-isolated-root-closures; dynamic-shared-ready-pool; minimum-and-exclusive-before-module-setup',
+    files: 'process-isolated-root-closures; dynamic-shared-ready-pool; minimum-and-exclusive-before-module-setup; demand-first-ready-backfill',
     nested: 'awaited-parent-yield; ancestor-token-loan; restore-before-return' }),
 });
-const source63SchedulingPolicy = Object.freeze({
+const source64SchedulingPolicy = Object.freeze({
   ...validationSchedulingPolicy,
+  schemaVersion: 6, algorithm: 'source-bound-ready-root-v6',
+  budget: Object.freeze({ ...validationSchedulingPolicy.budget,
+    files: 'process-isolated-root-closures; dynamic-shared-ready-pool; minimum-and-exclusive-before-module-setup' }),
+});
+const source63SchedulingPolicy = Object.freeze({
+  ...source64SchedulingPolicy,
   schemaVersion: 5, algorithm: 'source-bound-ready-root-v5',
   priorities: Object.freeze(measuredFilePriorities.filter(file =>
     !['github-provider-consumers.test.mjs', 'package.test.mjs', 'pr-facts-archive-recovery.test.mjs',
@@ -66,7 +72,7 @@ const priorSchedulingPolicy = Object.freeze({
   schemaVersion: 2, algorithm: 'source-bound-ready-root-v2',
   priorities: Object.freeze(middleSchedulingPolicy.priorities.filter(file => file !== 'validation-catalog.test.mjs')),
 });
-const knownPolicies = new Set([validationSchedulingPolicy, source63SchedulingPolicy,
+const knownPolicies = new Set([validationSchedulingPolicy, source64SchedulingPolicy, source63SchedulingPolicy,
   previousSchedulingPolicy, middleSchedulingPolicy, priorSchedulingPolicy]);
 export function validationSchedulingPolicyDigest(policy = validationSchedulingPolicy) {
   requireThat(knownPolicies.has(policy), 'EVIDENCE', 'Scheduling policy must be current or independently source-selected');
@@ -293,7 +299,8 @@ export async function runValidationReadyPool(groups, { concurrency, capacity = c
   let allocated = 0;
   let failure;
   while (pending.size || running.size) {
-    for (const [id, group] of pending) {
+    const admission = [...pending].sort(([, left], [, right]) => right.minimumSlots - left.minimumSlots);
+    for (const [id, group] of admission) {
       if (signal?.aborted || failure || running.size >= concurrency) break;
       if (!group.dependsOn.every(dependency => completed.get(dependency) === 'Passed') ||
           allocated + group.minimumSlots > capacity ||

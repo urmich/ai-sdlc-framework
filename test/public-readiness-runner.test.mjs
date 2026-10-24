@@ -1289,6 +1289,84 @@ test('T-PRD010 ready root groups validate exact partitions, dependencies and res
     concurrency: 3, capacity: 3, execute: async group => group.root === 'first root' ? 'Failed' : 'Passed',
   });
   assert.deepEqual(failed.notRun.map(group => group.root), ['second root']);
+  const ordered = [
+    { id: 'leading', minimumSlots: 2, dependsOn: [], exclusiveResources: [] },
+    { id: 'wide', minimumSlots: 3, dependsOn: [], exclusiveResources: [] },
+    { id: 'small', minimumSlots: 1, dependsOn: [], exclusiveResources: [] },
+  ];
+  const wide = Promise.withResolvers();
+  const entered = Promise.withResolvers();
+  const starts = [];
+  const admission = runValidationReadyPool(ordered, {
+    concurrency: 4, capacity: 4, execute: async group => {
+      starts.push(group.id);
+      if (group.id === 'wide') {
+        entered.resolve();
+        await wide.promise;
+      }
+      return 'Passed';
+    },
+  });
+  try {
+    await entered.promise;
+    await Promise.resolve();
+    assert.deepEqual(starts, ['wide', 'small'],
+      'Wide ready work starts first while smaller fitting work backfills the remaining capacity');
+    wide.resolve();
+    assert.equal((await admission).completed.size, 3);
+    assert.deepEqual(starts, ['wide', 'small', 'leading']);
+  } finally {
+    wide.resolve();
+    await admission;
+  }
+  const peer = Promise.withResolvers();
+  const cleanup = Promise.withResolvers();
+  const firstEntered = Promise.withResolvers();
+  const overlapStarts = [];
+  const overlap = runValidationReadyPool([
+    { id: 'A', minimumSlots: 1, dependsOn: [], exclusiveResources: [] },
+    { id: 'B', minimumSlots: 4, dependsOn: [], exclusiveResources: [] },
+    { id: 'C', minimumSlots: 1, dependsOn: [], exclusiveResources: [] },
+  ], { concurrency: 4, capacity: 4, execute: async group => {
+    overlapStarts.push(group.id);
+    if (group.id === 'A') {
+      firstEntered.resolve();
+      await Promise.race([peer.promise, cleanup.promise]);
+    }
+    if (group.id === 'C') peer.resolve();
+    return 'Passed';
+  } });
+  try {
+    await firstEntered.promise;
+    await Promise.resolve();
+    assert.deepEqual(overlapStarts, ['B', 'A', 'C'],
+      'An interposed wide group must not block supported peer-arrival overlap');
+    assert.equal((await overlap).completed.size, 3);
+  } finally {
+    cleanup.resolve();
+    await overlap;
+  }
+  const resource = Promise.withResolvers();
+  let independentStarted = false;
+  const exclusive = runValidationReadyPool([
+    { id: 'owner', minimumSlots: 4, dependsOn: [], exclusiveResources: ['owned'] },
+    { id: 'excluded', minimumSlots: 3, dependsOn: [], exclusiveResources: ['owned'] },
+    { id: 'independent', minimumSlots: 1, dependsOn: [], exclusiveResources: [] },
+  ], { concurrency: 4, capacity: 5, execute: async group => {
+    if (group.id === 'owner') await resource.promise;
+    if (group.id === 'independent') independentStarted = true;
+    return 'Passed';
+  } });
+  try {
+    await Promise.resolve();
+    assert.equal(independentStarted, true,
+      'An exclusive-resource conflict must still allow unrelated runnable work');
+    resource.resolve();
+    assert.equal((await exclusive).completed.size, 3);
+  } finally {
+    resource.resolve();
+    await exclusive;
+  }
 });
 
 test('T-PRD010 same-file roots overlap in isolated processes while ordered children and hooks remain causal', async t => {
@@ -1709,9 +1787,12 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
       'distribution', 'runner', 'retained-identity', 'catalog',
       'native-launcher', 'release-report', 'operation']);
   const source = await fs.readFile(new URL('../scripts/test-scheduling.mjs', import.meta.url), 'utf8');
+  const source64 = source.replace("schemaVersion: 7, algorithm: 'source-bound-ready-root-v7'",
+    "schemaVersion: 6, algorithm: 'source-bound-ready-root-v6'")
+    .replace('; demand-first-ready-backfill', '');
   const source63 = ['github-provider-consumers.test.mjs', 'package.test.mjs', 'pr-facts-archive-recovery.test.mjs',
     'distribution-channels.test.mjs', 'test-runner.test.mjs'].reduce((contents, file) =>
-    contents.replace(`  '${file}',\n`, ''), source)
+    contents.replace(`  '${file}',\n`, ''), source64)
     .replace("schemaVersion: 6, algorithm: 'source-bound-ready-root-v6'",
       "schemaVersion: 5, algorithm: 'source-bound-ready-root-v5'");
   const previous = source63.replace("  'public-readiness-ci.test.mjs',\n", '')
@@ -1727,6 +1808,14 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
       "schemaVersion: 2, algorithm: 'source-bound-ready-root-v2'");
   const selectedPolicy = contents => sourceValidationSchedulingPolicy([{ file: 'scripts/test-scheduling.mjs', contents }]);
   assert.equal(selectedPolicy(source), validationSchedulingPolicy);
+  assert.equal(selectedPolicy(source64).schemaVersion, 6);
+  assert.equal(validationSchedulingPolicyDigest(selectedPolicy(source64)),
+    'abc5f21ad9e5b998a0f0ce3341ced66f3784d7122e8d72d7cd5a6b67e9fb609a');
+  assert.deepEqual(validationSchedulingPolicy.priorities, selectedPolicy(source64).priorities);
+  assert.equal(validationSchedulingPolicy.budget.files,
+    `${selectedPolicy(source64).budget.files}; demand-first-ready-backfill`);
+  assert.deepEqual({ ...validationSchedulingPolicy.budget, files: selectedPolicy(source64).budget.files },
+    selectedPolicy(source64).budget);
   assert.equal(selectedPolicy(source63).schemaVersion, 5);
   assert.equal(validationSchedulingPolicyDigest(selectedPolicy(source63)),
     'fada90e8f91f761ecb98a11fafc0d0409d1f14d295339d94ee9547855df6ec58');
@@ -1743,6 +1832,11 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
   assert.throws(() => validationSchedulingPolicyDigest({ ...validationSchedulingPolicy }), { code: 'EVIDENCE' });
   for (const changed of [
     source.replace('maxWorkers: 32', 'maxWorkers: 31'),
+    source.replace('; demand-first-ready-backfill', ''),
+    source.replace("schemaVersion: 7, algorithm: 'source-bound-ready-root-v7'",
+      "schemaVersion: 6, algorithm: 'source-bound-ready-root-v6'"),
+    source.replace('demand-first-ready-backfill', 'demand-first-ready-bypass'),
+    source.replace('demand-first-ready-backfill', 'priority-ready-capacity-barrier'),
     source.replace("  'validation-catalog.test.mjs',\n", ''),
     source.replace("  'winget-launcher-native.test.mjs',\n", ''),
     source.replace("  'public-readiness-release-report.test.mjs',\n", ''),
