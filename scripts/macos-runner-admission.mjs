@@ -12,6 +12,7 @@ const admissionGroups = Object.freeze({
   'arm-bodies': ['body-0', 'body-1', 'body-2']
     .map(shard => `native-macos-arm64-framework-${shard}`),
   'intel-retained-body': ['native-macos-x64-framework-body-1'],
+  'intel-primary-body': ['native-macos-x64-framework-body-0'],
   'arm-refresh': ['native-macos-arm64-framework-refresh'],
 });
 const api = 'https://api.github.com';

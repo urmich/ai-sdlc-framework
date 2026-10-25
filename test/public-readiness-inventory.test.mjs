@@ -143,7 +143,10 @@ if(process.connected)process.disconnect();
         const journalPath = path.join(directory, `${name}.journal.ndjson`);
         const journal = await fs.readFile(journalPath);
         const reference = report.checkpoint.originalJournalPrefix;
-        assert.equal(report.checkpoint.journalDurable, true);
+        t.diagnostic(JSON.stringify({ boundary: 'running-journal', variant: name,
+          checkpoint: report.checkpoint, causes: report.causes, originalOutput: report.originalOutput }));
+        assert.equal(report.checkpoint.journalDurable, true,
+          `The running journal must be durable: ${JSON.stringify(report.checkpoint)}`);
         assert.equal(digest(journal.subarray(0, reference.bytes)), reference.sha256);
         const events = journal.subarray(0, reference.bytes).toString('utf8').trim().split('\n').map(JSON.parse);
         assert.equal(events.at(-1).sequence, report.checkpoint.journalSequence);
@@ -170,7 +173,11 @@ if(process.connected)process.disconnect();
           const cancelled = JSON.parse(await fs.readFile(reportPath, 'utf8'));
           assert.equal(cancelled.complete, false);
           assert.ok(cancelled.causes.some(cause => cause.type === 'cancellation'));
-          assert.equal(cancelled.cleanup.rootExitObserved, true);
+          t.diagnostic(JSON.stringify({ boundary: 'cancelled-root-closure', variant: name,
+            cleanup: cancelled.cleanup, checkpoint: cancelled.checkpoint,
+            causes: cancelled.causes, originalOutput: cancelled.originalOutput }));
+          assert.equal(cancelled.cleanup.rootExitObserved, true,
+            `Cancellation must observe root closure: ${JSON.stringify(cancelled.cleanup)}`);
           assert.equal(cancelled.checkpoint.phase, 'finished');
           const finalJournal = await fs.readFile(journalPath);
           assert.equal(digest(finalJournal), cancelled.checkpoint.originalJournalPrefix.sha256);

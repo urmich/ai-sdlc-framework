@@ -426,16 +426,18 @@ workloads or shard ownership. It does not cache cold Go builds, prune
 lifecycle/failure probes, alter assertions or replace historical policies.
 
 The PR workflow uses five Linux read-only allocation coordinators under
-`arm-regression-allocation-v4-retained-first`. After ARM's own unit barrier,
+`arm-regression-allocation-v5-critical-body-first`. After ARM's own unit barrier,
 `mac-admission` observes its three long body workers before releasing Intel's
-retained body-1 producer, still behind both Intel unit jobs. The
+measured critical body-0 producer, still behind both Intel unit jobs. The
 `intel-retained-admission` coordinator observes that actual worker before
 releasing ARM's separate short refresh, which retains its own ARM unit barrier.
+The coordinator retains its historical job/artifact identifier, while its
+current closed `intel-primary-body` group requires body-0 allocation.
 Then `arm-refresh-admission` observes the refresh worker before Intel's genuine
 Homebrew producer becomes eligible. ARM's genuine Homebrew producer retains
 its initial schedule.
 The `intel-homebrew-admission` coordinator observes the actual Intel Homebrew
-worker before releasing Intel body-0 and body-2, retaining both Intel unit jobs.
+worker before releasing Intel body-1 and body-2, retaining both Intel unit jobs.
 Finally, `intel-admission` observes all three Intel body workers before releasing
 the separate short Intel refresh. No gate waits for a Homebrew command or any
 producer's completion. Native part names, recipes, assertions, retention and
@@ -443,10 +445,12 @@ cleanup remain unchanged.
 A queued `started_at` placeholder is not allocation evidence; a runner or
 started step is required. Completed allocated parts also satisfy admission; no stage
 waits for its allocated parts to finish. Each helper invocation selects only
-the closed `arm-bodies`, `intel-retained-body`, `arm-refresh`,
+the closed `arm-bodies`, `intel-primary-body`, `arm-refresh`,
 `intel-homebrew` or `intel-bodies` group. The historical `arm-regressions`
-group remains the default for existing callers. Retain the exact historical
-v1, v2 and v3 resource graphs and unmarked native v1-v4 replay rather than
+group remains the default for existing callers. Current v5 uses
+`intel-primary-body`; historical v4 retains `intel-retained-body` and its
+original body-1 receipt semantics. Retain the exact historical
+v1, v2, v3 and v4 resource graphs and unmarked native v1-v4 replay rather than
 silently adopting new dependencies.
 No coordinator occupies a Mac VM while waiting or adds a native producer
 part. The policy does not change the twenty-five-part assertion union,

@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 env:
-  SDLC_MAC_ADMISSION_POLICY: arm-regression-allocation-v4-retained-first
+  SDLC_MAC_ADMISSION_POLICY: arm-regression-allocation-v5-critical-body-first
   # Representative public regression input, not an installer version-support whitelist.
   SUPPORTED_PREVIOUS_REPOSITORY: urmich/ai-sdlc-framework
   SUPPORTED_PREVIOUS_VERSION: '0.3.1'
@@ -1087,7 +1087,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: macos-x64, component: framework, shard: body-1, role: macos-x64-framework-body-1, os: macos-15-intel, architecture: x64 }
+          - { target: macos-x64, component: framework, shard: body-0, role: macos-x64-framework-body-0, os: macos-15-intel, architecture: x64 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 360
     env:
@@ -1318,11 +1318,11 @@ jobs:
       - name: Select pinned native Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with: { node-version: '24.20.0', architecture: x64, check-latest: false }
-      - name: Wait for actual Intel retained body worker allocation
+      - name: Wait for actual Intel primary body worker allocation
         env: { GITHUB_TOKEN: '${{ github.token }}', ADMISSION_HEAD_SHA: '${{ github.event.pull_request.head.sha || github.sha }}' }
         run: |
           mkdir -p .test-data
-          node scripts/macos-runner-admission.mjs --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --head-sha "$ADMISSION_HEAD_SHA" --group intel-retained-body --output .test-data/intel-retained-admission.json
+          node scripts/macos-runner-admission.mjs --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --head-sha "$ADMISSION_HEAD_SHA" --group intel-primary-body --output .test-data/intel-retained-admission.json
       - name: Retain Intel retained admission observation
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -1434,7 +1434,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: macos-x64, component: framework, shard: body-0, role: macos-x64-framework-body-0, os: macos-15-intel, architecture: x64 }
+          - { target: macos-x64, component: framework, shard: body-1, role: macos-x64-framework-body-1, os: macos-15-intel, architecture: x64 }
           - { target: macos-x64, component: framework, shard: body-2, role: macos-x64-framework-body-2, os: macos-15-intel, architecture: x64 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 360

@@ -1316,7 +1316,7 @@ test('T-PRD022 actual workflow graph applies semantic YAML, effective permission
   const workflows = await readWorkflowPolicySources(repositoryRoot);
   const positive = inspectWorkflowTrust(workflows);
   assert.equal(positive.complete, true, JSON.stringify(positive.blockers));
-  assert.equal(positive.nativeResourcePolicy, 'arm-regression-allocation-v4-retained-first');
+  assert.equal(positive.nativeResourcePolicy, 'arm-regression-allocation-v5-critical-body-first');
   const producer = positive.workflows.find(item => item.file === '.github/workflows/ci.yml');
   assert.deepEqual(producer.document.permissions, { contents: 'read' });
   assert.deepEqual(producer.jobs.find(job => job.id === 'mac-admission').effectivePermissions,
@@ -1587,7 +1587,25 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.deepEqual(ci.jobs.native.needs, ['intent', 'source', 'native-units']);
   assert.deepEqual(ci.jobs['native-units'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-homebrew'].needs, ['intent', 'source']);
-  assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v4-retained-first');
+  assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v5-critical-body-first');
+  const legacy = structuredClone(ci);
+  const primaryPart = legacy.jobs['native-mi-retained'].strategy.matrix.include[0];
+  const remainingParts = legacy.jobs['native-mi'].strategy.matrix.include;
+  legacy.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v4-retained-first';
+  legacy.jobs['native-mi-retained'].strategy.matrix.include = remainingParts.filter(part => part.shard === 'body-1');
+  legacy.jobs['native-mi'].strategy.matrix.include = [primaryPart, ...remainingParts.filter(part => part.shard === 'body-2')];
+  const legacyStep = legacy.jobs['intel-retained-admission'].steps[4];
+  legacyStep.name = 'Wait for actual Intel retained body worker allocation';
+  legacyStep.run = legacyStep.run.replace('--group intel-primary-body', '--group intel-retained-body');
+  const inspectDocument = document => inspectWorkflowTrust(workflows.map(workflow =>
+    workflow.file === '.github/workflows/ci.yml' ? { ...workflow, contents: Object.entries(document)
+      .map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n' } : workflow));
+  assert.equal(inspectDocument(legacy).complete, true,
+    'Historical v4 retained-first allocation and its original closed receipt group must remain authentic');
+  const relabeled = structuredClone(legacy);
+  relabeled.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v5-critical-body-first';
+  assert.equal(inspectDocument(relabeled).complete, false,
+    'An old retained-body allocation cannot be relabeled as a current primary-body allocation');
   assert.deepEqual(ci.jobs['mac-admission'].needs, ['intent', 'source', 'native-units-ma']);
   assert.deepEqual(ci.jobs['native-ma'].needs, ['intent', 'source', 'native-units-ma']);
   assert.deepEqual(ci.jobs['native-mi'].needs, ['intent', 'source', 'native-units-mi', 'intel-homebrew-admission']);
@@ -1604,13 +1622,13 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.deepEqual(ci.jobs['intel-retained-admission'].needs, ['intent', 'source', 'native-units-mi', 'mac-admission']);
   assert.deepEqual(ci.jobs['arm-refresh-admission'].needs, ['intent', 'source', 'native-units-ma', 'intel-retained-admission']);
   assert.deepEqual(ci.jobs['native-mi'].strategy.matrix.include.map(row => row.shard),
-    ['body-0', 'body-2']);
+    ['body-1', 'body-2']);
   assert.deepEqual(ci.jobs['native-ma'].strategy.matrix.include.map(row => row.shard),
     ['body-0', 'body-1', 'body-2']);
   assert.equal(ci.jobs['native-homebrew'].strategy.matrix.include.length, 1);
   assert.equal(ci.jobs['native-homebrew'].strategy.matrix.include[0].target, 'macos-arm64');
   const jobKeyForPart = part => part.target === 'macos-arm64' && part.shard === 'refresh' ?
-    'native-ma-refresh' : part.target === 'macos-x64' && part.shard === 'body-1' ?
+    'native-ma-refresh' : part.target === 'macos-x64' && part.shard === 'body-0' ?
       'native-mi-retained' : part.target === 'macos-x64' && part.component === 'homebrew' ?
     'native-homebrew-mi' : part.target === 'macos-x64' && part.shard === 'refresh' ?
       'native-mi-refresh' : nativePartJobKey(part);
@@ -2009,7 +2027,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
       step.run = step.run.replace('--group arm-bodies ', '');
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
     ...[
-      ['intel-retained-admission', 'native-mi-retained', 'intel-retained-body', 'INTEL_RETAINED_ADMISSION_RESULT'],
+      ['intel-retained-admission', 'native-mi-retained', 'intel-primary-body', 'INTEL_RETAINED_ADMISSION_RESULT'],
       ['arm-refresh-admission', 'native-ma-refresh', 'arm-refresh', 'ARM_REFRESH_ADMISSION_RESULT'],
     ].flatMap(([key, nativeJob, group, result]) => [
       [`${key} waits for producer completion`, doc => {

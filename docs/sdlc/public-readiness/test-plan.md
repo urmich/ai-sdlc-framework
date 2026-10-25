@@ -1330,13 +1330,16 @@ the original subset. A new legitimate test must not erase preservation checks.
    must wait for both unit jobs, not a borrowed ARM/original-unit result.
    Require the Linux `mac-admission` coordinator to observe all three long ARM
    body workers in the exact repository/run/attempt/head context before Intel's
-   retained body-1 producer dispatches, still behind both Intel unit jobs.
+   measured critical body-0 producer dispatches under
+   `arm-regression-allocation-v5-critical-body-first`, still behind both Intel unit jobs.
    Require `intel-retained-admission` to observe that actual worker before
    ARM's separate short refresh dispatches, retaining its own ARM unit barrier.
+   Its historical job/artifact identifier remains, but current
+   `intel-primary-body` receipts must identify body-0, not a relabelled body-1.
    Require `arm-refresh-admission` to observe that refresh worker before Intel
    Homebrew dispatches. Keep ARM genuine Homebrew initial.
    Then require `intel-homebrew-admission` to observe the actual Intel Homebrew
-   worker before Intel body-0 and body-2 dispatch, retaining both Intel units.
+   worker before Intel body-1 and body-2 dispatch, retaining both Intel units.
    Finally require `intel-admission` to observe all three actual Intel body
    workers before short Intel refresh dispatches. No coordinator may wait for
    a command or producer completion, create an observed-producer dependency
@@ -1350,9 +1353,11 @@ the original subset. A new legitimate test must not erase preservation checks.
    fallback. Preserve ARM's own unit barrier, both Intel units and all
    twenty-five native parts and worker limits; verify real overlap and queues
    again on the next frozen candidate. Verify the split ARM refresh and Intel
-   retained body cleanup receipts bind their new actual `GITHUB_JOB` identities,
+   primary body cleanup receipts bind their actual `GITHUB_JOB` identities,
    alongside the existing split Intel refresh/Homebrew bindings. Reject stale
-   aliases. Replay the exact v1, v2 and v3 resource graphs and unmarked historical
+   aliases. Preserve v4's original `intel-retained-body`/body-1 receipt semantics;
+   reject a label-only v4-to-v5 substitution. Replay the exact v1, v2, v3 and v4
+   resource graphs and unmarked historical
    native graphs without borrowing new dependency or origin proof.
    Configured priority is only a lead; provider allocation gaps remain in the
    measured whole-lane span and cannot be converted into a passing estimate.

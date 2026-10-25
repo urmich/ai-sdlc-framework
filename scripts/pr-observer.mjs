@@ -146,13 +146,16 @@ const macAdmissionResourcePolicy = 'arm-regression-allocation-v1';
 const intelPriorityResourcePolicy = 'arm-regression-allocation-v2-priority-intel-bodies';
 const intelHomebrewResourcePolicy = 'arm-regression-allocation-v3-intel-homebrew-first';
 const retainedFirstResourcePolicy = 'arm-regression-allocation-v4-retained-first';
-const priorityPolicies = [intelPriorityResourcePolicy, intelHomebrewResourcePolicy, retainedFirstResourcePolicy];
+const criticalBodyResourcePolicy = 'arm-regression-allocation-v5-critical-body-first';
+const priorityPolicies = [intelPriorityResourcePolicy, intelHomebrewResourcePolicy,
+  retainedFirstResourcePolicy, criticalBodyResourcePolicy];
 const admissionPolicies = [macAdmissionResourcePolicy, ...priorityPolicies];
 
 function resourceJobKey(part, protocol, resourcePolicy) {
-  if (resourcePolicy === retainedFirstResourcePolicy) {
+  if ([retainedFirstResourcePolicy, criticalBodyResourcePolicy].includes(resourcePolicy)) {
     if (part.target === 'macos-arm64' && part.shard === 'refresh') return 'native-ma-refresh';
-    if (part.target === 'macos-x64' && part.shard === 'body-1') return 'native-mi-retained';
+    if (part.target === 'macos-x64' &&
+      part.shard === (resourcePolicy === criticalBodyResourcePolicy ? 'body-0' : 'body-1')) return 'native-mi-retained';
   }
   if (priorityPolicies.includes(resourcePolicy) && part.target === 'macos-x64') {
     if (part.component === 'homebrew') return 'native-homebrew-mi';
@@ -231,12 +234,15 @@ function expectedMacAdmissionJob(group = 'arm-regressions', retainedFirst = fals
   for (const [selected, id, name, needs] of [
     ['intel-retained-body', 'intel-retained-admission', 'Intel retained admission',
       ['intent', 'source', 'native-units-mi', 'mac-admission']],
+    ['intel-primary-body', 'intel-retained-admission', 'Intel retained admission',
+      ['intent', 'source', 'native-units-mi', 'mac-admission']],
     ['arm-refresh', 'arm-refresh-admission', 'ARM refresh admission',
       ['intent', 'source', 'native-units-ma', 'intel-retained-admission']],
   ]) if (group === selected) {
     job.needs = needs;
     job.name = name;
-    job.steps[4].name = `Wait for actual ${selected === 'arm-refresh' ? 'ARM refresh' : 'Intel retained body'} worker allocation`;
+    job.steps[4].name = `Wait for actual ${selected === 'arm-refresh' ? 'ARM refresh' :
+      selected === 'intel-primary-body' ? 'Intel primary body' : 'Intel retained body'} worker allocation`;
     job.steps[4].run = job.steps[4].run.replace('--output .test-data/mac-admission.json',
       `--group ${selected} --output .test-data/${id}.json`);
     job.steps[5].name = `Retain ${name} observation`;
@@ -330,7 +336,8 @@ function macAdmissionPolicyMatches(document, protocol, priority, homebrewFirst, 
       digest(expectedMacAdmissionJob('intel-homebrew', retainedFirst)) :
       document.jobs?.['intel-homebrew-admission'] === undefined) &&
     (!retainedFirst || digest(document.jobs?.['intel-retained-admission'] ?? null) ===
-      digest(expectedMacAdmissionJob('intel-retained-body')) &&
+      digest(expectedMacAdmissionJob(document.env?.SDLC_MAC_ADMISSION_POLICY === criticalBodyResourcePolicy ?
+        'intel-primary-body' : 'intel-retained-body')) &&
       digest(document.jobs?.['arm-refresh-admission'] ?? null) ===
       digest(expectedMacAdmissionJob('arm-refresh')) &&
       sameRecipe(document.jobs?.['native-mi-retained'], document.jobs?.['native-mi']) &&
@@ -365,7 +372,7 @@ export function inspectWorkflowTrust(workflows) {
     const resourcePolicy = selected.document.env?.SDLC_MAC_ADMISSION_POLICY;
     const admission = admissionPolicies.includes(resourcePolicy);
     const priority = priorityPolicies.includes(resourcePolicy);
-    const retainedFirst = resourcePolicy === retainedFirstResourcePolicy;
+    const retainedFirst = [retainedFirstResourcePolicy, criticalBodyResourcePolicy].includes(resourcePolicy);
     const homebrewFirst = retainedFirst || resourcePolicy === intelHomebrewResourcePolicy;
     nativeResourcePolicy = resourcePolicy ?? null;
     if ((resourcePolicy !== undefined &&

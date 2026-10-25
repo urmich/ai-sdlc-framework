@@ -193,6 +193,82 @@ test('T-MACADM008 only classified transient GET failures retry finitely without 
 test('T-MACADM009 Linux admission preserves all twenty-five native identities barriers pins limits and critical budget', async () => {
   const contents = await fs.readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
   const ci = parseWorkflow({ file: '.github/workflows/ci.yml', contents });
+  const macJobs = Object.entries(ci.jobs).flatMap(([key, job]) =>
+    (job.strategy?.matrix?.include ?? []).filter(part => part.target?.startsWith('macos-'))
+      .map(part => ({ key, part, needs: job.needs })));
+  const records = macJobs.map(({ part }, index) => ({
+    ...jobs()[0], id: 100 + index, name: `native-${part.role}`,
+  }));
+  const active = new Set();
+  const trace = [];
+  const gates = new Set();
+  const initial = new Set(['intent', 'source']);
+  const done = key => initial.has(key) || gates.has(key) ||
+    macJobs.some(job => job.key === key) && macJobs.filter(job => job.key === key)
+      .every(job => records.find(record => record.name === `native-${job.part.role}`).status === 'completed');
+  const allocate = name => {
+    const record = records.find(record => record.name === name);
+    assert.ok(record && record.status === 'queued');
+    record.status = 'in_progress';
+    record.runner_name = 'controlled-allocation-worker';
+    active.add(name);
+    assert.ok(active.size <= 5, 'The controlled shared Mac pool must never exceed five allocations');
+    trace.push({ name, active: active.size });
+  };
+  const completeWorker = name => {
+    const record = records.find(record => record.name === name);
+    assert.equal(record.status, 'in_progress');
+    record.status = 'completed';
+    record.conclusion = 'success';
+    active.delete(name);
+  };
+  for (const { part } of macJobs.filter(job => job.part.shard?.startsWith('units') ||
+    job.part.target === 'macos-arm64' && job.part.component === 'homebrew')) {
+    allocate(`native-${part.role}`);
+    completeWorker(`native-${part.role}`);
+  }
+  for (let index = 0; index < 3; index++) allocate(`native-macos-arm64-framework-body-${index}`);
+  const advance = () => {
+    let changed;
+    do {
+      changed = false;
+      for (const [key, job] of Object.entries(ci.jobs).filter(([, job]) =>
+        job.steps?.some(step => /scripts\/macos-runner-admission\.mjs/u.test(step.run ?? '')))) {
+        if (gates.has(key) || !job.needs.every(done)) continue;
+        const command = job.steps.find(step => /scripts\/macos-runner-admission\.mjs/u.test(step.run ?? '')).run;
+        const group = /--group ([a-z-]+)/u.exec(command)?.[1] ?? 'arm-regressions';
+        if (evaluateMacAdmission(observation(records), { ...expected, group }).admitted) {
+          gates.add(key);
+          changed = true;
+        }
+      }
+      for (const job of macJobs) {
+        const name = `native-${job.part.role}`;
+        if (active.size < 5 && records.find(record => record.name === name).status === 'queued' &&
+          job.needs.every(done)) {
+          allocate(name);
+          changed = true;
+        }
+      }
+    } while (changed);
+  };
+  advance();
+  assert.equal(trace.find(row => /^native-macos-x64-framework-body-/u.test(row.name))?.name,
+    'native-macos-x64-framework-body-0',
+    'The measured critical body must receive the first Intel allocation after both unit origins and ARM bodies');
+  for (let index = 0; index < 3; index++) {
+    completeWorker(`native-macos-arm64-framework-body-${index}`);
+    advance();
+  }
+  while (active.size) {
+    completeWorker(active.values().next().value);
+    advance();
+  }
+  assert.ok(records.every(record => record.status === 'completed'), 'Every old native part must make progress');
+  assert.equal(new Set(trace.map(row => row.name)).size, records.length);
+  assert.equal(trace.length, records.length, 'No native part may be substituted or allocated twice');
+  assert.ok(gates.has('intel-retained-admission') && gates.has('arm-refresh-admission') &&
+    gates.has('intel-homebrew-admission') && gates.has('intel-admission'));
   const coordinator = ci.jobs['mac-admission'];
   assert.equal(coordinator.name, 'Mac regression admission');
   assert.equal(coordinator['runs-on'], 'ubuntu-24.04');
@@ -210,12 +286,12 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   assert.deepEqual(ci.jobs['native-homebrew'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-homebrew-mi'].needs, ['intent', 'source', 'arm-refresh-admission']);
   assert.deepEqual(ci.jobs['native-mi'].strategy.matrix.include.map(part => part.shard),
-    ['body-0', 'body-2']);
+    ['body-1', 'body-2']);
   assert.deepEqual(ci.jobs['native-ma'].strategy.matrix.include.map(part => part.shard),
     ['body-0', 'body-1', 'body-2']);
   assert.deepEqual(ci.jobs['native-mi-retained'].needs,
     ['intent', 'source', 'native-units-mi', 'mac-admission']);
-  assert.deepEqual(ci.jobs['native-mi-retained'].strategy.matrix.include.map(part => part.shard), ['body-1']);
+  assert.deepEqual(ci.jobs['native-mi-retained'].strategy.matrix.include.map(part => part.shard), ['body-0']);
   assert.deepEqual(ci.jobs['native-ma-refresh'].needs,
     ['intent', 'source', 'native-units-ma', 'intel-retained-admission']);
   assert.deepEqual(ci.jobs['native-ma-refresh'].strategy.matrix.include.map(part => part.shard), ['refresh']);
@@ -240,7 +316,7 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   assert.match(homebrewGate.steps.find(step => step.name === 'Wait for actual Intel Homebrew worker allocation').run,
     /--group intel-homebrew --output \.test-data\/intel-homebrew-admission\.json/u);
   for (const [key, needs, group] of [
-    ['intel-retained-admission', ['intent', 'source', 'native-units-mi', 'mac-admission'], 'intel-retained-body'],
+    ['intel-retained-admission', ['intent', 'source', 'native-units-mi', 'mac-admission'], 'intel-primary-body'],
     ['arm-refresh-admission', ['intent', 'source', 'native-units-ma', 'intel-retained-admission'], 'arm-refresh'],
   ]) {
     const gate = ci.jobs[key];
@@ -400,6 +476,7 @@ test('T-MACADM015 retained-first groups admit only their exact allocated workers
   for (const [group, names] of [
     ['arm-bodies', [0, 1, 2].map(index => `native-macos-arm64-framework-body-${index}`)],
     ['intel-retained-body', ['native-macos-x64-framework-body-1']],
+    ['intel-primary-body', ['native-macos-x64-framework-body-0']],
     ['arm-refresh', ['native-macos-arm64-framework-refresh']],
   ]) {
     const identity = { ...expected, group };
@@ -426,6 +503,11 @@ test('T-MACADM015 retained-first groups admit only their exact allocated workers
     await assert.rejects(waitForMacAdmission(identity, pending.options), error =>
       error.code === 'ADMISSION_TIMEOUT' && error.observation.group === group);
   }
+  const retained = [{ ...jobs()[0], name: 'native-macos-x64-framework-body-1',
+    status: 'in_progress', runner_name: 'synthetic-worker' }];
+  const primary = [{ ...retained[0], name: 'native-macos-x64-framework-body-0' }];
+  assert.equal(evaluateMacAdmission(observation(retained), { ...expected, group: 'intel-primary-body' }).admitted, false);
+  assert.equal(evaluateMacAdmission(observation(primary), { ...expected, group: 'intel-retained-body' }).admitted, false);
 });
 
 test('T-MACADM010 cancellation and the overall deadline interrupt in-flight synthetic HTTP without admission', async () => {
@@ -472,7 +554,7 @@ test('T-MACADM011 CLI binds synthetic event context and owned receipt without cr
   assert.equal(receipt.observation, null);
   assert.equal(receipt.code, 'ADMISSION_IDENTITY');
   await fs.unlink(output);
-  for (const group of ['intel-bodies', 'intel-homebrew', 'arm-bodies', 'intel-retained-body', 'arm-refresh']) {
+  for (const group of ['intel-bodies', 'intel-homebrew', 'arm-bodies', 'intel-retained-body', 'intel-primary-body', 'arm-refresh']) {
     await assert.rejects(execute(process.execPath, [...args, '--group', group], { env }), { code: 1 });
     assert.equal(JSON.parse(await fs.readFile(output, 'utf8')).identity.group, group);
     await fs.unlink(output);
