@@ -1,13 +1,13 @@
 import { digest, requireThat } from '../src/core.mjs';
 import { nativeBootstrapProtocol, nativeBodyBootstrapProtocol, nativeUnitBootstrapProtocol, nativeSdkBootstrapProtocol, nativeBootstrapProtocols,
   nativeToolchain, homebrewToolchain } from './toolchain-baseline.mjs';
-import { nativeFrameworkShardPlan } from './native-validation.mjs';
+import { nativeExpectedAssignment } from './native-validation.mjs';
 import { prCryptoFixture } from './pr-capabilities.mjs';
 
 function selectedFrameworkRoots({ inventory, plan, target, shard, assignment, shardProtocol }) {
   requireThat(inventory?.complete && typeof plan === 'string', 'INPUT',
     'Body bootstrap requirements need the complete independently selected source inventory and Test Plan');
-  const selected = (assignment ?? nativeFrameworkShardPlan({ inventory, plan, target, protocol: shardProtocol }))
+  const selected = (assignment ?? nativeExpectedAssignment({ inventory, plan, target, protocol: shardProtocol }))
     .parts.find(part => part.shard === shard);
   requireThat(selected?.stages?.length > 0, 'INPUT', 'Body bootstrap needs its exact source-selected closure');
   const roots = selected.stages.flatMap(stage => stage.cases)

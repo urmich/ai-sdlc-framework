@@ -5,7 +5,7 @@ import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
   requireReadinessEvaluation } from 'ai-sdlc-framework/evidence';
 import { validationPlatforms } from './validation-inventory.mjs';
 // The shared native configuration recipe is invoked only after module initialization.
-import { nativeConfigurationDigest, nativeProducerRole, nativePrPartsForProtocol, nativeFrameworkShardPlan,
+import { nativeConfigurationDigest, nativeProducerRole, nativePrPartsForProtocol, nativeExpectedAssignment,
   nativeSpecification, nativeFrameworkShardProtocol, requireNativeShardUnitOrder } from './native-validation.mjs';
 import { nativeFrameworkShardProtocols, nativeFourBodyFrameworkShardProtocol } from './native-validation.mjs';
 import { calculatorCapability, calculatorBaselineCapability } from './pr-calculator.mjs';
@@ -57,7 +57,7 @@ export function deriveNativeComponentSpecification({ inventory, testPlan, adapte
     'INVENTORY', 'Shard component expectations require exact complete Go source definitions');
   const policy = componentPolicy(frameworkShards ? shardProtocol : null);
   const assignments = frameworkShards ? new Map(validationPlatforms.map(target =>
-    [target, nativeFrameworkShardPlan({ inventory, plan: testPlan, target, protocol: shardProtocol })])) : null;
+    [target, nativeExpectedAssignment({ inventory, plan: testPlan, target, protocol: shardProtocol })])) : null;
   const tests = parseTestPlan(testPlan).filter(test => !test.outOfScope &&
     test.location === nativeComponentPolicy.location && !nativeComponentPolicy.excludedCases.includes(test.id));
   const roots = inventory.cases.filter(test => test.parents.length === 0);

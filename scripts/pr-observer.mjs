@@ -641,7 +641,7 @@ export async function verifyOriginalNativeRows({
     Object.getPrototypeOf(row) === Object.prototype), 'EVIDENCE',
   'Original derived native results must be a complete literal result collection');
   if (shard !== null) {
-    const assignment = native.nativeFrameworkShardPlan({ inventory, plan, target, protocol: shardProtocol });
+    const assignment = native.nativeExpectedAssignment({ inventory, plan, target, protocol: shardProtocol });
     const part = assignment.parts.find(part => part.shard === shard);
     requireThat(part && digest(specification) === digest(native.nativeSpecification({
       inventory, plan, goSources, target, profile: 'pr', component, shard, shardProtocol,
@@ -894,6 +894,15 @@ export function createPrReadinessHost({
       source.tree.paths.get(file)?.sha === adopted.paths.get(file).sha);
   }
   async function nativeVerdict(pr, source, { workflowId, runs }) {
+    return native.withNativeDefinitionPass({
+      inventory: source.inventory, plan: source.plan, goSources: source.goSources,
+      frameworkShards: source.frameworkShards,
+      shardProtocol: source.shardProtocol ?? native.nativeFrameworkShardProtocol,
+    }, owned => nativeVerdictForPass(pr, {
+      ...source, inventory: owned.inventory, plan: owned.plan, goSources: owned.goSources,
+    }, { workflowId, runs }));
+  }
+  async function nativeVerdictForPass(pr, source, { workflowId, runs }) {
     const frameworkShards = source.frameworkShards;
     const shardProtocol = source.shardProtocol ?? native.nativeFrameworkShardProtocol;
     const expectedParts = frameworkShards ? native.nativePrPartsForProtocol(shardProtocol) : native.nativeLegacyPrParts;
@@ -1059,7 +1068,7 @@ export function createPrReadinessHost({
           plan: source.plan, inventory: source.inventory, goSources: source.goSources,
           target, component, shard, profile: 'pr', shardProtocol,
         });
-        const assignment = shard === null ? null : native.nativeFrameworkShardPlan({
+        const assignment = shard === null ? null : native.nativeExpectedAssignment({
           inventory: source.inventory, plan: source.plan, target, protocol: shardProtocol,
         });
         const toolchain = raw.context.native.toolchain;

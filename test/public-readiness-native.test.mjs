@@ -53,6 +53,8 @@ import { aggregateNativeReadiness, nativeArtifacts, nativeSpecification, nativeG
   nativeFrameworkUnitShardNames, nativeStageSelections, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
 import { runNativeValidation } from '../scripts/native-validation.mjs';
 import { observerApiFixture } from './readiness-observer-fixture.mjs';
+import * as nativePass from '../scripts/native-validation.mjs';
+import { sourceValidationSchedulingPolicy, validationSchedulingPolicy } from '../scripts/test-scheduling.mjs';
 import { validateBootstrapRequest, bootstrapNativeToolchain, nativeBootstrapEnvironment,
   nativeBootstrapExports, portableRubyBootstrapEnvironment, requireHomebrewBottlePlan,
   requireHomebrewBottleReceipts, homebrewSetupLimits, homebrewBottlePlanSource } from '../scripts/native-toolchain.mjs';
@@ -2482,6 +2484,92 @@ test('T-PRD016 twenty-five native shard selections preserve complete root unions
     sourceRevision: f.revisions.merge, artifacts: nativeArtifacts(f.candidate), executions,
     inventory: f.source.inventory, plan: f.source.plan, goSources: f.source.goSources, unitOrder };
   assert.equal(aggregateNativeReadiness(evaluations, expected).status, 'Passed');
+  const passInputs = { inventory: structuredClone(expected.inventory), plan: expected.plan,
+    goSources: structuredClone(expected.goSources), shardProtocol: nativeFrameworkShardProtocol,
+    frameworkShards: true };
+  const runPass = nativePass.withNativeDefinitionPass ?? (async (inputs, read) => read(inputs));
+  let firstBaseline;
+  let escapedInputs;
+  let release;
+  let late;
+  await runPass(passInputs, async owned => {
+    escapedInputs = owned;
+    const request = { ...owned, target: 'linux-x64', profile: 'pr', component: 'framework', shard: 'body-0' };
+    const baseline = nativeSpecification(request);
+    assert.deepEqual(baseline, nativeSpecification({ ...request,
+      inventory: structuredClone(owned.inventory), goSources: structuredClone(owned.goSources) }));
+    assert.strictEqual(nativeSpecification(request), baseline,
+      'One immutable SDK pass must derive each pure native baseline only once');
+    firstBaseline = baseline;
+    const assignment = nativePass.nativeExpectedAssignment({
+      inventory: owned.inventory, plan: owned.plan, target: 'linux-x64',
+    });
+    assert.strictEqual(nativePass.nativeExpectedAssignment({
+      inventory: owned.inventory, plan: owned.plan, target: 'linux-x64',
+    }), assignment);
+    assert.throws(() => owned.inventory.cases[0].parents.push('altered private source'), TypeError);
+    assert.throws(() => baseline.cases[0].assertions.pop(), TypeError);
+    passInputs.inventory.cases[0].parents.push('altered external source');
+    assert.throws(() => nativeSpecification({ ...request, inventory: passInputs.inventory }));
+    assert.strictEqual(nativeSpecification(request), baseline);
+    const changedGo = structuredClone(owned.goSources);
+    changedGo[0].contents += '\nfunc TestDifferentPass(t *testing.T) {}\n';
+    const whole = { ...request, component: 'full', shard: null };
+    assert.throws(() => nativeSpecification({ ...whole, goSources: changedGo }),
+      /Go declarations must cover every current test function/u);
+    assert.strictEqual(nativeSpecification(request), baseline);
+    for (const delta of [
+      { target: 'foreign-platform' }, { shard: 'body-7' }, { shardProtocol: 'unknown-protocol' },
+    ]) assert.throws(() => nativeSpecification({ ...request, ...delta }));
+    const blocked = new Promise(resolve => { release = resolve; });
+    late = (async () => {
+      await blocked;
+      return nativeSpecification(request);
+    })();
+  });
+  release();
+  assert.notStrictEqual(await late, firstBaseline,
+    'An async descendant cannot retain a completed pass cache');
+  await runPass({ ...passInputs, inventory: structuredClone(expected.inventory) }, async owned => {
+    const baseline = nativeSpecification({ ...owned, target: 'linux-x64', profile: 'pr',
+      component: 'framework', shard: 'body-0' });
+    assert.deepEqual(baseline, firstBaseline);
+    assert.notStrictEqual(baseline, firstBaseline, 'A fresh SDK observation starts a fresh private pass');
+  });
+  assert.notStrictEqual(nativeSpecification({ ...escapedInputs, target: 'linux-x64', profile: 'pr',
+    component: 'framework', shard: 'body-0' }), firstBaseline);
+  const unsafe = { ...passInputs, inventory: structuredClone(expected.inventory) };
+  Object.defineProperty(unsafe.inventory, 'complete', { enumerable: true, get() {
+    throw new Error('Executable source must not run');
+  } });
+  await assert.rejects(runPass(unsafe, () => assert.fail('Unsafe input reached the pass')), { code: 'EVIDENCE' });
+  const schedulingSource = await fs.readFile(new URL('../scripts/test-scheduling.mjs', import.meta.url), 'utf8');
+  const historicalPolicy = sourceValidationSchedulingPolicy([{ file: 'scripts/test-scheduling.mjs',
+    contents: schedulingSource.replace("schemaVersion: 7, algorithm: 'source-bound-ready-root-v7'",
+      "schemaVersion: 6, algorithm: 'source-bound-ready-root-v6'").replace('; demand-first-ready-backfill', ''),
+  }]);
+  assert.equal(historicalPolicy.schemaVersion, 6, 'The fixture must select the historical policy, not silently retest the current one');
+  for (const schedulingPolicy of [historicalPolicy, validationSchedulingPolicy]) {
+    const inputs = { ...passInputs, inventory: structuredClone(expected.inventory), schedulingPolicy };
+    const request = { ...inputs, target: 'linux-x64', profile: 'pr', component: 'framework', shard: 'body-0' };
+    const original = nativeSpecification(request);
+    const originalAssignment = nativeFrameworkShardPlan({
+      inventory: inputs.inventory, plan: inputs.plan, target: 'linux-x64', schedulingPolicy,
+    });
+    await runPass(inputs, async owned => {
+      const selected = { ...request, ...owned };
+      const baseline = nativeSpecification(selected);
+      assert.deepEqual(baseline, original);
+      assert.strictEqual(nativeSpecification(selected), baseline);
+      assert.strictEqual(owned.schedulingPolicy, schedulingPolicy,
+        'Independently source-selected scheduling authority must retain its recognized identity');
+      assert.deepEqual(nativePass.nativeExpectedAssignment({
+        inventory: owned.inventory, plan: owned.plan, target: 'linux-x64', schedulingPolicy: owned.schedulingPolicy,
+      }), originalAssignment);
+    });
+    await assert.rejects(runPass({ ...inputs, schedulingPolicy: structuredClone(schedulingPolicy) },
+      () => assert.fail('Equal JSON must not become recognized scheduling authority')), { code: 'EVIDENCE' });
+  }
   assert.equal(unitOrder.protocol, nativeFrameworkShardProtocol);
   assert.equal(aggregateNativeReadiness(evaluations, expected).requiredCases.length, 7);
   assert.equal(aggregateNativeReadiness(evaluations.slice(0, -1), expected).status, 'NotRun');

@@ -7,7 +7,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { promisify, types } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { canonical, digest, id, requireThat, SdlcError } from '../src/core.mjs';
 import { atomicWrite } from '../src/files.mjs';
@@ -44,6 +45,7 @@ export { deriveNativeComponentSpecification, nativeComponentSelection,
   requireNativeComponentProjection } from './native-components.mjs';
 
 const execute = promisify(execFile);
+const nativeDefinitionPass = new AsyncLocalStorage();
 const suffixes = { 'linux-x64': 'LX', 'windows-x64': 'WX', 'macos-arm64': 'MA', 'macos-x64': 'MI' };
 const platforms = { 'linux-x64': 'linux', 'windows-x64': 'win32',
   'macos-arm64': 'darwin', 'macos-x64': 'darwin' };
@@ -154,6 +156,64 @@ const canonicalIds = (target, profile) => [
 ];
 const safe = value => sanitizeExecutionPayload(Buffer.from(JSON.stringify(value)));
 
+function immutableNativeDefinition(value) {
+  let nodes = 0;
+  const ancestors = new Set();
+  const copy = (item, depth) => {
+    requireThat(++nodes <= 500000 && depth <= 32, 'EVIDENCE', 'Native definition exceeds its closed JSON budget');
+    if (item === null || ['string', 'boolean'].includes(typeof item) ||
+      typeof item === 'number' && Number.isFinite(item)) return item;
+    requireThat(item && typeof item === 'object' && !types.isProxy(item) &&
+      !ancestors.has(item) && Object.getOwnPropertySymbols(item).length === 0 &&
+      Object.getPrototypeOf(item) === (Array.isArray(item) ? Array.prototype : Object.prototype),
+    'EVIDENCE', 'Native definition pass requires closed plain JSON source data');
+    const fields = Object.getOwnPropertyDescriptors(item);
+    const keys = Object.keys(fields).filter(key => !Array.isArray(item) || key !== 'length');
+    requireThat(keys.every(key => fields[key].enumerable && Object.hasOwn(fields[key], 'value')) &&
+      (!Array.isArray(item) || keys.length === item.length &&
+        keys.every((key, index) => key === String(index))),
+    'EVIDENCE', 'Native definition pass cannot admit executable or sparse source data');
+    ancestors.add(item);
+    const result = Array.isArray(item) ? keys.map(key => copy(fields[key].value, depth + 1)) :
+      Object.fromEntries(keys.map(key => [key, copy(fields[key].value, depth + 1)]));
+    ancestors.delete(item);
+    return Object.freeze(result);
+  };
+  return copy(value, 0);
+}
+
+export async function withNativeDefinitionPass({ inventory, plan, goSources,
+  shardProtocol = nativeFrameworkShardProtocol, frameworkShards = true,
+  schedulingPolicy = validationSchedulingPolicy }, read) {
+  requireThat(typeof read === 'function' && typeof frameworkShards === 'boolean' &&
+    nativeFrameworkShardProtocols.includes(shardProtocol), 'INPUT', 'Use one explicit closed native definition pass');
+  const source = immutableNativeDefinition({ inventory, plan, goSources, shardProtocol, frameworkShards });
+  validationSchedulingPolicyDigest(schedulingPolicy);
+  const inputs = Object.freeze({ ...source, schedulingPolicy });
+  const parts = [...nativeLegacyPrParts, ...(frameworkShards ? nativePrPartsForProtocol(shardProtocol) : [])];
+  const pass = { inputs, active: true, assignments: new Map(), specifications: new Map(),
+    parts: new Set(parts.map(part => JSON.stringify([part.target, part.component, part.shard ?? null]))) };
+  try { return await nativeDefinitionPass.run(pass, () => read(inputs)); }
+  finally {
+    pass.active = false;
+    pass.assignments.clear();
+    pass.specifications.clear();
+  }
+}
+
+export function nativeExpectedAssignment({ inventory, plan, target, protocol = nativeFrameworkShardProtocol,
+  schedulingPolicy = validationSchedulingPolicy }) {
+  const pass = nativeDefinitionPass.getStore();
+  if (!pass?.active || inventory !== pass.inputs.inventory || plan !== pass.inputs.plan ||
+    protocol !== pass.inputs.shardProtocol || schedulingPolicy !== pass.inputs.schedulingPolicy ||
+    !validationPlatforms.includes(target)) {
+    return nativeFrameworkShardPlan({ inventory, plan, target, protocol, schedulingPolicy });
+  }
+  if (!pass.assignments.has(target)) pass.assignments.set(target, immutableNativeDefinition(
+    nativeFrameworkShardPlan({ inventory, plan, target, protocol, schedulingPolicy })));
+  return pass.assignments.get(target);
+}
+
 export function nativeConfigurationDigest({ inventory, plan, profile, target = null, configuredWorkers = null,
   calculator = calculatorCapability(inventory), component = 'full', shard = null, shardPlanDigest = null,
   shardProtocol = nativeFrameworkShardProtocol, bootstrapProtocol = null, bootstrapTools = null, assignment,
@@ -237,7 +297,24 @@ export function createNativeObservationCheckpoint(file, producer) {
   };
 }
 
-export function nativeSpecification({ plan, inventory, goSources, target, profile, component = 'full', shard = null,
+export function nativeSpecification(options) {
+  const pass = nativeDefinitionPass.getStore();
+  const { inventory, plan, goSources, target, profile, component = 'full', shard = null,
+    shardProtocol = nativeFrameworkShardProtocol, schedulingPolicy = validationSchedulingPolicy } = options;
+  if (!pass?.active || inventory !== pass.inputs.inventory || plan !== pass.inputs.plan ||
+    goSources !== pass.inputs.goSources || profile !== 'pr' || shardProtocol !== pass.inputs.shardProtocol ||
+    schedulingPolicy !== pass.inputs.schedulingPolicy || typeof target !== 'string' ||
+    typeof component !== 'string' || shard !== null && typeof shard !== 'string') {
+    return deriveNativeSpecification(options);
+  }
+  const key = JSON.stringify([target, component, shard]);
+  if (!pass.parts.has(key)) return deriveNativeSpecification(options);
+  if (!pass.specifications.has(key)) pass.specifications.set(key,
+    immutableNativeDefinition(deriveNativeSpecification(options)));
+  return pass.specifications.get(key);
+}
+
+function deriveNativeSpecification({ plan, inventory, goSources, target, profile, component = 'full', shard = null,
   shardProtocol = nativeFrameworkShardProtocol, schedulingPolicy = validationSchedulingPolicy }) {
   requireThat(validationPlatforms.includes(target) && ['pr', 'r-pre'].includes(profile) && inventory.complete,
     'INVENTORY', 'Native validation requires the complete declared inventory and an explicit profile/platform');
@@ -377,7 +454,7 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
 }
 
 function nativeFrameworkShardSpecification({ plan, inventory, goSources, target, shard, shardProtocol, schedulingPolicy }) {
-  const assignment = nativeFrameworkShardPlan({ inventory, plan, target, protocol: shardProtocol, schedulingPolicy });
+  const assignment = nativeExpectedAssignment({ inventory, plan, target, protocol: shardProtocol, schedulingPolicy });
   const part = assignment.parts.find(part => part.shard === shard);
   requireThat(part, 'INVENTORY', 'Unknown independently expected native framework shard');
   const whole = nativeSpecification({ plan, inventory, goSources, target, profile: 'pr',
@@ -480,7 +557,7 @@ export function aggregateNativeReadiness(evaluations, { profile, sourceRevision,
   'INPUT', 'Native aggregation needs every independently expected producer part and the complete frozen artifact set');
   const expected = new Map(executions.map(({ target, context, component = 'full', shard = null }) => {
     const actual = validateExecutionContext(context);
-    const assignment = shard === null ? null : nativeFrameworkShardPlan({ inventory, plan, target, protocol: shardProtocol });
+    const assignment = shard === null ? null : nativeExpectedAssignment({ inventory, plan, target, protocol: shardProtocol });
     requireThat(nativeContextMatches(actual, { inventory, plan, assignment, shardProtocol,
       target, profile, sourceRevision, artifacts, component, shard, bootstrapProtocol }),
       'EVIDENCE', 'Expected native execution does not match source, artifacts, platform or baseline');
@@ -863,7 +940,7 @@ async function collectExecution({ directory, data, inventory, sources, calculato
   candidate, profile = context.profile.startsWith('r-pre-') ? 'r-pre' : 'pr',
   component = componentFromContext(context, target), shard = shardFromContext(context, target),
   shardProtocol = nativeFrameworkShardProtocol, bootstrapProtocol = null, schedulingPolicy = validationSchedulingPolicy }) {
-  const assignment = shard === null ? null : nativeFrameworkShardPlan({ inventory, plan, target, protocol: shardProtocol, schedulingPolicy });
+  const assignment = shard === null ? null : nativeExpectedAssignment({ inventory, plan, target, protocol: shardProtocol, schedulingPolicy });
   const part = assignment?.parts.find(part => part.shard === shard);
   const observations = [];
   const diagnostics = [];
