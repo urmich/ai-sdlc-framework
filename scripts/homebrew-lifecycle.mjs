@@ -312,6 +312,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
       local.contents.replace('class AiSdlcFramework <', 'class AiSdlcFrameworkPrevious <'));
     await runBrew(['install', '--formula', '--skip-link', previousName]);
     installed.add(previousName);
+    await runBrew(['unlink', formulaName]);
     await runBrew(['link', previousName]);
     const oldKeg = await fs.realpath((await runBrew(['--prefix', previousName])).stdout.trim());
     const switchedOwned = await switchToHomebrew({

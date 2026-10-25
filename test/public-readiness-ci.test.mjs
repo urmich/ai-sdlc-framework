@@ -1056,13 +1056,20 @@ test('T-PRD018 command checkpoints recover Windows sharing conflicts without hid
       { code: mode === 'nontransient' ? 'EIO' : 'EPERM' });
     const attempts = [];
     let previous;
+    let clock = 0;
+    const mockedClock = t.mock.method(Date, 'now', () => clock);
     const mocked = t.mock.method(fsPromises, 'rename', async (staged, destination) => {
       if (destination === reportPath) {
-        const bytes = await fs.readFile(staged);
-        if (JSON.parse(bytes).checkpoint.phase === 'finished') {
-          previous ??= await fs.readFile(reportPath);
+        const bytes = readFileSync(staged);
+        const snapshot = JSON.parse(bytes);
+        if (snapshot.checkpoint.phase === 'finished') {
+          assert.equal(snapshot.cleanup.rootExitObserved, true);
+          previous ??= readFileSync(reportPath);
           attempts.push({ staged, sha256: fixtureSHA(bytes) });
-          if (mode !== 'transient' || attempts.length === 1) throw failure;
+          if (mode !== 'transient' || attempts.length === 1) {
+            clock += 10;
+            throw failure;
+          }
         }
       }
       return originalRename(staged, destination);
@@ -1091,10 +1098,18 @@ test('T-PRD018 command checkpoints recover Windows sharing conflicts without hid
         await assert.rejects(fs.stat(staged), { code: 'ENOENT' });
       }
       const retained = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+      const journal = await fs.readFile(path.join(f.reportDir, `${name}.journal.ndjson`));
+      const reference = retained.checkpoint.originalJournalPrefix;
+      assert.equal(fixtureSHA(journal.subarray(0, reference.bytes)), reference.sha256);
+      const events = journal.toString('utf8').trim().split('\n').map(JSON.parse);
+      assert.equal(events.at(-1).kind, 'command-end',
+        'A final persistence failure must not start another stop or checkpoint after command closure');
+      assert.equal(retained.cleanup.requested, false);
       assert.ok(Number.isSafeInteger(retained.pid));
       assert.throws(() => process.kill(retained.pid, 0), { code: 'ESRCH' });
     } finally {
       mocked.mock.restore();
+      mockedClock.mock.restore();
       syncBuiltinESMExports();
     }
   }

@@ -197,6 +197,8 @@ if(process.connected)process.disconnect();
 
 test('T-PRD018 command checkpoint capacity retains safe original streams without manufacturing completion',
   { timeout: 30000 }, async t => {
+    // Keep the one-second progress callback pending until the real producer closes.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
     const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'command-checkpoint-bound-'));
     t.after(() => fs.rm(directory, { recursive: true, force: true }));
     const source = path.join(directory, 'bounded.mjs');
@@ -213,6 +215,9 @@ test('T-PRD018 command checkpoint capacity retains safe original streams without
     assert.equal(report.complete, false);
     assert.ok(report.causes.some(cause => cause.type === 'persistence' && cause.code === 'CAPACITY'));
     assert.equal(report.checkpoint.phase, 'retention-failed');
+    assert.equal(report.cleanup.requested, false,
+      'Retention failure after root closure must not start asynchronous termination or journal writes');
+    assert.equal(report.cleanup.rootExitObserved, true);
     assert.ok(report.checkpoint.originalSnapshot.bytes > 4 * 1024 * 1024);
     const journal = await fs.readFile(path.join(directory, 'bounded-command.journal.ndjson'));
     assert.equal(digest(journal), report.checkpoint.originalJournalPrefix.sha256);

@@ -12,6 +12,8 @@ export const validationDeclarations = {
       "minimumSlots": 1, "exclusiveResources": []},
     {"root": "TOOL03 full lifecycle finalization retains unsettled taps and preserves evidence failure identity",
       "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD061 candidate lifecycle respects Brew link ownership through alias switching and promotion rollback retry",
+      "minimumSlots": 1, "exclusiveResources": []},
     {"root": "TOOL03 switch recovery finalizers retain private unsettled state and reject serialized authority",
       "minimumSlots": 1, "exclusiveResources": []},
     {"root": "TOOL03 actual native child boundary quarantines a surviving detached writer before outer cleanup",
@@ -78,6 +80,8 @@ import { canonical as archiveCanonical } from '../packaging/standalone/archive.m
 import { renderChecksums } from '../scripts/package-platforms.mjs';
 import { verifyReleaseChecksums } from '../scripts/verify-platform-package.mjs';
 import { releaseRepository } from '../scripts/release-bundle.mjs';
+import { generateHomebrewFormula } from '../packaging/homebrew/generate-formula.mjs';
+import { homebrewFormulaEvidence } from '../packaging/homebrew/evidence.mjs';
 
 async function nativeChildPrefixApi(project, directory, environment, commandProof) {
   const disk = ownedMacFilesystem(directory);
@@ -434,7 +438,7 @@ function ownedMacFilesystem(directory) {
   return { ...fs, rename: retry('rename'), rm: retry('rm'), unlink: retry('unlink') };
 }
 
-async function fullLifecycleFixture(directory, mode) {
+async function fullLifecycleFixture(directory, mode, { faithfulBrew = false, lifecycleMode = 'public' } = {}) {
   const fs = ownedMacFilesystem(directory);
   const root = path.join(directory, 'source');
   const data = path.join(root, '.test-data');
@@ -495,6 +499,7 @@ async function fullLifecycleFixture(directory, mode) {
   let currentVersion = '1.0.0';
   let installedVersion = '1.0.0';
   let evidencePassedAtWrite;
+  const brewTrace = [];
   const writeFailure = Object.assign(new Error('Owned evidence ENOSPC'), { code: 'ENOSPC' });
   const hooks = ['sessionStart', 'userPromptSubmitted', 'preToolUse', 'postToolUse',
     'postToolUseFailure', 'preCompact', 'agentStop', 'sessionEnd'];
@@ -514,8 +519,11 @@ async function fullLifecycleFixture(directory, mode) {
       files: { 'sdlc/bin/sdlc.mjs': digest(cli), 'hooks/sdlc.json': digest(routing) },
     }));
   };
-  const createKeg = async version => {
-    const keg = path.join(cellar, 'ai-sdlc-framework', version);
+  const createKeg = async (version, name = 'ai-sdlc-framework') => {
+    const keg = path.join(cellar, name, version);
+    if (faithfulBrew && await fs.stat(keg).catch(error => {
+      if (error.code !== 'ENOENT') throw error; return null;
+    })) return keg;
     await fs.mkdir(path.join(keg, 'bin'), { recursive: true });
     await fs.mkdir(path.join(keg, 'libexec', 'package', 'bin'), { recursive: true });
     await fs.writeFile(path.join(keg, 'bin', 'sdlc'), version);
@@ -524,8 +532,8 @@ async function fullLifecycleFixture(directory, mode) {
     await fs.writeFile(path.join(keg, 'libexec', 'package', 'bin', 'sdlc.mjs'), version);
     await fs.writeFile(path.join(keg, 'INSTALL_RECEIPT.json'), JSON.stringify(receipt(version,
       formulaName.split('/').slice(0, 2).join('/'), [{ full_name: homebrewToolchain.formula, pkg_version: homebrewToolchain.node }])));
-    await replaceLink(path.join(prefix, 'opt', 'ai-sdlc-framework'), keg);
-    await replaceLink(path.join(prefix, 'var', 'homebrew', 'linked', 'ai-sdlc-framework'), keg);
+    await replaceLink(path.join(prefix, 'opt', name), keg);
+    if (!faithfulBrew) await replaceLink(path.join(prefix, 'var', 'homebrew', 'linked', name), keg);
     return keg;
   };
   const runCommand = async (command, args, options = {}) => {
@@ -548,6 +556,11 @@ async function fullLifecycleFixture(directory, mode) {
         }
       }
     } else if (command === brew) {
+      const selectedFormula = args.find(value => value.startsWith('local/'));
+      const selectedName = selectedFormula?.split('/').at(-1);
+      const linkBefore = faithfulBrew ? await switchState.linkState(destination) : undefined;
+      const trace = { args: [...args], linkBefore };
+      if (faithfulBrew) brewTrace.push(trace);
       if (args[0] === '--prefix') stdout = args[1] === undefined ? prefix :
         path.join(prefix, 'opt', args[1].split('/').at(-1));
       else if (args[0] === '--repository') stdout = prefix;
@@ -558,9 +571,11 @@ async function fullLifecycleFixture(directory, mode) {
         if (args[0] === 'style') formulaFile = args[1];
         if (formulaFile) {
           const formula = await fs.readFile(formulaFile, 'utf8');
-          currentVersion = /\/v(\d+\.\d+\.\d+)\//u.exec(formula)[1];
+          currentVersion = (/\/v(\d+\.\d+\.\d+)\//u.exec(formula) ??
+            /version "(\d+\.\d+\.\d+)"/u.exec(formula))[1];
         }
-        if (args[0] === 'info') stdout = json({ formulae: [{ name: 'ai-sdlc-framework', full_name: formulaName,
+        if (args[0] === 'info') stdout = json({ formulae: [{ name: selectedName ?? 'ai-sdlc-framework',
+          full_name: selectedFormula ?? formulaName,
           versions: { stable: currentVersion }, revision: 0 }] });
         if (['install', 'upgrade'].includes(args[0])) {
           if (mode.startsWith('install-') || mode === 'command-plus-evidence-failure' ||
@@ -578,16 +593,30 @@ async function fullLifecycleFixture(directory, mode) {
               throw error;
             }
           }
-          const keg = await createKeg(currentVersion);
+          const keg = await createKeg(currentVersion, faithfulBrew ? selectedName : undefined);
           if (args[0] === 'upgrade') await replaceLink(destination, path.join(keg, 'bin', 'sdlc'));
         }
         if (args[0] === 'link') {
-          const keg = path.join(cellar, 'ai-sdlc-framework', currentVersion);
+          const name = faithfulBrew ? selectedName : 'ai-sdlc-framework';
+          const keg = path.join(cellar, name, currentVersion);
+          if (faithfulBrew && linkBefore.kind !== 'absent' &&
+              !switchState.ownsLauncher(linkBefore, keg)) {
+            trace.refused = true;
+            throw Object.assign(new Error('Could not symlink bin/sdlc: existing destination belongs to another formula'), {
+              code: 1, stdout: '', stderr: 'Target bin/sdlc already exists. Unlink its owning formula first.',
+            });
+          }
           await replaceLink(destination, path.join(keg, 'bin', 'sdlc'));
-          await replaceLink(path.join(prefix, 'opt', 'ai-sdlc-framework'), keg);
-          await replaceLink(path.join(prefix, 'var', 'homebrew', 'linked', 'ai-sdlc-framework'), keg);
+          await replaceLink(path.join(prefix, 'opt', name), keg);
+          await replaceLink(path.join(prefix, 'var', 'homebrew', 'linked', name), keg);
         }
-        if (args[0] === 'unlink') await fs.unlink(destination).catch(error => { if (error.code !== 'ENOENT') throw error; });
+        if (args[0] === 'unlink') {
+          const opt = path.join(prefix, 'opt', selectedName ?? 'ai-sdlc-framework');
+          const keg = faithfulBrew ? await fs.realpath(opt) : undefined;
+          if (!faithfulBrew || switchState.ownsLauncher(linkBefore, keg)) {
+            await fs.unlink(destination).catch(error => { if (error.code !== 'ENOENT') throw error; });
+          }
+        }
         if (args[0] === 'tab') {
           const file = path.join(nodeKeg, 'INSTALL_RECEIPT.json');
           const value = JSON.parse(await fs.readFile(file, 'utf8'));
@@ -595,13 +624,21 @@ async function fullLifecycleFixture(directory, mode) {
           await fs.writeFile(file, json(value));
         }
         if (args[0] === 'uninstall') {
-          await fs.rm(path.join(cellar, 'ai-sdlc-framework'), { recursive: true, force: true });
-          for (const file of [destination, path.join(prefix, 'opt', 'ai-sdlc-framework'),
-            path.join(prefix, 'var', 'homebrew', 'linked', 'ai-sdlc-framework')]) {
+          const name = faithfulBrew ? selectedName : 'ai-sdlc-framework';
+          if (faithfulBrew) {
+            const keg = await fs.realpath(path.join(prefix, 'opt', name));
+            trace.removedLauncherSha256 = digest(await fs.readFile(path.join(keg, 'bin', 'sdlc')));
+          }
+          const ownsDestination = faithfulBrew && linkBefore.kind === 'link' &&
+            path.relative(path.join(cellar, name), linkBefore.absolute).split(path.sep)[0] !== '..';
+          await fs.rm(path.join(cellar, name), { recursive: true, force: true });
+          for (const file of [...(!faithfulBrew || ownsDestination ? [destination] : []),
+            path.join(prefix, 'opt', name), path.join(prefix, 'var', 'homebrew', 'linked', name)]) {
             await fs.unlink(file).catch(error => { if (error.code !== 'ENOENT') throw error; });
           }
         }
       }
+      if (faithfulBrew) trace.linkAfter = await switchState.linkState(destination);
     } else if (command === node && args[0] === '--version') stdout = `v${homebrewToolchain.node}`;
     else if (command === node && args[0] === '-p') stdout = json({
       ...(args[1].includes('execPath') ? { execPath: node } : {}),
@@ -672,18 +709,112 @@ async function fullLifecycleFixture(directory, mode) {
     nativeToolchain, homebrewToolchain, releaseRepository, ROOT: root,
     createOwnedCommandRunner: kernel.createOwnedCommandRunner, processDiagnostic: error => ({ code: error.code, message: error.message }),
     process: { platform: 'darwin', arch: 'x64', version: process.version, env: {}, hrtime: process.hrtime },
-    createServer() { throw new Error('Network not allowed'); }, fetch() { throw new Error('Network not allowed'); },
-    generateHomebrewFormula() { throw new Error('Public test cannot provision a generator'); }, homebrewFormulaEvidence() {},
+    createServer() {
+      assert.equal(faithfulBrew, true, 'Network not allowed');
+      return Object.assign(new EventEmitter(), {
+        listen(port, host, ready) { assert.equal(port, 0); assert.equal(host, '127.0.0.1'); ready(); },
+        address: () => ({ port: 12345 }), close: done => done(),
+      });
+    },
+    fetch: async url => {
+      assert.equal(faithfulBrew, true, 'Network not allowed');
+      assert.match(url, /^http:\/\/127\.0\.0\.1:12345\/ai-sdlc-framework-1\.0\.0-macos\.tar\.gz$/u);
+      return { status: 200 };
+    },
+    generateHomebrewFormula: faithfulBrew ? generateHomebrewFormula :
+      () => { throw new Error('Public test cannot provision a generator'); },
+    homebrewFormulaEvidence,
   });
   const life = runInContext(`${lifecycleSource}\nverifyHomebrewLifecycle;`, lifeContext);
-  return { work, home, prefix, get tapRoot() { return tapRoot; }, get primary() { return primary; },
+  return { work, home, prefix, node, destination, brewTrace, get tapRoot() { return tapRoot; }, get primary() { return primary; },
     get originalFailure() { return primarySnapshot; }, get evidencePassedAtWrite() { return evidencePassedAtWrite; }, writeFailure,
     run: () => life({ brew, root: work, candidateDirectory: releases[0].directory, upgradeDirectory: releases[1].directory,
-      mode: 'public', targetArch: 'x64', expectedPreviousIdentity: releases[0].identity, expectedCurrentIdentity: releases[1].identity,
+      mode: lifecycleMode, targetArch: 'x64', expectedPreviousIdentity: releases[0].identity, expectedCurrentIdentity: releases[1].identity,
       expectedPreviousRepository: 'owned/project', expectedCurrentRepository: 'owned/project',
       environment: {}, runCommand, processSettlement: mode === 'missing-guard' ? undefined :
         mode === 'json-guard' ? { isSettled: true } : owned.isSettled }) };
 }
+
+test('T-PRD061 candidate lifecycle respects Brew link ownership through alias switching and promotion rollback retry',
+  async t => {
+    for (const lifecycleMode of ['candidate', 'public']) {
+      const directory = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'brew-link-owner-'));
+      let fixture;
+      try {
+        fixture = await fullLifecycleFixture(directory, 'success', { faithfulBrew: true, lifecycleMode });
+        const foreignTarget = path.join(directory, 'unrelated-launcher');
+        const foreignLink = path.join(fixture.prefix, 'bin', 'unrelated-tool');
+        await fs.writeFile(foreignTarget, 'unrelated owned fixture bytes');
+        await fs.symlink(foreignTarget, foreignLink);
+        const originalRuntime = digest(await fs.readFile(fixture.node));
+        const result = await fixture.run();
+        assert.equal(result.passed, true);
+        assert.equal(result.failedPromotionRetry.passed, true);
+        assert.equal(result.failedPromotionRetry.candidateVersion, '2.0.0');
+        assert.equal(result.publicAcceptance, lifecycleMode === 'public' ? 'Passed' : 'NotRun');
+        assert.equal(fixture.brewTrace.some(entry => entry.refused), false);
+        assert.equal(fixture.brewTrace.some(entry => entry.args.includes('--overwrite')), false);
+        const aliasInstall = fixture.brewTrace.findIndex(entry => entry.args[0] === 'install' &&
+          entry.args.at(-1).endsWith('/ai-sdlc-framework-previous'));
+        if (lifecycleMode === 'candidate') {
+          assert.ok(aliasInstall >= 0);
+          const installed = fixture.brewTrace[aliasInstall];
+          assert.ok(installed.args.includes('--skip-link'));
+          assert.equal(installed.linkBefore.kind, 'link', 'The settled negative control must restore the current launcher');
+          assert.match(installed.linkBefore.absolute, /ai-sdlc-framework[/\\]1\.0\.0[/\\]bin[/\\]sdlc$/u);
+          assert.deepEqual(installed.linkAfter, installed.linkBefore, 'Skip-link install must not replace the current link');
+          const aliasLink = fixture.brewTrace.findIndex((entry, index) => index > aliasInstall &&
+            entry.args[0] === 'link' && entry.args.at(-1).endsWith('/ai-sdlc-framework-previous'));
+          assert.ok(aliasLink > aliasInstall);
+          assert.equal(fixture.brewTrace[aliasLink].linkBefore.kind, 'absent');
+          assert.match(fixture.brewTrace[aliasLink].linkAfter.absolute, /ai-sdlc-framework-previous[/\\]1\.0\.0[/\\]bin[/\\]sdlc$/u);
+          const aliasRemoval = fixture.brewTrace.find(entry => entry.args[0] === 'uninstall' &&
+            entry.args.at(-1).endsWith('/ai-sdlc-framework-previous'));
+          assert.match(aliasRemoval.linkAfter.absolute, /ai-sdlc-framework[/\\]1\.0\.0[/\\]bin[/\\]sdlc$/u);
+          assert.equal(aliasRemoval.removedLauncherSha256, digest(Buffer.from('1.0.0')),
+            'The old alias payload must survive until verified forward switching permits removal');
+        } else assert.equal(aliasInstall, -1);
+        const injected = result.commands.filter(entry => entry.faultInjected);
+        assert.equal(injected.length, 1);
+        assert.equal(injected[0].success, false, 'The deliberate promotion negative control must still fail');
+        const recoveryRoot = path.join(fixture.prefix, 'var', 'ai-sdlc-framework-switch');
+        const states = await Promise.all((await fs.readdir(recoveryRoot)).map(async name =>
+          JSON.parse(await fs.readFile(path.join(recoveryRoot, name, 'state.json'), 'utf8'))));
+        const failed = states.find(state => state.requestedCandidate?.pkgVersion === '2.0.0' &&
+          !state.postSwitchVerified);
+        assert.ok(failed, 'Keep the actual failed-promotion recovery record');
+        assert.equal(failed.capturedLink.absolute, path.join(result.failedPromotionRetry.priorKeg, 'bin', 'sdlc'));
+        const capturedPrior = failed.kegs.find(keg => keg.path === result.failedPromotionRetry.priorKeg);
+        assert.equal(capturedPrior.files.find(file => file.path === path.join('bin', 'sdlc')).sha256,
+          digest(Buffer.from('1.0.0')));
+        const retried = states.find(state => state.postSwitchVerified && state.requestedCandidate?.pkgVersion === '2.0.0');
+        assert.equal(retried.requestedCandidate.keg, result.failedPromotionRetry.candidateKeg);
+        assert.equal(retried.capturedLink.absolute, failed.capturedLink.absolute);
+        assert.equal(retried.retentionVerifiedBeforePromotion, true);
+        assert.equal(retried.oldPackageCleanupAllowed, true);
+        assert.equal(fixture.brewTrace.filter(entry => entry.args[0] === 'upgrade').length, 1,
+          'Retry must reuse the retained candidate, not repeat the semantic upgrade');
+        assert.equal((await switchState.linkState(fixture.destination)).kind, 'absent');
+        assert.equal(await fs.readlink(foreignLink), foreignTarget);
+        assert.equal(await fs.readFile(foreignLink, 'utf8'), 'unrelated owned fixture bytes');
+        assert.equal(digest(await fs.readFile(fixture.node)), originalRuntime);
+        const runtimeReceipt = JSON.parse(await fs.readFile(path.join(path.dirname(path.dirname(fixture.node)),
+          'INSTALL_RECEIPT.json'), 'utf8'));
+        assert.equal(runtimeReceipt.installed_on_request, true);
+        assert.equal(await fs.readFile(path.join(fixture.home, 'copilot-instructions.md'), 'utf8'),
+          'Unrelated user instructions.\n');
+        await assert.rejects(fs.access(path.join(recoveryRoot, 'active.lock')), { code: 'ENOENT' });
+        t.diagnostic(JSON.stringify({ lifecycleMode, actualLifecycleAndSwitch: true, realFilesystemLinks: true,
+          controlledDarwinAndCommands: true, genuineNative: false, promotionFailureAndRetry: true }));
+      } catch (error) {
+        t.diagnostic(JSON.stringify({ lifecycleMode, genuineNative: false,
+          refusedLinks: fixture?.brewTrace.filter(entry => entry.refused) }));
+        throw error;
+      } finally {
+        await fs.rm(directory, { recursive: true, force: true });
+      }
+    }
+  });
 
 test('TOOL03 full lifecycle finalization retains unsettled taps and preserves evidence failure identity', async t => {
   const failures = [];

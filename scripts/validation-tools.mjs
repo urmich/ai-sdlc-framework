@@ -553,7 +553,7 @@ export async function executeValidationCommand({
     cleanup = { requested: false, pid: null, mechanism: null, outcome: 'not-requested',
       survivorsVerified: false, error: null };
     const stop = () => {
-      if (!child?.pid || stopping) return;
+      if (!child?.pid || stopping || finalizing) return;
       cleanup.requested = true;
       cleanup.pid = child.pid;
       cleanup.mechanism = process.platform === 'win32' ? 'owned-pid-tree' : 'owned-process-group';
