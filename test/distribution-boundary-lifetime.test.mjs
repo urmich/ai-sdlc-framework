@@ -6,8 +6,22 @@ export const validationDeclarations = {
   "groups": [{
     "root": "T-51 owned boundary terminates descendant writers before return while an unrelated sibling survives",
     "minimumSlots": 4
+  }, {
+    "root": "TOOL02 Windows validation settlement bounds exited roots and failed or stalled tree termination",
+    "minimumSlots": 4,
+    "exclusiveResources": []
+  }, {
+    "root": "TOOL02 owned writer provenance is invisible until its complete publication",
+    "minimumSlots": 2,
+    "exclusiveResources": []
   }],
   "applicability": [{
+    "names": ["TOOL02 owned writer provenance is invisible until its complete publication"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "PR-only atomic provenance regression uses an isolated stock Node writer and an owned pre-write barrier.",
+    "prerequisites": ["Node and two aggregate worker slots"]
+  }, {
     "names": ["T-51 owned boundary terminates descendant writers before return while an unrelated sibling survives"],
     "platforms": ["linux-x64", "macos-arm64", "macos-x64"],
     "owner": "maintainer",
@@ -20,14 +34,17 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { createContext, runInContext } from 'node:vm';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { stopOwnedProcessGroup, processDiagnostic } from '../scripts/validation-tools.mjs';
 import { boundaryPhaseDiagnostics } from './distribution-network-boundary.mjs';
+import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
+import { digest, SdlcError } from '../src/core.mjs';
+import { atomicWrite } from '../src/files.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const toolsModule = await fs.readFile(new URL('../scripts/validation-tools.mjs', import.meta.url), 'utf8');
@@ -35,6 +52,246 @@ const toolsSource = toolsModule.slice(toolsModule.indexOf('export function stopO
   .split('export async function executeValidationCommand(')[0].replace(/^export /gmu, '');
 const boundarySource = (await fs.readFile(new URL('./distribution-network-boundary.mjs', import.meta.url), 'utf8'))
   .replace(/^import .+;\r?$/gmu, '').replace(/^export /gmu, '');
+
+test('TOOL02 owned writer provenance is invisible until its complete publication', { timeout: 15000 }, async t => {
+  const directory = await fs.mkdtemp(path.join(root, '.test-data', 'writer-publication-'));
+  const token = randomUUID();
+  const publication = path.join(directory, `${token}.writer.json`);
+  const pausedPath = path.join(directory, `${token}.paused.json`);
+  const preload = path.join(directory, 'pause-write.mjs');
+  await fs.writeFile(preload, `
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+const write = fs.writeFileSync;
+fs.writeFileSync = function(file, bytes, options) {
+  if (typeof file !== 'string' || !file.startsWith(${JSON.stringify(publication)})) {
+    return write(file, bytes, options);
+  }
+  const flag = typeof options === 'object' ? options.flag ?? 'w' : 'w';
+  const descriptor = fs.openSync(file, flag);
+  try {
+    write(${JSON.stringify(pausedPath)}, JSON.stringify({ pid: process.pid, file, flag }), { flag: 'wx' });
+    process.send({ paused: true });
+    const release = Buffer.alloc(1);
+    if (fs.readSync(0, release, 0, 1, null) !== 1) throw new Error('Owned write barrier was not released');
+    return write(descriptor, bytes, options);
+  } finally { fs.closeSync(descriptor); }
+};
+syncBuiltinESMExports();
+`);
+  const child = spawn(process.execPath, ['--import', pathToFileURL(preload).href,
+    path.join(root, 'test', 'owned-process-fixture.mjs'), '--owned-pipe-fixture', 'writer', directory, token],
+  { shell: false, stdio: ['pipe', 'pipe', 'pipe', 'ipc'] });
+  const outputClosed = Promise.all([child.stdout, child.stderr].map(stream =>
+    new Promise(resolve => stream.once('close', resolve))));
+  const closed = Promise.all([
+    new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal }))), outputClosed,
+  ]).then(([result]) => result);
+  const message = key => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => finish(new Error(`Owned writer did not announce ${key}`)), 5000);
+    const received = value => { if (value[key]) finish(null, value); };
+    const exited = () => finish(new Error(`Owned writer exited before ${key}`));
+    const finish = (error, value) => {
+      clearTimeout(timer);
+      child.off('message', received);
+      child.off('error', finish);
+      child.off('close', exited);
+      if (error) reject(error); else resolve(value);
+    };
+    child.on('message', received);
+    child.once('error', finish);
+    child.once('close', exited);
+  });
+  const paused = message('paused');
+  const ready = message('ready');
+  ready.catch(() => {});
+  child.stdout.resume();
+  child.stderr.resume();
+  child.stdin.on('error', () => {});
+  try {
+    await paused;
+    const barrier = JSON.parse(await fs.readFile(pausedPath, 'utf8'));
+    assert.equal(barrier.pid, child.pid);
+    assert.equal(child.exitCode, null, 'The owned writer is blocked after opening its publication file');
+    assert.equal(child.signalCode, null);
+    await assert.rejects(fs.stat(publication), { code: 'ENOENT' },
+      'Readers must not see the final provenance name before the writer finishes its bytes');
+    assert.notEqual(barrier.file, publication);
+    assert.equal(path.dirname(barrier.file), directory);
+    assert.equal(barrier.flag, 'wx', 'Only a unique owned pending file may be opened for publication');
+    assert.equal((await fs.stat(barrier.file)).size, 0);
+    child.stdin.end(Buffer.from([1]));
+    await ready;
+    assert.deepEqual(JSON.parse(await fs.readFile(publication, 'utf8')),
+      { pid: child.pid, parent: process.pid, token });
+    await assert.rejects(fs.stat(barrier.file), { code: 'ENOENT' });
+  } finally {
+    if (!child.stdin.destroyed && !child.stdin.writableEnded) child.stdin.end(Buffer.from([1]));
+    await fs.writeFile(path.join(directory, `${token}.release`), '');
+    await ready.catch(() => {});
+    if (child.connected) child.disconnect();
+    let timer;
+    const result = await Promise.race([closed, new Promise(resolve => {
+      timer = setTimeout(() => resolve(null), 5000);
+    })]).finally(() => clearTimeout(timer));
+    if (!result && child.exitCode === null && child.signalCode === null) child.kill();
+    const drained = result ?? await closed;
+    assert.deepEqual(drained, { code: 0, signal: null }, 'The exact owned leaf writer must be reaped');
+    t.diagnostic(JSON.stringify({ kind: 'owned-publication-writer-drained', pid: child.pid, ...drained }));
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('TOOL02 Windows validation settlement bounds exited roots and failed or stalled tree termination',
+  { timeout: 20000 }, async t => {
+    const failures = [];
+    for (const mode of ['natural', 'root-exit', 'failed', 'stalled', 'reported-stopped', 'retention-failed']) {
+      const directory = await fs.mkdtemp(path.join(root, '.test-data', 'tool02-'));
+      const token = randomUUID();
+      const cancellation = new AbortController();
+      const lifetime = { cleanupSafe: true, unsettledCommands: [] };
+      const retentionFailure = Object.assign(new Error('Owned final report persistence failed'), { code: 'OWNED_PERSISTENCE' });
+      let child;
+      let closed;
+      let killer;
+      let identity;
+      let killerSignals = 0;
+      let launches = 0;
+      const context = createContext({
+        Buffer, TextDecoder, path, performance, setTimeout, clearTimeout, delay, console,
+        createHash, digest, SdlcError, sanitizeExecutionPayload, root,
+        atomicWrite: async (file, bytes) => {
+          if (mode === 'retention-failed' && JSON.parse(bytes).checkpoint.phase === 'finished') throw retentionFailure;
+          return atomicWrite(file, bytes);
+        },
+        open: fs.open, realpath: fs.realpath, processDiagnostic,
+        process: { platform: 'win32', arch: process.arch, version: process.version,
+          env: { SystemRoot: process.env.SystemRoot ?? 'owned-windows' } },
+        spawn(command, args, options) {
+          if (command.endsWith('taskkill.exe')) {
+            launches++;
+            assert.equal(child.exitCode, null, 'No PID-tree request after losing the live root');
+            assert.equal(child.signalCode, null);
+            killer = Object.assign(new EventEmitter(), { pid: 990001, exitCode: null,
+              signalCode: null, stderr: new PassThrough(),
+              kill() { killerSignals++; this.signalCode = 'SIGTERM'; this.emit('close', null, 'SIGTERM'); return true; },
+              unref() {} });
+            if (['failed', 'retention-failed', 'reported-stopped'].includes(mode)) queueMicrotask(() => {
+              killer.exitCode = mode === 'reported-stopped' ? 0 : 1;
+              killer.stderr.end('controlled termination denied');
+              killer.emit('close', killer.exitCode, null);
+            });
+            return killer;
+          }
+          child = spawn(command, args, options);
+          closed = new Promise(resolve => child.once('close', resolve));
+          return child;
+        },
+      });
+      const execute = runInContext(`${toolsModule.replace(/^import .+;\r?$/gmu, '')
+        .replace(/^const root = .+;\r?$/gmu, '').replace(/^export /gmu, '')}\nexecuteValidationCommand;`, context);
+      const pending = execute({ name: 'owned', command: process.execPath,
+        args: [path.join(root, 'test', 'owned-process-fixture.mjs'), '--owned-pipe-fixture',
+          mode === 'root-exit' ? mode : 'root-open', directory, token],
+        cwd: root, outputDir: directory, environment: process.env, signal: cancellation.signal, lifetime });
+      pending.catch(() => {});
+      const observed = pending.then(report => ({ report }), error => ({ error }));
+      try {
+        const deadline = performance.now() + 5000;
+        while (!identity) {
+          identity = await fs.readFile(path.join(directory, `${token}.writer.json`), 'utf8')
+            .then(JSON.parse, error => { if (error.code !== 'ENOENT') throw error; return null; });
+          assert.ok(performance.now() < deadline, 'Owned descendant must publish provenance');
+          if (!identity) await delay(10);
+        }
+        assert.equal(identity.token, token);
+        assert.equal(identity.parent, child.pid);
+        if (mode === 'natural') {
+          await fs.writeFile(path.join(directory, `${token}.release`), '');
+          const report = await pending;
+          assert.equal(report.complete, true);
+          assert.equal(report.exitCode, 23);
+          assert.equal(report.stdout, 'owned-natural-tail');
+          assert.equal(launches, 0);
+          assert.equal(lifetime.cleanupSafe, true);
+          assert.deepEqual(lifetime.unsettledCommands, []);
+          continue;
+        }
+        if (mode === 'root-exit') {
+          while (child.exitCode === null) {
+            assert.ok(performance.now() < deadline, 'Owned root must exit before cancellation');
+            await delay(10);
+          }
+          assert.equal(child.exitCode, 23);
+        }
+        const started = performance.now();
+        cancellation.abort();
+        const sentinel = Symbol('unsettled');
+        let timer;
+        const outcome = await Promise.race([observed, new Promise(resolve => {
+          timer = setTimeout(() => resolve(sentinel), 1500);
+        })]).finally(() => clearTimeout(timer));
+        assert.notEqual(outcome, sentinel, `${mode}: cancellation must settle inside its original one-second stop window`);
+        assert.ok(performance.now() - started < 1500);
+        assert.equal(lifetime.cleanupSafe, false, 'A bounded return must not authorize deletion under the owned writer');
+        assert.equal(lifetime.unsettledCommands[0].pid, child.pid);
+        assert.equal(lifetime.unsettledCommands[0].reportPath, path.join(directory, 'owned.json'));
+        if (mode === 'retention-failed') {
+          assert.equal(outcome.error, retentionFailure);
+          t.diagnostic(JSON.stringify({ mode, pid: child.pid, cleanupSafe: lifetime.cleanupSafe,
+            primaryCode: outcome.error.code, cleanup: lifetime.unsettledCommands[0].cleanup }));
+          continue;
+        }
+        assert.equal(outcome.error, undefined);
+        const result = outcome.report;
+        assert.equal(result.complete, false);
+        assert.equal(result.cleanup.survivorsVerified, false);
+        assert.equal(result.cleanup.outcome, 'uncertain');
+        assert.ok(result.causes.some(cause => cause.type === 'cancellation'));
+        assert.ok(result.causes.some(cause => cause.type === 'cleanup'));
+        assert.deepEqual(JSON.parse(await fs.readFile(path.join(directory, 'owned.json'), 'utf8')), result);
+        assert.equal(result.stdout, 'owned-natural-tail');
+        if (mode === 'root-exit') {
+          assert.equal(result.exitCode, 23);
+          assert.equal(launches, 0);
+        } else assert.equal(launches, 1);
+        if (mode === 'stalled') assert.equal(killerSignals, 1,
+          'Stop the owned controller before it can issue a late tree request');
+        t.diagnostic(JSON.stringify({ mode, pid: child.pid, complete: result.complete,
+          exitCode: result.exitCode, cleanup: result.cleanup }));
+      } catch (error) {
+        failures.push({ mode, message: error.message });
+      } finally {
+        await fs.writeFile(path.join(directory, `${token}.release`), '');
+        const deadline = performance.now() + 5000;
+        while (!await fs.stat(path.join(directory, `${token}.drained`)).catch(error => {
+          if (error.code !== 'ENOENT') throw error; return null;
+        })) {
+          assert.ok(performance.now() < deadline, 'Exact owned writer must drain through its control barrier');
+          await delay(10);
+        }
+        const writerPresent = () => {
+          if (!identity) return false;
+          try { return process.kill(identity.pid, 0); }
+          catch (error) { if (error.code !== 'ESRCH') throw error; return false; }
+        };
+        while (writerPresent()) {
+          assert.ok(performance.now() < deadline, 'Exact owned descendant must exit after releasing its barrier');
+          await delay(10);
+        }
+        await closed;
+        if (killer && killer.exitCode === null && killer.signalCode === null) {
+          killer.exitCode = 1;
+          killer.stderr.end();
+          killer.emit('close', 1, null);
+        }
+        const finalOutcome = await observed;
+        if (mode !== 'retention-failed') assert.equal(finalOutcome.error, undefined);
+        await fs.rm(directory, { recursive: true, force: true });
+      }
+    }
+    assert.deepEqual(failures, []);
+  });
 
 function controlled(mode = 'absent', { automatic = false, broker = false, budgetError = false, budgetAbort = false } = {}) {
   let clock = 0;

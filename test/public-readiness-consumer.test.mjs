@@ -1,5 +1,18 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
+  "applicability": [{
+    "names": ["T-PRD075 RC66 TEST01 required Python skip JSON never supplies passing execution credit"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "maintainer",
+    "reason": "PR-only Node-controlled adapter regression for required execution denominators and AC-213.8; no Python process.",
+    "prerequisites": ["Node"]
+  }, {
+    "names": ["T-PRD075 RC66 TEST01 real required Python skip remains NotRun"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "maintainer",
+    "reason": "PR-only genuine unittest skip producer; required capable native CI lanes execute Python, not the protected local host.",
+    "prerequisites": ["Pinned native CPython on the required PR runner"]
+  }],
   "surfaces": [{"coverage": "direct", "paths": ["src/coverage.mjs", "src/coverage-cli.mjs", "src/evidence.mjs"]}]
 };
 import test from 'node:test';
@@ -309,16 +322,22 @@ test('T-PRD084 SDK preparation preserves inputs and provides no action authority
 
 function pythonExecutionReport(value, capture) {
   const { context, startedAt, observedAt, exitCode, planned, specification } = capture;
+  const required = specification.cases[0].assertions.length;
+  const executed = value.tests - value.skips;
+  const passed = value.ok === true && exitCode === 0 && value.tests === required &&
+    executed === required && value.skips === 0 && value.failures === 0 && value.errors === 0;
+  const status = value.ok === false || exitCode !== 0 || value.failures > 0 || value.errors > 0 ?
+    'Failed' : value.skips > 0 ? 'Skipped' : passed ? 'Passed' : 'NotRun';
   return {
     schemaVersion: 1, kind: 'test-execution', context, startedAt,
     finishedAt: observedAt, observedAt, sequence: 1, complete: true,
     exitCode,
     sourceSummary: { tests: value.tests, failures: value.failures,
-      errors: value.errors, skips: value.skips },
+      errors: value.errors, skips: value.skips, required, executed },
     results: [{
       testId: planned.id, assertionId: 'balance',
       selector: specification.cases[0].assertions[0].selector,
-      status: value.ok ? 'Passed' : 'Failed', expectedMet: value.ok,
+      status, expectedMet: passed,
       expectedDigest: digest(planned.expected), checkpoint: planned.checkpoint,
       observedAt, sourceSequence: 1, durationMs: value.durationMs,
       exitCode,
@@ -326,13 +345,50 @@ function pythonExecutionReport(value, capture) {
     }],
   };
 }
-async function actualPythonProducer(t, { fail = false, guide = false } = {}) {
+
+test('T-PRD075 RC66 TEST01 required Python skip JSON never supplies passing execution credit', () => {
+  const planned = compileCoverage({
+    repositoryId: 'consumer', requirements: [{ path: requirementPath, contents: requirements }],
+    testPlans: [{ path: planPath, contents: plan }],
+  }).tests[0];
+  const capture = { context: {}, startedAt: '2026-10-25T08:00:00.000Z',
+    observedAt: '2026-10-25T08:00:01.000Z', exitCode: 0, planned,
+    specification: { cases: [{ assertions: [{ selector: {
+      language: 'python', module: 'test_balance', class: 'BalanceTests', method: 'test_balance',
+    } }] }] } };
+  for (const [counts, status, executed] of [
+    [{ tests: 1, skips: 1 }, 'Skipped', 0],
+    [{ tests: 0, skips: 0 }, 'NotRun', 0],
+    [{ tests: 2, skips: 0 }, 'NotRun', 2],
+    [{ tests: 1, skips: 0 }, 'Passed', 1],
+    [{ tests: 1, skips: 0, failures: 1, ok: false }, 'Failed', 1],
+    [{ tests: 1, skips: 0, errors: 1, ok: false }, 'Failed', 1],
+  ]) {
+    const value = JSON.parse(JSON.stringify({ ok: true, failures: 0, errors: 0,
+      durationMs: 1, diagnostics: [], ...counts }));
+    const original = structuredClone(value);
+    const report = pythonExecutionReport(value, capture);
+    assert.equal(report.results[0].status, status);
+    assert.equal(report.results[0].expectedMet, status === 'Passed');
+    assert.equal(report.sourceSummary.required, 1);
+    assert.equal(report.sourceSummary.executed, executed);
+    assert.equal(report.sourceSummary.skips, counts.skips);
+    assert.deepEqual(value, original);
+  }
+});
+
+async function actualPythonProducer(t, { fail = false, guide = false, skip = false } = {}) {
   const fixture = await consumer(t, { canonical: guide });
   if (guide) await cli(fixture, sourceEntry, ['install', '--source-root', sourceRoot], {});
   if (fail) {
     const file = path.join(fixture.repo, 'test_balance.py');
     const contents = await fs.readFile(file, 'utf8');
     await fs.writeFile(file, contents.replace('debit(balance, 25), 75', 'debit(balance, 25), 74'));
+  }
+  if (skip) {
+    const file = path.join(fixture.repo, 'test_balance.py');
+    await fs.writeFile(file, (await fs.readFile(file, 'utf8')).replace(
+      '    def test_balance(self):', '    @unittest.skip("controlled required skip")\n    def test_balance(self):'));
   }
   const source = {
     repositoryId: 'consumer',
@@ -444,6 +500,19 @@ test('T-PRD075 an independent real non-Node producer uses the same evidence cont
   assert.ok(result.cases[0].assertions[0].detail.includes('AssertionError'));
   await preserved(passing.fixture);
   assert.ok(!(await files(failing.fixture.repo)).some(file => /coverage|validation\.json/iu.test(file)));
+});
+
+test('T-PRD075 RC66 TEST01 real required Python skip remains NotRun', async t => {
+  const input = await actualPythonProducer(t, { skip: true });
+  assert.equal(input.execution.exitCode, 0);
+  assert.equal(input.output.ok, true);
+  assert.equal(input.output.tests, 1);
+  assert.equal(input.output.skips, 1);
+  assert.equal(input.report.observations[0].rawStatus, 'Skipped');
+  const result = evaluateReadiness(input.specification, [input.report], input.selection);
+  assert.equal(result.status, 'NotRun');
+  assert.equal(result.counts.required, 1);
+  assert.equal(result.counts.passed, 0);
 });
 
 test('T-PRD075 real consumer history cannot satisfy missing, expired or changed source specification and configuration', async t => {

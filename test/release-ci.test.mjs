@@ -1,5 +1,17 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
+  "groups": [
+    {"root": "TOOL03 release gate retains unsettled original workspaces and preserves primary errors across cleanup failure",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "TOOL03 native Homebrew helper binds command settlement to its caller lifetime without trusting success evidence",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "TOOL03 Homebrew quality retains unsettled Git style and audit writers and cleans settled taps",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "TOOL03 Homebrew quality preserves primary failures across evidence cleanup and observer finalizers",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "TOOL03 native Homebrew quality shares its caller lifetime before lifecycle entry",
+      "minimumSlots": 1, "exclusiveResources": []}
+  ],
   "applicability": [
     {"options": "{skip:packagePrerelease?'Stable Homebrew publication metadata is not generated for prereleases':false}", "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Stable-channel formula negatives remain required; a prerelease source cannot silently waive this declared profile.", "prerequisites": ["Stable source version for the required Homebrew release profile"]},
     {"options": "{skip:packagePrerelease?'Stable Homebrew acceptance is not applicable to prereleases':false}", "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Controlled public-consumer adapter tests do not substitute for actual later native consumers.", "prerequisites": ["Stable source version for the required Homebrew release profile"]}
@@ -20,10 +32,16 @@ export const validationDeclarations = {
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
+import fileSystem from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { promisify } from 'node:util';
+import { createContext, runInContext } from 'node:vm';
 import { canonical, readTarGzip, readZip, sha256, tarGzip, zip } from '../packaging/standalone/archive.mjs';
 import { isPrerelease, platformEntries, TARGETS, validateWindowsLauncher, verifyEntries } from '../packaging/standalone/protocol.mjs';
 import { generateManifests } from '../packaging/winget/generate.mjs';
@@ -38,7 +56,9 @@ import { boundedReadback, preflightRelease, promoteRelease, publishApprovedDraft
 import { NPM_TRUST, npmHandoffFromVerifiedBundle, prepareNpmHandoff } from '../scripts/npm-handoff.mjs';
 import { acceptPublicHomebrew, completeRelease, downloadPublicAssets } from '../scripts/accept-release.mjs';
 import { verifyIntelFormula, verifyMacosArchives, verifyNativeHomebrew, validateNativeHomebrewEvidence } from '../scripts/release-gate.mjs';
+import { runGate } from '../scripts/release-gate.mjs';
 import { verifyHomebrewQuality } from '../scripts/homebrew-quality.mjs';
+import { createOwnedCommandRunner } from '../scripts/validation-tools.mjs';
 import { digest } from '../src/core.mjs';
 import { parseTestPlan } from '../src/artifacts.mjs';
 import { evaluateReadiness, normalizeExecutionReport, validationInventoryDigest } from '../src/evidence.mjs';
@@ -46,6 +66,82 @@ import { createCompletionFixture } from './readiness-release-consumer-fixture.mj
 import { admitAcceptanceHandoff, prepareAcceptanceHandoff, runReleaseAcceptance,
   releaseConsumerTargets } from '../scripts/release-orchestration.mjs';
 import { readWorkflowPolicySources } from '../scripts/workflow-policy.mjs';
+
+test('TOOL03 release gate retains unsettled original workspaces and preserves primary errors across cleanup failure', async () => {
+  const failures = [];
+  const root = path.resolve(import.meta.dirname, '..');
+  for (const mode of ['uncertain-report', 'uncertain-throw', 'unsafe-success', 'settled-throw', 'copy-failure', 'gate-retention-failure']) {
+    const directory = await fs.mkdtemp(path.join(root, '.test-data', 'tool03-gate-'));
+    const reports = path.join(directory, '.test-data', 'release-native-windows-x64-owned');
+    const evidence = path.join(directory, 'evidence');
+    await fs.mkdir(evidence);
+    const primary = Object.assign(new Error('Original native failure'), { code: 'OWNED_PRIMARY' });
+    let copies = 0;
+    const context = createContext({
+      path, fs, console, ROOT: directory, randomUUID: () => 'owned',
+      RELEASE_GATE_TARGETS: ['windows-x64'], RELEASE_PRE_CASES: { 'windows-x64': 'owned' },
+      RELEASE_SCOPE: { 'windows-x64': { required: true, validation: 'native' } },
+      process: { env: {}, stdout: { write() {} }, stderr: { write() {} } },
+      releaseIntent: value => value,
+      verifyCandidate: async () => ({ context: { releaseIntentId: 'owned-intent', identity: {} } }),
+      processDiagnostic: error => ({ code: error.code ?? 'PROCESS_ERROR', message: error.message }),
+      readJson: async file => JSON.parse(await fs.readFile(file, 'utf8')),
+      writeJson: async (file, value) => {
+        if (mode === 'gate-retention-failure') throw Object.assign(new Error('Owned gate report persistence failed'), { code: 'OWNED_RESULT' });
+        return fs.writeFile(file, JSON.stringify(value));
+      },
+      copyNativeReports: async () => {
+        copies++;
+        if (mode === 'copy-failure') throw Object.assign(new Error('Original report copy failed'), { code: 'OWNED_COPY' });
+      },
+      nativeRun: async (_, options) => {
+        await fs.mkdir(path.join(reports, 'scratch'), { recursive: true });
+        await fs.writeFile(path.join(reports, 'scratch', 'lease.json'), '{"owned":"original"}');
+        await fs.writeFile(path.join(reports, 'execution.json'), '{"finishedAt":null}');
+        if ((mode.startsWith('uncertain') || mode === 'unsafe-success') && options?.lifetime) {
+          options.lifetime.cleanupSafe = false;
+          options.lifetime.unsettledCommands.push({ name: 'owned-command', pid: 12345 });
+        }
+        if (!['uncertain-report', 'unsafe-success'].includes(mode)) throw primary;
+        return { status: mode === 'unsafe-success' ? 'Passed' : 'NotRun', context: { native: {} } };
+      },
+    });
+    try {
+      const source = runGate.toString().replace("await import('./native-validation.mjs')", '({ runNativeValidation: nativeRun })');
+      const gate = runInContext(`(${source})`, context);
+      let observed;
+      await assert.rejects(gate({ candidateDir: 'owned', evidenceDir: evidence,
+        target: 'windows-x64', releaseIntentId: 'owned-intent' }), error => {
+        observed = error;
+        return mode === 'uncertain-report' ? error.code === 'RELEASE_INTEGRATION_BLOCKED' :
+          mode === 'unsafe-success' ? error.code === 'UNSETTLED_WRITERS' : error === primary;
+      });
+      if (mode === 'gate-retention-failure') {
+        assert.equal(observed.retentionDiagnostic.code, 'OWNED_RESULT');
+        continue;
+      }
+      const result = JSON.parse(await fs.readFile(path.join(evidence, 'windows-x64.json'), 'utf8'));
+      assert.equal(result.status, mode === 'unsafe-success' ? 'Failed' : 'NotRun');
+      assert.equal(result.reason, observed.message);
+      if (mode.startsWith('uncertain') || mode === 'unsafe-success' || mode === 'copy-failure') {
+        assert.equal(await fs.readFile(path.join(reports, 'scratch', 'lease.json'), 'utf8'), '{"owned":"original"}');
+        assert.equal(result.workspaceCleanup.retainedWorkspaces.includes(reports), true);
+        assert.equal(result.cleanupDiagnostic.code, mode === 'copy-failure' ? 'OWNED_COPY' : 'UNSETTLED_WRITERS');
+        if (mode !== 'copy-failure') assert.equal(copies, 0, 'A live original workspace is not a stable copy source');
+      } else {
+        assert.equal(copies, 1);
+        assert.equal(await fs.stat(reports).then(() => true, error => {
+          if (error.code !== 'ENOENT') throw error; return false;
+        }), false);
+      }
+    } catch (error) {
+      failures.push({ mode, message: error.message });
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  }
+  assert.deepEqual(failures, []);
+});
 import { immutablePublicationBinding } from '../scripts/release-history.mjs';
 import { fixtureWindowsLauncher } from './winget-payload-fixture.mjs';
 import { nativeReplayFixture } from './readiness-observer-fixture.mjs';
@@ -522,6 +618,12 @@ async function qualityFixture(t) {
   await fs.writeFile(brew, '#!/bin/sh\nexit 99\n', { mode: 0o755 });
   const calls = [];
   const run = async (command, args, options) => {
+    if (command === 'git') {
+      assert.deepEqual(args.slice(0, 2), ['init', '--quiet']);
+      assert.equal(path.dirname(args[2]), path.join(prefix, 'Library', 'Taps', 'local'));
+      assert.equal(options.timeout, 30_000);
+      return { stdout: '', stderr: '' };
+    }
     assert.equal(command, brew);
     calls.push({ args, options });
     assert.ok(['--prefix', '--repository', '--version', 'style', 'audit'].includes(args[0]),
@@ -530,7 +632,7 @@ async function qualityFixture(t) {
     if (args[0] === '--version') return { stdout: 'Homebrew mocked quality tool\n', stderr: '' };
     return { stdout: '', stderr: '' };
   };
-  return { ...f, prefix, brew, calls, run,
+  return { ...f, prefix, brew, calls, run, processSettlement: () => true,
     formulaPath: path.join(f.candidateDir, 'homebrew/ai-sdlc-framework.rb'),
     mode: f.candidate.context.prerelease ? 'candidate' : 'stable',
     candidateBaseUrl: f.candidate.context.prerelease ? candidateBaseUrl : undefined };
@@ -542,7 +644,8 @@ test('Homebrew quality runner requires actual style and strict macOS/architectur
     const quality = await verifyHomebrewQuality({ candidate: f.candidate, formulaPath: f.formulaPath,
       mode: f.mode, candidateBaseUrl: f.candidateBaseUrl,
       targetArch, outputDir: path.join(f.directory, `quality-${targetArch}`),
-      brew: f.brew, run: f.run, environment: { ...process.env, HOMEBREW_TEST_SETTING: 'remove',
+      brew: f.brew, run: f.run, processSettlement: f.processSettlement,
+      environment: { ...process.env, HOMEBREW_TEST_SETTING: 'remove',
         NODE_AUTH_TOKEN: 'unit-test-placeholder', RUBOCOP_OPTS: '--except-cops=all',
         GIT_DIR: f.candidateDir, BUNDLE_PATH: '/unit-test-external-cache' } });
     assert.equal(quality.style.status, 'Passed');
@@ -569,6 +672,7 @@ test('audit/style failures and formula mutation fail closed, with no native life
     const outputDir = path.join(f.directory, 'failed-quality');
     await assert.rejects(verifyHomebrewQuality({ candidate: f.candidate, formulaPath: f.formulaPath,
       mode: f.mode, candidateBaseUrl: f.candidateBaseUrl, targetArch: 'x64', outputDir, brew: f.brew,
+      processSettlement: f.processSettlement,
       run: async (command, args, options) => {
         const result = await f.run(command, args, options);
         if (args[0] === failure) throw Object.assign(new Error(`${failure} offense`), { code: 1, stderr: 'offense' });
@@ -590,7 +694,7 @@ test('Node metadata and audit prerequisites are checked before lifecycle or targ
   await assert.rejects(verifyHomebrewQuality({ candidate: f.candidate, formulaPath: wrongFormula,
     mode: f.mode, candidateBaseUrl: f.candidateBaseUrl,
     targetArch: 'arm64', outputDir: path.join(f.directory, 'wrong-node-quality'),
-    brew: f.brew, run: f.run }), /Node dependency contract/u);
+    brew: f.brew, run: f.run, processSettlement: f.processSettlement }), /Node dependency contract/u);
   assert.equal(f.calls.length, 0);
   await assert.rejects(verifyHomebrewQuality({ candidate: f.candidate, formulaPath: f.formulaPath,
     mode: f.mode, candidateBaseUrl: f.candidateBaseUrl,
@@ -612,12 +716,260 @@ test('Homebrew quality rejects linked scratch and tap parents without touching t
   await fs.symlink(unrelated, link);
   const args = { candidate: f.candidate, formulaPath: f.formulaPath, mode: f.mode,
     candidateBaseUrl: f.candidateBaseUrl,
-    targetArch: 'x64', brew: f.brew, run: f.run };
+    targetArch: 'x64', brew: f.brew, run: f.run, processSettlement: f.processSettlement };
   await assert.rejects(verifyHomebrewQuality({ ...args, outputDir: path.join(link, 'quality') }), /literal directory/u);
   assert.deepEqual(await fs.readdir(unrelated), ['keep']);
   await fs.symlink(unrelated, path.join(f.prefix, 'Library'));
   await assert.rejects(verifyHomebrewQuality({ ...args, outputDir: path.join(f.directory, 'quality-tap-link') }), /literal directory/u);
   assert.deepEqual(await fs.readdir(unrelated), ['keep']);
+});
+
+async function qualityProcessKernel(t, f) {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const original = { spawn: childProcess.spawn, execFile: childProcess.execFile,
+    kill: process.kill, writeFile: fileSystem.writeFile, rm: fileSystem.rm };
+  const groups = new Map();
+  let state;
+  Object.defineProperty(process, 'platform', { ...platform, value: 'darwin' });
+  const stageOf = (command, args) => command === 'git' ? 'git' : args[0];
+  const outputOf = (stage, failed) => ({
+    stdout: ['--prefix', '--repository'].includes(stage) ? `${f.prefix}\n` :
+      stage === '--version' ? 'Homebrew controlled process boundary\n' : `${stage} original output\n`,
+    stderr: failed ? `${stage} original diagnostic\n` : '',
+  });
+  childProcess.spawn = (command, args, options) => {
+    const stage = stageOf(command, args);
+    assert.ok(command === 'git' || command === f.brew, 'No target package or provisioner may execute');
+    assert.equal(options.detached, true);
+    const failed = stage === state.failure;
+    const child = Object.assign(new EventEmitter(), { pid: 830001 + groups.size,
+      exitCode: null, signalCode: null, stdout: new PassThrough(), stderr: new PassThrough(),
+      stdin: new PassThrough(), unref() {} });
+    groups.set(child.pid, { child, unsafe: failed && state.unsafe, state });
+    state.children.push(child);
+    queueMicrotask(() => {
+      const output = outputOf(stage, failed);
+      child.exitCode = failed ? stage === 'git' ? 128 : 73 : 0;
+      child.stdout.end(output.stdout);
+      child.stderr.end(output.stderr);
+      child.emit('exit', child.exitCode, null);
+      child.emit('close', child.exitCode, null);
+    });
+    return child;
+  };
+  const legacyGit = (command, args, options, callback) => {
+    assert.equal(command, 'git');
+    assert.deepEqual(args.slice(0, 2), ['init', '--quiet']);
+    assert.equal(options.timeout, 30_000);
+    state.commands.push({ command, args, options });
+    state.tap = args[2];
+    const child = { stdin: new PassThrough() };
+    queueMicrotask(() => {
+      const failed = state.failure === 'git';
+      const output = outputOf('git', failed);
+      const error = failed ? Object.assign(new Error('git original failure'), { code: 128, ...output }) : null;
+      if (error) state.primary = error;
+      callback(error, output.stdout, output.stderr);
+    });
+    return child;
+  };
+  legacyGit[promisify.custom] = (command, args, options) => {
+    let child;
+    const pending = new Promise((resolve, reject) => {
+      child = legacyGit(command, args, options, (error, stdout, stderr) =>
+        error ? reject(error) : resolve({ stdout, stderr }));
+    });
+    pending.child = child;
+    return pending;
+  };
+  childProcess.execFile = legacyGit;
+  process.kill = (pid, signal) => {
+    assert.ok(groups.has(-pid), 'Only this fixture-owned process group may be observed');
+    assert.equal(signal, 0, 'Closed roots must not receive late termination signals');
+    if (groups.get(-pid).unsafe) return false;
+    throw Object.assign(new Error('Controlled process group is absent'), { code: 'ESRCH' });
+  };
+  fileSystem.writeFile = async (file, ...args) => {
+    if (state?.persistFailure && file === path.join(state.outputDir, 'quality-evidence.json')) {
+      state.attemptedEvidence = JSON.parse(args[0]);
+      state.primaryEvidence ??= state.primary?.homebrewQuality;
+      throw state.persistFailure;
+    }
+    return original.writeFile(file, ...args);
+  };
+  fileSystem.rm = async (file, options) => {
+    if (state?.cleanupFailure && file === state.tap) {
+      state.primaryEvidence ??= state.primary?.homebrewQuality;
+      throw state.cleanupFailure;
+    }
+    return original.rm(file, options);
+  };
+  t.after(() => {
+    Object.defineProperty(process, 'platform', platform);
+    Object.assign(childProcess, { spawn: original.spawn, execFile: original.execFile });
+    process.kill = original.kill;
+    Object.assign(fileSystem, { writeFile: original.writeFile, rm: original.rm });
+    syncBuiltinESMExports();
+    for (const { child } of groups.values()) {
+      child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy();
+    }
+  });
+  syncBuiltinESMExports();
+  // Import the complete production entry point after binding the C6 execFile boundary.
+  const { verifyHomebrewQuality: verify } = await import(`../scripts/homebrew-quality.mjs?quality-kernel=${randomUUID()}`);
+  return {
+    verify,
+    begin(options) {
+      const lifetime = { cleanupSafe: true, unsettledCommands: [], retainedWorkspaces: [] };
+      const owned = createOwnedCommandRunner({ lifetime });
+      state = { commands: [], children: [], lifetime, ...options };
+      const current = state;
+      current.run = async (command, args, options) => {
+        current.commands.push({ command, args, options });
+        if (command === 'git') current.tap = args[2];
+        if (args[0] === 'style') current.tap = path.dirname(path.dirname(args[1]));
+        try { return await owned.run(command, args, options); }
+        catch (error) { current.primary = error; throw error; }
+      };
+      current.processSettlement = () => {
+        if (current.observerFailure && current.primary) throw current.observerFailure;
+        return owned.isSettled();
+      };
+      current.input = { candidate: f.candidate, formulaPath: f.formulaPath, mode: f.mode,
+        candidateBaseUrl: f.candidateBaseUrl, targetArch: 'x64', outputDir: current.outputDir,
+        brew: f.brew, run: current.run, processSettlement: current.processSettlement, lifetime };
+      return current;
+    },
+  };
+}
+
+test('TOOL03 Homebrew quality retains unsettled Git style and audit writers and cleans settled taps', async t => {
+  const f = await qualityFixture(t);
+  const kernel = await qualityProcessKernel(t, f);
+  const frozenFormula = await fs.readFile(f.formulaPath);
+  const failures = [];
+  for (const failure of ['git', 'style', 'audit', null]) {
+    for (const unsafe of failure ? [true, false] : [false]) {
+      const mode = `${failure ?? 'success'}-${unsafe ? 'unsettled' : 'settled'}`;
+      const current = kernel.begin({ failure, unsafe, outputDir: path.join(f.directory, mode) });
+      try {
+        const outcome = await kernel.verify(current.input).then(value => ({ value }), error => ({ error }));
+        const tapExists = await fs.lstat(current.tap).then(() => true, error => {
+          if (error.code !== 'ENOENT') throw error;
+          return false;
+        });
+        t.diagnostic(JSON.stringify({ mode, tapExists, cleanupSafe: current.lifetime.cleanupSafe,
+          commandCode: outcome.error?.code, proof: 'synthetic kernel with real private owned runner and filesystem' }));
+        if (failure) {
+          assert.equal(outcome.error, current.primary, `${mode}: original command object`);
+          assert.equal(outcome.error.code, failure === 'git' ? 128 : 73);
+          assert.equal(outcome.error.stdout, `${failure} original output\n`);
+          assert.equal(outcome.error.stderr, `${failure} original diagnostic\n`);
+          assert.equal(outcome.error.homebrewQuality.validation, 'Failed');
+        } else {
+          assert.equal(outcome.value?.validation, 'Passed', outcome.error?.stack);
+        }
+        assert.equal(tapExists, unsafe, `${mode}: tap deletion must follow private settlement`);
+        assert.equal(current.lifetime.cleanupSafe, !unsafe, `${mode}: same caller lifetime`);
+        assert.equal(current.processSettlement(), !unsafe, `${mode}: private runner observation`);
+        if (unsafe) assert.deepEqual(await fs.readFile(path.join(current.tap, 'Formula', 'ai-sdlc-framework.rb')), frozenFormula);
+        const evidence = JSON.parse(await fs.readFile(path.join(current.outputDir, 'quality-evidence.json'), 'utf8'));
+        assert.equal(evidence.validation, failure ? 'Failed' : 'Passed');
+        assert.equal(evidence.nativeExecution, 'NotRun');
+        assert.deepEqual(await fs.readFile(f.formulaPath), frozenFormula);
+        assert.ok(current.commands.some(call => call.command === 'git'));
+        for (const call of current.commands) {
+          assert.equal(call.options.timeout, call.command === 'git' ? 30_000 : 300_000);
+          if (call.command !== 'git') assert.equal(call.options.maxBuffer, 8 * 1024 * 1024);
+        }
+      } catch (error) { failures.push({ mode, message: error.message.slice(0, 500) }); }
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
+test('TOOL03 Homebrew quality preserves primary failures across evidence cleanup and observer finalizers', async t => {
+  const f = await qualityFixture(t);
+  const kernel = await qualityProcessKernel(t, f);
+  const failures = [];
+  for (const mode of ['command-and-persist', 'command-and-cleanup', 'command-and-observer', 'success-and-persist']) {
+    const secondary = Object.assign(new Error(`${mode} controlled finalizer failure`),
+      { code: mode.includes('persist') ? 'ENOSPC' : mode.includes('cleanup') ? 'EACCES' : 'OBSERVER_FAILURE' });
+    const current = kernel.begin({ failure: mode.startsWith('command') ? 'audit' : null,
+      outputDir: path.join(f.directory, mode),
+      ...(mode.includes('persist') ? { persistFailure: secondary } :
+        mode.includes('cleanup') ? { cleanupFailure: secondary } : { observerFailure: secondary }) });
+    try {
+      const outcome = await kernel.verify(current.input).then(value => ({ value }), error => ({ error }));
+      assert.equal(outcome.error, current.primary ?? secondary, `${mode}: primary object identity`);
+      assert.equal(outcome.error.homebrewQuality.validation, 'Failed');
+      assert.equal(outcome.error.homebrewQuality.nativeExecution, 'NotRun');
+      if (current.primary) {
+        assert.equal(outcome.error.code, 73);
+        assert.equal(outcome.error.stdout, 'audit original output\n');
+        assert.equal(outcome.error.stderr, 'audit original diagnostic\n');
+        assert.equal(outcome.error.homebrewQuality.audit.status, 'Failed');
+        if (!mode.includes('observer')) assert.equal(outcome.error.homebrewQuality, current.primaryEvidence);
+        const diagnostic = mode.includes('persist') ? outcome.error.qualityRetentionDiagnostic :
+          outcome.error.qualityCleanupDiagnostic;
+        assert.equal(diagnostic?.code, secondary.code);
+      } else {
+        assert.equal(outcome.error.code, 'ENOSPC', 'Successful commands cannot hide failed evidence persistence');
+      }
+      if (mode.includes('persist')) {
+        await assert.rejects(fs.lstat(path.join(current.outputDir, 'quality-evidence.json')), { code: 'ENOENT' });
+        assert.ok(current.attemptedEvidence, 'The real JSON persistence boundary was reached');
+      } else {
+        const evidence = JSON.parse(await fs.readFile(path.join(current.outputDir, 'quality-evidence.json'), 'utf8'));
+        assert.equal(evidence.validation, 'Failed');
+      }
+      if (mode.includes('observer')) {
+        assert.equal(current.lifetime.cleanupSafe, false);
+        assert.ok((await fs.lstat(path.join(current.tap, 'Formula', 'ai-sdlc-framework.rb'))).isFile());
+      }
+      t.diagnostic(JSON.stringify({ mode, primaryCode: outcome.error.code,
+        primaryPreserved: outcome.error === (current.primary ?? secondary), nativeExecution: 'NotRun' }));
+    } catch (error) { failures.push({ mode, message: error.message.slice(0, 500) }); }
+  }
+  assert.deepEqual(failures, []);
+});
+
+test('TOOL03 native Homebrew quality shares its caller lifetime before lifecycle entry', async t => {
+  const f = await qualityFixture(t);
+  const kernel = await qualityProcessKernel(t, f);
+  const failures = [];
+  for (const failure of ['git', 'style', 'audit']) {
+    const scratch = path.join(f.directory, `native-quality-${failure}`);
+    const current = kernel.begin({ failure, unsafe: true, outputDir: path.join(scratch, 'x64-homebrew-quality') });
+    let qualityLifetime;
+    let lifecycleEntered = false;
+    try {
+      const outcome = await verifyNativeHomebrew({ candidate: f.candidate, candidateDir: f.candidateDir,
+        scratch, lifetime: current.lifetime, previous: previousFixture, brew: f.brew,
+        targetArch: 'x64', mode: 'stable',
+        verifyQuality: async input => {
+          qualityLifetime = input.lifetime;
+          return kernel.verify(input);
+        },
+        verifyLifecycle: async () => { lifecycleEntered = true; assert.fail('Unsafe quality cannot enter the native lifecycle'); },
+      }).then(value => ({ value }), error => ({ error }));
+      assert.equal(qualityLifetime, current.lifetime, 'Quality and outer gate must share one actual lifetime');
+      assert.equal(current.lifetime.cleanupSafe, false);
+      assert.equal(lifecycleEntered, false);
+      assert.equal(outcome.error?.homebrewResult.stage, 'quality');
+      assert.equal(outcome.error.homebrewResult.nativeValidation, 'Failed');
+      assert.equal(outcome.error.homebrewQuality.validation, 'Failed');
+      const taps = await fs.readdir(path.join(f.prefix, 'Library', 'Taps', 'local'));
+      assert.ok(taps.length > 0, 'The original writer-owned tap must survive the outer failure');
+      for (const tap of taps) {
+        assert.deepEqual(await fs.readFile(path.join(f.prefix, 'Library', 'Taps', 'local', tap,
+          'Formula', 'ai-sdlc-framework.rb')), await fs.readFile(f.formulaPath));
+      }
+      t.diagnostic(JSON.stringify({ failure, cleanupSafe: current.lifetime.cleanupSafe,
+        lifecycleEntered, proof: 'synthetic process boundary; actual quality and outer exports' }));
+    } catch (error) { failures.push({ failure, message: error.message.slice(0, 500) }); }
+  }
+  assert.deepEqual(failures, []);
 });
 
 test('T-60 prompt deterministically binds final metadata and explicitly does not claim native execution', async t => {
@@ -725,6 +1077,99 @@ test('missing Homebrew integration blocks the required native gate; an adapter c
   await assert.rejects(verifyNativeHomebrew({ ...args, scratch: path.join(f.directory, 'bad-native'),
     brew: path.join(f.directory, 'isolated/bin/brew'), verifyQuality: mockQuality,
     verifyLifecycle: async () => ({ ...evidence, architecture: 'x64' }) }), /did not pass/u);
+});
+
+test('TOOL03 native Homebrew helper binds command settlement to its caller lifetime without trusting success evidence', async t => {
+  const f = await fixture(t);
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const groups = new Map();
+  const failures = [];
+  let mode;
+  Object.defineProperty(process, 'platform', { ...platform, value: 'darwin' });
+  const spawn = t.mock.method(childProcess, 'spawn', (command, args, options) => {
+    assert.equal(command, process.execPath);
+    assert.deepEqual(args, ['--version']);
+    assert.equal(options.detached, true);
+    const child = Object.assign(new EventEmitter(), { pid: 820001 + groups.size,
+      exitCode: null, signalCode: null, stdout: new PassThrough(), stderr: new PassThrough(),
+      stdin: new PassThrough(), unref() {} });
+    groups.set(child.pid, { child, uncertain: mode.includes('unsafe') });
+    queueMicrotask(() => {
+      child.exitCode = mode === 'success' ? 0 : 73;
+      child.stdout.end('original command output\n');
+      child.stderr.end('original command diagnostic\n');
+      child.emit('exit', child.exitCode, null);
+      child.emit('close', child.exitCode, null);
+    });
+    return child;
+  });
+  const kill = t.mock.method(process, 'kill', (pid, signal) => {
+    assert.ok(groups.has(-pid), 'Only a controlled owned process group may be probed');
+    assert.equal(signal, 0, 'An exited root must never receive a late termination signal');
+    if (groups.get(-pid).uncertain) return false;
+    throw Object.assign(new Error('Controlled group is absent'), { code: 'ESRCH' });
+  });
+  t.after(() => {
+    Object.defineProperty(process, 'platform', platform);
+    spawn.mock.restore();
+    kill.mock.restore();
+    syncBuiltinESMExports();
+  });
+  syncBuiltinESMExports();
+  for (mode of ['unsafe-command', 'settled-command-failure', 'success', 'swallowed-unsafe', 'unobserved-success']) {
+    const lifetime = { cleanupSafe: true, unsettledCommands: [], retainedWorkspaces: [] };
+    const scratch = path.join(f.directory, mode);
+    const receipt = path.join(scratch, 'homebrew-native', 'evidence.json');
+    let primary;
+    let original;
+    let settled;
+    try {
+      const outcome = await verifyNativeHomebrew({ candidate: f.candidate, candidateDir: f.candidateDir,
+        scratch, lifetime, previous: previousFixture, verifyQuality: mockQuality,
+        brew: path.join(f.directory, 'isolated', 'bin', 'brew'),
+        verifyLifecycle: async input => {
+          // Match the real lifecycle's private default when the caller omits its owned runner.
+          const fallback = createOwnedCommandRunner({ lifetime: { cleanupSafe: true } });
+          const run = input.runCommand ?? fallback.run;
+          const observe = input.processSettlement ?? fallback.isSettled;
+          await fs.mkdir(path.dirname(receipt), { recursive: true });
+          await fs.writeFile(receipt, '{"passed":false,"original":"lifecycle receipt"}\n');
+          if (mode !== 'unobserved-success') {
+            try { await run(process.execPath, ['--version'], { timeout: 15000 }); }
+            catch (error) {
+              primary = error;
+              original = { code: error.code, stdout: error.stdout, stderr: error.stderr,
+                ownedProcess: error.ownedProcess };
+              settled = observe();
+              if (mode !== 'swallowed-unsafe') throw error;
+            }
+          }
+          settled = observe();
+          return simulatedNativeHomebrew(f.candidate, 'arm64');
+        } }).then(value => ({ value }), error => ({ error }));
+      if (primary && mode !== 'swallowed-unsafe') {
+        assert.equal(outcome.error, primary, mode);
+        for (const [field, value] of Object.entries(original)) assert.equal(outcome.error[field], value, field);
+        assert.equal(primary.code, 73);
+        assert.equal(primary.stdout, 'original command output\n');
+        assert.equal(primary.stderr, 'original command diagnostic\n');
+        assert.equal(primary.ownedProcess.settled, mode === 'settled-command-failure');
+        assert.equal(primary.homebrewResult.nativeValidation, 'Failed');
+        assert.deepEqual(primary.homebrewResult.evidence, { passed: false, original: 'lifecycle receipt' });
+      } else if (mode === 'success') {
+        assert.equal(outcome.value?.nativeValidation, 'Passed', outcome.error?.stack);
+      } else {
+        assert.equal(outcome.error?.code, 'STOP_UNVERIFIED', 'Success-shaped evidence cannot settle an unobserved or unsafe writer');
+        assert.equal(outcome.error.homebrewResult.nativeValidation, 'Failed');
+      }
+      assert.equal(lifetime.cleanupSafe, ['settled-command-failure', 'success'].includes(mode), mode);
+      assert.equal(settled, ['settled-command-failure', 'success'].includes(mode), mode);
+      assert.equal(await fs.readFile(receipt, 'utf8'), '{"passed":false,"original":"lifecycle receipt"}\n');
+      t.diagnostic(JSON.stringify({ mode, cleanupSafe: lifetime.cleanupSafe, settled,
+        primaryCode: primary?.code, receiptPreserved: true }));
+    } catch (error) { failures.push({ mode, message: error.message }); }
+  }
+  assert.deepEqual(failures, []);
 });
 
 test('T-PRD029 all four real native profiles are required before sealing the same frozen bytes', async t => {

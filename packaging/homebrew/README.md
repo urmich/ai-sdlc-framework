@@ -42,7 +42,7 @@ Only stable SemVer versions produce public formula metadata; prereleases and
 build-metadata versions cannot silently become stable releases. Release
 publication must verify this repository and these exact bytes are anonymously
 reachable. No URL or checksum placeholder is committed as a usable formula.
-The generated formula declares `node@22` (supported Node 22+ LTS), copies the
+The generated formula declares `node@24`, copies the
 entire verified archive to `libexec`, and wraps `libexec/bin/sdlc` with the
 Homebrew dependency first in `PATH` and its absolute executable in `SDLC_NODE`,
 overriding inherited standalone-runtime selections. The standalone launcher
@@ -101,17 +101,48 @@ All four pins above must come from independently verified previous/public and
 frozen-current identities; no example digest or environment placeholder is
 evidence. The initial `--candidate-dir` is the verified **older** release and
 `--upgrade-dir` the exact **newer** candidate. Candidate mode uses test-only
-loopback formulas and keeps public acceptance NotRun. Validation selects native
-Node 22.23.3; the shipped consumer minimum remains Node >=22.
+loopback formulas and keeps public acceptance NotRun. Current native validation
+selects Node 24.20.0 with `node@24`; the separate mandatory minimum-runtime
+compatibility job uses Node 22.23.3. Publishing uses Node 24.22.0. The shipped
+consumer minimum remains Node >=22. These current prerequisites do not rewrite
+the explicitly historical published 0.4.0 formula, dependency or receipt.
 
-After publication, `--mode public` uses the same four external pins and exact
-downloaded previous/current public directories. It executes the retained
-published formula bytes/URLs without regeneration. Legacy `stable` diagnostic
-formula-revision work is never accepted as required R-PRE/R-POST upgrade proof.
+After publication, public acceptance requires all four external pins, exact
+downloaded previous/current public directories, and the independently frozen
+previous and current release destinations. Supply both destination flags
+explicitly; neither the source repository nor the current destination is a
+fallback for the previous release. The two destinations may differ. Resolve
+each from its independently verified release binding, not from a formula URL,
+package source metadata, or a hard-coded repository assumption.
+
+The asset variables below identify the verified older public release and the
+downloaded newer public release matching the frozen current identity:
+
+<!-- recipe:homebrew-public -->
+```sh
+node scripts/homebrew-lifecycle.mjs \
+  --brew "$PWD/.test-data/homebrew/bin/brew" \
+  --candidate-dir "$VERIFIED_PREVIOUS_ASSETS" \
+  --upgrade-dir "$EXACT_FROZEN_CURRENT_ASSETS" \
+  --root "$PWD/.test-data/homebrew-public-lifecycle" \
+  --mode public \
+  --previous-descriptor-sha256 "$SUPPORTED_PREVIOUS_DESCRIPTOR_SHA256" \
+  --previous-checksums-sha256 "$SUPPORTED_PREVIOUS_CHECKSUMS_SHA256" \
+  --current-descriptor-sha256 "$EXPECTED_DESCRIPTOR_SHA256" \
+  --current-checksums-sha256 "$EXPECTED_CHECKSUMS_SHA256" \
+  --previous-release-repository "$FROZEN_PREVIOUS_RELEASE_REPOSITORY" \
+  --current-release-repository "$FROZEN_CURRENT_RELEASE_REPOSITORY"
+```
+
+The destination values are independently frozen `owner/repository` identities;
+the other variables retain the independently verified directory/digest meanings
+above. This executes the retained published formula bytes/URLs without
+regeneration. Legacy `stable` diagnostic formula-revision work is never accepted
+as required R-PRE/R-POST upgrade proof.
 
 The runner refuses to modify a system Homebrew prefix. A local clone of an
 existing Homebrew checkout under `.test-data` can provide the isolated prefix;
-install its actual `node@22` dependency first. Keep `HOME`, `HOMEBREW_CACHE`,
+install the current baseline's actual `node@24` dependency first. Keep `HOME`, `HOMEBREW_CACHE`,
 `HOMEBREW_LOGS`, `HOMEBREW_TEMP` and `TMPDIR` inside that local test tree during
 bootstrap. A nondefault prefix may require building a dependency from source.
 The runner records JSON evidence and the exact generated formulas under its
@@ -267,10 +298,12 @@ node scripts/homebrew-switch.mjs \
 # Restart Copilot.
 ```
 
-The reverse helper captures rollback state first, probes the exact native
-Node 22+ executable, and uses
-`brew tab --installed-on-request --formula node@22` to retain that runtime
-independently of the framework formula. It verifies the installed-on-request
+The reverse helper captures rollback state first, derives the runtime dependency
+from the actual installed receipt, probes that exact native Node 22+ executable,
+and uses `brew tab --installed-on-request --formula "$RECORDED_NODE_FORMULA"`
+with the receipt's resolved dependency identity to retain that runtime
+independently of the framework formula. The dependency is not assumed from an
+older release or the current generator's default. It verifies the installed-on-request
 receipt before invoking the replacement CLI. Merely finding Node in `PATH`, or
 running `doctor` before uninstall, does not prove it will survive autoremove.
 The helper verifies the copied hooks bind that retained Node, executes the hooks

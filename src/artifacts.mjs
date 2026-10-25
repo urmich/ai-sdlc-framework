@@ -243,13 +243,13 @@ export async function snapshotLocators(store, workItemId, locators, manifest, me
   }
   return result;
 }
-export function splitMarkdownTableRow(line) {
+export function splitMarkdownTableRow(line, { preserveEscapes = false } = {}) {
   const cells = [];
   let value = '';
   let escaped = false;
   for (const character of line) {
     if (escaped) {
-      value += character === '|' ? '|' : `\\${character}`;
+      value += character === '|' && !preserveEscapes ? '|' : `\\${character}`;
       escaped = false;
     } else if (character === '\\') escaped = true;
     else if (character === '|') { cells.push(value); value = ''; }
@@ -278,8 +278,9 @@ export function testSpecificationDigest(contents) {
     if (!line.trim().startsWith('|')) return line;
     const cells = splitMarkdownTableRow(line);
     const normalized = cells.map(cell => cell.trim());
-    if (normalized.some(cell => /^ID$/iu.test(cell)) && normalized.some(cell => /^Status$/iu.test(cell))) {
-      mutableColumns = normalized.map((cell, index) =>
+    const headings = normalized.map(cell => cell.replace(/`/gu, ''));
+    if (headings.some(cell => /^ID$/iu.test(cell)) && headings.some(cell => /^Status$/iu.test(cell))) {
+      mutableColumns = headings.map((cell, index) =>
         /^(?:status|evidence|activity|blockers?|run(?:\s+id)?)$/iu.test(cell) ? index : -1).filter(index => index >= 0);
       // Preserve legacy identities; escaped definition cells need unambiguous boundaries.
       return normalized.some(cell => cell.includes('|')) ?
@@ -315,7 +316,7 @@ export function parseTestPlan(contents) {
   let headings = [];
   for (const line of contents.split('\n')) {
     if (!line.trim().startsWith('|')) continue;
-    const cells = line.split('|').slice(1, -1).map(cell => cell.trim().replace(/`/gu, ''));
+    const cells = splitMarkdownTableRow(line).slice(1, -1).map(cell => cell.trim().replace(/`/gu, ''));
     if (cells.some(cell => /^ID$/iu.test(cell)) && cells.some(cell => /^Status$/iu.test(cell))) { headings = cells.map(c => c.toLowerCase()); continue; }
     if (!/^T-[A-Za-z0-9._-]+$/u.test(cells[0] ?? '')) continue;
     const fields = Object.fromEntries(headings.map((heading, index) => [heading, cells[index]]));
@@ -456,10 +457,14 @@ export async function synchronizeTestPlan(store, workItemId, transactionOptions 
         let statusColumn = -1;
         updated = original.split('\n').map(line => {
           if (!line.trimStart().startsWith('|')) return line;
-          const cells = line.split('|');
-          const header = cells.findIndex(cell => /^Status$/iu.test(cell.trim()));
-          if (header > 0) statusColumn = header;
-          const testId = cells[1]?.trim().replace(/`/gu, '');
+          const cells = splitMarkdownTableRow(line, { preserveEscapes: true });
+          const normalized = cells.map(cell => cell.trim().replace(/`/gu, ''));
+          if (normalized.some(cell => /^ID$/iu.test(cell)) &&
+              normalized.some(cell => /^Status$/iu.test(cell))) {
+            statusColumn = normalized.findIndex(cell => /^Status$/iu.test(cell));
+            return line;
+          }
+          const testId = normalized[1];
           if (statusColumn > 0 && statuses.has(testId)) cells[statusColumn] = ` ${statuses.get(testId)} `;
           return cells.join('|');
         }).join('\n');

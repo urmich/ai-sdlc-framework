@@ -182,7 +182,7 @@ and downloaded provenance verification. It extends the installer's acyclic
 release-bundle evidence without changing channel ownership or rollback behavior.
 Real GitHub settings, scheduled runs, public provenance and consumer approvals
 remain distinct from local fixture success; unobserved results stay `NotRun`
-with explicit blockers. Michael Urinovsky's third-party project does not become
+with explicit blockers. This personal third-party project does not become
 Microsoft first-party or CFS/DCISO-approved through repository evidence.
 T-53..T-59 cover the proposal; no implementation or external control is claimed.
 

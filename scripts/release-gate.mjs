@@ -9,6 +9,7 @@ import { buildPackage } from './package.mjs';
 import { buildPlatforms, renderChecksums } from './package-platforms.mjs';
 import { verifyHomebrewQuality } from './homebrew-quality.mjs';
 import { nativeToolchain, homebrewToolchain } from './toolchain-baseline.mjs';
+import { createOwnedCommandRunner, processDiagnostic } from './validation-tools.mjs';
 import { ROOT, MACOS_ARCHITECTURES, RELEASE_GATE_TARGETS, RELEASE_PRE_CASES, RELEASE_SCOPE, archiveRecord, copyNativeReports, homebrewMetadata, options, releaseIntent,
   readJson, trustedEnvironment, validateHomebrewQualityEvidence, validateInitialHomebrewFormula, verifyCandidate, writeJson } from './release-bundle.mjs';
 
@@ -88,7 +89,8 @@ export function validateNativeHomebrewEvidence(result, { candidate, targetArch,
   return result;
 }
 
-export async function verifyNativeHomebrew({ candidate, candidateDir, scratch,
+// A supplied lifetime is the caller's actual in-process cleanup authority, never serialized evidence.
+export async function verifyNativeHomebrew({ candidate, candidateDir, scratch, lifetime,
   brew = process.env.SDLC_HOMEBREW_BREW, verifyLifecycle, verifyQuality = verifyHomebrewQuality, generator,
   targetArch = 'arm64', mode = 'candidate', previous, verifyUpgradeInputs, environment = process.env,
   expectedNodeVersion = nativeToolchain.node } = {}) {
@@ -158,13 +160,21 @@ export async function verifyNativeHomebrew({ candidate, candidateDir, scratch,
     }
     if (!formulaPath) throw integrationBlocked('Native Homebrew audit/style requires candidate-bound formula metadata');
     stage = 'quality';
+    const qualityOwned = lifetime ? createOwnedCommandRunner({ lifetime }) : undefined;
     quality = await verifyQuality({ candidate, formulaPath, mode, candidateBaseUrl, environment,
-      targetArch, outputDir: path.join(scratch, `${targetArch}-homebrew-quality`), brew });
+      targetArch, outputDir: path.join(scratch, `${targetArch}-homebrew-quality`), brew,
+      ...(qualityOwned ? { run: qualityOwned.run, processSettlement: qualityOwned.isSettled, lifetime } : {}) });
     validateHomebrewQualityEvidence(quality, { identity: candidate.context.identity, targetArch, formula, mode });
     stage = 'lifecycle';
+    const owned = lifetime ? createOwnedCommandRunner({ lifetime }) : undefined;
     const evidence = await verifyLifecycle({ brew, candidateDirectory: previous.directory, root,
       targetArch, mode, upgradeDirectory: path.resolve(candidateDir, 'assets'), expectedNodeVersion, environment,
-      expectedPreviousIdentity: previous.identity, expectedCurrentIdentity: candidate.context.identity });
+      expectedPreviousIdentity: previous.identity, expectedCurrentIdentity: candidate.context.identity,
+      ...(owned ? { runCommand: owned.run, processSettlement: owned.isSettled } : {}) });
+    if (owned && !owned.isSettled()) {
+      lifetime.cleanupSafe = false;
+      throw Object.assign(new Error('Native Homebrew writer settlement is unverified.'), { code: 'STOP_UNVERIFIED' });
+    }
     if (evidence?.passed !== true || evidence.platform !== 'darwin' || evidence.architecture !== targetArch ||
         evidence.uname !== (targetArch === 'arm64' ? 'arm64' : 'x86_64') ||
         canonical(evidence.homebrewRuntime) !== canonical({ platform: 'darwin', arch: targetArch, major: homebrewToolchain.major }) ||
@@ -249,16 +259,18 @@ export async function runGate({ candidateDir, evidenceDir, target,
   const candidate = await verifyCandidate(candidateDir, expected);
   if (candidate.context.releaseIntentId !== releaseIntentId) throw new Error('R-PRE must use the frozen logical release intent');
   const policy = RELEASE_SCOPE[target];
+  const lifetime = { cleanupSafe: true, unsettledCommands: [], retainedWorkspaces: [] };
+  let failure;
   const result = { schemaVersion: 1, profile: 'r-pre', caseId: RELEASE_PRE_CASES[target],
     releaseIntentId, target, required: policy.required, validation: policy.validation,
     identity: candidate.context.identity, status: 'NotRun', nativeValidation: 'NotRun',
-    reportDirectory: `native/${target}`,
+    reportDirectory: `native/${target}`, workspaceCleanup: lifetime, cleanupDiagnostic: null,
     ...(process.env.GITHUB_RUN_ID ? { run: { id: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT } } : {}) };
   const reports = path.join(ROOT, '.test-data', `release-native-${target}-${randomUUID()}`);
   try {
     const { runNativeValidation } = await import('./native-validation.mjs');
     const native = await runNativeValidation({ target, profile: 'r-pre', candidateDir,
-      evidenceDir: reports, buildCandidate: false });
+      evidenceDir: reports, buildCandidate: false }, { lifetime });
     const original = await readJson(path.join(reports, 'execution.json'));
     result.host = native.context.native;
     result.finishedAt = original.finishedAt;
@@ -269,6 +281,7 @@ export async function runGate({ candidateDir, evidenceDir, target,
     result.status = 'Passed';
     return result;
   } catch (error) {
+    failure = error;
     result.status = result.nativeValidation === 'Failed' ? 'Failed' : 'NotRun';
     result.diagnosticStatus = result.status === 'Failed' ? 'FailedExecution' : 'Blocked';
     if (error.homebrewResult) result.homebrew = error.homebrewResult;
@@ -278,14 +291,36 @@ export async function runGate({ candidateDir, evidenceDir, target,
     if (error.stderr) process.stderr.write(error.stderr);
     throw error;
   } finally {
-    if (await fs.lstat(reports).then(() => true, error => {
-      if (error.code !== 'ENOENT') throw error;
-      return false;
-    })) {
-      await copyNativeReports(reports, path.join(evidenceDir, 'native', target));
-      await fs.rm(reports, { recursive: true, force: true });
+    try {
+      if (!lifetime.cleanupSafe) {
+        throw Object.assign(new Error('Owned native workspaces and original reports are retained until writer termination is established.'),
+          { code: 'UNSETTLED_WRITERS' });
+      }
+      if (await fs.lstat(reports).then(() => true, error => {
+        if (error.code !== 'ENOENT') throw error;
+        return false;
+      })) {
+        await copyNativeReports(reports, path.join(evidenceDir, 'native', target));
+        await fs.rm(reports, { recursive: true, force: true });
+      }
+    } catch (error) {
+      lifetime.retainedWorkspaces = [...new Set([...lifetime.retainedWorkspaces, reports])];
+      result.cleanupDiagnostic = processDiagnostic(error);
+      result.status = result.status === 'Passed' ? 'Failed' : result.status;
+      result.diagnosticStatus = result.status === 'Failed' ? 'FailedCleanup' : 'Blocked';
+      result.reason ??= error.message;
+      failure ??= error;
     }
-    await writeJson(path.join(evidenceDir, `${target}.json`), result);
+    try { await writeJson(path.join(evidenceDir, `${target}.json`), result); }
+    catch (error) {
+      if (!failure) throw error;
+      failure.retentionDiagnostic = processDiagnostic(error);
+    }
+    if (failure) {
+      failure.workspaceCleanup = lifetime;
+      if (result.cleanupDiagnostic) failure.cleanupDiagnostic = result.cleanupDiagnostic;
+      throw failure;
+    }
   }
 }
 

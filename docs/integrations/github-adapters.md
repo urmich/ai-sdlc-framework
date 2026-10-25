@@ -194,10 +194,24 @@ the parent records actual selectors and integrated package/installer evidence.
 Excluded native administration tests are removed rather than skipped. Core
 validation catalog/evidence remains separate from the deleted native registry.
 
-Preserve Node >=22, dependency-free runtime and the canonical fast 16-case
-profile. Complete local unit-first/full/static/package validation precedes the
-normal built-in `/review` using current GPT-6.1 Sol/max. CI and live acceptance
-remain separately source/run/attempt-bound and authorized.
+Preserve Node >=22 and the dependency-free runtime. The current required local
+gate is the finite 27-assertion critical sanity selection, including the
+canonical 16-case unit stage first, followed by static/documentation checks:
+
+<!-- recipe:github-local -->
+```sh
+node scripts/test-runner.mjs critical
+node scripts/check.mjs
+```
+
+See [contributor testing guidance](../contributing/README.md) for the current
+gate and protected-host commands. Targeted debugging and full/coverage local
+runs are optional; separate artifact production is not a mandatory local Review
+prerequisite. Older exhaustive feature-acceptance sequences in the canonical
+records are historical obligations/evidence, not a replacement local gate.
+After the required local gate, use normal built-in `/review` with current
+GPT-6.1 Sol/max. CI, release and live acceptance remain separately
+source/run/attempt-bound and authorized.
 
 Lifecycle stages are advisory and user-governed. Review, provider checks,
 publication/merge authority, DEV completion, STAGING promotion and STAGING

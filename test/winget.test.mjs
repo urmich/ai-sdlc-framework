@@ -1,5 +1,12 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
+  "applicability": [{
+    "names": ["T-51 RC66 TEST03 unavailable symlink capability fails the required public worker"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "maintainer",
+    "reason": "PR-only controlled Windows EPERM through the original root and real public worker; no privilege changes or native tooling.",
+    "prerequisites": ["Node and repository-local owned fixtures"]
+  }],
   "surfaces": [
     {"coverage": "direct", "paths": ["packaging/winget/generate.mjs", "packaging/winget/validate.mjs"]}
   ]
@@ -9,6 +16,9 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { pathToFileURL } from 'node:url';
 import { generateManifests, manifestContext, renderManifests, PACKAGE_IDENTIFIER, TEST_PACKAGE_IDENTIFIER } from '../packaging/winget/generate.mjs';
 import { validateManifests } from '../packaging/winget/validate.mjs';
 import { launcherBuildEnvironment, TOOLCHAIN } from '../packaging/winget/build-launcher.mjs';
@@ -178,15 +188,55 @@ test('T-51 WinGet output refuses unrelated files and symbolic links', async t =>
   await fs.unlink(path.join(options.outputDir, 'unrelated.txt'));
   const target = path.join(options.root, 'unrelated.yaml');
   await fs.writeFile(target, 'keep');
-  try {
-    await fs.symlink(target, path.join(options.outputDir, `${PACKAGE_IDENTIFIER}.yaml`));
-  } catch (error) {
-    if (process.platform === 'win32' && error.code === 'EPERM') return;
-    throw error;
-  }
+  await fs.symlink(target, path.join(options.outputDir, `${PACKAGE_IDENTIFIER}.yaml`));
   await assert.rejects(generateManifests(options), /owned manifest set/u);
   await assert.rejects(validateManifests({ ...options, manifestDir: options.outputDir }), /non-regular/u);
   assert.equal(await fs.readFile(target, 'utf8'), 'keep');
+});
+
+test('T-51 RC66 TEST03 unavailable symlink capability fails the required public worker', async t => {
+  const { root } = await fixture(t);
+  const trace = path.join(root, 'symlink-denied.ndjson');
+  const preload = path.join(root, 'deny-symlink.mjs');
+  await fs.writeFile(preload, `
+import fs from 'node:fs/promises';
+import {appendFileSync} from 'node:fs';
+import {syncBuiltinESMExports} from 'node:module';
+fs.symlink = async (target, link) => {
+  Object.defineProperty(process, 'platform', {value: 'win32'});
+  appendFileSync(${JSON.stringify(trace)}, JSON.stringify({target, link, code: 'EPERM'}) + '\\n');
+  throw Object.assign(new Error('Controlled required Windows symlink capability unavailable'), {code: 'EPERM'});
+};
+syncBuiltinESMExports();
+`);
+  const reportPath = path.join(root, 'denied.json');
+  let result;
+  try {
+    result = { ...await promisify(execFile)(process.execPath, [
+      path.resolve('scripts/test-runner.mjs'), 'targeted', '--workers', '1',
+      '--name', '^T-51 WinGet output refuses unrelated files and symbolic links$',
+      'test/winget.test.mjs',
+    ], { cwd: path.resolve('.'), timeout: 60000, maxBuffer: 1024 * 1024,
+      env: { ...process.env, NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`,
+        COPILOT_HOME: path.join(root, 'home'), TMPDIR: root, TMP: root, TEMP: root,
+        SDLC_TEST_REPORT_FILE: reportPath } }), exitCode: 0 };
+  } catch (error) {
+    if (!Number.isInteger(error.code)) throw error;
+    result = { stdout: error.stdout, stderr: error.stderr, exitCode: error.code };
+  }
+  const attempts = (await fs.readFile(trace, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(attempts.length, 1, 'The original required scenario must reach the controlled capability failure');
+  assert.equal(attempts[0].code, 'EPERM');
+  const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+  assert.notEqual(result.exitCode, 0, result.stdout + result.stderr);
+  assert.equal(report.complete, true);
+  assert.notEqual(report.exitCode, 0);
+  assert.equal(report.executions.length, 1);
+  assert.equal(report.executions[0].name, 'T-51 WinGet output refuses unrelated files and symbolic links');
+  assert.equal(report.executions[0].status, 'Failed');
+  await assert.rejects(fs.stat(path.dirname(attempts[0].target)), { code: 'ENOENT' });
+  t.diagnostic(JSON.stringify({ requiredSymlinkProbe: { complete: report.complete,
+    exitCode: result.exitCode, attempts, executions: report.executions, summary: report.summary } }));
 });
 
 test('T-51 launcher toolchain contract overrides ambient build variation', async () => {

@@ -1,14 +1,20 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
   "applicability": [
+    {"names": ["T-PRD054 consumer report clocks authenticate original bytes independently of provider completion"], "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "release-consumer", "reason": "PR-only REL01 clock, origin, interval and freshness regression with controlled provider observations; no public/native/crypto execution or critical-profile growth.", "prerequisites": ["Node >=22", "Owned repository-local originals and provider double"]},
     {"names": ["T-PRD054 producer consumer originals preserve typed provenance through completion admission"], "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "release-consumer", "reason": "PR-only producer serialization and completion-admission regression; owned filesystem and controlled provider observations, no network/native/public acceptance or critical-profile growth.", "prerequisites": ["Node >=22", "Owned repository-local fixture with isolated cleanup"]},
     {"names": ["T-PRD041 retained signed fixtures use the actual verifier for payload signature certificate and transparency failures"], "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "consumer-crypto-fixture", "reason": "Every native PR job provisions public authentic verification material; missing capability fails rather than skips. Optional local reproduction never supplies PR credit.", "prerequisites": ["SHA-pinned recorded public Sigstore bundle and public trust root", "Integrity-pinned npm 11.16.0 with its actual bundled verifier", "Exact recorded certificate identity and issuer; offline verification without network fallback"]}
   ],
+  "groups": [{"root": "T-PRD054 consumer report clocks authenticate original bytes independently of provider completion",
+    "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}],
   "surfaces": [
     {"coverage": "direct", "paths": ["scripts/consumer-evidence.mjs", "scripts/consumer-lifecycle.mjs", "scripts/accept-release.mjs", "scripts/verify-npm-attestation.mjs"]},
     {"coverage": "fixture-only", "paths": ["scripts/homebrew-lifecycle.mjs", "scripts/homebrew-switch.mjs"]}
   ],
   "plannedCases": [
+    {"id": "T-PRD041", "selectors": [
+      {"name": "T-PRD054 consumer report clocks authenticate original bytes independently of provider completion", "parents": []}
+    ]},
     {"id": "T-PRD037", "selectors": [
       {"name": "T-PRD054 rejected and failed consumer originals retain sanitized bytes, digests and immutable prior outcomes", "parents": []}
     ]}
@@ -212,7 +218,8 @@ test('T-PRD054 retained consumer inputs replay as-of without renewing freshness 
     status: 'Passed' };
   const origin = { native: structuredClone(native), scope: structuredClone(scope), producerPassed: true,
     conclusion: 'success', stepConclusion: 'success',
-    startedAt: new Date(Date.parse(report.observedAt) - 60_000).toISOString(), finishedAt: report.observedAt };
+    startedAt: new Date(Date.parse(report.observedAt) - 60_000).toISOString(),
+    finishedAt: new Date(Date.parse(report.observedAt) + 1_000).toISOString() };
   const retainedReport = canonical(report);
   const retainedResult = canonical(result);
   const request = { bundle, plan, tree: 'b'.repeat(40), target: 'windows-x64', result, report,
@@ -247,6 +254,88 @@ test('T-PRD054 retained consumer inputs replay as-of without renewing freshness 
   assert.equal(failed.evaluation.status, 'Failed', 'Known matching failed producer origin must remain replayable as Failed');
   assert.equal(canonical(report), retainedReport);
   assert.equal(canonical(result), retainedResult);
+});
+
+test('T-PRD054 consumer report clocks authenticate original bytes independently of provider completion', async t => {
+  const root = await fixture(t);
+  const file = path.join(root, 'windows-x64.json');
+  const observedAt = new Date(Date.now() - 5_000).toISOString();
+  const report = execution();
+  Object.assign(report, { startedAt: new Date(Date.parse(observedAt) - 1_000).toISOString(),
+    finishedAt: observedAt, observedAt });
+  for (const row of report.results) row.observedAt = observedAt;
+  const result = { profile: 'r-post', target: 'windows-x64', identity: structuredClone(bundle.identity),
+    releaseIntentId: bundle.releaseIntentId, native: structuredClone(native),
+    run: { id: scope.runId, attempt: scope.attempt }, status: 'Passed',
+    startedAt: report.startedAt, finishedAt: observedAt };
+  await write(file, result);
+  await write(`${file}.execution.json`, report);
+  await write(`${file}.toolchain.json`, { status: 'Passed', target: 'windows-x64', native: native.bootstrap });
+  const marker = { target: 'windows-x64', sourceCommit: bundle.identity.sourceCommit,
+    releaseIntentId: bundle.releaseIntentId, scope, native, files: await consumerOriginalInventory(file) };
+  const job = { id: 789, name: 'consumer-windows-x64', head_sha: bundle.identity.sourceCommit,
+    conclusion: 'success', status: 'completed', started_at: report.startedAt,
+    completed_at: new Date(Date.parse(observedAt) + 1_000).toISOString(),
+    labels: ['windows-2022'], steps: [{
+      name: 'Anonymous exact public downloads, real prior-version upgrades and cryptographic provenance',
+      conclusion: 'success',
+    }] };
+  const api = async route => ({ status: 200, value: route.endsWith('/logs') ?
+    Buffer.from(`${consumerEvidenceMarker}${canonical(marker)}\n`) :
+    route.includes('/jobs?') ? { total_count: 1, jobs: [job] } : {
+      id: 456, run_attempt: 2, repository: { id: 123, full_name: scope.repository },
+      head_sha: bundle.identity.sourceCommit, path: '.github/workflows/release.yml',
+      event: 'workflow_dispatch', head_branch: 'main',
+    } });
+  const origin = await acquireConsumerOrigin({ bundle, target: 'windows-x64', file, api, scope });
+  const originalReport = await fs.readFile(`${file}.execution.json`);
+  const originalResult = await fs.readFile(file);
+  const verifyOrigin = ({ resultSha256, reportSha256, target, sourceCommit, releaseIntentId }) => {
+    assert.equal(target, marker.target);
+    assert.equal(sourceCommit, marker.sourceCommit);
+    assert.equal(releaseIntentId, marker.releaseIntentId);
+    assert.equal(resultSha256, marker.files.find(row => row.filename === 'windows-x64.json').sha256);
+    assert.equal(reportSha256, marker.files.find(row => row.filename === 'windows-x64.json.execution.json').sha256);
+    return structuredClone(origin);
+  };
+  const request = { bundle, plan, tree: 'b'.repeat(40), target: 'windows-x64', result, report,
+    now: origin.finishedAt, verifyOrigin };
+  const replay = evaluateConsumerOriginal(request);
+  assert.equal(replay.evaluation.status, 'Passed', 'Authenticated report time need not equal provider cleanup completion');
+  assert.equal(replay.origin.finishedAt, job.completed_at);
+  assert.equal(replay.sourceTime, job.completed_at, 'Retained history keeps its literal provider-time contract');
+  assert.notEqual(report.observedAt, job.completed_at);
+  const atAge = offset => new Date(Date.parse(report.observedAt) + offset).toISOString();
+  assert.equal(evaluateConsumerOriginal({ ...request, now: atAge(86_400_000) }).evaluation.status, 'Passed');
+  assert.equal(evaluateConsumerOriginal({ ...request, now: atAge(86_400_001) }).evaluation.status, 'NotRun',
+    'Later provider completion cannot renew an expired report');
+  assert.equal(evaluateConsumerOriginal({ ...request, now: atAge(-1) }).evaluation.status, 'NotRun');
+  for (const mutate of [
+    value => { value.observedAt = atAge(1); },
+    value => { value.results[0].status = 'Failed'; },
+    value => { value.context.producer.executionRef = '999'; },
+  ]) {
+    const changed = structuredClone(report);
+    mutate(changed);
+    assert.throws(() => evaluateConsumerOriginal({ ...request, report: changed }),
+      /Expected values to be strictly equal/u, 'Parsed report tampering must fail original-byte authentication');
+  }
+  const changedResult = { ...result, run: { ...result.run, attempt: '1' } };
+  assert.throws(() => evaluateConsumerOriginal({ ...request, result: changedResult }),
+    /Expected values to be strictly equal/u);
+  assert.equal(evaluateConsumerOriginal({ ...request, verifyOrigin: input => ({
+    ...verifyOrigin(input), finishedAt: report.observedAt,
+  }) }).evaluation.status, 'Passed', 'Report exactly at provider completion remains admissible');
+  for (const bounds of [
+    { startedAt: new Date(Date.parse(report.startedAt) + 1).toISOString() },
+    { finishedAt: atAge(-1) },
+  ]) assert.throws(() => evaluateConsumerOriginal({ ...request,
+    verifyOrigin: input => ({ ...verifyOrigin(input), ...bounds }) }), /outside.*provider job/u);
+  await fs.appendFile(`${file}.execution.json`, '\n');
+  await assert.rejects(acquireConsumerOrigin({ bundle, target: 'windows-x64', file, api, scope }),
+    /originals differ/u, 'Even semantically identical replacement bytes are not the authenticated original');
+  assert.deepEqual(await fs.readFile(file), originalResult);
+  assert.deepEqual(await fs.readFile(`${file}.execution.json`), Buffer.concat([originalReport, Buffer.from('\n')]));
 });
 
 test('T-PRD054 rejected and failed consumer originals retain sanitized bytes, digests and immutable prior outcomes', async t => {
@@ -419,7 +508,8 @@ test('T-PRD054 producer consumer originals preserve typed provenance through com
     'Producer origin must bind the final sanitized bytes, not the unsanitized result');
   const job = { id: 789, name: 'consumer-windows-x64', head_sha: bundle.identity.sourceCommit,
     conclusion: 'success', status: 'completed',
-    started_at: new Date(Date.parse(report.startedAt) - 60_000).toISOString(), completed_at: report.finishedAt,
+    started_at: new Date(Date.parse(report.startedAt) - 60_000).toISOString(),
+    completed_at: new Date(Date.parse(report.finishedAt) + 1_000).toISOString(),
     labels: ['windows-2022'], steps: [{
       name: 'Anonymous exact public downloads, real prior-version upgrades and cryptographic provenance', conclusion: 'success',
     }] };
@@ -602,19 +692,23 @@ test('T-PRD041 public Homebrew executes exact formula bytes while candidate loop
   const old = path.join(root, 'previous');
   await fs.mkdir(directory);
   await fs.mkdir(old);
+  const releaseRepository = 'ApprovedOwner/current-releases';
   const filename = 'ai-sdlc-framework-1.2.3-macos.tar.gz';
-  const contents = `class AiSdlcFramework < Formula\n  url "https://github.com/urmich/ai-sdlc-framework/releases/download/v1.2.3/${filename}"\nend\n`;
+  const contents = `class AiSdlcFramework < Formula\n  url "https://github.com/${releaseRepository}/releases/download/v1.2.3/${filename}"\nend\n`;
   const descriptor = { version: '1.2.3', files: [
     { filename, kind: 'archive', sha256: 'a'.repeat(64), size: 1 },
     { filename: 'ai-sdlc-framework.rb', kind: 'homebrew', sha256: sha256(Buffer.from(contents)), size: Buffer.byteLength(contents) },
   ] };
   await write(path.join(directory, 'ai-sdlc-framework.rb'), contents);
-  const selected = { ...bundle, descriptor };
+  const selected = { ...bundle, descriptor, releaseRepository,
+    context: { previousRelease: { repository: 'PreviousOwner/prior-releases' } } };
   const previous = { directory: old, identity: { version: '1.2.2' },
     descriptor: { files: [{ kind: 'homebrew', filename: 'ai-sdlc-framework.rb', sha256: 'c'.repeat(64) }] } };
   const verifyLifecycle = async options => {
     if (options.mode !== 'public') return { passed: true, upgradeKind: 'version', platform: 'darwin', architecture: process.arch };
-    const exact = await publicHomebrewFormula(options.upgradeDirectory, descriptor);
+    assert.equal(options.expectedPreviousRepository, selected.context.previousRelease.repository);
+    assert.equal(options.expectedCurrentRepository, selected.releaseRepository);
+    const exact = await publicHomebrewFormula(options.upgradeDirectory, descriptor, options.expectedCurrentRepository);
     if (exact.contents.includes('broken-published-formula')) throw new Error('Actual public formula execution failed');
     return { passed: true, mode: 'public', publicAcceptance: 'Passed', upgradeKind: 'version',
       platform: 'darwin', architecture: process.arch, previousIdentity: previous.identity, currentIdentity: selected.identity,
@@ -624,6 +718,12 @@ test('T-PRD041 public Homebrew executes exact formula bytes while candidate loop
   const accept = () => acceptPublicHomebrew({ bundle: selected, downloaded: directory, previous,
     root: path.join(root, randomUUID()), brew: process.execPath, verifyLifecycle });
   assert.equal((await accept()).status, 'Passed', 'Controlled public-adapter fixture, not actual Homebrew execution');
+  selected.releaseRepository = selected.context.previousRelease.repository;
+  await assert.rejects(accept(), /exact public archive URLs/u, 'A prior destination cannot replace the current frozen destination');
+  selected.releaseRepository = releaseRepository;
+  delete selected.releaseRepository;
+  await assert.rejects(accept(), { code: 'RELEASE_INTEGRATION_BLOCKED' });
+  selected.releaseRepository = releaseRepository;
   const broken = `${contents}raise "broken-published-formula"\n`;
   await write(path.join(directory, 'ai-sdlc-framework.rb'), broken);
   Object.assign(descriptor.files[1], { sha256: sha256(Buffer.from(broken)), size: Buffer.byteLength(broken) });

@@ -180,6 +180,33 @@ export function ownedBlock(contents) {
     contents.indexOf(BLOCK_END, end + 1) < 0, 'INSTALL_CONFLICT', 'Instructions contain duplicate or incomplete ownership delimiters');
   return { start, end: end + BLOCK_END.length, text: contents.slice(start, end + BLOCK_END.length) };
 }
+function validateOwnershipManifest(manifest) {
+  requireThat(manifest && Object.getPrototypeOf(manifest) === Object.prototype &&
+    manifest.owner === 'ai-sdlc-framework' &&
+    manifest.schemaVersion === 1, 'INSTALL_CONFLICT', 'Unknown ownership manifest');
+  requireThat(manifest.files &&
+    Object.getPrototypeOf(manifest.files) === Object.prototype &&
+    Object.entries(manifest.files).every(([relative, hash]) =>
+      relative.split('/').every(part => part && part !== '.' && part !== '..') &&
+      !/[\\:\0]/u.test(relative) &&
+      typeof hash === 'string' && hash.length === 64 && /^[a-f0-9]{64}$/u.test(hash)),
+  'INSTALL_CONFLICT', 'Malformed ownership inventory');
+  const block = typeof manifest.instructionsBlock === 'string' ?
+    ownedBlock(manifest.instructionsBlock) : null;
+  requireThat(block && block.text === manifest.instructionsBlock,
+    'INSTALL_CONFLICT', 'Malformed ownership instructions block');
+  requireThat((manifest.instructionsOriginallyExisted === undefined ||
+    typeof manifest.instructionsOriginallyExisted === 'boolean') &&
+    (manifest.version === undefined ||
+      typeof manifest.version === 'string' && manifest.version.length > 0),
+  'INSTALL_CONFLICT', 'Malformed ownership metadata');
+}
+async function readOwnershipManifest(file) {
+  if (!(await exists(file))) return null;
+  const manifest = await readJson(file);
+  validateOwnershipManifest(manifest);
+  return manifest;
+}
 export async function selectMaintenanceSource(store, input) {
   object(input, ['sessionId', 'receiptId', 'input', 'sourceRoot'],
     ['sessionId', 'receiptId', 'input', 'sourceRoot']);
@@ -313,8 +340,7 @@ async function installLocked(store, {
 } = {}) {
     installPhase('replacement-preflight', 'begin');
     const manifestFile = await safePath(store.home, 'sdlc/install-manifest.json');
-    const previous = await readJson(manifestFile, { optional: true });
-    if (previous) requireThat(previous.owner === 'ai-sdlc-framework' && previous.schemaVersion === 1, 'INSTALL_CONFLICT', 'Unknown ownership manifest');
+    const previous = await readOwnershipManifest(manifestFile);
     const { files, block } = prepared ?? await distribution(store.home, sourceRoot);
     const instructionsFile = await safePath(store.home, 'copilot-instructions.md');
     const original = await exists(instructionsFile) ? (await readBytes(instructionsFile)).toString('utf8') : '';
@@ -325,14 +351,16 @@ async function installLocked(store, {
     const inspected = await readInstallInputs([...files], async ([relative, content]) => {
       const target = await safePath(store.home, relative);
       const before = await exists(target) ? await readBytes(target, LIMITS.artifact) : null;
-      requireThat(!before || previous?.files?.[relative] === digest(before), 'INSTALL_CONFLICT', `Modified or unowned file preserved: ${relative}`);
+      requireThat(!before || previous?.files[relative] === digest(before), 'INSTALL_CONFLICT', `Modified or unowned file preserved: ${relative}`);
       return !before || !before.equals(content) ? { relative, target, before, content } : null;
     });
     const changes = inspected.filter(Boolean);
-    for (const [relative, hash] of Object.entries(previous?.files ?? {})) {
+    for (const [relative, hash] of Object.entries(previous ? previous.files : {})) {
       if (files.has(relative)) continue;
-      const target = await safePath(store.home, relative);
+      const target = await purgeOwnedPath(store.home, relative);
       if (await exists(target)) {
+        requireThat(!(await fs.lstat(target)).isSymbolicLink(), 'INSTALL_CONFLICT',
+          `Obsolete symlink preserved: ${relative}`);
         const before = await readBytes(target, LIMITS.artifact);
         requireThat(digest(before) === hash, 'INSTALL_CONFLICT', `Modified obsolete file preserved: ${relative}`);
         changes.push({ relative, target, before, content: null });
@@ -448,13 +476,22 @@ async function uninstallLocked(store) {
     }
     const manifestFile = await safePath(store.home,
       'sdlc/install-manifest.json');
-    const manifest = await readJson(manifestFile, { optional: true });
-    if (manifest) requireThat(manifest.owner === 'ai-sdlc-framework',
-      'INSTALL_CONFLICT', 'Unknown ownership manifest');
+    const manifest = await readOwnershipManifest(manifestFile);
+    const files = manifest ? manifest.files : {};
     const removed = [], preserved = [];
     const remaining = {};
-    for (const relative of Object.keys(manifest?.files ?? {})) {
-      await purgeOwnedPath(store.home, relative);
+    for (const relative of Object.keys(files)) {
+      const literal = await purgeOwnedPath(store.home, relative);
+      let stat;
+      try { stat = await fs.lstat(literal); }
+      catch (error) {
+        if (error.code === 'ENOENT') continue;
+        throw error;
+      }
+      if (stat.isSymbolicLink()) continue;
+      requireThat(stat.isFile(), 'INSTALL_CONFLICT',
+        `Non-file ownership entry preserved: ${relative}`);
+      await readBytes(literal, LIMITS.artifact);
     }
     const instructionPreflight = await purgeOwnedPath(store.home,
       'copilot-instructions.md');
@@ -466,7 +503,7 @@ async function uninstallLocked(store) {
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }
-    for (const [relative, hash] of Object.entries(manifest?.files ?? {})) {
+    for (const [relative, hash] of Object.entries(files)) {
       const literal = await purgeOwnedPath(store.home, relative);
       try {
         if ((await fs.lstat(literal)).isSymbolicLink()) {

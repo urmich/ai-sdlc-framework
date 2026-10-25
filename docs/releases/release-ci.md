@@ -105,9 +105,13 @@ Windows remains a distinct x64 PE; npm remains the primary channel.
 | `macos-15`, Apple Silicon | T-PRD079-MA | Complete native regression and standalone/Homebrew/shell lifecycle on the frozen shared archive. |
 | `macos-15-intel`, Intel Mac | T-PRD079-MI | Corresponding complete native x64 execution on the exact same shared Mac bytes. |
 
-The native validation baseline is Node 22.23.3, Go 1.27.1 and CPython 3.12.10,
+The native validation baseline is Node 24.20.0 (`node@24` for Homebrew),
+Go 1.27.1 and CPython 3.12.10,
 plus the integrity-pinned schema/Homebrew/Ruby inputs and actual image/tool
 identities in the [living Test Plan](../sdlc/public-readiness/test-plan.md#22-hosts-and-prerequisites).
+The separate mandatory minimum-runtime compatibility job uses Node 22.23.3;
+publishing uses Node 24.22.0. Product support remains Node >=22. These current
+baselines do not change explicitly historical published 0.4.0 examples or assets.
 These are selected execution inputs, not proof of available or completed jobs.
 Translated/cross-build/metadata fixtures cannot satisfy native cases.
 

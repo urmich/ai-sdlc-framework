@@ -84,9 +84,8 @@ restriction as `NotRun` with a separate `Blocked` reason.
 ## 2. Download and verify before extraction
 
 ```powershell
-$Work = Join-Path $env:TEMP 'AI SDLC Framework Windows Test'
-Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Path $Work | Out-Null
+$Work = Join-Path $env:TEMP ('AI SDLC Framework Windows Test-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $Work -ErrorAction Stop | Out-Null
 
 $Descriptor = Join-Path $Work 'release-descriptor.json'
 $Checksums = Join-Path $Work 'SHA256SUMS'
@@ -112,6 +111,10 @@ if (-not (Select-String -LiteralPath $Checksums -SimpleMatch $Binding.archive.sh
   throw 'SHA256SUMS does not bind the expected Windows archive'
 }
 ```
+
+Workspace creation is exclusive: an existing destination is an error, not
+permission to reuse or delete it. Retain this execution's new `$Work` path with
+the evidence; never recursively clean a fixed TEMP path or another run's content.
 
 If the release assets are not yet public, record this phase as `NotRun` with
 `Blocked: release assets unavailable`; do not substitute checkout bytes or a

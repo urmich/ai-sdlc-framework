@@ -2458,8 +2458,8 @@ not by advisory framework hooks. No Coding authorization is implied.
 
 ### 17.1 Public identity, governance, and configuration
 
-The canonical identity is `urmich/ai-sdlc-framework`, maintained by Michael
-Urinovsky as personal/community third-party OSS under MIT. It is not Microsoft
+The canonical identity is `urmich/ai-sdlc-framework`, maintained by
+[`urmich`](https://github.com/urmich) as personal/community third-party OSS under MIT. It is not Microsoft
 first-party software, sponsored/approved Microsoft distribution, or a promise
 of Microsoft/GitHub support or corporate availability. Contributor attribution
 and third-party licenses are retained; contribution does not imply copyright
@@ -2467,7 +2467,7 @@ assignment to Microsoft or a requirement to sign a Microsoft CLA.
 
 | Planned surface | Contract |
 | --- | --- |
-| `config/oss-project.json`; `README.md`; `package.json`; `LICENSE` | One validated repository/name/owner/license identity; actual source, homepage, issues, discussions, private security, and conduct-reporting channels. Keep the requested Michael Urinovsky author/copyright. Placeholder contacts fail; channels must be owner-confirmed and their enablement/reachability separately observed. |
+| `config/oss-project.json`; `README.md`; `package.json`; `LICENSE` | One validated repository/name/owner/license identity; actual source, homepage, issues, discussions, private security, and conduct-reporting channels. Current reader/package identity uses the maintainer's public GitHub handle; retain required LICENSE copyright and immutable published metadata. Placeholder contacts fail; channels must be owner-confirmed and their enablement/reachability separately observed. |
 | `GOVERNANCE.md`; `.github/CODEOWNERS` | Named actual maintainers/reviewers, decision and release authority, succession/contact procedure, and ownership of workflows/security policy. A sole maintainer or AI review is not fabricated independent GitHub approval. |
 | `SECURITY.md` | Supported release lines, GitHub private vulnerability reporting, report content, coordinated disclosure, best-effort response boundaries, and escalation limitations. No public issue containing undisclosed vulnerability details. An unavailable private path is a visible blocker, not an invented email address. |
 | `CONTRIBUTING.md`; `CODE_OF_CONDUCT.md`; `SUPPORT.md`; `.github/PULL_REQUEST_TEMPLATE.md`; `CHANGELOG.md` | Build/test/review and inbound MIT contribution rules, maintainer-owned conduct channels, community support, and user-facing release notes rather than a duplicate engineering revision log. Institutional support/contact claims are not copied from another project. |

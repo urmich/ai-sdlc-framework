@@ -6,7 +6,7 @@ review the exact candidate before separately authorized delivery.
 
 ![AI SDLC Framework lifecycle](docs/images/ai-sdlc-framework-overview.svg)
 
-This is Michael Urinovsky's personal, community-maintained third-party OSS
+This is [urmich](https://github.com/urmich)'s personal, community-maintained third-party OSS
 project, licensed under [MIT](LICENSE). It is not a Microsoft product,
 sponsorship, approval or corporate support commitment.
 

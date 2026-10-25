@@ -1,6 +1,6 @@
 # Ownership and review
 
-Michael Urinovsky ([urmich](https://github.com/urmich)) owns/maintains this
+[urmich](https://github.com/urmich) owns/maintains this
 personal third-party OSS project. See [MIT](LICENSE) and [package metadata](package.json).
 No employer, Microsoft team, corporate support organization or additional
 maintainer approval is implied.

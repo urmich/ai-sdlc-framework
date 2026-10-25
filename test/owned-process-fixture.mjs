@@ -1,6 +1,42 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import * as fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
+
+if (process.argv[2] === '--owned-pipe-fixture') {
+  const [mode, directory, token] = process.argv.slice(3);
+  const release = path.join(directory, `${token}.release`);
+  if (mode === 'writer') {
+    const publication = path.join(directory, `${token}.writer.json`);
+    const pending = `${publication}.${randomUUID()}.pending`;
+    fs.writeFileSync(pending, JSON.stringify({ pid: process.pid, parent: process.ppid, token }), { flag: 'wx' });
+    fs.renameSync(pending, publication);
+    process.send({ ready: true });
+    const timer = setInterval(() => {
+      if (!fs.existsSync(release)) return;
+      clearInterval(timer);
+      fs.writeFileSync(path.join(directory, `${token}.drained`), String(process.pid));
+    }, 10);
+  } else {
+    const writer = spawn(process.execPath,
+      [import.meta.filename, '--owned-pipe-fixture', 'writer', directory, token],
+      { stdio: ['ignore', 'inherit', 'inherit', 'ipc'], shell: false, detached: true });
+    writer.once('message', () => {
+      writer.disconnect();
+      process.stdout.write('owned-natural-tail');
+      if (mode === 'root-exit') process.exitCode = 23;
+      else {
+        const timer = setInterval(() => {
+          if (!fs.existsSync(release)) return;
+          clearInterval(timer);
+          process.exitCode = 23;
+        }, 10);
+      }
+      writer.unref();
+    });
+  }
+}
 
 export async function windowsProcessIdentity(pid, exitPath, { createdBeforeMs } = {}) {
   assert.ok(Number.isSafeInteger(pid) && pid > 0);

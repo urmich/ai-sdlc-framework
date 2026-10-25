@@ -1,6 +1,6 @@
 # Support
 
-This is personal/community-maintained third-party OSS by Michael Urinovsky,
+This is personal/community-maintained third-party OSS by [urmich](https://github.com/urmich),
 not Microsoft-owned, sponsored or approved software. Support is best effort:
 there is no guaranteed response time, SLA, enterprise entitlement or promise
 that a corporate environment permits the package.

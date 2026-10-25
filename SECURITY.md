@@ -2,7 +2,7 @@
 
 ## Scope and supported versions
 
-Michael Urinovsky maintains this personal third-party MIT project on a
+[urmich](https://github.com/urmich) maintains this personal third-party MIT project on a
 best-effort basis. Current published version: **0.4.0**. The project does not
 promise LTS, support for every older release, a response SLA, corporate approval,
 first-party status, CFS exemption or guaranteed availability.

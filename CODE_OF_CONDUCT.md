@@ -5,7 +5,7 @@ project spaces. Discuss code and behavior rather than attacking people.
 Harassment, threats, discriminatory abuse, unwanted sexual attention, doxxing
 and deliberate disclosure of private information are not acceptable.
 
-Michael Urinovsky, the project's personal maintainer, moderates project spaces.
+The project's personal maintainer, [urmich](https://github.com/urmich), moderates project spaces.
 For nonsensitive conduct concerns use the
 [public issue channel](https://github.com/urmich/ai-sdlc-framework/issues)
 without naming private details; an existing conversation can also be flagged

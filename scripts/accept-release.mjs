@@ -13,6 +13,8 @@ import { assertNativeMacHost, verifyCopiedHomebrewInstallation,
   runHomebrewCommand as execute } from './homebrew-switch.mjs';
 import { verifyHomebrewLifecycle, verifyHomebrewUpgradeInputs } from './homebrew-lifecycle.mjs';
 import { nativeToolchain } from './toolchain-baseline.mjs';
+import { beginHomebrewPrefixStage } from './native-homebrew-prefix.mjs';
+import { createOwnedCommandRunner } from './validation-tools.mjs';
 import { assertConsumerUpdate, assertConsumerUninstall, installedConsumerSnapshot, npmPublicCommand,
   seedConsumerPreservation } from './consumer-lifecycle.mjs';
 import { consumerSpecification, consumerTargetSuffixes, evaluateConsumerOriginal,
@@ -276,7 +278,7 @@ export async function downloadPreviousRelease({ repository, version, descriptorS
     }
 export async function acceptPublicHomebrew({ bundle, downloaded, previous, root,
   environment = process.env, brew = process.env.SDLC_PUBLIC_HOMEBREW_BREW ?? process.env.SDLC_HOMEBREW_BREW,
-  verifyLifecycle = verifyHomebrewLifecycle }) {
+  verifyLifecycle = verifyHomebrewLifecycle, runCommand, processSettlement }) {
   const formulas = bundle.descriptor.files.filter(file => file.kind === 'homebrew');
   if (formulas.length !== 1 || formulas[0].filename !== 'ai-sdlc-framework.rb') {
     throw new Error('Stable public Homebrew acceptance requires one frozen formula');
@@ -296,7 +298,9 @@ export async function acceptPublicHomebrew({ bundle, downloaded, previous, root,
   const evidence = await verifyLifecycle({ brew, candidateDirectory: previous.directory,
     upgradeDirectory: downloaded, root, targetArch: process.arch, mode: 'public',
     expectedPreviousIdentity: previous.identity, expectedCurrentIdentity: bundle.identity,
-    expectedNodeVersion: nativeToolchain.node, environment });
+    expectedPreviousRepository: bundle.context?.previousRelease?.repository,
+    expectedCurrentRepository: bundle.releaseRepository,
+    expectedNodeVersion: nativeToolchain.node, environment, runCommand, processSettlement });
   if (evidence.passed !== true || evidence.upgradeKind !== 'version' ||
       evidence.mode !== 'public' || evidence.publicAcceptance !== 'Passed' ||
       evidence.formulas?.candidate?.source !== 'exact-published-bytes' ||
@@ -568,6 +572,12 @@ export async function acceptRelease({ directory, outputFile, target, previousVer
     corporateWindows: { status: 'NotRun', reason: 'No corporate-managed-device or IT-policy bypass is performed' },
     windowsNetworkDenial: { status: 'NotRun', reason: 'No validated approved native Windows denial adapter exists' } };
   let toolchain;
+  let prefixStage;
+  let commandRunner;
+  let bootstrapDirectory;
+  let prefixFinished = false;
+  let primaryFailure;
+  const lifetime = { cleanupSafe: true, unsettledCommands: [] };
   const procedure = async (name, action) => {
     try { return result[name] = await action(); }
     catch (error) {
@@ -654,12 +664,28 @@ export async function acceptRelease({ directory, outputFile, target, previousVer
     }
     await procedure('standalone', () => verifyStandaloneConsumer({ bundle, downloaded, previous, root, environment: env, run: command }));
     if (process.platform === 'darwin' && !bundle.context.prerelease) {
-      await procedure('homebrew', () => acceptPublicHomebrew({ bundle, downloaded, previous,
-        root: path.join(root, 'homebrew-public-native'), environment: env }));
+      bootstrapDirectory = path.dirname(process.env.SDLC_NATIVE_TOOLCHAIN_REPORT);
+      if (!path.isAbsolute(process.env.SDLC_NATIVE_TOOLCHAIN_REPORT) ||
+          process.env.SDLC_HOMEBREW_PREFIX_PROOF !== bootstrapDirectory) {
+        throw blocked('Public Homebrew consumption requires its exact owned bootstrap prefix proof');
+      }
+      prefixStage = await beginHomebrewPrefixStage({ stage: 'native', bootstrapDirectory,
+        repositoryRoot: path.resolve(ROOT), target, role: target, sourceCommit: bundle.identity.sourceCommit,
+        environment: process.env });
+      if (!prefixStage) throw blocked('Public Homebrew consumption requires an allocated prefix, not non-allocation evidence');
+      commandRunner = createOwnedCommandRunner({ lifetime });
+      await procedure('homebrew', () => prefixStage.run('public-homebrew-lifecycle',
+        () => acceptPublicHomebrew({ bundle, downloaded, previous,
+          root: path.join(root, 'homebrew-public-native'), environment: env, runCommand: commandRunner.run,
+          processSettlement: commandRunner.isSettled }),
+        lifetime, () => commandRunner.isSettled()));
+      if (!lifetime.cleanupSafe) throw Object.assign(new Error('Public Homebrew command settlement is unverified.'),
+        { code: 'UNSETTLED_WRITERS' });
     }
     result.status = 'Passed';
     return result;
   } catch (error) {
+    primaryFailure = error;
     result.status = error.code === 'RELEASE_INTEGRATION_BLOCKED' ? 'NotRun' : 'Failed';
     if (error.code === 'RELEASE_INTEGRATION_BLOCKED') result.diagnosticStatus = 'Blocked';
     result.reason = error.message;
@@ -676,10 +702,32 @@ export async function acceptRelease({ directory, outputFile, target, previousVer
       if (result.status === 'Passed') result.status = 'NotRun';
       result.readinessDiagnostic = error.message;
     }
-    await retainConsumerResult({ result, bundle, outputFile,
-      commandFile: path.join(root, 'commands.jsonl'), toolchain });
-    await fs.rm(root, { recursive: true, force: true });
-    if (readinessError) throw readinessError;
+    let retentionError;
+    try {
+      await retainConsumerResult({ result, bundle, outputFile,
+        commandFile: path.join(root, 'commands.jsonl'), toolchain });
+      if (prefixStage && !readinessError && commandRunner?.isSettled() && lifetime.cleanupSafe) {
+        const retained = JSON.parse(await fs.readFile(outputFile, 'utf8'));
+        const expectedResult = sanitizeConsumerResultPayload(Buffer.from(JSON.stringify(result)));
+        if (canonical(retained) !== canonical(expectedResult)) {
+          throw new Error('Retained public consumer report does not match this exact consumer outcome.');
+        }
+        await prefixStage.finish();
+        prefixFinished = true;
+      }
+    } catch (error) {
+      if (!prefixStage) throw error;
+      lifetime.cleanupSafe = false;
+      retentionError = error;
+    }
+    if (!prefixStage || prefixFinished && result.status === 'Passed') await fs.rm(root, { recursive: true, force: true });
+    const failure = retentionError ?? readinessError;
+    if (failure) {
+      if (!prefixStage || !primaryFailure) throw failure;
+      primaryFailure.prefixSafetyRetentionError ??= failure;
+      primaryFailure.workspaceCleanup = { ...lifetime, retainedWorkspaces: [root, bootstrapDirectory] };
+      throw primaryFailure;
+    }
   }
 }
 

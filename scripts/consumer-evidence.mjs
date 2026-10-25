@@ -98,7 +98,8 @@ export function evaluateConsumerOriginal({ bundle, plan, tree, target, result, r
   'Consumer report times fall outside its independently verified provider job');
   const normalized = normalizeExecutionReport(report, context, input => ({
     verifierId: 'published-consumer-host', reportDigest: input.reportDigest, context,
-    sourceTime: origin.finishedAt, sourceSequence: 1,
+    // Provider upload/cleanup completion is not the authenticated report clock.
+    sourceTime: report.observedAt, sourceSequence: 1,
   }));
   const evaluation = evaluateReadiness(specification, [normalized], {
     profile: specification.profile, executions: [{ id: `consumer-${target}`, context }], now,

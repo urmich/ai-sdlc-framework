@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for contributing to Michael Urinovsky's personal third-party OSS
+Thank you for contributing to [urmich](https://github.com/urmich)'s personal third-party OSS
 project. Contributions are licensed under the existing [MIT license](LICENSE);
 do not submit proprietary code, secrets or material you cannot license.
 Follow the [Code of Conduct](CODE_OF_CONDUCT.md).

@@ -18,7 +18,8 @@ import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
 import { compileValidationInventory, compileValidationSourceInventory, reconcileNodeExecution,
   validationPlatforms, validationSourcePaths, isValidationTestPath,
   partitionValidationInventory } from './validation-inventory.mjs';
-import { discoverGoDeclarations, executeValidationCommand, reconcileGoExecution, processDiagnostic } from './validation-tools.mjs';
+import { discoverGoDeclarations, executeValidationCommand, reconcileGoExecution, processDiagnostic,
+  createOwnedCommandRunner } from './validation-tools.mjs';
 import { repositoryRoot, unitFiles, validationSelectionDescriptor, validationSelectionProtocol,
   writeValidationSelection } from './test-runner.mjs';
 import { verifyCandidate, archiveRecord } from './release-bundle.mjs';
@@ -33,6 +34,7 @@ import { calculatorProjectFiles, calculatorSelection, calculatorCapability, calc
 import { prCryptoFixture } from './pr-capabilities.mjs';
 import { nativeToolchain, nativeBootstrapProtocol, nativeBodyBootstrapProtocol, nativeUnitBootstrapProtocol,
   nativeSdkBootstrapProtocol, nativeBootstrapProtocols } from './toolchain-baseline.mjs';
+import { beginHomebrewPrefixStage, beginHomebrewPrefixChild } from './native-homebrew-prefix.mjs';
 import { sourceNativeBootstrapProtocol, requireNativeBootstrapCapability, nativeSdkRequirements,
   nativeSdkContextMatches, nativeBootstrapRequirements, probeNativeSdk,
   requireNativeCryptoEnvironment } from './native-bootstrap-capability.mjs';
@@ -1560,7 +1562,7 @@ export async function verifyNativeEvidence({ target, profile, candidateDir, evid
     artifacts: context.artifacts, diagnostics, sourceCommit: expectedSourceCommit };
 }
 
-export async function runNativeValidation(options) {
+export async function runNativeValidation(options, { lifetime = { cleanupSafe: true, unsettledCommands: [] } } = {}) {
   const request = validateNativeRequest(options);
   const { target, profile, candidateDir, evidenceDir, buildCandidate, phase, component, shard } = request;
   const role = nativeProducerRole(target, component, shard);
@@ -1590,10 +1592,24 @@ export async function runNativeValidation(options) {
   let candidate;
   let inputs;
   let failure;
+  let primaryFailure;
   let evaluation;
   let ambient;
+  let prefixStage;
+  let cleanupDiagnostic = null;
   let candidateReady = false;
   try {
+    if (process.platform === 'darwin') {
+      requireThat(typeof process.env.SDLC_NATIVE_TOOLCHAIN_REPORT === 'string' &&
+        path.isAbsolute(process.env.SDLC_NATIVE_TOOLCHAIN_REPORT), 'HOST',
+      'Native prefix settlement requires the exact owned bootstrap report directory');
+      const bootstrapDirectory = path.dirname(process.env.SDLC_NATIVE_TOOLCHAIN_REPORT);
+      requireThat(!process.env.SDLC_HOMEBREW_PREFIX_PROOF ||
+        process.env.SDLC_HOMEBREW_PREFIX_PROOF === bootstrapDirectory, 'HOST',
+      'Native prefix settlement cannot borrow another bootstrap proof');
+      prefixStage = await beginHomebrewPrefixStage({ stage: 'native', bootstrapDirectory,
+        repositoryRoot, target, role, sourceCommit: revision, environment: process.env });
+    }
     await assertCommittedNativeInputs();
     await runtimePreflight();
     inputs = await definitionInputs(target, profile, component, shard);
@@ -1634,8 +1650,26 @@ export async function runNativeValidation(options) {
     });
     environment.SDLC_TEST_REPORT_CONTEXT = JSON.stringify(commandContext);
     await writeJson(path.join(directory, 'toolchain.json'), bootstrap);
-    const runTool = options => executeValidationCommand({ outputDir: directory, environment,
-      signal: cancellation.signal, ...options });
+    const runTool = options => {
+      const { verifySettlement, ...commandOptions } = options;
+      const execute = async () => {
+        let report;
+        let primary;
+        try {
+          report = await executeValidationCommand({ outputDir: directory, environment,
+            signal: cancellation.signal, ...commandOptions, lifetime });
+        } catch (error) { primary = error; }
+        try { if (verifySettlement) await verifySettlement(report); }
+        catch (error) {
+          lifetime.cleanupSafe = false;
+          if (!primary) throw error;
+          primary.innerSettlementError = error;
+        }
+        if (primary) throw primary;
+        return report;
+      };
+      return prefixStage ? prefixStage.run(options.name, execute, lifetime) : execute();
+    };
     const sdk = await probeNativeSdk({ inventory: inputs.inventory, plan: inputs.plan, assignment,
       target, profile, component, shard, protocol: inputs.bootstrapProtocol }, runTool);
     const tree = (await git(['rev-parse', 'HEAD^{tree}'])).stdout.trim();
@@ -1785,11 +1819,18 @@ export async function runNativeValidation(options) {
     }
     }
     if (target.startsWith('macos-') && component !== 'framework') {
+      requireThat(prefixStage, 'HOST', 'Native Homebrew requires its allocated prefix stage');
+      const homebrewArgs = [path.join(repositoryRoot, 'scripts', 'native-validation.mjs'), 'homebrew',
+        '--target', target, '--profile', profile, '--candidate-dir', candidateDir,
+        '--evidence-dir', evidenceDir, '--build-candidate', 'false',
+        ...(component === 'full' ? [] : ['--component', component])];
+      const child = await prefixStage.prepareChild({ name: 'homebrew-command',
+        command: [process.execPath, ...homebrewArgs],
+        commandContext: JSON.parse(environment.SDLC_TEST_REPORT_CONTEXT), reportDirectory: directory });
       const command = await runTool({ name: 'homebrew-command', command: process.execPath,
-        args: [path.join(repositoryRoot, 'scripts', 'native-validation.mjs'), 'homebrew',
-          '--target', target, '--profile', profile, '--candidate-dir', candidateDir,
-          '--evidence-dir', evidenceDir, '--build-candidate', 'false',
-          ...(component === 'full' ? [] : ['--component', component])] });
+        cwd: repositoryRoot, requireSettlement: true, verifySettlement: child.verify,
+        environment: { ...environment, SDLC_NATIVE_HOMEBREW_CHILD: child.id },
+        args: homebrewArgs });
       requireThat(command.complete && command.exitCode === 0, 'VALIDATION',
         'Native Homebrew did not complete successfully; original subprocess reports are retained');
     }
@@ -1801,14 +1842,27 @@ export async function runNativeValidation(options) {
       !(await git(['status', '--porcelain'])).stdout.trim(), 'EVIDENCE',
     'Native validation cannot credit changed source or changed frozen artifacts');
   } catch (error) {
+    primaryFailure = error;
     failure = safe({ code: error.code ?? 'NATIVE_PRODUCER', message: error.message });
   } finally {
     process.off('SIGINT', interrupt);
     process.off('SIGTERM', interrupt);
     if (ambient) {
-      try { await ambient.dispose(); }
-      catch (error) {
-        failure = safe({ code: error.code ?? 'NATIVE_AMBIENT_CLEANUP', message: error.message });
+      if (!lifetime.cleanupSafe) {
+        cleanupDiagnostic = safe({ code: 'UNSETTLED_WRITERS',
+          message: 'Owned native workspaces and evidence are retained until writer termination is established.' });
+      } else {
+        try { await ambient.dispose(); }
+        catch (error) {
+          cleanupDiagnostic = safe({ code: error.code ?? 'NATIVE_AMBIENT_CLEANUP', message: error.message });
+        }
+      }
+      if (cleanupDiagnostic) {
+        failure ??= cleanupDiagnostic;
+        lifetime.retainedWorkspaces = [...new Set([
+          ...(lifetime.retainedWorkspaces ?? []),
+          ...(!lifetime.cleanupSafe ? [directory] : []), ambient.directory,
+        ])];
       }
     }
   }
@@ -1842,8 +1896,17 @@ export async function runNativeValidation(options) {
     descriptorSha256: candidate?.context.identity.descriptorSha256 ?? null,
     checksumsSha256: candidate?.context.identity.checksumsSha256 ?? null,
     artifacts: context?.artifacts ?? [], diagnostics, failure, presentationDiagnostic,
+    workspaceCleanup: lifetime, cleanupDiagnostic,
     complete: status === 'Passed', cancelled: cancellation.signal.aborted, startedAt, finishedAt: new Date().toISOString() };
-  await writeJson(path.join(directory, 'producer.json'), result);
+  try {
+    await writeJson(path.join(directory, 'producer.json'), result);
+    if (prefixStage) await prefixStage.finish();
+  } catch (error) {
+    if (!primaryFailure) throw error;
+    primaryFailure.prefixSafetyRetentionError ??= error;
+    primaryFailure.workspaceCleanup = lifetime;
+    throw primaryFailure;
+  }
   return { ...result, evaluation };
 }
 
@@ -1879,21 +1942,42 @@ async function runHomebrewProcedure(options) {
   const candidate = await verifyCandidate(candidateDir, { sourceCommit: process.env.EXPECTED_SOURCE_COMMIT,
     descriptorSha256: process.env.EXPECTED_DESCRIPTOR_SHA256,
     checksumsSha256: process.env.EXPECTED_CHECKSUMS_SHA256 });
+  const lifetime = { cleanupSafe: true, unsettledCommands: [] };
+  // Register the delegated-command scope before any SDK work, including settled pre-lifecycle failures.
+  createOwnedCommandRunner({ lifetime });
+  const child = process.env.SDLC_NATIVE_HOMEBREW_CHILD ? await beginHomebrewPrefixChild({
+    repositoryRoot, bootstrapDirectory: path.dirname(process.env.SDLC_NATIVE_TOOLCHAIN_REPORT),
+    target, role: nativeProducerRole(target, component), sourceCommit: process.env.EXPECTED_SOURCE_COMMIT,
+    environment: process.env,
+  }) : null;
   let result;
+  let primaryFailure;
+  let retained = false;
   try {
     const { verifyNativeHomebrew } = await import('./release-gate.mjs');
     result = await verifyNativeHomebrew({ candidate, candidateDir, scratch: evidenceDir,
-      targetArch: process.arch, mode: 'candidate' });
+      targetArch: process.arch, mode: 'candidate', lifetime });
   } catch (error) {
-    await writeNativeHomebrewReport(evidenceDir, {
-      nativeValidation: error.homebrewResult?.nativeValidation ?? 'NotRun',
+    primaryFailure = error;
+    result = { nativeValidation: error.homebrewResult?.nativeValidation ?? 'NotRun',
       diagnostic: processDiagnostic(error), stage: error.homebrewResult?.stage,
-      evidence: error.homebrewResult?.evidence ?? null,
-      quality: error.homebrewResult?.quality ?? error.homebrewQuality ?? null,
-    }, error);
-    throw error;
+      evidence: error.homebrewResult?.evidence ?? null, quality: error.homebrewResult?.quality ?? error.homebrewQuality ?? null };
   }
-  await writeNativeHomebrewReport(evidenceDir, result);
+  try {
+    await writeNativeHomebrewReport(evidenceDir, result, primaryFailure);
+    retained = true;
+  } catch (error) {
+    if (!primaryFailure) throw error;
+    if (error !== primaryFailure) primaryFailure.innerReportRetentionError = error;
+  }
+  if (child && retained) {
+    try { await child.finish({ lifetime, reportPath: path.join(evidenceDir, 'native-homebrew.json') }); }
+    catch (error) {
+      if (!primaryFailure) throw error;
+      primaryFailure.innerSettlementError = error;
+    }
+  }
+  if (primaryFailure) throw primaryFailure;
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {

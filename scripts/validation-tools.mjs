@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { finished } from 'node:stream/promises';
 import { open, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -295,8 +296,224 @@ async function settleOwnedProcessGroup(childClosed, cleanup, signalError, deadli
   }
 }
 
+async function stopOwnedProcessTree(child, childClosed, cleanup, deadline) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    throw Object.assign(new Error('Owned root exited before tree termination; descendants remain unverified.'),
+      { code: 'STOP_UNVERIFIED' });
+  }
+  // Dispatch while the original ChildProcess still owns a live root, never on a later PID retry.
+  const killer = spawn(path.join(process.env.SystemRoot, 'System32', 'taskkill.exe'),
+    ['/PID', String(child.pid), '/T', '/F'], { stdio: ['ignore', 'ignore', 'pipe'], shell: false });
+  cleanup.control = { pid: killer.pid ?? null, exitCode: null, signal: null };
+  let timer;
+  let settled = false;
+  try {
+    const termination = new Promise((resolve, reject) => {
+      let diagnostic = '';
+      const original = createHash('sha256');
+      let bytesSeen = 0;
+      killer.stderr.on('data', bytes => {
+        original.update(bytes);
+        bytesSeen += bytes.length;
+        if (diagnostic.length < 2000) diagnostic += bytes.toString('utf8').slice(0, 2000 - diagnostic.length);
+      });
+      killer.stderr.once('error', reject);
+      killer.once('error', reject);
+      killer.once('close', (code, signal) => {
+        if (!settled) cleanup.control = { ...cleanup.control, exitCode: code, signal,
+          originalStderr: { sha256: original.digest('hex'), bytes: bytesSeen } };
+        if (code === 0) resolve();
+        else reject(Object.assign(new Error(`Cannot stop the owned validation process tree: ${diagnostic}`),
+          { code: 'STOP_FAILED' }));
+      });
+    });
+    await Promise.race([
+      termination.then(async () => {
+        if (!settled) cleanup.outcome = 'reported-stopped';
+        await childClosed;
+      }),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(Object.assign(
+          new Error('Owned process tree or termination controller remains unsettled after its bounded termination settlement.'),
+          { code: 'STOP_TIMEOUT' })), Math.max(0, deadline - performance.now()));
+      }),
+    ]);
+  } finally {
+    settled = true;
+    clearTimeout(timer);
+    if (killer.exitCode === null && killer.signalCode === null) {
+      // Stop only this still-owned controller handle so it cannot issue a late tree request.
+      try {
+        cleanup.control.stopSignalSent = killer.kill() === true;
+        if (!cleanup.control.stopSignalSent) throw Object.assign(
+          new Error('Owned termination controller stop could not be verified.'), { code: 'STOP_UNVERIFIED' });
+      } catch (error) { cleanup.control.error = processDiagnostic(error); }
+      killer.stderr.destroy();
+      killer.unref?.();
+    }
+  }
+}
+
+async function executeOwnedRawCommand(command, args, {
+  cwd, env, input = '', timeout = 0, maxBuffer = 1024 * 1024, signal, encoding = 'utf8',
+} = {}, receipt) {
+  if (signal?.aborted) throw Object.assign(new Error('Owned command was aborted before dispatch.'),
+    { name: 'AbortError', code: 'ABORT_ERR' });
+  if (!Number.isFinite(maxBuffer) || maxBuffer <= 0 || !Number.isFinite(timeout) || timeout < 0 ||
+      !(typeof input === 'string' || Buffer.isBuffer(input)) ||
+      signal !== undefined && (typeof signal?.addEventListener !== 'function' ||
+        typeof signal?.removeEventListener !== 'function' || typeof signal.aborted !== 'boolean')) {
+    throw new TypeError('Invalid owned raw command limits, input or cancellation signal.');
+  }
+  const child = spawn(command, args, { cwd, env, shell: false, detached: process.platform !== 'win32',
+    stdio: ['pipe', 'pipe', 'pipe'] });
+  receipt.dispatched = Number.isInteger(child.pid) && child.pid > 0;
+  receipt.pid = child.pid ?? null;
+  const cleanup = { requested: false, survivorsVerified: false, outcome: 'not-requested' };
+  let failure;
+  let launchError;
+  let inputError;
+  let cleanupError;
+  let rootClosed = false;
+  let stopping;
+  let stopped;
+  let timer;
+  const stopCompleted = new Promise(resolve => { stopped = resolve; });
+  const closed = new Promise(resolve => {
+    child.once('error', error => { launchError = error; });
+    child.once('close', (code, signal) => {
+      rootClosed = true;
+      resolve({ code, signal, error: launchError });
+    });
+  });
+  const stop = () => {
+    if (stopping) return stopping;
+    clearTimeout(timer);
+    Object.assign(cleanup, { requested: true, pid: child.pid ?? null,
+      mechanism: process.platform === 'win32' ? 'owned-pid-tree' : 'owned-process-group', outcome: 'pending' });
+    const deadline = performance.now() + 1000;
+    const termination = !receipt.dispatched ? Promise.reject(Object.assign(
+      new Error('Owned command has no established process identity.'), { code: 'STOP_UNVERIFIED' })) :
+      process.platform === 'win32' ?
+      stopOwnedProcessTree(child, closed, cleanup, deadline) :
+      stopOwnedProcessGroup(child, closed, cleanup, deadline);
+    stopping = termination.catch(error => {
+      cleanupError = error;
+      cleanup.outcome = 'uncertain';
+      cleanup.error = processDiagnostic(error);
+    }).finally(() => {
+      child.stdout.destroy(); child.stderr.destroy();
+      if (!rootClosed) child.stdin?.destroy();
+      if (!cleanup.survivorsVerified) child.unref?.();
+      stopped({ code: child.exitCode, signal: child.signalCode, error: launchError });
+    });
+    return stopping;
+  };
+  child.once('exit', () => { stop(); });
+  const streams = new Map(['stdout', 'stderr'].map(channel => [channel, { chunks: [], bytes: 0 }]));
+  for (const [channel, state] of streams) {
+    child[channel].on('data', bytes => {
+      const remaining = maxBuffer - state.bytes;
+      if (remaining > 0) state.chunks.push(bytes.subarray(0, remaining));
+      state.bytes += bytes.length;
+      if (state.bytes > maxBuffer) {
+        failure ??= Object.assign(new RangeError(`Owned command ${channel} exceeds maxBuffer.`),
+          { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' });
+        stop();
+      }
+    });
+    child[channel].on('error', error => { failure ??= error; stop(); });
+  }
+  child.stdin?.on('error', error => { inputError ??= error; });
+  const inputWritten = child.stdin ? finished(child.stdin, { readable: false, cleanup: true }) : Promise.resolve();
+  inputWritten.catch(error => { inputError ??= error; });
+  const abort = () => {
+    failure ??= Object.assign(new Error('Owned command was aborted.'), { name: 'AbortError', code: 'ABORT_ERR' });
+    stop();
+  };
+  signal?.addEventListener('abort', abort, { once: true });
+  try {
+    child.stdin?.end(input.length ? input : undefined);
+    if (timeout > 0) timer = setTimeout(() => {
+      failure ??= Object.assign(new Error('Owned command timed out.'), { code: 'ETIMEDOUT' });
+      stop();
+    }, timeout);
+    if (signal?.aborted) abort();
+    const outcome = await Promise.race([closed, stopCompleted]);
+    clearTimeout(timer);
+    failure ??= outcome.error;
+    if (!failure && (outcome.code !== 0 || outcome.signal !== null)) {
+      failure = Object.assign(new Error('Owned command failed.'), { code: outcome.code });
+    }
+    // A numeric root exit is not process-group disappearance; never send a late PID signal.
+    await stop();
+    receipt.settled = rootClosed && cleanup.survivorsVerified === true;
+    Object.assign(receipt, { exitCode: outcome.code, signal: outcome.signal,
+      cleanup: JSON.parse(JSON.stringify(cleanup)) });
+    await inputWritten.catch(error => { inputError ??= error; });
+    failure ??= cleanupError ?? inputError;
+    if (!receipt.settled) failure ??= Object.assign(new Error('Owned command settlement is unverified.'),
+      { code: 'STOP_UNVERIFIED' });
+    const output = Object.fromEntries([...streams].map(([channel, state]) => {
+      const bytes = Buffer.concat(state.chunks);
+      return [channel, encoding === null || encoding === 'buffer' ? bytes : bytes.toString(encoding)];
+    }));
+    if (failure) {
+      Object.assign(failure, output, { signal: outcome.signal, killed: cleanup.signalSent === true,
+        ownedProcess: { ...receipt } });
+      throw failure;
+    }
+    return { ...output, ownedProcess: { ...receipt } };
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+  }
+}
+
+/** Private observations, not consumer success flags, establish whether every dispatched writer settled. */
+const ownedLifetimeObservations = new WeakMap();
+
+export function ownedCommandLifetimeProof(lifetime) {
+  const observed = ownedLifetimeObservations.get(lifetime);
+  if (!observed || observed.active || observed.uncertain ||
+      lifetime.cleanupSafe !== true) return null;
+  return JSON.parse(JSON.stringify(observed.receipts));
+}
+
+export function createOwnedCommandRunner({ lifetime }) {
+  let active = 0;
+  let observed = 0;
+  let uncertain = false;
+  let shared = ownedLifetimeObservations.get(lifetime);
+  if (!shared) {
+    shared = { active: 0, uncertain: false, receipts: [] };
+    ownedLifetimeObservations.set(lifetime, shared);
+  }
+  return {
+    async run(command, args, options) {
+      if (uncertain || lifetime.cleanupSafe === false) throw Object.assign(
+        new Error('An unsettled owned command prevents further process dispatch.'), { code: 'STOP_UNVERIFIED' });
+      const receipt = { dispatched: false, settled: false, pid: null };
+      active++;
+      shared.active++;
+      try { return await executeOwnedRawCommand(command, args, options, receipt); }
+      finally {
+        active--;
+        shared.active--;
+        if (receipt.dispatched) observed++;
+        uncertain ||= !receipt.settled;
+        shared.uncertain ||= !receipt.settled;
+        if (shared.receipts.length < 1024) shared.receipts.push(receipt);
+        else { shared.uncertain = true; lifetime.cleanupSafe = false; }
+        if (uncertain) lifetime.cleanupSafe = false;
+      }
+    },
+    isSettled() { return observed > 0 && active === 0 && !uncertain && lifetime.cleanupSafe === true; },
+  };
+}
+
 export async function executeValidationCommand({
-  name, command, args, cwd = root, environment = process.env, outputDir, signal,
+  name, command, args, cwd = root, environment = process.env, outputDir, signal, lifetime, requireSettlement = false,
 }) {
   if (!/^[a-z][a-z0-9-]{0,79}$/u.test(name) || typeof command !== 'string' ||
       !Array.isArray(args) || !args.every(value => typeof value === 'string')) {
@@ -314,6 +531,9 @@ export async function executeValidationCommand({
   let checkpointQueue = Promise.resolve();
   let progressTimer;
   let finalizing = false;
+  let child;
+  let childDidClose = false;
+  let cleanup;
   try {
     journalFile = await open(path.join(destination, `${name}.journal.ndjson`), 'wx');
     let sequence = 0;
@@ -326,16 +546,14 @@ export async function executeValidationCommand({
     let interrupted = signal?.aborted === true;
     let outputError;
     let cleanupError;
-    let child;
     let childClosed;
     let stopping;
     let stopped;
     const stopCompleted = new Promise(resolve => { stopped = resolve; });
-    const cleanup = { requested: false, pid: null, mechanism: null, outcome: 'not-requested',
+    cleanup = { requested: false, pid: null, mechanism: null, outcome: 'not-requested',
       survivorsVerified: false, error: null };
     const stop = () => {
-      if (!child?.pid || stopping || process.platform === 'win32' &&
-          (child.exitCode !== null || child.signalCode !== null)) return;
+      if (!child?.pid || stopping) return;
       cleanup.requested = true;
       cleanup.pid = child.pid;
       cleanup.mechanism = process.platform === 'win32' ? 'owned-pid-tree' : 'owned-process-group';
@@ -343,37 +561,9 @@ export async function executeValidationCommand({
       retain('command-stop-request', { pid: child.pid, cleanup });
       if (!finalizing) requestCheckpoint('cancelling', { force: true });
       const stopDeadline = performance.now() + 1000;
-      const termination = process.platform === 'win32' ? Promise.resolve().then(async () => {
-        if (process.platform === 'win32') {
-          if (child.exitCode !== null || child.signalCode !== null) {
-            cleanup.outcome = 'root-exited-unverified';
-            return;
-          }
-          const killer = spawn(path.join(process.env.SystemRoot, 'System32', 'taskkill.exe'),
-            ['/PID', String(child.pid), '/T', '/F'], { stdio: ['ignore', 'ignore', 'pipe'], shell: false });
-          cleanup.control = { pid: killer.pid ?? null, exitCode: null, signal: null };
-          await new Promise((resolve, reject) => {
-            let diagnostic = '';
-            const original = createHash('sha256');
-            let bytesSeen = 0;
-            killer.stderr.on('data', bytes => {
-              original.update(bytes);
-              bytesSeen += bytes.length;
-              if (diagnostic.length < 2000) diagnostic += bytes.toString('utf8').slice(0, 2000 - diagnostic.length);
-            });
-            killer.stderr.once('error', reject);
-            killer.once('error', reject);
-            killer.once('close', (code, termination) => {
-              cleanup.control = { ...cleanup.control, exitCode: code, signal: termination,
-                originalStderr: { sha256: original.digest('hex'), bytes: bytesSeen } };
-              if (code === 0) resolve();
-              else reject(Object.assign(new Error(`Cannot stop the owned validation process tree: ${diagnostic}`),
-                { code: 'STOP_FAILED' }));
-            });
-          });
-          cleanup.outcome = 'reported-stopped';
-        }
-      }) : stopOwnedProcessGroup(child, childClosed, cleanup, stopDeadline);
+      const termination = process.platform === 'win32' ?
+        stopOwnedProcessTree(child, childClosed, cleanup, stopDeadline) :
+        stopOwnedProcessGroup(child, childClosed, cleanup, stopDeadline);
       stopping = termination.catch(async error => {
         cleanupError ??= error;
         cleanup.outcome = 'uncertain';
@@ -392,19 +582,15 @@ export async function executeValidationCommand({
             diagnostic: causes.map(value => value.message).join('; '), causes, originalOutput });
           await requestCheckpoint('cancelling', { force: true });
         } catch (retentionError) { persistenceError ??= retentionError; }
-        if (process.platform !== 'win32') {
-          await new Promise(resolve => {
-            const timer = setTimeout(resolve, Math.max(0, stopDeadline - performance.now()));
-            childClosed.then(() => { clearTimeout(timer); resolve(); });
-          });
-        }
+        await new Promise(resolve => {
+          const timer = setTimeout(resolve, Math.max(0, stopDeadline - performance.now()));
+          childClosed.then(() => { clearTimeout(timer); resolve(); });
+        });
       }).finally(() => {
-        if (process.platform !== 'win32') {
-          child.stdout.destroy();
-          child.stderr.destroy();
-          if (!cleanup.survivorsVerified) child.unref?.();
-          stopped({ code: child.exitCode, signal: child.signalCode, closed: cleanup.rootExitObserved === true });
-        }
+        child.stdout.destroy();
+        child.stderr.destroy();
+        if (!cleanup.survivorsVerified) child.unref?.();
+        stopped({ code: child.exitCode, signal: child.signalCode, closed: cleanup.rootExitObserved === true });
       });
     };
     const retain = (kind, data) => {
@@ -569,7 +755,11 @@ export async function executeValidationCommand({
           childClosed = new Promise(resolve => {
             let launchError;
             child.once('error', error => { launchError = error; });
-            child.once('close', (code, termination) => resolve({ code, signal: termination, error: launchError, closed: true }));
+            child.once('close', (code, termination) => {
+              childDidClose = true;
+              cleanup.rootExitObserved = true;
+              resolve({ code, signal: termination, error: launchError, closed: true });
+            });
           });
           for (const channel of ['stdout', 'stderr']) {
             child[channel].on('data', bytes => consume(channel, bytes));
@@ -584,6 +774,7 @@ export async function executeValidationCommand({
     } finally {
       signal?.removeEventListener('abort', abort);
     }
+    if (child && requireSettlement) stop();
     if (stopping) await stopping;
     for (const [channel, state] of streams) {
       try {
@@ -637,6 +828,12 @@ export async function executeValidationCommand({
   } finally {
     finalizing = true;
     clearTimeout(progressTimer);
+    if (lifetime && child?.pid &&
+        (!childDidClose || cleanup.requested && !cleanup.survivorsVerified)) {
+      lifetime.cleanupSafe = false;
+      lifetime.unsettledCommands ??= [];
+      lifetime.unsettledCommands.push({ name, pid: child.pid, reportPath, cleanup: { ...cleanup } });
+    }
     await checkpointQueue;
     await journalFile?.close();
     await reportFile?.close();

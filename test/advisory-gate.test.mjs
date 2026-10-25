@@ -1,6 +1,13 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
   "applicability": [
+    {
+      "names": ["T-41 RC66 TEST02 malformed launcher probe never inherits an ambient home"],
+      "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+      "owner": "maintainer",
+      "reason": "PR-only process-isolated caller regression; the ambient home is an owned sentinel even against unfixed code.",
+      "prerequisites": ["Node and repository-local owned homes"]
+    },
     {"names": ["T-42 authentic public installation upgrades through the new package while preserving owned content"], "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "The exact public release establishes a real earlier installation; the replacement package performs the upgrade without requiring private Git history.", "prerequisites": ["Pinned offline public v0.3.1 source fixture with its original MIT license"]}
   ],
   "variants": [
@@ -14,6 +21,8 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { pathToFileURL } from 'node:url';
 import { coding, completeReview, fixture, grant, grantPush, observeFixtureRepository } from './helpers.mjs';
 import { currentCycle, stagePassed } from '../src/authority.mjs';
 import { digest, fingerprint } from '../src/core.mjs';
@@ -32,8 +41,12 @@ const packageVersion = JSON.parse(await fs.readFile(
   new URL('../package.json', import.meta.url), 'utf8')).version;
 
 function runEntry(executable, args, input) {
+  const home = args[args.indexOf('--home') + 1];
+  assert.ok(args.includes('--home') && typeof home === 'string' && path.isAbsolute(home),
+    'Launcher probes require an explicit owned fixture home');
   return new Promise((resolve, reject) => {
-    const child = execFile(executable, args, { encoding: 'utf8' },
+    const child = execFile(executable, args, { encoding: 'utf8',
+      env: { ...process.env, COPILOT_HOME: home } },
       (error, stdout, stderr) => {
         if (error && typeof error.code !== 'number') reject(error);
         else resolve({ code: error?.code ?? 0, stdout, stderr });
@@ -138,19 +151,25 @@ test('T-41 only lifecycle-stage findings become one-time advisories', async t =>
 });
 
 test('T-41 command-hook launcher fails open for malformed input and import failure', async t => {
-  const malformed = await runEntry(process.execPath, [entry, 'gate'], '{not-json');
+  await fs.mkdir(path.resolve('.test-data'), { recursive: true });
+  const root = await fs.realpath(await fs.mkdtemp(
+    path.resolve('.test-data', 'sdlc-missing-runtime-')));
+  t.after(async () => {
+    await fs.rm(root, { recursive: true });
+    await assert.rejects(fs.stat(root), { code: 'ENOENT' });
+  });
+  const malformed = await runEntry(process.execPath,
+    [entry, 'gate', '--home', path.join(root, 'malformed hook home')], '{not-json');
   assert.equal(malformed.code, 0);
   assert.equal(malformed.stderr, '');
   assert.deepEqual(finalHookOutput(malformed.stdout), {});
   assert.doesNotMatch(malformed.stdout, /advisory/iu);
 
-  const root = await fs.realpath(await fs.mkdtemp(
-    path.join(os.tmpdir(), 'sdlc-missing-runtime-')));
-  t.after(async () => fs.rm(root, { recursive: true, force: true }));
   const copiedEntry = path.join(root, 'bin', 'sdlc.mjs');
   await fs.mkdir(path.dirname(copiedEntry), { recursive: true });
   await fs.copyFile(entry, copiedEntry);
-  const missingRuntime = await runEntry(process.execPath, [copiedEntry, 'gate'], '{}');
+  const missingRuntime = await runEntry(process.execPath,
+    [copiedEntry, 'gate', '--home', path.join(root, 'missing runtime home')], '{}');
   assert.equal(missingRuntime.code, 0);
   assert.deepEqual(finalHookOutput(missingRuntime.stdout), {});
   assert.doesNotMatch(missingRuntime.stdout, /advisory/iu);
@@ -170,6 +189,58 @@ test('T-41 command-hook launcher fails open for malformed input and import failu
     }));
   assert.equal(unmanaged.code, 0);
   assert.deepEqual(finalHookOutput(unmanaged.stdout), {});
+});
+
+test('T-41 RC66 TEST02 malformed launcher probe never inherits an ambient home', async t => {
+  await fs.mkdir(path.resolve('.test-data'), { recursive: true });
+  const root = await fs.mkdtemp(path.resolve('.test-data', 'rc66-advisory-'));
+  t.after(async () => {
+    await fs.rm(root, { recursive: true });
+    await assert.rejects(fs.stat(root), { code: 'ENOENT' });
+  });
+  const ambientHome = path.join(root, 'protected ambient home');
+  const trace = path.join(root, 'launcher-calls.ndjson');
+  const preload = path.join(root, 'observe-launchers.mjs');
+  await fs.writeFile(preload, `
+import cp from 'node:child_process';
+import {appendFileSync} from 'node:fs';
+import {syncBuiltinESMExports} from 'node:module';
+const original = cp.execFile;
+cp.execFile = function(executable, args, options, callback) {
+  if (args[1] === 'gate') appendFileSync(${JSON.stringify(trace)},
+    JSON.stringify({args, home: options?.env?.COPILOT_HOME ?? process.env.COPILOT_HOME}) + '\\n');
+  return original.apply(this, arguments);
+};
+syncBuiltinESMExports();
+`);
+  const reportPath = path.join(root, 'probe.json');
+  const result = await promisify(execFile)(process.execPath, [
+    path.resolve('scripts/test-runner.mjs'), 'targeted', '--workers', '1',
+    '--name', '^T-41 command-hook launcher fails open for malformed input and import failure$',
+    'test/advisory-gate.test.mjs',
+  ], { cwd: path.resolve('.'), timeout: 60000, maxBuffer: 1024 * 1024,
+    env: { ...process.env, COPILOT_HOME: ambientHome,
+      HOME: path.join(root, 'user'), USERPROFILE: path.join(root, 'user'),
+      TMPDIR: root, TMP: root, TEMP: root,
+      NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`,
+      SDLC_TEST_REPORT_FILE: reportPath } });
+  const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+  assert.equal(report.complete, true, result.stdout + result.stderr);
+  assert.equal(report.exitCode, 0);
+  const calls = (await fs.readFile(trace, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(calls.length, 3);
+  for (const call of calls) {
+    const index = call.args.indexOf('--home');
+    assert.ok(index >= 0, 'Every launcher probe must explicitly select its own fixture home');
+    const home = call.args[index + 1];
+    assert.notEqual(home, ambientHome);
+    assert.equal(call.home, home, 'The helper must isolate its child environment as well as CLI arguments');
+    assert.ok(path.resolve(home).startsWith(`${path.resolve('.test-data')}${path.sep}`));
+    await assert.rejects(fs.stat(home), { code: 'ENOENT' });
+  }
+  await assert.rejects(fs.stat(ambientHome), { code: 'ENOENT' });
+  t.diagnostic(JSON.stringify({ ownedLauncherProbe: { complete: report.complete,
+    exitCode: report.exitCode, calls, ambientHomeUntouched: true } }));
 });
 
 test('T-41 unmanaged tool execution invalidates stale candidate evidence when files changed', async t => {

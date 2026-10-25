@@ -62,7 +62,7 @@ export async function createCompletionFixture(t, { directory, bundle, bundleDire
       image: `${bootstrap.imageOS}/${bootstrap.imageVersion}`, bootstrap };
     const specification = consumerSpecification(plan, target);
     const context = expectedConsumerContext({ bundle, specification, plan, tree, target, native, scope });
-    const observedAt = new Date().toISOString();
+    const observedAt = new Date(Date.now() - 5_000).toISOString();
     const result = { schemaVersion: 1, profile: 'r-post', target, identity: bundle.identity,
       releaseIntentId: bundle.releaseIntentId, native, status: 'Passed',
       run: { id: scope.runId, attempt: scope.attempt }, startedAt: observedAt, finishedAt: observedAt,
@@ -113,7 +113,8 @@ export async function createCompletionFixture(t, { directory, bundle, bundleDire
     consumers.set(target, { file, result, report, context, native, specification });
     provider.set(target, { id: String(baseJobId + index), name: `acceptance / consumer-${target}`,
       head_sha: bundle.identity.sourceCommit, conclusion: 'success', status: 'completed',
-      started_at: new Date(Date.parse(observedAt) - 60_000).toISOString(), completed_at: observedAt,
+      started_at: new Date(Date.parse(observedAt) - 60_000).toISOString(),
+      completed_at: new Date(Date.parse(observedAt) + 1_000).toISOString(),
       labels: [windows ? 'windows-2022' : target === 'macos-arm64' ? 'macos-15' : 'macos-15-intel'],
       steps: [{ name: 'Anonymous exact public downloads, real prior-version upgrades and cryptographic provenance',
         conclusion: 'success' }], native: clone(native), marker: null });

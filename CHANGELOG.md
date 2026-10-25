@@ -2,6 +2,17 @@
 
 ## Unreleased candidate
 
+Safety, evidence and validation fixes preserve unowned installation content,
+bound request/process cleanup, retain uncertain workspaces, authenticate original
+release-report timestamps and destinations, and account for required skips and
+platform budgets. Documentation corrects owned Windows workspaces, current
+toolchains, the finite local gate and canonical Test Plan admission. Current
+reader/package identity uses the maintainer's GitHub handle and project reporting
+routes rather than unnecessary real-name/contact details; required legal
+attribution and immutable published history remain unchanged.
+Public Homebrew acceptance recipes bind both frozen release destinations;
+mixed acceptance keeps automated/provider and manual/user responsibilities explicit.
+
 Public-readiness work includes topic-organized documentation, canonical SDLC
 migration and contributor guidance, alongside generic evidence/coverage,
 runner/native CI and release-flow implementation maintained in this branch.

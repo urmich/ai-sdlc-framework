@@ -52,6 +52,15 @@ const labels = { 'linux-x64': 'ubuntu-24.04', 'windows-x64': 'windows-2022',
   'macos-arm64': 'macos-15', 'macos-x64': 'macos-15-intel' };
 const platforms = { 'linux-x64': 'linux', 'windows-x64': 'win32',
   'macos-arm64': 'darwin', 'macos-x64': 'darwin' };
+const nativeLaneLimits = Object.freeze({
+  'linux-x64': { maximumMs: 460000, maximumInclusive: true },
+  'windows-x64': { maximumMs: 665000, maximumInclusive: true },
+  'macos-arm64': { maximumMs: 627000, maximumInclusive: true },
+  'macos-x64': { maximumMs: 1200000, maximumInclusive: false },
+});
+function nativeLaneBudgetDescription({ maximumMs, maximumInclusive }) {
+  return `${maximumInclusive ? 'at most' : 'strictly below'} ${maximumMs}ms`;
+}
 function parseProof(text) {
   try { return JSON.parse(text); }
   catch (error) {
@@ -563,8 +572,9 @@ export function nativeLaneTimings(parts, { frameworkShards = true,
     const startedAt = new Date(Math.min(...selected.map(({ job }) => Date.parse(job.started_at)))).toISOString();
     const completedAt = new Date(Math.max(...selected.map(({ job }) => Date.parse(job.completed_at)))).toISOString();
     const durationMs = Date.parse(completedAt) - Date.parse(startedAt);
-    return { target, startedAt, completedAt, durationMs, maximumMs: 15 * 60 * 1000,
-      withinBudget: durationMs < 15 * 60 * 1000,
+    const { maximumMs, maximumInclusive } = nativeLaneLimits[target];
+    return { target, startedAt, completedAt, durationMs, maximumMs, maximumInclusive,
+      withinBudget: durationMs < maximumMs || maximumInclusive && durationMs === maximumMs,
       parts: selected.map(({ role, job }) => ({ role, jobId: job.id,
         startedAt: job.started_at, completedAt: job.completed_at,
         providerQueueMs: Number.isFinite(Date.parse(job.created_at)) ?
@@ -1177,7 +1187,8 @@ export function createPrReadinessHost({
           runId: run.id, attempt: run.run_attempt,
         })) });
       const timingBlockers = laneTimings.filter(lane => !lane.withinBudget)
-        .map(lane => `Native ${lane.target} complete required worker span ${lane.durationMs}ms is not under 15 minutes`);
+        .map(lane => `Native ${lane.target} complete required worker span ${lane.durationMs}ms exceeds its ` +
+          `${nativeLaneBudgetDescription(lane)} limit`);
       const passed = result.status === 'Passed' && projection.evaluation.status === 'Passed' && !timingBlockers.length;
       return { status: passed ? 'Passed' : 'NotRun',
         laneTimings,
@@ -1328,9 +1339,10 @@ export function renderObserverSummary(result, { completeReportRef, maxBytes = 90
   for (const entry of componentEvidence) for (const lane of entry.laneTimings ?? []) {
     const queues = lane.parts.map(part =>
       `${part.role}: ${part.providerQueueMs === null ? 'unknown' : `${part.providerQueueMs}ms`}`).join('; ');
-    const line = `| Native span / ${cell(lane.target)} | ${lane.withinBudget ? 'Under 15m' : 'Over budget'} | ` +
+    const line = `| Native span / ${cell(lane.target)} | ${lane.withinBudget ? 'Within budget' : 'Over budget'} | ` +
       `PR #${cell(entry.prNumber)} | Earliest required worker to last job completion: ${cell(lane.durationMs)}ms ` +
-      `(includes bootstrap, evidence and guarded cleanup). Provider queue separately: ${cell(queues)} |`;
+      `(includes bootstrap, evidence and guarded cleanup); limit ${cell(nativeLaneBudgetDescription(lane))}. ` +
+      `Provider queue separately: ${cell(queues)} |`;
     if (bytes + Buffer.byteLength(line) + 1 > maxBytes - reserve) { omitted++; continue; }
     lines.push(line);
     bytes += Buffer.byteLength(line) + 1;

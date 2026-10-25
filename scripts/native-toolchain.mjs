@@ -9,7 +9,7 @@ import { executeValidationCommand } from './validation-tools.mjs';
 import { nativeResourceFacts, nativeFrameworkShardPlan } from './native-validation.mjs';
 import { nativeToolchain, homebrewToolchain } from './toolchain-baseline.mjs';
 import { allocateHomebrewPrefix, cleanupHomebrewPrefix,
-  recordHomebrewPrefixNotRequired } from './native-homebrew-prefix.mjs';
+  recordHomebrewPrefixNotRequired, beginHomebrewPrefixStage } from './native-homebrew-prefix.mjs';
 import { provisionPrCryptoFixture, prCryptoFixture } from './pr-capabilities.mjs';
 import { bootstrapRequestCapability, nativeBootstrapRequirements,
   requireNativeCryptoEnvironment } from './native-bootstrap-capability.mjs';
@@ -199,14 +199,21 @@ export async function bootstrapNativeToolchain(options) {
     await fs.mkdir(environment[key]);
   }
   const reports = [];
+  const lifetime = { cleanupSafe: true, unsettledCommands: [] };
+  let prefixStage;
+  let primaryFailure;
   const cancellation = new AbortController();
   const interrupt = () => cancellation.abort();
   process.on('SIGINT', interrupt);
   process.on('SIGTERM', interrupt);
+  const executeCommand = options => {
+    const execute = () => executeValidationCommand({ ...options, lifetime });
+    return prefixStage ? prefixStage.run(options.name, execute, lifetime) : execute();
+  };
   const run = async (name, command, args, cwd = repositoryRoot, commandEnvironment = environment, timeoutMs) => {
     const signal = timeoutMs === undefined ? cancellation.signal :
       AbortSignal.any([cancellation.signal, AbortSignal.timeout(timeoutMs)]);
-    const result = await executeValidationCommand({ name, command, args, cwd, environment: commandEnvironment,
+    const result = await executeCommand({ name, command, args, cwd, environment: commandEnvironment,
       signal, outputDir: directory });
     reports.push({ name, complete: result.complete, exitCode: result.exitCode });
     requireThat(result.complete && result.exitCode === 0, 'HOST',
@@ -217,10 +224,14 @@ export async function bootstrapNativeToolchain(options) {
   const retained = { schemaVersion: 1, status: 'NotRun', target: options.target,
     native: { platform: process.platform, architecture: process.arch, node: process.versions.node,
       os: os.release(), machine: os.machine(), imageOS: process.env.ImageOS ?? null,
-      imageVersion: process.env.ImageVersion ?? null }, reports };
+      imageVersion: process.env.ImageVersion ?? null }, reports, workspaceCleanup: lifetime };
   const selected = {};
   let homebrewAllocationRequested = false;
   try {
+    if (process.platform === 'darwin' && tools.homebrew) {
+      prefixStage = await beginHomebrewPrefixStage({ ...options, stage: 'bootstrap',
+        bootstrapDirectory: directory, repositoryRoot, environment });
+    }
     retained.native.resources = nativeResourceFacts();
     retained.native.executables = { node: process.execPath };
     if (tools.go) {
@@ -249,7 +260,7 @@ export async function bootstrapNativeToolchain(options) {
       'HOST', 'Schema dependencies must use exact version pins');
     const probe = ['-c', 'import importlib.metadata,json; print(json.dumps({p:importlib.metadata.version(p) for p in ' +
       `${JSON.stringify(requirements.map(([name]) => name))}}))`];
-    const dependencyProbe = await executeValidationCommand({ name: 'schema-dependency-probe',
+    const dependencyProbe = await executeCommand({ name: 'schema-dependency-probe',
       command: selected.SDLC_PYTHON, args: probe, environment, signal: cancellation.signal, outputDir: directory });
     reports.push({ name: 'schema-dependency-probe', complete: dependencyProbe.complete, exitCode: dependencyProbe.exitCode });
     if (!dependencyProbe.complete || dependencyProbe.exitCode !== 0) {
@@ -284,7 +295,7 @@ export async function bootstrapNativeToolchain(options) {
       const uname = await run('mac-uname', '/usr/bin/uname', ['-m']);
       requireThat(uname === (process.arch === 'arm64' ? 'arm64' : 'x86_64'),
         'HOST', 'Translated process architecture cannot satisfy native macOS');
-      const translated = await executeValidationCommand({ name: 'mac-translation',
+      const translated = await executeCommand({ name: 'mac-translation',
         command: '/usr/sbin/sysctl', args: ['-n', 'sysctl.proc_translated'], environment,
         signal: cancellation.signal, outputDir: directory });
       requireThat(translated.complete && ((translated.exitCode === 0 && translated.stdout.trim() === '0') ||
@@ -295,6 +306,7 @@ export async function bootstrapNativeToolchain(options) {
       const { prefix: brewRoot } = await allocateHomebrewPrefix({
         bootstrapDirectory: directory, repositoryRoot, target: options.target, environment, run,
       });
+      if (prefixStage) await prefixStage.bindAllocation();
       selected.SDLC_HOMEBREW_PREFIX_PROOF = directory;
       await run('brew-git-init', 'git', ['init', '--quiet', brewRoot]);
       await run('brew-git-origin', 'git', ['-C', brewRoot, 'remote', 'add', 'origin',
@@ -427,21 +439,32 @@ export async function bootstrapNativeToolchain(options) {
     retained.status = 'Passed';
     return { ...selected, report: retained };
   } catch (error) {
+    primaryFailure = error;
     retained.blocker = { code: error.code ?? 'NATIVE_BOOTSTRAP', message: error.message };
     throw error;
   } finally {
     process.off('SIGINT', interrupt);
     process.off('SIGTERM', interrupt);
     retained.cancelled = cancellation.signal.aborted;
-    if (process.platform === 'darwin' && !homebrewAllocationRequested) {
-      await recordHomebrewPrefixNotRequired({
-        bootstrapDirectory: directory, repositoryRoot, target: options.target, environment,
-      });
+    let retentionFailure;
+    try {
+      if (process.platform === 'darwin' && !homebrewAllocationRequested) {
+        await recordHomebrewPrefixNotRequired({
+          bootstrapDirectory: directory, repositoryRoot, target: options.target, environment,
+        });
+      }
+      const safe = sanitizeExecutionPayload(Buffer.from(JSON.stringify(retained)));
+      const handle = await fs.open(path.join(directory, 'toolchain.json'), 'wx');
+      try { await handle.writeFile(`${JSON.stringify(safe)}\n`); await handle.sync(); }
+      finally { await handle.close(); }
+    } catch (error) { retentionFailure = error; }
+    try { if (prefixStage) await prefixStage.finish(!retentionFailure); }
+    catch (error) { retentionFailure ??= error; }
+    if (retentionFailure) {
+      if (!primaryFailure) throw retentionFailure;
+      primaryFailure.prefixSafetyRetentionError ??= retentionFailure;
+      throw primaryFailure;
     }
-    const safe = sanitizeExecutionPayload(Buffer.from(JSON.stringify(retained)));
-    const handle = await fs.open(path.join(directory, 'toolchain.json'), 'wx');
-    try { await handle.writeFile(`${JSON.stringify(safe)}\n`); await handle.sync(); }
-    finally { await handle.close(); }
   }
 }
 

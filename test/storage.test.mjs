@@ -3,7 +3,10 @@ export const validationDeclarations = {
   "applicability": [
     {"names": ["T-16 Windows guard-create contention requires an existing literal guard and preserves real denial"], "platforms": ["windows-x64"], "owner": "maintainer", "reason": "Windows may deny creating a recovery-guard directory while another owner is removing it; genuine permission denial must still fail.", "prerequisites": ["Windows guard-create error semantics"]}
   ],
-  "surfaces": [{"coverage": "direct", "paths": ["src/core.mjs", "src/files.mjs", "src/git.mjs", "src/store.mjs", "src/schemas.mjs", "src/audit.mjs", "src/validation-evidence.mjs"]}],
+  "surfaces": [{"coverage": "direct", "paths": ["src/core.mjs", "src/files.mjs", "src/git.mjs", "src/store.mjs", "src/schemas.mjs", "src/audit.mjs", "src/validation-evidence.mjs", "src/artifacts.mjs"]}],
+  "groups": [
+    {"root": "T-PRD083 managed Markdown parsing retains escaped expectations and selectors", "minimumSlots": 1, "dependsOn": [], "exclusiveResources": []}
+  ],
   "variants": [
     {"expression": "scenario", "names": ["settling-metadata", "changing-content", "changing-identity", "changing-size", "continued-churn"]}
   ],
@@ -16,6 +19,9 @@ export const validationDeclarations = {
       {"name": "T-PRD013 real archived history retains original records and rejects changed identities and active conflicts", "parents": []},
       {"name": "T-PRD013 active events are checked on both transaction reads", "parents": []},
       {"name": "T-PRD013 bounded reads allocate for observed bytes while preserving short-read and growth failures", "parents": []}
+    ]},
+    {"id": "T-PRD083", "selectors": [
+      {"name": "T-PRD083 managed Markdown parsing retains escaped expectations and selectors", "parents": []}
     ]}
   ]
 };
@@ -42,6 +48,37 @@ import { currentCycle, currentTestEvidence, stagePassed } from '../src/authority
 import { currentArtifact, currentDeployment } from '../src/current-evidence.mjs';
 import { formatAudit, recordAudit, replayAudit } from '../src/audit.mjs';
 import { prepareValidationHistory, validateRetainedPayload } from '../src/validation-evidence.mjs';
+import { parseTestPlan } from '../src/artifacts.mjs';
+
+test('T-PRD083 managed Markdown parsing retains escaped expectations and selectors', () => {
+  for (const [outcomeHeading, expected, implementation, decodedExpected, decodedImplementation] of [
+    ['Expected outcome', String.raw`Preserve original \| replacement bytes at C:\fixture`,
+      'test/owned.mjs#ordinary', String.raw`Preserve original | replacement bytes at C:\fixture`,
+      'test/owned.mjs#ordinary'],
+    ['Observe or assert', 'The selected assertion preserves all original bytes',
+      String.raw`test/owned.mjs#before\|after`, 'The selected assertion preserves all original bytes',
+      'test/owned.mjs#before|after'],
+    ['`Expected outcome`', String.raw`Preserve \| and \\\| without losing \\ or \q`,
+      String.raw`test/owned.mjs#before\|after\\suffix`, String.raw`Preserve | and \\| without losing \\ or \q`,
+      String.raw`test/owned.mjs#before|after\\suffix`],
+    ['Expected outcome', 'Ordinary definitions retain their existing fields',
+      'test/owned.mjs#ordinary', 'Ordinary definitions retain their existing fields',
+      'test/owned.mjs#ordinary'],
+  ]) {
+    const contents = [
+      '# Managed Test Plan',
+      `  | \`ID\` | Requirements | Conditions | Environment | Level | Checkpoint | Mode | Owner | Location | ${outcomeHeading} | Implementation | \`Status\` |`,
+      '  | :--- | ---: | :---: | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+      `  | \`T-owned\` | FR-001 | AC-001.1 | local | unit | pre-review | Automated | agent | local | ${expected} | ${implementation} | NotRun |`,
+    ].join('\r\n');
+    assert.deepEqual(parseTestPlan(contents), [{
+      id: 'T-owned', requirements: ['FR-001'], conditions: ['AC-001.1'],
+      environment: 'local', level: 'unit', checkpoint: 'pre-review', mode: 'Automated',
+      owner: 'agent', location: 'local', expected: decodedExpected,
+      implementation: decodedImplementation, status: 'NotRun', outOfScope: false,
+    }], outcomeHeading);
+  }
+});
 
 test('T-PRD010 canonical encoding reuses only property-name bytes within each fresh call', t => {
   const value = { rows: Array.from({ length: 32 }, (_, index) => ({

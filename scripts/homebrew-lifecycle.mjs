@@ -13,10 +13,18 @@ import { assertConsumerUpdate, assertConsumerUninstall, installedConsumerSnapsho
 import { verifyReleaseChecksums } from './verify-platform-package.mjs';
 import { nativeToolchain, homebrewToolchain } from './toolchain-baseline.mjs';
 import { verifyHomebrewPrefixOwnership } from './native-homebrew-prefix.mjs';
-import { validationCommandArguments } from './validation-tools.mjs';
+import { validationCommandArguments, createOwnedCommandRunner } from './validation-tools.mjs';
+import { releaseRepository } from './release-bundle.mjs';
 
 const execute = runHomebrewCommand;
 const ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
+
+function frozenHomebrewRepository(repository) {
+  if (repository === undefined) throw Object.assign(
+    new Error('The independently frozen public Homebrew release destination is required'),
+    { code: 'RELEASE_INTEGRATION_BLOCKED' });
+  return releaseRepository(repository);
+}
 
 async function snapshot(root, prefix = '') {
   const inventory = [];
@@ -34,13 +42,29 @@ async function snapshot(root, prefix = '') {
 
 export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgradeDirectory, root,
   targetArch = process.arch, mode = 'stable', expectedNodeVersion = nativeToolchain.node, expectedPreviousIdentity,
-  expectedCurrentIdentity, environment: selectedEnvironment = process.env } = {}) {
+  expectedCurrentIdentity, expectedPreviousRepository, expectedCurrentRepository,
+  environment: selectedEnvironment = process.env, runCommand = execute, processSettlement } = {}) {
+  if (runCommand === execute && processSettlement === undefined) {
+    const owned = createOwnedCommandRunner({ lifetime: { cleanupSafe: true } });
+    runCommand = owned.run;
+    processSettlement = owned.isSettled;
+  }
+  if (typeof processSettlement !== 'function') throw new TypeError('Homebrew lifecycle requires its in-process command settlement observer.');
+  let observationError;
+  const settled = () => {
+    try { return processSettlement() === true; }
+    catch (error) { observationError ??= error; return false; }
+  };
   assert.equal(process.platform, 'darwin', 'Homebrew lifecycle requires native macOS');
   assert.ok(['arm64', 'x64'].includes(process.arch), 'Unsupported native architecture');
   assert.equal(process.arch, targetArch, 'Homebrew lifecycle must execute on its declared native architecture');
   assert.ok(['candidate', 'stable', 'public'].includes(mode), 'Unknown Homebrew lifecycle mode');
+  if (mode === 'public') {
+    frozenHomebrewRepository(expectedPreviousRepository);
+    frozenHomebrewRepository(expectedCurrentRepository);
+  }
   assert.ok(brew && candidateDirectory, 'Provide the isolated brew executable and candidate directory');
-  const { uname: host, translated } = await assertNativeMacHost();
+  const { uname: host, translated } = await assertNativeMacHost(runCommand, selectedEnvironment);
   const scratchRoot = path.join(ROOT, '.test-data');
   const work = path.resolve(root ?? path.join(scratchRoot, `homebrew-lifecycle-${randomUUID()}`));
   const relative = path.relative(scratchRoot, work);
@@ -96,7 +120,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
       const serviceStarted = process.hrtime.bigint();
       let output;
       try {
-        output = await execute(command, args,
+        output = await runCommand(command, args,
           { maxBuffer: 16 * 1024 * 1024, ...options, env: options.env ?? environment });
       } finally {
         entry.elapsedMs = Number(process.hrtime.bigint() - serviceStarted) / 1e6;
@@ -111,7 +135,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
       return output;
     } catch (error) {
       Object.assign(entry, { success: false, stdout: error.stdout, stderr: error.stderr,
-        error: error.message });
+        error: error.message, ownedProcess: error.ownedProcess });
       throw error;
     }
   };
@@ -121,6 +145,8 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
   let tapRoot;
   let tap;
   const installed = new Set();
+  let primaryError;
+  let finalizationError;
   try {
     const prefix = await fs.realpath((await runBrew(['--prefix'])).stdout.trim());
     const relativePrefix = path.relative(await fs.realpath(scratchRoot), prefix);
@@ -222,7 +248,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
         mode === 'candidate' ? 'NotRun-unpublished-candidate' : 'not-applicable-prerelease';
       evidence.publicAcceptance = mode === 'candidate' ? 'NotRun' : 'not-applicable-prerelease';
     }
-    const local = mode === 'public' ? await publicHomebrewFormula(candidateDirectory, candidate) :
+    const local = mode === 'public' ? await publicHomebrewFormula(candidateDirectory, candidate, expectedPreviousRepository) :
       await generate(candidate, candidateDirectory);
     await fs.writeFile(formulaFile, local.contents);
     await fs.writeFile(path.join(work, 'Formula', 'ai-sdlc-framework.rb'), local.contents);
@@ -241,7 +267,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     installed.add(formulaName);
     assert.deepEqual(await snapshot(home), initialHome, 'brew install changed COPILOT_HOME');
     await assert.rejects(fs.lstat(path.join(prefix, 'bin', 'sdlc')), { code: 'ENOENT' });
-    const switched = await switchToHomebrew({ brew, formula: formulaName, home, environment, run });
+    const switched = await switchToHomebrew({ brew, formula: formulaName, home, environment, run, processSettlement });
     assert.equal(switched.linked, true);
     assert.equal(switched.postSwitchVerified, true);
     await preserveUserContent();
@@ -267,11 +293,18 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     const destination = path.join(prefix, 'bin', 'sdlc');
     await fs.writeFile(destination, 'unidentified launcher\n');
     try {
-      await assert.rejects(switchToHomebrew({ brew, formula: formulaName, home, environment, run }),
-        /Unidentified/u);
+      await assert.rejects(switchToHomebrew({ brew, formula: formulaName, home, environment, run, processSettlement }),
+        error => {
+          if (!settled()) throw error;
+          assert.match(error.message, /Unidentified/u);
+          return true;
+        });
       assert.equal(await fs.readFile(destination, 'utf8'), 'unidentified launcher\n');
     } finally {
-      await fs.unlink(destination);
+      if (settled()) {
+        await fs.unlink(destination);
+        await runBrew(['link', formulaName]);
+      }
     }
     if (mode !== 'public') {
     const previousName = `${tap}/ai-sdlc-framework-previous`;
@@ -282,7 +315,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     await runBrew(['link', previousName]);
     const oldKeg = await fs.realpath((await runBrew(['--prefix', previousName])).stdout.trim());
     const switchedOwned = await switchToHomebrew({
-      brew, formula: formulaName, home, previousFormula: previousName, environment, run,
+      brew, formula: formulaName, home, previousFormula: previousName, environment, run, processSettlement,
     });
     assert.equal(switchedOwned.previousRetained, true);
     assert.equal(switchedOwned.postSwitchVerified, true);
@@ -297,7 +330,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
       forbiddenKegs: [oldKeg], run, environment });
     }
 
-    const next = mode === 'public' ? await publicHomebrewFormula(upgradeDirectory, upgrade) :
+    const next = mode === 'public' ? await publicHomebrewFormula(upgradeDirectory, upgrade, expectedCurrentRepository) :
       await generate(upgrade, upgradeDirectory ?? candidateDirectory);
     const upgradedFormula = upgradeDirectory ? next.contents :
       next.contents.replace('  license "MIT"\n', '  license "MIT"\n  revision 1\n');
@@ -308,7 +341,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     } : await homebrewFormulaEvidence(work, 'upgrade');
     let failedPromotionState;
     await assert.rejects(switchToHomebrew({
-      brew, formula: formulaName, home, environment, upgradePackage: true,
+      brew, formula: formulaName, home, environment, upgradePackage: true, processSettlement,
       run: async (command, args, options) => {
         if (command === brew && args[0] === 'link' && args[1] === formulaName) {
           assert.equal(options.env.HOMEBREW_NO_INSTALL_CLEANUP, '1');
@@ -321,6 +354,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
         return run(command, args, options);
       },
     }), error => {
+      if (!settled()) throw error;
       assert.equal(error.code, 'HOMEBREW_SWITCH_FAILED');
       assert.match(error.message, /Injected candidate promotion failure/u);
       failedPromotionState = error.details.stateFile;
@@ -331,7 +365,8 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     const priorKeg = path.dirname(path.dirname(launcher));
     assert.equal(await fs.realpath((await runBrew(['--prefix', formulaName])).stdout.trim()), priorKeg);
     await fs.access(path.join(failedState.requestedCandidate.keg, 'INSTALL_RECEIPT.json'));
-    const upgraded = await switchToHomebrew({ brew, formula: formulaName, home, environment, run, upgradePackage: true });
+    const upgraded = await switchToHomebrew({ brew, formula: formulaName, home, environment, run, upgradePackage: true,
+      processSettlement });
     const rollbackState = JSON.parse(await fs.readFile(upgraded.stateFile, 'utf8'));
     await preserveUserContent();
     assert.equal(upgraded.postSwitchVerified, true);
@@ -349,6 +384,8 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     const upgradedLauncher = path.join(upgradedKeg, 'bin', 'sdlc');
     if (mode === 'public') {
       assert.equal((await json(upgradedLauncher, ['doctor'])).frameworkVersion, upgrade.version);
+      if (!settled()) throw Object.assign(new Error('Homebrew writers are unsettled; the prior keg is retained.'),
+        { code: 'STOP_UNVERIFIED' });
       await fs.rm(priorKeg, { recursive: true });
       await assert.rejects(fs.access(priorKeg), { code: 'ENOENT' });
       await verifyCopiedHomebrewInstallation({ home, node, frameworkVersion: upgrade.version,
@@ -372,7 +409,7 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     await fs.cp(path.join(upgradedKeg, 'libexec', 'package'), extracted, { recursive: true });
     await runBrew(['tab', '--no-installed-on-request', '--formula', homebrewToolchain.formula]);
     const removed = await switchFromHomebrew({
-      brew, formula: formulaName, sourceRoot: extracted, home, environment, run,
+      brew, formula: formulaName, sourceRoot: extracted, home, environment, run, processSettlement,
     });
     installed.delete(formulaName);
     assert.equal(removed.oldPackageRemoved, true);
@@ -402,10 +439,12 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
     if (mode === 'public') evidence.publicAcceptance = 'Passed';
     return evidence;
   } catch (error) {
+    primaryError = error;
     evidence.error = error.message;
     throw error;
   } finally {
     for (const formula of installed) {
+      if (!settled()) break;
       try {
         if (!evidence.passed) {
           try {
@@ -417,14 +456,37 @@ export async function verifyHomebrewLifecycle({ brew, candidateDirectory, upgrad
           }
 
         }
+        if (!settled()) break;
         await runBrew(['uninstall', '--force', '--formula', formula]);
         installed.delete(formula);
       }
-      catch (error) { evidence.cleanupError = error.message; }
+      catch (error) {
+        evidence.cleanupError = error.message;
+        if (!settled()) finalizationError ??= error;
+      }
     }
     if (server) await new Promise(resolve => server.close(resolve));
-    if (tapRoot && installed.size === 0) await fs.rm(tapRoot, { recursive: true, force: true });
-    await fs.writeFile(path.join(work, 'evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`);
+    if (settled() && tapRoot && installed.size === 0) {
+      try { await fs.rm(tapRoot, { recursive: true, force: true }); }
+      catch (error) { evidence.cleanupError = error.message; finalizationError ??= error; }
+    }
+    if (!settled()) {
+      evidence.cleanupDeferred = { tapRoot, installed: [...installed], reason: 'Owned writer settlement is unverified' };
+      finalizationError ??= observationError ?? Object.assign(new Error('Homebrew cleanup deferred until owned writers settle.'),
+        { code: 'STOP_UNVERIFIED' });
+    }
+    try { await fs.writeFile(path.join(work, 'evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`); }
+    catch (error) {
+      const pending = primaryError ?? finalizationError;
+      if (!pending) throw error;
+      pending.evidenceRetentionError = error;
+      throw pending;
+    }
+    if (finalizationError) {
+      if (!primaryError) throw finalizationError;
+      primaryError.lifecycleCleanupError = finalizationError;
+      throw primaryError;
+    }
   }
 }
 
@@ -453,7 +515,8 @@ export async function verifyHomebrewUpgradeInputs({ candidateDirectory, upgradeD
   return { previous, current, upgradeKind: 'version' };
 }
 
-export async function publicHomebrewFormula(directory, descriptor) {
+export async function publicHomebrewFormula(directory, descriptor, repository) {
+  repository = frozenHomebrewRepository(repository);
   const records = descriptor.files.filter(file => file.kind === 'homebrew');
   assert.equal(records.length, 1, 'Public lifecycle requires one exact published formula');
   const [record] = records;
@@ -469,7 +532,7 @@ export async function publicHomebrewFormula(directory, descriptor) {
   const urls = [...contents.matchAll(/^\s*url\s+"([^"]+)"\s*$/gmu)].map(match => match[1]);
   assert.ok(urls.length > 0 && urls.every(url => descriptor.files.some(archive =>
     archive.kind === 'archive' && archive.filename.includes('-macos') &&
-    url === `https://github.com/urmich/ai-sdlc-framework/releases/download/v${descriptor.version}/${archive.filename}`)),
+    url === `https://github.com/${repository}/releases/download/v${descriptor.version}/${archive.filename}`)),
   'Published formula must execute its exact public archive URLs, never a regenerated loopback candidate');
   return { ...record, contents };
 }
@@ -492,6 +555,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     'upgrade-dir': { type: 'string' }, root: { type: 'string' }, mode: { type: 'string', default: 'stable' },
     'previous-descriptor-sha256': { type: 'string' }, 'previous-checksums-sha256': { type: 'string' },
     'current-descriptor-sha256': { type: 'string' }, 'current-checksums-sha256': { type: 'string' },
+    'previous-release-repository': { type: 'string' }, 'current-release-repository': { type: 'string' },
   } });
   const versionUpgrade = ['candidate', 'public'].includes(values.mode);
   const expectedPreviousIdentity = versionUpgrade ? await identityFromPins(values['candidate-dir'],
@@ -501,7 +565,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   const evidence = await verifyHomebrewLifecycle({ brew: values.brew,
     candidateDirectory: values['candidate-dir'], upgradeDirectory: values['upgrade-dir'],
     root: values.root, mode: values.mode, expectedNodeVersion: nativeToolchain.node,
-    expectedPreviousIdentity, expectedCurrentIdentity });
+    expectedPreviousIdentity, expectedCurrentIdentity,
+    expectedPreviousRepository: values['previous-release-repository'],
+    expectedCurrentRepository: values['current-release-repository'] });
   process.stdout.write(`${JSON.stringify({ passed: evidence.passed,
     architecture: evidence.architecture, upgradeKind: evidence.upgradeKind,
     publicAcceptance: evidence.publicAcceptance })}\n`);

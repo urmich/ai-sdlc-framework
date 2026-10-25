@@ -7,6 +7,7 @@ import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { createOwnedCommandRunner } from './validation-tools.mjs';
 import {
   advanceSwitchState, captureSwitchState, findInstalledKeg, finishSwitchState,
   linkState, ownsLauncher, resolveHomebrewCandidate, restoreCapturedUpgradeLinks, verifyCapturedKegs,
@@ -50,7 +51,7 @@ export async function assertNativeMacHost(run = runHomebrewCommand, env = proces
 }
 
 export async function promoteHomebrewLink({
-  prefix, formula, newKeg, previousFormula, previousKeg, runBrew, capturedLink,
+  prefix, formula, newKeg, previousFormula, previousKeg, runBrew, capturedLink, processSettlement,
 }) {
   const destination = path.join(prefix, 'bin', 'sdlc');
   const captured = capturedLink ?? await linkState(destination);
@@ -77,6 +78,11 @@ export async function promoteHomebrewLink({
     }
     return { linked: true, previousRetained: captured.kind !== 'absent' };
   } catch (error) {
+    if (processSettlement) {
+      let settled = false;
+      try { settled = processSettlement() === true; } catch {}
+      if (!settled) throw error;
+    }
     let restoration = captured.kind === 'absent' ? 'no old link to restore' : 'old link retained';
     try {
       let current = await linkState(destination);
@@ -242,14 +248,19 @@ export async function verifyCopiedHomebrewInstallation({
 export async function switchToHomebrew({
   brew = 'brew', formula = 'urmich/ai-sdlc-framework/ai-sdlc-framework',
   home, previousFormula, purgeExisting = false, environment = process.env,
-  run = runHomebrewCommand, upgradePackage = false,
+  run = runHomebrewCommand, upgradePackage = false, processSettlement,
 } = {}) {
+  if (run === runHomebrewCommand && processSettlement === undefined) {
+    const owned = createOwnedCommandRunner({ lifetime: { cleanupSafe: true } });
+    run = owned.run;
+    processSettlement = owned.isSettled;
+  }
   if (!formulaName(formula) || (previousFormula && !formulaName(previousFormula))) {
     throw new Error('Invalid Homebrew formula name');
   }
   if (process.platform !== 'darwin') throw new Error('Homebrew switching is supported on macOS only');
   const { env, runBrew, prefix, cellar } = await brewContext(brew, environment, run);
-  const state = await captureSwitchState({ prefix, cellar, formula, previousFormula, runBrew });
+  const state = await captureSwitchState({ prefix, cellar, formula, previousFormula, runBrew, processSettlement });
   let newKeg;
   let result;
   try {
@@ -300,7 +311,7 @@ export async function switchToHomebrew({
     await advanceSwitchState(state, 'promoting-new-link');
     const promoted = await promoteHomebrewLink({ prefix, formula, newKeg,
       previousFormula: state.previousFormula, previousKeg: state.previousKeg,
-      capturedLink: state.capturedLink, runBrew });
+      capturedLink: state.capturedLink, runBrew, processSettlement });
     if (await findInstalledKeg(runBrew, formula, cellar) !== newKeg) {
       throw new Error('Homebrew opt does not point to the requested candidate after promotion');
     }
@@ -322,8 +333,13 @@ export async function switchToHomebrew({
 
 export async function switchFromHomebrew({
   brew = 'brew', formula = 'urmich/ai-sdlc-framework/ai-sdlc-framework',
-  sourceRoot, home, purgeExisting = false, environment = process.env, run = runHomebrewCommand,
+  sourceRoot, home, purgeExisting = false, environment = process.env, run = runHomebrewCommand, processSettlement,
 } = {}) {
+  if (run === runHomebrewCommand && processSettlement === undefined) {
+    const owned = createOwnedCommandRunner({ lifetime: { cleanupSafe: true } });
+    run = owned.run;
+    processSettlement = owned.isSettled;
+  }
   if (!formulaName(formula)) throw new Error('Invalid Homebrew formula name');
   if (process.platform !== 'darwin') throw new Error('Homebrew switching is supported on macOS only');
   if (!sourceRoot) throw new Error('Provide an independently verified extracted or non-global npm package root');
@@ -338,7 +354,7 @@ export async function switchFromHomebrew({
   if (!relative || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))) {
     throw new Error('The replacement package must be outside Homebrew Cellar');
   }
-  const state = await captureSwitchState({ prefix, cellar, formula, runBrew });
+  const state = await captureSwitchState({ prefix, cellar, formula, runBrew, processSettlement });
   let result;
   try {
     if (!state.targetKeg) throw new Error('There is no installed Homebrew channel to replace');

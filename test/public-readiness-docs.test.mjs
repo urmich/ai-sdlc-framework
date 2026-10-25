@@ -1,14 +1,31 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
-  "surfaces": [{"coverage": "direct", "paths": ["scripts/check-docs.mjs", "scripts/check.mjs", "src/documentation-links.mjs"]}]
+  "surfaces": [{"coverage": "direct", "paths": ["scripts/check-docs.mjs", "scripts/check.mjs", "src/documentation-links.mjs"]}],
+  "applicability": [{
+    "names": ["T-PRD088 RC66 DOC01 rendered Windows workspace preserves existing content and refuses collisions"],
+    "options": "{skip:process.platform!=='win32'}",
+    "platforms": ["windows-x64"],
+    "owner": "maintainer",
+    "reason": "The rendered PowerShell workspace prefix needs a native Windows shell; it never downloads or installs.",
+    "prerequisites": ["Native Windows x64 Node", "Windows PowerShell", "Owned mock TEMP"]
+  }],
+  "groups": [
+    {"root": "T-PRD088 RC66 DOC01 rendered Windows workspace preserves existing content and refuses collisions", "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD088 RC66 DOC02 current runtime guidance matches actual validation and publishing inputs", "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD088 RC66 DOC03 integration readers use the finite unit-first local gate", "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD088 RC66 DOC04 canonical core definitions pass catalog and cycle definition admission", "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD088 RC66 current reader identity needs only the repository maintainer handle", "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD088 RC66 followup Homebrew public recipe binds both frozen release destinations", "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD088 RC66 followup T52 separates automated provider work from manual user observations", "minimumSlots": 1, "exclusiveResources": []}
+  ]
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { parseArgs, promisify } from 'node:util';
 import { checkDocumentation, documentationMigrations, documentationTopics,
   headingAnchors, markdownLinks, publicGuides, repositoryGuides } from '../scripts/check-docs.mjs';
 import { npmInvocation } from '../scripts/package.mjs';
@@ -20,7 +37,13 @@ import { inspectGovernanceDispositions, inspectReaderContracts,
 import { Store } from '../src/store.mjs';
 import { fixture as frameworkFixture } from './helpers.mjs';
 import { retainTestEvidence } from '../src/validation-evidence.mjs';
-import { readValidationObject } from '../src/validation-catalog.mjs';
+import { readValidationObject, buildTestCatalog, validateTestDefinitions } from '../src/validation-catalog.mjs';
+import { normalizeTestDefinition, parseTestPlan, registerArtifact, resolveTestSpecification,
+  splitMarkdownTableRow } from '../src/artifacts.mjs';
+import { startCycle } from '../src/validation.mjs';
+import { nativeToolchain, homebrewToolchain } from '../scripts/toolchain-baseline.mjs';
+import { criticalProfileBudget } from '../scripts/test-profiles.mjs';
+import { renderWindowsTesterPrompt, TESTER_TEMPLATE_SHA256 } from '../packaging/windows-tester/generate.mjs';
 import { pathToFileURL } from 'node:url';
 import { observerApiFixture } from './readiness-observer-fixture.mjs';
 import { parseOptions } from '../scripts/test-runner.mjs';
@@ -608,4 +631,283 @@ test('T-PRD062 packaging readers reject obsolete future Mac assets and nonblocki
   const standaloneOriginal = await fs.readFile(standalone, 'utf8');
   await fs.writeFile(standalone, `Every archive contains the exact .tgz payload.\n\n${standaloneOriginal}`);
   assert.match(await diagnostics(root), /embedded Mac archive claim/u);
+});
+
+test('T-PRD088 RC66 DOC01 rendered Windows workspace preserves existing content and refuses collisions',
+  { skip: process.platform !== 'win32' }, async t => {
+    const root = path.join(source, '.test-data', `ww-${randomUUID().slice(0, 8)}`);
+    await fs.mkdir(root);
+    t.after(async () => {
+      assert.equal(path.dirname(root), path.join(source, '.test-data'));
+      await fs.rm(root, { recursive: true });
+      await assert.rejects(fs.stat(root), { code: 'ENOENT' });
+    });
+    const pkg = JSON.parse(await fs.readFile(path.join(source, 'package.json'), 'utf8'));
+    const identity = { version: pkg.version, sourceCommit: '1'.repeat(40),
+      payloadSha256: '2'.repeat(64), descriptorSha256: '3'.repeat(64), checksumsSha256: '4'.repeat(64) };
+    const rendered = renderWindowsTesterPrompt({ identity,
+      releaseRepository: new URL(pkg.repository.url).pathname.slice(1).replace(/\.git$/u, ''),
+      inventoryDigest: '5'.repeat(64), launcherSha256: '6'.repeat(64),
+      templateSha256: TESTER_TEMPLATE_SHA256,
+      archive: { filename: `ai-sdlc-framework-${pkg.version}-windows-x64.zip`,
+        kind: 'archive', sha256: '7'.repeat(64), size: 1 },
+      readiness: { identity, installerImplementation: 'Complete',
+        nativeMacosArm64: 'Passed', nativeHomebrew: 'Passed' },
+    });
+    const prefix = /## 2\. Download[\s\S]*?```powershell\r?\n([\s\S]*?)\r?\n\$Descriptor =/u
+      .exec(rendered.contents)?.[1];
+    assert.ok(prefix, 'Execute only the rendered workspace allocation, never download/install instructions');
+    assert.doesNotMatch(prefix, /Invoke-WebRequest|Expand-Archive|& \$Installer/iu);
+    const mockTemp = path.join(root, 'owned mock TEMP');
+    const oldFixed = path.join(mockTemp, 'AI SDLC Framework Windows Test');
+    await fs.mkdir(oldFixed, { recursive: true });
+    await fs.writeFile(path.join(oldFixed, 'sentinel.txt'), 'unrelated existing evidence');
+    const probe = async (collision) => {
+      const script = `Set-Location -LiteralPath '${source.replaceAll("'", "''")}'\n` +
+        "$ErrorActionPreference = 'Stop'\n" +
+        (collision ? 'function Join-Path { param([string]$Path, [string]$ChildPath) $env:RC66_COLLISION_PATH }\n' : '') +
+        `try {\n${prefix}\n[ordered]@{ ok = $true; work = $Work } | ConvertTo-Json -Compress\n` +
+        '} catch { [ordered]@{ ok = $false; work = $Work } | ConvertTo-Json -Compress }\n';
+      const result = await execute('powershell.exe', ['-NoProfile', '-NonInteractive',
+        '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
+        cwd: source, env: { ...process.env, TEMP: mockTemp, TMP: mockTemp,
+          ...(collision ? { RC66_COLLISION_PATH: collision } : {}) },
+        timeout: 15000, maxBuffer: 1024 * 1024,
+      });
+      return JSON.parse(result.stdout.trim());
+    };
+    const first = await probe();
+    assert.equal(first.ok, true);
+    assert.equal(await fs.readFile(path.join(oldFixed, 'sentinel.txt'), 'utf8'),
+      'unrelated existing evidence', 'Existing fixed-name content must never be deleted');
+    assert.equal(path.dirname(first.work), mockTemp);
+    assert.notEqual(first.work, oldFixed);
+    assert.ok((await fs.stat(first.work)).isDirectory());
+    const second = await probe();
+    assert.equal(second.ok, true);
+    assert.notEqual(second.work, first.work, 'Each execution must allocate a unique owned workspace');
+    const guid = randomUUID();
+    const collision = path.join(mockTemp, `AI SDLC Framework Windows Test-${guid.replaceAll('-', '')}`);
+    await fs.mkdir(collision);
+    await fs.writeFile(path.join(collision, 'sentinel.txt'), 'collision evidence');
+    assert.deepEqual(await probe(collision), { ok: false, work: collision },
+      'Exclusive creation must refuse an existing destination instead of reusing or deleting it');
+    assert.equal(await fs.readFile(path.join(collision, 'sentinel.txt'), 'utf8'), 'collision evidence');
+  });
+
+test('T-PRD088 RC66 DOC02 current runtime guidance matches actual validation and publishing inputs', async () => {
+  const read = relative => fs.readFile(path.join(source, relative), 'utf8');
+  const [homebrew, release, ci, publisher, pkg] = await Promise.all([
+    read('packaging/homebrew/README.md'), read('docs/releases/release-ci.md'),
+    read('.github/workflows/ci.yml'), read('scripts/npm-handoff.mjs'),
+    read('package.json').then(JSON.parse),
+  ]);
+  const minimum = /node-version: '([^']+)'/u.exec(ci)?.[1];
+  const publishing = /process\.versions\.node !== '([^']+)'/u.exec(publisher)?.[1];
+  assert.ok(minimum && publishing);
+  for (const [name, guide] of [['Homebrew', homebrew], ['release', release]]) {
+    assert.ok(guide.includes(`Node ${nativeToolchain.node}`), `${name}: actual native baseline`);
+    assert.ok(guide.includes(`Node ${minimum}`), `${name}: separate minimum compatibility lane`);
+    assert.ok(guide.includes(`Node ${publishing}`), `${name}: separate publishing baseline`);
+    assert.ok(guide.includes(`Node ${pkg.engines.node}`), `${name}: unchanged product minimum`);
+  }
+  assert.ok(homebrew.includes(`declares \`${homebrewToolchain.formula}\``));
+  const retention = homebrew.slice(homebrew.indexOf('The reverse helper captures rollback state'));
+  assert.match(retention, /receipt/iu);
+  assert.doesNotMatch(retention, /brew tab[^\r\n]*--formula node@\d+/u,
+    'Runtime retention must use the actual installed receipt, not a hard-coded formula');
+  assert.match(homebrew, /installed receipt[\s\S]*dependency/iu);
+});
+
+test('T-PRD088 RC66 DOC03 integration readers use the finite unit-first local gate', async () => {
+  const guide = await fs.readFile(path.join(source, 'docs/integrations/github-adapters.md'), 'utf8');
+  const pkg = JSON.parse(await fs.readFile(path.join(source, 'package.json'), 'utf8'));
+  const recipe = /<!-- recipe:github-local -->\s*```sh\r?\n([\s\S]*?)\r?\n```/u.exec(guide)?.[1];
+  assert.ok(recipe, 'Current integration guidance must expose its exact local gate');
+  const commands = recipe.trim().split(/\r?\n/u).map(line => line.split(' ').slice(1));
+  assert.deepEqual(commands, [pkg.scripts['test:critical'], pkg.scripts.check]
+    .map(command => command.split(' ').slice(1)));
+  assert.equal(parseOptions(commands[0].slice(1)).profile, 'critical');
+  assert.ok(guide.includes(`${criticalProfileBudget.maximumAssertions}-assertion`));
+  assert.match(guide, /full\/coverage[\s\S]*optional/iu);
+  assert.match(guide, /\.\.\/contributing\/README\.md/u);
+  assert.doesNotMatch(guide, /Complete local unit-first\/full\/static\/package validation precedes/u);
+});
+
+test('T-PRD088 RC66 DOC04 canonical core definitions pass catalog and cycle definition admission', async t => {
+  const contents = await fs.readFile(path.join(source, 'docs/sdlc/core-framework/test-plan.md'), 'utf8');
+  const parsed = parseTestPlan(contents);
+  assert.equal(parsed.length, 60);
+  assert.equal(new Set(parsed.map(item => item.id)).size, 60);
+  const f = await frameworkFixture(t);
+  const relative = 'docs/sdlc/core-framework/test-plan.md';
+  await write(f.repo, relative, contents);
+  await registerArtifact(f.store, { workItemId: f.workItemId, role: 'test-plan',
+    repositoryId: 'primary', path: relative });
+  const specification = await resolveTestSpecification(f.store, f.workItemId);
+  assert.doesNotThrow(() => validateTestDefinitions(specification.tests));
+  const catalog = buildTestCatalog(f.workItemId, specification);
+  assert.deepEqual(catalog.tests.map(item => item.id), parsed.map(item => item.id).sort());
+  for (const item of catalog.tests) {
+    assert.ok(item.expected.length <= 2000, `${item.id}: bounded admission outcome`);
+  }
+  for (const id of ['T-51', 'T-52', 'T-58', 'T-59', 'T-60']) {
+    assert.equal(parsed.find(item => item.id === id).status, 'NotRun');
+    assert.match(contents, new RegExp(`### Procedure ${id}\\b`, 'u'));
+    assert.ok(catalog.tests.find(item => item.id === id).expected.includes(`procedure ${id}`));
+  }
+  assert.match(contents, /hook-bound Node runtime survives formula dependency autoremove/u);
+  assert.match(contents, /missing\/swapped\/wrong-identity evidence/u);
+  await assert.rejects(startCycle(f.store, { workItemId: f.workItemId,
+    configDigest: 'rc66-fixture-config', cause: 'Exercise actual canonical definition admission' }),
+  error => error.code === 'PHASE' && /Validation cycles require Coding authority/u.test(error.message),
+  'Real cycle admission must reach its independent authority guard, not reject canonical definitions');
+  const state = await f.store.load(f.workItemId);
+  assert.equal(state.checkpoint.phase, 'requirements');
+  assert.equal(state.records.some(record => record.type === 'cycle'), false,
+    'A fixture definition check cannot fabricate Coding approval or execution credit');
+});
+
+test('T-PRD088 RC66 current reader identity needs only the repository maintainer handle', async () => {
+  const pkg = JSON.parse(await fs.readFile(path.join(source, 'package.json'), 'utf8'));
+  const repository = new URL(pkg.repository.url);
+  const handle = repository.pathname.split('/').filter(Boolean)[0];
+  assert.ok(handle);
+  assert.equal(pkg.author, handle);
+  const legal = await fs.readFile(path.join(source, 'LICENSE'), 'utf8');
+  const legalIdentity = /Copyright \(c\) \d{4} ([^\r\n]+)/u.exec(legal)?.[1];
+  assert.ok(legalIdentity, 'Retain the existing required legal attribution');
+  const current = ['README.md', 'CONTRIBUTING.md', 'OWNERSHIP.md', 'SUPPORT.md',
+    'SECURITY.md', 'CODE_OF_CONDUCT.md', 'RELEASING.md'];
+  const collect = async relative => {
+    for (const entry of await fs.readdir(path.join(source, relative), { withFileTypes: true })) {
+      if (relative === 'docs' && entry.name === 'sdlc') continue;
+      const file = path.join(relative, entry.name);
+      if (entry.isDirectory()) await collect(file);
+      else if (/\.md(?:\.template)?$/u.test(entry.name)) current.push(file);
+    }
+  };
+  for (const directory of ['docs', 'assets', 'packaging']) await collect(directory);
+  for (const file of current) {
+    const guide = await fs.readFile(path.join(source, file), 'utf8');
+    assert.ok(!guide.includes(legalIdentity), `${file}: current reader guidance needs no legal-name repetition`);
+    assert.doesNotMatch(guide, /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/iu,
+      `${file}: use project routes rather than personal email`);
+  }
+  const [ownership, security, support] = await Promise.all([
+    fs.readFile(path.join(source, 'OWNERSHIP.md'), 'utf8'),
+    fs.readFile(path.join(source, 'SECURITY.md'), 'utf8'),
+    fs.readFile(path.join(source, 'SUPPORT.md'), 'utf8'),
+  ]);
+  assert.ok(ownership.includes(`https://github.com/${handle}`));
+  assert.match(ownership, /personal third-party OSS/u);
+  assert.ok(security.includes(`${repository.href.replace(/\.git$/u, '')}/security/advisories/new`));
+  assert.ok(support.includes(`${repository.href.replace(/\.git$/u, '')}/issues`));
+  assert.match(security, /Do not disclose exploit details or secrets in public Issues/u);
+});
+
+test('T-PRD088 RC66 followup Homebrew public recipe binds both frozen release destinations', async () => {
+  const fixturePath = process.env.SDLC_DOCS_HOMEBREW_CONTRACT_FIXTURE;
+  let contract = path.join(source, 'scripts', 'homebrew-lifecycle.mjs');
+  if (fixturePath) {
+    contract = path.resolve(fixturePath);
+    const relative = path.relative(path.join(source, '.test-data'), contract);
+    assert.ok(relative && !path.isAbsolute(relative) && !relative.startsWith('..'),
+      'A cross-slice metadata fixture must be an owned repository-local file');
+    assert.equal((await fs.lstat(contract)).isSymbolicLink(), false);
+    const provenance = JSON.parse(await fs.readFile(`${contract}.provenance.json`, 'utf8'));
+    assert.equal(provenance.protocol, 'read-only-source-contract-v1');
+    assert.equal(provenance.sourcePath, 'scripts/homebrew-lifecycle.mjs');
+    const bytes = await fs.readFile(contract);
+    assert.equal(bytes.length, provenance.bytes);
+    assert.equal(createHash('sha256').update(bytes).digest('hex'), provenance.sha256);
+  }
+  const contents = await fs.readFile(contract, 'utf8');
+  const metadata = /parseArgs\(\{ options: \{([\s\S]*?)\r?\n  \} \}\)/u.exec(contents)?.[1];
+  assert.ok(metadata, 'Read the actual CLI option declaration without importing or executing the driver');
+  const options = Object.fromEntries([...metadata.matchAll(
+    /(?:'([^']+)'|([a-z][a-z-]*)):\s*\{\s*type:\s*'(string|boolean)'(?:,\s*default:\s*'([^']*)')?\s*\}/gu,
+  )].map(match => [match[1] ?? match[2],
+    { type: match[3], ...(match[4] === undefined ? {} : { default: match[4] }) }]));
+  for (const side of ['previous', 'current']) {
+    assert.ok(Object.hasOwn(options, `${side}-release-repository`),
+      'The current caller-bound CLI contract, not the legacy worker script, is required');
+    assert.ok(contents.includes(`values['${side}-release-repository']`));
+  }
+  const guide = await fs.readFile(path.join(source, 'packaging/homebrew/README.md'), 'utf8');
+  const recipe = /<!-- recipe:homebrew-public -->\s*```sh\r?\n([\s\S]*?)\r?\n```/u.exec(guide)?.[1];
+  assert.ok(recipe, 'Public acceptance needs a complete, independently destination-bound invocation');
+  const tokens = [...recipe.replace(/\\\r?\n\s*/gu, ' ').matchAll(/"([^"]*)"|'([^']*)'|([^\s"']+)/gu)]
+    .map(match => match[1] ?? match[2] ?? match[3]);
+  assert.deepEqual(tokens.slice(0, 2), ['node', 'scripts/homebrew-lifecycle.mjs']);
+  const bindings = {
+    PWD: '/owned/checkout',
+    VERIFIED_PREVIOUS_ASSETS: '/owned/previous-public-assets',
+    EXACT_FROZEN_CURRENT_ASSETS: '/owned/current-public-assets',
+    SUPPORTED_PREVIOUS_DESCRIPTOR_SHA256: '1'.repeat(64),
+    SUPPORTED_PREVIOUS_CHECKSUMS_SHA256: '2'.repeat(64),
+    EXPECTED_DESCRIPTOR_SHA256: '3'.repeat(64),
+    EXPECTED_CHECKSUMS_SHA256: '4'.repeat(64),
+    FROZEN_PREVIOUS_RELEASE_REPOSITORY: 'previous-owner/previous-release',
+    FROZEN_CURRENT_RELEASE_REPOSITORY: 'current-owner/current-release',
+  };
+  const args = tokens.slice(2).map(token => token.replace(/\$([A-Z][A-Z0-9_]*)/gu, (_, name) => {
+    assert.ok(Object.hasOwn(bindings, name), `Undeclared recipe input: ${name}`);
+    return bindings[name];
+  }));
+  const { values } = parseArgs({ args, options, allowPositionals: false });
+  assert.equal(values.mode, 'public');
+  assert.deepEqual(Object.keys(values).sort(), Object.keys(options).sort(),
+    'The public recipe must supply every current CLI input, including both destinations and all four pins');
+  for (const [name, value] of [
+    ['candidate-dir', bindings.VERIFIED_PREVIOUS_ASSETS],
+    ['upgrade-dir', bindings.EXACT_FROZEN_CURRENT_ASSETS],
+    ['previous-descriptor-sha256', bindings.SUPPORTED_PREVIOUS_DESCRIPTOR_SHA256],
+    ['previous-checksums-sha256', bindings.SUPPORTED_PREVIOUS_CHECKSUMS_SHA256],
+    ['current-descriptor-sha256', bindings.EXPECTED_DESCRIPTOR_SHA256],
+    ['current-checksums-sha256', bindings.EXPECTED_CHECKSUMS_SHA256],
+    ['previous-release-repository', bindings.FROZEN_PREVIOUS_RELEASE_REPOSITORY],
+    ['current-release-repository', bindings.FROZEN_CURRENT_RELEASE_REPOSITORY],
+  ]) assert.equal(values[name], value, `Preserve the independently selected ${name}`);
+  assert.notEqual(values['previous-release-repository'], values['current-release-repository']);
+  assert.match(guide, /independently frozen\s+previous and current release destinations/iu);
+  assert.match(guide, /neither.*source repository.*fallback/isu);
+});
+
+test('T-PRD088 RC66 followup T52 separates automated provider work from manual user observations', async () => {
+  const requirements = await fs.readFile(path.join(source, 'docs/sdlc/core-framework/requirements.md'), 'utf8');
+  assert.match(requirements, /Semi-automated means that the agent drives an instruction-defined flow, not that\s+the user performs part of the scenario/u);
+  const contents = await fs.readFile(path.join(source, 'docs/sdlc/core-framework/test-plan.md'), 'utf8');
+  const parsed = parseTestPlan(contents);
+  assert.equal(parsed.length, 60, 'Keep the existing canonical case identities without duplicate component cases');
+  assert.equal(parsed.filter(item => item.id === 'T-52').length, 1);
+  const tests = parsed.map(normalizeTestDefinition);
+  assert.doesNotThrow(() => validateTestDefinitions(tests));
+  const aggregate = tests.find(item => item.id === 'T-52');
+  assert.equal(aggregate.mode, 'manual');
+  assert.equal(aggregate.owner, 'user');
+  assert.match(aggregate.location, /Microsoft-managed client/u);
+  assert.equal(parsed.find(item => item.id === 'T-52').status, 'NotRun');
+  const procedure = /### Procedure T-52\b([\s\S]*?)(?=### Procedure T-58\b)/u.exec(contents)?.[1];
+  assert.ok(procedure);
+  const matrix = /\| Part \| Mode \| Owner \| Location \| Procedure and expected outcome \|\r?\n\|[^\r\n]+\r?\n((?:\|[^\r\n]+\r?\n)+)/u.exec(procedure)?.[1];
+  assert.ok(matrix, 'Mixed acceptance needs explicit component mode, owner, location and outcomes');
+  const parts = matrix.trim().split(/\r?\n/u)
+    .map(line => splitMarkdownTableRow(line).slice(1, -1).map(cell => cell.trim()));
+  assert.equal(parts.length, 2);
+  assert.deepEqual(parts.map(cells => cells.slice(0, 3)), [
+    ['Published-byte automation', 'automated', 'provider'],
+    ['Managed-client observations', 'manual', 'user'],
+  ]);
+  assert.match(parts[0][3], /CI.*native clean clients/iu);
+  assert.match(parts[0][4], /original.*reports/iu);
+  assert.match(parts[1][3], /Microsoft-managed client/u);
+  assert.match(parts[1][4], /CFS.*registry.*WinGet.*OS/iu);
+  assert.match(procedure, /neither runner-driven automation nor an\s+agent-driven flow can execute/iu);
+  assert.match(procedure, /both.*automated.*manual.*results/isu);
+  assert.match(procedure, /automated suites remain\s+automated/iu);
+  assert.doesNotMatch(contents, /T-52 is semi-automated because|the semi-automated aggregate/iu);
+  assert.match(procedure, /Public npm install\/update\/uninstall\/purge/u);
+  assert.match(procedure, /real Homebrew tap install\/upgrade\/uninstall/u);
+  assert.match(procedure, /A generic network error never proves CFS/u);
 });

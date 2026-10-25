@@ -1,19 +1,10 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { sha256 } from '../packaging/standalone/archive.mjs';
 import { ROOT, emptyDirectory, validateInitialHomebrewFormula, writeJson } from './release-bundle.mjs';
 import { verifyHomebrewPrefixOwnership } from './native-homebrew-prefix.mjs';
-
-const execute = promisify(execFile);
-
-function executeCommand(command, args, options) {
-  const pending = execute(command, args, options);
-  pending.child.stdin?.end();
-  return pending;
-}
+import { createOwnedCommandRunner, processDiagnostic } from './validation-tools.mjs';
 
 function contained(root, file) {
   const relative = path.relative(root, file);
@@ -36,9 +27,21 @@ async function literalDirectories(root, parts) {
   return directory;
 }
 
+// Injected runners must supply their in-process settlement observer, not output-shaped cleanup authority.
 export async function verifyHomebrewQuality({ candidate, formulaPath, mode, candidateBaseUrl, targetArch,
-  outputDir, brew = process.env.SDLC_HOMEBREW_BREW, environment = process.env, run = executeCommand }) {
+  outputDir, brew = process.env.SDLC_HOMEBREW_BREW, environment = process.env, run, processSettlement,
+  lifetime = { cleanupSafe: true } }) {
   if (!['arm64', 'x64'].includes(targetArch)) throw new Error('Select an explicit Homebrew audit architecture');
+  if (run === undefined) {
+    const owned = createOwnedCommandRunner({ lifetime });
+    run = owned.run;
+    processSettlement = owned.isSettled;
+  }
+  if (typeof run !== 'function' || typeof processSettlement !== 'function') {
+    throw new TypeError('Homebrew quality requires its in-process command settlement observer.');
+  }
+  if (lifetime.cleanupSafe === false) throw Object.assign(
+    new Error('An unsettled owned command prevents Homebrew quality work.'), { code: 'STOP_UNVERIFIED' });
   const formulaStat = await fs.lstat(formulaPath);
   if (!formulaStat.isFile() || formulaStat.isSymbolicLink()) throw new Error('Homebrew quality requires a regular candidate formula');
   const contents = await fs.readFile(formulaPath, 'utf8');
@@ -93,22 +96,42 @@ export async function verifyHomebrewQuality({ candidate, formulaPath, mode, cand
     formula, nodeDependency: metadata.nodeDependency, nativeExecution: 'NotRun',
     tool: 'Homebrew', brew: executable, brewVersion: '', commands: [],
     style: { status: 'NotRun' }, audit: { status: 'NotRun' } };
+  let observationError;
+  const settled = () => {
+    try { return processSettlement() === true; }
+    catch (error) {
+      observationError ??= error;
+      result.settlementDiagnostic ??= processDiagnostic(error);
+      return false;
+    }
+  };
+  const executeCommand = async (command, args, options) => {
+    const output = await run(command, args, options);
+    if (!settled()) {
+      lifetime.cleanupSafe = false;
+      throw Object.assign(new Error('Homebrew quality writer settlement is unverified.'),
+        { code: 'STOP_UNVERIFIED', stdout: output.stdout, stderr: output.stderr, ownedProcess: output.ownedProcess });
+    }
+    return output;
+  };
   const command = async (args, stage) => {
     const record = { command: executable, args, exitCode: null };
     result.commands.push(record);
     try {
-      const output = await run(executable, args, { env, cwd: ROOT, timeout: 300_000, maxBuffer: 8 * 1024 * 1024 });
-      Object.assign(record, { exitCode: 0, stdout: output.stdout, stderr: output.stderr });
+      const output = await executeCommand(executable, args, { env, cwd: ROOT, timeout: 300_000, maxBuffer: 8 * 1024 * 1024 });
+      Object.assign(record, { exitCode: 0, stdout: output.stdout, stderr: output.stderr, ownedProcess: output.ownedProcess });
       if (stage) result[stage] = { status: 'Passed', args, exitCode: 0 };
       return output.stdout.trim();
     } catch (error) {
-      Object.assign(record, { exitCode: error.code, stdout: error.stdout ?? '', stderr: error.stderr ?? error.message });
+      Object.assign(record, { exitCode: error.code, stdout: error.stdout ?? '', stderr: error.stderr ?? error.message,
+        ownedProcess: error.ownedProcess });
       if (stage) result[stage] = { status: 'Failed', args, exitCode: error.code };
       throw error;
     }
   };
   let tapRoot;
   let tapCreated = false;
+  let primaryError;
   try {
     const prefix = await fs.realpath(await command(['--prefix']));
     const repository = await fs.realpath(await command(['--repository']));
@@ -141,12 +164,35 @@ export async function verifyHomebrewQuality({ candidate, formulaPath, mode, cand
     result.validation = 'Passed';
     return result;
   } catch (error) {
+    primaryError = error;
     result.validation = error.code === 'RELEASE_INTEGRATION_BLOCKED' ? 'NotRun' : 'Failed';
     result.reason = error.message;
     error.homebrewQuality = result;
     throw error;
   } finally {
-    if (tapCreated) await fs.rm(tapRoot, { recursive: true, force: true });
-    await writeJson(path.join(outputDir, 'quality-evidence.json'), result);
+    let pending = primaryError;
+    const finalizationFailure = (error, resultField, errorField) => {
+      const diagnostic = processDiagnostic(error);
+      result.validation = 'Failed';
+      result.reason ??= diagnostic.message;
+      result[resultField] = diagnostic;
+      if (pending) pending[errorField] = diagnostic;
+      else {
+        pending = error;
+        pending.homebrewQuality = result;
+      }
+    };
+    if (!settled()) {
+      lifetime.cleanupSafe = false;
+      result.cleanupDeferred = { tapRoot: tapRoot ?? null, reason: 'Owned writer settlement is unverified' };
+      finalizationFailure(observationError ?? Object.assign(new Error('Homebrew quality cleanup deferred until owned writers settle.'),
+        { code: 'STOP_UNVERIFIED' }), 'cleanupDiagnostic', 'qualityCleanupDiagnostic');
+    } else if (tapCreated) {
+      try { await fs.rm(tapRoot, { recursive: true, force: true }); }
+      catch (error) { finalizationFailure(error, 'cleanupDiagnostic', 'qualityCleanupDiagnostic'); }
+    }
+    try { await writeJson(path.join(outputDir, 'quality-evidence.json'), result); }
+    catch (error) { finalizationFailure(error, 'retentionDiagnostic', 'qualityRetentionDiagnostic'); }
+    if (!primaryError && pending) throw pending;
   }
 }

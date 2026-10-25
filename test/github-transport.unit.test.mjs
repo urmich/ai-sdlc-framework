@@ -1069,3 +1069,68 @@ test('failing owned reader cancellation still releases the lock and preserves th
   });
   assert.equal(released, true);
 });
+
+async function cleanupWithinDeadline(pending, release) {
+  let guard;
+  try {
+    return await Promise.race([pending, new Promise((_, reject) => {
+      guard = setTimeout(() => reject(new Error('Response cleanup exceeded its request deadline')), 1000);
+    })]);
+  } finally {
+    clearTimeout(guard);
+    release();
+    await Promise.allSettled([pending]);
+  }
+}
+
+test('owned reader cleanup cannot outlive the request deadline or lose the primary error', async () => {
+  let release;
+  let released = false;
+  let cancellations = 0;
+  const cleanup = new Promise(resolve => { release = resolve; });
+  const transport = createGitHubTransport({ connection: connection(), maxResponseBytes: 8, fetch: async () => ({
+    status: 200, url: '', headers: new Headers({ 'content-type': 'application/json' }),
+    body: { getReader() { return {
+      read: async () => ({ done: false, value: new Uint8Array(9) }),
+      cancel() { cancellations++; return cleanup; },
+      releaseLock() { released = true; },
+    }; } },
+  }) });
+  const pending = transport.execute(rest(transport), { timeoutMs: 20 });
+  await assert.rejects(cleanupWithinDeadline(pending, release), error => {
+    assert.ok(error.code === 'RESPONSE_LIMIT', 'Cleanup must preserve the primary response-limit failure');
+    assert.equal(error.details.cleanupFailed, true);
+    assert.equal(error.details.cleanupTimedOut, true);
+    return true;
+  });
+  assert.equal(cancellations, 1);
+  assert.equal(released, true);
+});
+
+test('archive redirect cleanup respects the request deadline without duplicate cancellation or follow-up HTTP', async () => {
+  let release;
+  let calls = 0;
+  let cancellations = 0;
+  const cleanup = new Promise(resolve => { release = resolve; });
+  const transport = createGitHubTransport({
+    connection: connection({ archiveOrigins: ['https://archives.fixture.invalid'] }),
+    fetch: async () => {
+      calls++;
+      return { status: 302, url: '', redirected: false,
+        headers: new Headers({ location: 'https://archives.fixture.invalid/file.zip' }),
+        body: { cancel() { cancellations++; return cleanup; } } };
+    },
+  });
+  const request = rest(transport, {
+    path: '/repos/fixture-owner/fixture-repo/actions/artifacts/31/zip', responseType: 'bytes',
+  });
+  const pending = transport.downloadArchive(request, { timeoutMs: 20 });
+  await assert.rejects(cleanupWithinDeadline(pending, release), error => {
+    assert.ok(error.code === 'TIMEOUT', 'Redirect cleanup must return the original request timeout');
+    assert.equal(error.details.cleanupFailed, true);
+    assert.equal(error.details.cleanupTimedOut, true);
+    return true;
+  });
+  assert.equal(cancellations, 1);
+  assert.equal(calls, 1);
+});

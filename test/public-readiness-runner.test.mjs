@@ -7,8 +7,18 @@ export const validationDeclarations = {
   "groups": [{
     "root": "T-PRD010-CATALOG catalog third root overlaps a live four-slot retained guard within seven shared slots",
     "minimumSlots": 7
+  }, {
+    "root": "T-PRD010 protocol pool retains uncertain writers and cleans only proven safe operations",
+    "minimumSlots": 2,
+    "exclusiveResources": []
   }],
   "applicability": [{
+    "names": ["T-PRD010 protocol pool retains uncertain writers and cleans only proven safe operations"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "PR-only actual pool control flow with controlled executor lifetime, snapshot and close failures and owned stock Node writers; no native termination or provider access.",
+    "prerequisites": ["Node and two aggregate worker slots"]
+  }, {
     "names": [
       "T-PRD010 independent file workers overlap without sharing environment, module patches or fixture ownership",
       "T-PRD010 nested producers retain one aggregate budget, queued work and ordered real file outcomes",
@@ -52,17 +62,21 @@ import { compileValidationInventory, discoverDeclarations } from '../scripts/val
 import { digest, SdlcError } from '../src/core.mjs';
 import { captureBenchmarkCache, compareValidationBenchmarks, runValidationBenchmark } from '../scripts/validation-benchmark.mjs';
 import { hostedValidationSelection, scheduleValidationFiles, validationExecutionGroups,
-  runValidationReadyPool, validationSchedulingPolicyDigest, sourceValidationSchedulingPolicy,
+  runValidationReadyPool, resolveValidationWorkers, validationSchedulingPolicyDigest, sourceValidationSchedulingPolicy,
   validationSchedulingPolicy } from '../scripts/test-scheduling.mjs';
 import { acquireTestWorker, enterTestBudget, readTestBudget } from '../scripts/test-budget.mjs';
 import { readEvidenceBundle } from '../src/evidence.mjs';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { deriveLocalSanitySpecification, localEvidenceFailureDiagnostic } from '../scripts/test-local-evidence.mjs';
 import { processDiagnostic, executeValidationCommand } from '../scripts/validation-tools.mjs';
 import { windowsProcessIdentity, assertOwnedProcessExited } from './owned-process-fixture.mjs';
 import net from 'node:net';
 import { getEventListeners } from 'node:events';
+import { createContext, runInContext } from 'node:vm';
+import { runProtocolPool, protocolPoolIdentity, reconcileProtocolRows } from './readiness-protocol-pool.mjs';
+import { protocolPairs } from './readiness-protocol-row.mjs';
+import os from 'node:os';
 
 const execute = promisify(execFile);
 const requiredCriticalSelectors = [
@@ -78,6 +92,207 @@ const requiredCriticalSelectors = [
   ['test/test-runner.test.mjs', 'T-130 public runner preserves a real failing child and still executes the passing sibling'],
   ['test/test-runner.test.mjs', 'T-GHB24 native execution evidence distinguishes passing, failing and skipped assertions without overwriting reports'],
 ];
+
+test('T-PRD010 protocol pool retains uncertain writers and cleans only proven safe operations',
+  { timeout: 20000 }, async t => {
+    const failures = [];
+    const poolSource = await fs.readFile(new URL('./readiness-protocol-pool.mjs', import.meta.url), 'utf8');
+    const validateSource = poolSource.slice(poolSource.indexOf('function validateProtocolOutcome('),
+      poolSource.indexOf('export function reconcileProtocolRows('));
+    for (const mode of ['incomplete', 'retention-failed', 'incomplete-budget-close-failed',
+      'safe', 'safe-retention-failed', 'invalid-json', 'retention-failed-snapshot-close-failed',
+      'incomplete-snapshot-close-failed', 'snapshot-only-failed']) {
+      const unsafe = mode.startsWith('incomplete') || mode.startsWith('retention-failed');
+      const snapshotFails = mode.includes('snapshot');
+      const closeFails = mode === 'incomplete-budget-close-failed' || mode.includes('snapshot-close-failed');
+      const hooks = [];
+      const diagnostics = [];
+      const attempts = [];
+      const primary = Object.assign(new Error(`Owned ${mode} report persistence failed`), { code: 'OWNED_RETENTION' });
+      const closeError = Object.assign(new Error('Owned budget close failed'), { code: 'OWNED_BUDGET_CLOSE' });
+      const snapshotMessage = 'Test-worker budget disconnected; accessToken="owned-snapshot-sensitive-value"';
+      const snapshotError = Object.assign(new Error(snapshotMessage), { code: 'BUDGET' });
+      const allocation = { ownedLease: randomUUID(), workers: 1 };
+      let rowFailure;
+      let child;
+      let closed;
+      let writerLive = false;
+      let scratch;
+      let poolRoot;
+      let token;
+      let reportPath;
+      let budgetClosed = false;
+      const context = createContext({
+        assert, path, os, process, randomUUID, repositoryRoot, protocolPairs, JSON,
+        digest: value => digest(typeof value === 'object' ? JSON.parse(JSON.stringify(value)) : value),
+        AbortController, AbortSignal, fileURLToPath, processDiagnostic,
+        defaultWorker: new URL('./readiness-protocol-worker.mjs', import.meta.url),
+        protocolPoolIdentity, resolveValidationWorkers, reconcileProtocolRows,
+        async runValidationReadyPool(groups, options) {
+          try { return await runValidationReadyPool(groups, options); }
+          catch (error) { rowFailure = error; throw error; }
+        },
+        fs: { ...fs, async mkdir(file, options) {
+          if (path.dirname(file) === path.join(repositoryRoot, '.test-data')) poolRoot = file;
+          return fs.mkdir(file, options);
+        }, async rm(file, options) {
+          attempts.push({ file, writerLive });
+          if (writerLive) throw Object.assign(new Error('Observed unsafe owned-path removal attempt'), { code: 'UNSAFE_RM' });
+          return fs.rm(file, options);
+        } },
+        async enterTestBudget() {
+          return { workers: 1, environment: {}, signal: new AbortController().signal,
+            async snapshot() {
+              if (snapshotFails) throw snapshotError;
+              return allocation;
+            },
+            async close() {
+              budgetClosed = true;
+              if (closeFails) throw closeError;
+            } };
+        },
+        async executeValidationCommand(operation) {
+          scratch = operation.environment.TEMP;
+          poolRoot = operation.outputDir;
+          token = randomUUID();
+          reportPath = path.join(poolRoot, `${operation.name}.json`);
+          const startedAt = new Date().toISOString();
+          child = spawn(process.execPath, [path.join(repositoryRoot, 'test', 'owned-process-fixture.mjs'),
+            '--owned-pipe-fixture', 'writer', scratch, token],
+          { shell: false, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+          writerLive = true;
+          const outputClosed = Promise.all([child.stdout, child.stderr].map(stream =>
+            new Promise(resolve => stream.once('close', resolve))));
+          closed = Promise.all([
+            new Promise(resolve => child.once('exit', (code, signal) => {
+              writerLive = false;
+              resolve({ code, signal });
+            })), outputClosed,
+          ]).then(([result]) => result);
+          child.stdout.resume();
+          child.stderr.resume();
+          await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('Owned pool writer did not become ready')), 5000);
+            child.once('message', value => { clearTimeout(timer); assert.equal(value.ready, true); resolve(); });
+            child.once('error', error => { clearTimeout(timer); reject(error); });
+          });
+          const pid = child.pid;
+          const lease = { pid, slot: randomUUID(), minimumSlots: 1, startedAt, finishedAt: null };
+          await fs.writeFile(path.join(scratch, 'owned-lease.json'), JSON.stringify(lease), { flag: 'wx' });
+          const cleanup = { requested: unsafe, rootExitObserved: !unsafe,
+            survivorsVerified: !unsafe, outcome: unsafe ? 'uncertain' : 'not-requested' };
+          if (unsafe && operation.lifetime) {
+            operation.lifetime.cleanupSafe = false;
+            operation.lifetime.unsettledCommands.push({ name: operation.name, pid, reportPath, cleanup });
+          }
+          if (!unsafe) {
+            await fs.writeFile(path.join(scratch, `${token}.release`), '');
+            child.disconnect();
+            assert.deepEqual(await closed, { code: 0, signal: null });
+          }
+          const finishedAt = new Date().toISOString();
+          const outcome = { index: 0, pair: protocolPairs[0], sourceDigest: operation.args[2],
+            groupId: operation.args[4], status: 'Passed', cleaned: true, pid, slot: lease.slot,
+            lease, finishedAt, fixtureRoot: path.join(scratch, `observer-api-${randomUUID()}`) };
+          const report = { complete: !unsafe, exitCode: 0, pid, startedAt, finishedAt,
+            stdout: mode === 'invalid-json' ? '{invalid-json' : JSON.stringify(outcome), stderr: '', cleanup };
+          await fs.writeFile(reportPath, JSON.stringify(report), { flag: 'wx' });
+          if (mode.includes('retention-failed')) throw primary;
+          return report;
+        },
+      });
+      const pool = runInContext(`${validateSource}\n(${runProtocolPool.toString()})`, context);
+      try {
+        let result;
+        let error;
+        try {
+          result = await pool({ after: hook => hooks.push(hook), diagnostic: value => diagnostics.push(value) },
+            { workers: 1, rows: protocolPairs.slice(0, 1) });
+        } catch (caught) { error = caught; }
+        assert.equal(budgetClosed, true);
+        const hookErrors = [];
+        for (const hook of hooks.reverse()) {
+          try { await hook(); } catch (caught) { hookErrors.push(caught); }
+        }
+        assert.equal(hookErrors.length, 0, 'Root teardown must not attempt removal under an unverified writer');
+        if (mode === 'safe') {
+          assert.equal(error, undefined);
+          assert.equal(result.rows.length, 1);
+        } else {
+          assert.ok(error, `${mode} must preserve its actual failure`);
+          if (mode === 'snapshot-only-failed') {
+            assert.equal(rowFailure, undefined);
+            assert.equal(result, undefined, 'Missing allocation must not become a successful pool result');
+            assert.equal(error, snapshotError);
+          } else {
+            assert.equal(error, rowFailure, 'A later snapshot failure must not replace the original row error');
+          }
+          if (mode.includes('retention-failed')) {
+            assert.equal(error, primary);
+            assert.equal(error.code, 'OWNED_RETENTION');
+            assert.equal(error.message, `Owned ${mode} report persistence failed`);
+          }
+          else if (mode === 'invalid-json') assert.equal(error.name, 'SyntaxError', 'Invalid JSON must still reject');
+          else if (unsafe) assert.match(error.message, /process was incomplete/u);
+        }
+        if (snapshotFails) {
+          const evidence = error.protocolPool;
+          assert.ok(evidence, 'A failed snapshot must not discard available pool evidence');
+          assert.equal(evidence.allocation, null, 'A disconnected budget leaves allocation explicitly unknown');
+          assert.equal(typeof evidence.sourceDigest, 'string');
+          assert.ok(evidence.sources.length > 0);
+          assert.deepEqual(evidence.snapshotFailure, processDiagnostic(snapshotError));
+          assert.equal(evidence.snapshotFailure.code, 'BUDGET');
+          assert.equal(evidence.snapshotFailure.message.includes('owned-snapshot-sensitive-value'), false);
+          assert.equal(snapshotError.message, snapshotMessage, 'Sanitizing diagnostics must not mutate the original error');
+          assert.equal(evidence.failures.length, mode === 'snapshot-only-failed' ? 0 : 1);
+          assert.equal(evidence.reports.length, mode.includes('retention-failed') ? 0 : 1);
+          if (evidence.failures.length) assert.equal(evidence.failures[0].code, error.code);
+          if (mode === 'snapshot-only-failed') assert.equal(evidence.reports[0].complete, true);
+        }
+        if (unsafe) {
+          assert.equal(writerLive, true);
+          assert.deepEqual(attempts, [], 'Neither scratch nor root teardown may even attempt unsafe removal');
+          assert.ok((await fs.stat(poolRoot)).isDirectory());
+          assert.ok((await fs.stat(scratch)).isDirectory());
+          assert.equal(JSON.parse(await fs.readFile(path.join(scratch, 'owned-lease.json'), 'utf8')).pid, child.pid);
+          assert.equal(JSON.parse(await fs.readFile(reportPath, 'utf8')).pid, child.pid);
+          const retention = error.protocolPool.retention;
+          assert.equal(retention.code, 'PROTOCOL_POOL_CLEANUP_UNVERIFIED');
+          assert.equal(retention.root, poolRoot);
+          assert.deepEqual(retention.allocation, snapshotFails ? null : allocation);
+          assert.equal(retention.operations.length, 1);
+          assert.equal(retention.operations[0].scratch, scratch);
+          assert.equal(retention.operations[0].unsettledCommands[0].pid, child.pid);
+          assert.equal(retention.operations[0].unsettledCommands[0].reportPath, reportPath);
+          assert.ok(error.protocolPool.cleanupFailures.some(value => value.code === retention.code));
+          assert.ok(diagnostics.some(value => JSON.parse(value).code === retention.code),
+            'Root teardown must explicitly diagnose retained owned paths');
+        } else {
+          assert.equal(writerLive, false);
+          assert.deepEqual(attempts.map(value => value.file), [scratch, poolRoot]);
+          assert.ok(attempts.every(value => !value.writerLive));
+          await assert.rejects(fs.stat(poolRoot), { code: 'ENOENT' });
+        }
+        if (closeFails) assert.deepEqual(error.budgetCleanup, processDiagnostic(closeError),
+          'Budget close failure remains a separate diagnostic on the original error');
+        t.diagnostic(JSON.stringify({ mode, retained: unsafe, attempts, budgetClosed, pid: child.pid }));
+      } catch (error) {
+        failures.push(mode);
+        t.diagnostic(JSON.stringify({ mode, ...processDiagnostic(error) }));
+      } finally {
+        if (writerLive) {
+          await fs.writeFile(path.join(scratch, `${token}.release`), '');
+          if (child.connected) child.disconnect();
+        }
+        if (closed) assert.deepEqual(await closed, { code: 0, signal: null }, 'Reap only the exact owned leaf writer');
+        if (poolRoot) await fs.rm(poolRoot, { recursive: true, force: true });
+        assert.equal(writerLive, false);
+        t.diagnostic(JSON.stringify({ kind: 'owned-protocol-writer-drained', mode, pid: child?.pid }));
+      }
+    }
+    assert.equal(failures.length, 0, `Protocol lifecycle failures: ${failures.join(', ')}`);
+  });
 
 async function inspectionBroker(t) {
   const connections = [];

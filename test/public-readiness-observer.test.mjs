@@ -12,6 +12,15 @@ export const validationDeclarations = {
     "minimumSlots": 2
   }],
   "applicability": [{
+    "names": [
+      "T-PRD020 RC66 CI01 platform timing limits preserve inclusive strict and invalid boundaries",
+      "T-PRD020 RC66 CI01 current twenty-five-part observer admits Intel 1185s and blocks Linux 500s"
+    ],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "maintainer",
+    "reason": "PR-only Node regressions for AC-202.7 and AC-203.4; controlled provider data, no native tools or network.",
+    "prerequisites": ["Node and repository-local owned fixtures"]
+  }, {
     "names": ["T-PRD021 protocol row pool drains failed children stops dispatch and respects one-slot fallback"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "runner-resource-contract",
@@ -584,6 +593,77 @@ test('T-PRD020 logical native latency spans earliest required worker through the
   'Both isolated parts are below fifteen minutes, but their complete required logical span is not');
   assert.deepEqual(timings[2].parts.map(part => part.providerQueueMs), [100000, 700000]);
   assert.throws(() => nativeLaneTimings(parts.slice(0, -1), { frameworkShards: false }), { code: 'EVIDENCE' });
+});
+
+test('T-PRD020 RC66 CI01 platform timing limits preserve inclusive strict and invalid boundaries', () => {
+  const epoch = Date.parse('2026-10-18T10:00:00.000Z');
+  const at = milliseconds => new Date(epoch + milliseconds).toISOString();
+  const limits = [
+    ['linux-x64', 460000, true], ['windows-x64', 665000, true],
+    ['macos-arm64', 627000, true], ['macos-x64', 1200000, false],
+  ];
+  const partsFor = durationMs => nativePrPartsForProtocol(nativeFrameworkShardProtocol)
+    .map((part, index) => ({ ...part, job: {
+      id: index + 1, created_at: at(-1000), started_at: at(0), completed_at: at(durationMs),
+    } }));
+  for (const [target, maximumMs, inclusive] of limits) {
+    for (const durationMs of [0, 1, maximumMs - 1, maximumMs, maximumMs + 1]) {
+      const lane = nativeLaneTimings(partsFor(durationMs)).find(lane => lane.target === target);
+      assert.equal(lane.withinBudget, inclusive ? durationMs <= maximumMs : durationMs < maximumMs,
+        `${target}: ${durationMs}ms`);
+      assert.equal(lane.maximumMs, maximumMs);
+      assert.equal(lane.maximumInclusive, inclusive);
+      assert.equal(lane.durationMs, durationMs);
+      assert.ok(lane.parts.every(part => part.providerQueueMs === 1000));
+    }
+  }
+  assert.equal(nativeLaneTimings(partsFor(1185000)).find(lane => lane.target === 'macos-x64').withinBudget, true);
+  assert.equal(nativeLaneTimings(partsFor(500000)).find(lane => lane.target === 'linux-x64').withinBudget, false);
+  for (const mutate of [
+    parts => parts.pop(),
+    parts => { parts[1] = parts[0]; },
+    parts => { parts[0].target = 'unknown'; },
+    parts => { parts[0].job.started_at = 'invalid'; },
+    parts => { parts[0].job.completed_at = 'invalid'; },
+    parts => { parts[0].job.completed_at = at(-1); },
+    parts => { parts[0].job.created_at = at(1); },
+  ]) {
+    const parts = partsFor(1000);
+    mutate(parts);
+    assert.throws(() => nativeLaneTimings(parts), { code: 'EVIDENCE' });
+  }
+});
+
+test('T-PRD020 RC66 CI01 current twenty-five-part observer admits Intel 1185s and blocks Linux 500s', async t => {
+  const f = await observerApiFixture(t, { frameworkShards: true, nodeArtifactReader: true, ambient: false });
+  const intel = f.jobs.find(job => job.name === 'native-macos-x64-homebrew');
+  const start = Date.parse(intel.started_at);
+  intel.completed_at = new Date(start + 1185000).toISOString();
+  const { host, policy } = f.connect();
+  const snapshot = await host.snapshot();
+  assert.equal(verdict(snapshot).status, 'Passed', JSON.stringify(verdict(snapshot).blockers));
+  const retained = host.componentEvidence()[0];
+  assert.equal(retained.nativeParts.length, 25);
+  assert.equal(retained.nativeParts.filter(part => part.cleanupArtifactId).length, 13);
+  assert.equal(retained.sourceCommit, f.revisions.merge);
+  const summary = renderObserverSummary({ status: 'Passed', results: [] }, {
+    componentEvidence: [retained],
+    completeReportRef: 'https://github.com/urmich/ai-sdlc-framework/actions/runs/999/attempts/1',
+  });
+  assert.match(summary, /Within budget/u);
+  assert.match(summary, /strictly below 1200000ms/u);
+  assert.doesNotMatch(summary, /Under 15m/u);
+  intel.steps.find(step => step.name === 'Remove owned short Homebrew prefix').conclusion = 'skipped';
+  assert.equal(verdict(await host.snapshot()).status, 'NotRun');
+  intel.steps.find(step => step.name === 'Remove owned short Homebrew prefix').conclusion = 'success';
+  const linux = f.jobs.find(job => job.name === `native-${f.lanes.get('linux-x64').role}`);
+  linux.completed_at = new Date(start + 500000).toISOString();
+  const blocked = verdict(await host.snapshot());
+  assert.equal(blocked.status, 'NotRun');
+  assert.ok(blocked.blockers.some(message => message.includes('linux-x64') &&
+    message.includes('at most 460000ms')), JSON.stringify(blocked.blockers));
+  await reconcilePrReadiness(host, policy);
+  assert.ok(f.writes.some(row => row.context === 'framework/validation' && row.state === 'pending'));
 });
 
 test('T-PRD021 versioned twenty-five twenty-four and twenty-part originals require exact closures cleanup and protected SDK replay', async t => {

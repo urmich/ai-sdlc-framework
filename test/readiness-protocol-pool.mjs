@@ -62,8 +62,19 @@ export async function runProtocolPool(t, { workers, worker = defaultWorker, rows
     totalMemoryBytes: os.totalmem(), requested: workers ?? process.env.SDLC_TEST_WORKERS ?? null });
   const requested = Math.min(4, resources.workers);
   const root = path.join(repositoryRoot, '.test-data', `protocol-pool-${randomUUID()}`);
+  const retained = [];
+  let allocation;
+  const retentionDiagnostic = () => ({
+    code: 'PROTOCOL_POOL_CLEANUP_UNVERIFIED',
+    message: 'Retained owned protocol paths because command writers remain unverified.',
+    root, operations: retained, allocation: allocation ?? null,
+  });
   await fs.mkdir(root, { recursive: true });
   t.after(async () => {
+    if (retained.length) {
+      t.diagnostic(JSON.stringify(retentionDiagnostic()));
+      return;
+    }
     await fs.rm(root, { recursive: true });
     await assert.rejects(fs.stat(root), { code: 'ENOENT' });
   });
@@ -84,6 +95,7 @@ export async function runProtocolPool(t, { workers, worker = defaultWorker, rows
       pool = await runValidationReadyPool(groups, { concurrency: budget.workers,
         capacity: budget.workers, signal: AbortSignal.any([budget.signal, stopped.signal]), execute: async group => {
           const scratch = path.join(root, `scratch-${group.index}`);
+          const lifetime = { cleanupSafe: true, unsettledCommands: [] };
           try {
             await fs.mkdir(scratch);
             const report = await executeValidationCommand({
@@ -93,7 +105,7 @@ export async function runProtocolPool(t, { workers, worker = defaultWorker, rows
               cwd: repositoryRoot, outputDir: root,
               environment: { ...process.env, ...budget.environment,
                 TMPDIR: scratch, TMP: scratch, TEMP: scratch },
-              signal: budget.signal,
+              signal: budget.signal, lifetime,
             });
             reports.push({ index: group.index, ...report });
             assert.equal(report.complete, true, `Protocol row ${group.index} process was incomplete`);
@@ -122,6 +134,11 @@ export async function runProtocolPool(t, { workers, worker = defaultWorker, rows
             throw error;
           } finally {
             try {
+              if (!lifetime.cleanupSafe) {
+                retained.push({ index: group.index, scratch, unsettledCommands: [...lifetime.unsettledCommands] });
+                throw Object.assign(new Error('Retained owned protocol scratch because command writers remain unverified.'),
+                  { code: 'PROTOCOL_POOL_CLEANUP_UNVERIFIED' });
+              }
               await fs.rm(scratch, { recursive: true, force: true });
               await assert.rejects(fs.stat(scratch), { code: 'ENOENT' });
             } catch (error) {
@@ -135,13 +152,17 @@ export async function runProtocolPool(t, { workers, worker = defaultWorker, rows
           }
         } });
     } catch (error) { poolError = error; }
-    const allocation = await budget.snapshot();
-    if (failures.length || poolError) {
-      const ordered = failures.sort((left, right) => left.index - right.index);
-      const error = ordered[0]?.error ?? poolError;
-      error.protocolPool = { sourceDigest, sources, allocation,
+    const ordered = failures.sort((left, right) => left.index - right.index);
+    const failure = ordered[0]?.error ?? poolError;
+    let snapshotError;
+    try { allocation = await budget.snapshot(); }
+    catch (error) { snapshotError = error; }
+    if (failure || snapshotError) {
+      const error = failure ?? snapshotError;
+      error.protocolPool = { sourceDigest, sources, allocation: allocation ?? null,
         failures: ordered.map(({ index, error }) => ({ index, ...processDiagnostic(error) })),
-        cleanupFailures,
+        snapshotFailure: snapshotError ? processDiagnostic(snapshotError) : null,
+        cleanupFailures, retention: retained.length ? retentionDiagnostic() : null,
         reports: reports.sort((left, right) => left.index - right.index) };
       throw error;
     }
