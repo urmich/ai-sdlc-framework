@@ -520,6 +520,23 @@ period. Native ownership failures retain safe code/signal/cleanup observations
 before assertions. The real-kernel root reserves four aggregate slots for its
 test worker, owned root, descendant writer and unrelated sibling; host worker
 limits and the one-second settlement bound remain unchanged.
+The separate TOOL02 controlled Windows settlement root retains all six modes
+under its twenty-second ceiling. Admit at most two independent VM/root/writer
+scopes together and declare five slots for the test process plus their four
+children. Require both first-pair provenance announcements before release;
+serial-execution mutation must fail this bounded overlap check. Drain every
+in-flight scope before surfacing cleanup failure, verify all six modes cleaned,
+and preserve the original cancellation, controller, persistence, owner and
+one-second settlement assertions. This changes no native host capacity.
+For atomic writer publication, advance the test clock while the writer is
+intentionally blocked: the post-release ready deadline must not yet expire.
+Arm the same five-second ready allowance immediately before release, retain
+the fifteen-second test ceiling and all pending/final-file/exit assertions.
+An early-arming mutation must fail; retain safe outcome and stderr identity
+diagnostics rather than exposing raw rejected failure text.
+Advance virtual time before the real pause announcement too: it must not
+consume or disable the distinct real five-second pause watchdog. Missing
+announcements still require bounded cleanup rather than the outer timeout.
 The npm-denied lifecycle also reserves four slots for its test worker, outer
 installer runtime, activated runtime and framework CLI. Phase observations
 establish those concurrent process identities, not a CPU or I/O contention
@@ -1195,8 +1212,10 @@ partial write; do not catch or retry invalid JSON, relax a barrier or extend its
 deadline to conceal incomplete publication.
 The PR-only `T-PRD074 archived scheduling reconstructs only its authenticated
 captured literal policy without current-credit fallback` root in
-`test/public-readiness-observer.test.mjs` checks current v7 and exact historical
-v6/v5/v4/v3/v2 archives and all five historical policies' sharded SDK evidence.
+`test/public-readiness-observer.test.mjs` checks current v8 and exact historical
+v7/v6/v5/v4/v3/v2 archives and their sharded SDK evidence.
+Preserve the exact original v7 digest
+`996e99fc1a5c05e4e92048ab18142395859e0f158fb25091d1d37479a0e6acfc`.
 Preserve the exact original v6 digest
 `abc5f21ad9e5b998a0f0ce3341ced66f3784d7122e8d72d7cd5a6b67e9fb609a`,
 the exact original v5 digest
@@ -1348,17 +1367,22 @@ the original subset. A new legitimate test must not erase preservation checks.
    Require the Linux `mac-admission` coordinator to observe all three long ARM
    body workers in the exact repository/run/attempt/head context before Intel's
    measured critical body-0 producer dispatches under
-   `arm-regression-allocation-v5-critical-body-first`, still behind both Intel unit jobs.
+   `arm-regression-allocation-v6-all-critical-bodies-first`, still behind both Intel unit jobs.
    Require `intel-retained-admission` to observe that actual worker before
    ARM's separate short refresh dispatches, retaining its own ARM unit barrier.
    Its historical job/artifact identifier remains, but current
    `intel-primary-body` receipts must identify body-0, not a relabelled body-1.
    Require `arm-refresh-admission` to observe that refresh worker before Intel
-   Homebrew dispatches. Keep ARM genuine Homebrew initial.
-   Then require `intel-homebrew-admission` to observe the actual Intel Homebrew
-   worker before Intel body-1 and body-2 dispatch, retaining both Intel units.
-   Finally require `intel-admission` to observe all three actual Intel body
-   workers before short Intel refresh dispatches. No coordinator may wait for
+   body-1 and body-2 become eligible, independently of Homebrew and retaining
+   both Intel units. Keep ARM genuine Homebrew initial.
+   Require the existing `intel-homebrew-admission` coordinator to select the
+   closed `intel-bodies` group and observe actual allocation of all three Intel
+   bodies before Intel Homebrew dispatch. The new T-MACADM016 regression must
+   prove available capacity admits the waiting bodies first, queued timestamp
+   placeholders do not release Homebrew, and all bodies still running suffice:
+   no body or Homebrew completion dependency, added VM, or dependency cycle.
+   Independently require `intel-admission` to observe those body allocations
+   before short Intel refresh dispatches. No coordinator may wait for
    a command or producer completion, create an observed-producer dependency
    cycle, or hold a waiting Mac VM. Require the closed helper group selection,
    exact new job identities and all five coordinator results in completeness.
@@ -1373,7 +1397,8 @@ the original subset. A new legitimate test must not erase preservation checks.
    primary body cleanup receipts bind their actual `GITHUB_JOB` identities,
    alongside the existing split Intel refresh/Homebrew bindings. Reject stale
    aliases. Preserve v4's original `intel-retained-body`/body-1 receipt semantics;
-   reject a label-only v4-to-v5 substitution. Replay the exact v1, v2, v3 and v4
+   retain v5's original Homebrew-first dependencies only as v5 and reject a
+   label-only or hybrid v5-to-v6 substitution. Replay the exact v1-v5
    resource graphs and unmarked historical
    native graphs without borrowing new dependency or origin proof.
    Configured priority is only a lead; provider allocation gaps remain in the

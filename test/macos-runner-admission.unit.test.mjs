@@ -276,15 +276,15 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   assert.equal(coordinator.strategy, undefined);
   assert.deepEqual(coordinator.permissions, { actions: 'read', contents: 'read' });
   assert.deepEqual(coordinator.needs, ['intent', 'source', 'native-units-ma']);
-  assert.deepEqual(ci.jobs['native-mi'].needs, ['intent', 'source', 'native-units-mi', 'intel-homebrew-admission']);
+  assert.deepEqual(ci.jobs['native-mi'].needs, ['intent', 'source', 'native-units-mi', 'arm-refresh-admission']);
   assert.deepEqual(ci.jobs['native-ma'].needs, ['intent', 'source', 'native-units-ma']);
   assert.deepEqual(ci.jobs['native-units-ma'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-units-mi'].needs, ['intent', 'source']);
-  assert.deepEqual(ci.jobs['intel-admission'].needs, ['intent', 'source', 'native-units-mi', 'intel-homebrew-admission']);
+  assert.deepEqual(ci.jobs['intel-admission'].needs, ['intent', 'source', 'native-units-mi', 'arm-refresh-admission']);
   assert.deepEqual(ci.jobs['native-mi-refresh'].needs,
     ['intent', 'source', 'native-units-mi', 'intel-admission']);
   assert.deepEqual(ci.jobs['native-homebrew'].needs, ['intent', 'source']);
-  assert.deepEqual(ci.jobs['native-homebrew-mi'].needs, ['intent', 'source', 'arm-refresh-admission']);
+  assert.deepEqual(ci.jobs['native-homebrew-mi'].needs, ['intent', 'source', 'intel-homebrew-admission']);
   assert.deepEqual(ci.jobs['native-mi'].strategy.matrix.include.map(part => part.shard),
     ['body-1', 'body-2']);
   assert.deepEqual(ci.jobs['native-ma'].strategy.matrix.include.map(part => part.shard),
@@ -313,8 +313,8 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   assert.equal(homebrewGate['timeout-minutes'], 10);
   assert.equal(homebrewGate.strategy, undefined);
   assert.deepEqual(homebrewGate.permissions, { actions: 'read', contents: 'read' });
-  assert.match(homebrewGate.steps.find(step => step.name === 'Wait for actual Intel Homebrew worker allocation').run,
-    /--group intel-homebrew --output \.test-data\/intel-homebrew-admission\.json/u);
+  assert.match(homebrewGate.steps.find(step => step.name === 'Wait for actual Intel critical body worker allocation').run,
+    /--group intel-bodies --output \.test-data\/intel-homebrew-admission\.json/u);
   for (const [key, needs, group] of [
     ['intel-retained-admission', ['intent', 'source', 'native-units-mi', 'mac-admission'], 'intel-primary-body'],
     ['arm-refresh-admission', ['intent', 'source', 'native-units-ma', 'intel-retained-admission'], 'arm-refresh'],
@@ -403,6 +403,53 @@ test('T-MACADM012 closed Intel group admits three allocated long bodies without 
   assert.throws(() => evaluateMacAdmission(observation([
     ...intel.slice(0, 2), { ...queued[2], status: 'completed', conclusion: 'cancelled' },
   ]), identity), { code: 'ADMISSION_TERMINATED' });
+});
+
+test('T-MACADM016 current Homebrew yields free Mac capacity until all three critical Intel bodies are allocated', async () => {
+  const contents = await fs.readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const ci = parseWorkflow({ file: '.github/workflows/ci.yml', contents });
+  const coordinator = ci.jobs['intel-homebrew-admission'];
+  const command = coordinator.steps.find(step => /scripts\/macos-runner-admission\.mjs/u.test(step.run ?? '')).run;
+  const group = /--group ([a-z-]+)/u.exec(command)[1];
+  const intel = [0, 1, 2].map((index) => ({ ...jobs()[0], id: 50 + index,
+    name: `native-macos-x64-framework-body-${index}` }));
+  const arm = jobs({ status: 'in_progress', runner_name: 'synthetic-arm-worker' });
+  const allocated = record => Object.assign(record, { status: 'in_progress', runner_name: 'synthetic-worker' });
+  allocated(intel[0]);
+  const records = [...arm, ...intel];
+  const done = new Set(['intent', 'source', 'native-units-mi', 'native-units-ma',
+    'mac-admission', 'intel-retained-admission', 'arm-refresh-admission']);
+  const eligible = key => ci.jobs[key].needs.every(dep => done.has(dep));
+  assert.equal(eligible('native-mi'), true,
+    'Waiting critical body-1/2 must be runnable independently of Homebrew allocation or completion');
+  const admitted = () => evaluateMacAdmission(observation(records), { ...expected, group }).admitted;
+  assert.equal(admitted(), false, 'Early body-0 plus queued timestamp placeholders must not release Homebrew');
+  assert.equal(eligible('native-homebrew-mi'), false);
+  const active = () => records.filter(record => record.status === 'in_progress').length;
+  assert.equal(active(), 5, 'Three ARM bodies, ARM refresh and early Intel body use exactly five slots');
+  for (const index of [1, 2]) {
+    Object.assign(arm[index], { status: 'completed', conclusion: 'success' });
+    assert.equal(active(), 4);
+    assert.equal(eligible('native-mi'), true);
+    assert.equal(eligible('native-homebrew-mi'), false, 'Homebrew cannot compete for the newly free slot');
+    allocated(intel[index]);
+    assert.equal(active(), 5);
+    if (index === 1) assert.equal(admitted(), false);
+  }
+  assert.equal(admitted(), true, 'Allocation alone releases Homebrew while all Intel bodies are still running');
+  assert.ok(intel.every(record => record.status === 'in_progress' && record.conclusion === null));
+  done.add('intel-homebrew-admission');
+  assert.equal(eligible('native-homebrew-mi'), true);
+  for (const change of [{ head_sha: 'b'.repeat(40) }, { run_attempt: 1 },
+    { run_url: 'https://api.github.com/repos/other/repository/actions/runs/52' }]) {
+    assert.throws(() => evaluateMacAdmission(observation(records.map(record =>
+      record.id === intel[2].id ? { ...record, ...change } : record)), { ...expected, group }),
+    { code: 'ADMISSION_IDENTITY' });
+  }
+  assert.equal(evaluateMacAdmission(observation(records.map(record => record.id === intel[2].id ?
+    { ...record, status: 'queued', runner_name: '', steps: [] } : record)), { ...expected, group }).admitted, false);
+  assert.equal(Object.values(ci.jobs).filter(job =>
+    job.steps?.some(step => /scripts\/macos-runner-admission\.mjs/u.test(step.run ?? ''))).length, 5);
 });
 
 test('T-MACADM013 Intel wait uses the same bounded attempt-scoped transport and cannot pass timeout cancellation or wrong identity', async () => {

@@ -1316,7 +1316,7 @@ test('T-PRD022 actual workflow graph applies semantic YAML, effective permission
   const workflows = await readWorkflowPolicySources(repositoryRoot);
   const positive = inspectWorkflowTrust(workflows);
   assert.equal(positive.complete, true, JSON.stringify(positive.blockers));
-  assert.equal(positive.nativeResourcePolicy, 'arm-regression-allocation-v5-critical-body-first');
+  assert.equal(positive.nativeResourcePolicy, 'arm-regression-allocation-v6-all-critical-bodies-first');
   const producer = positive.workflows.find(item => item.file === '.github/workflows/ci.yml');
   assert.deepEqual(producer.document.permissions, { contents: 'read' });
   assert.deepEqual(producer.jobs.find(job => job.id === 'mac-admission').effectivePermissions,
@@ -1587,8 +1587,16 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.deepEqual(ci.jobs.native.needs, ['intent', 'source', 'native-units']);
   assert.deepEqual(ci.jobs['native-units'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-homebrew'].needs, ['intent', 'source']);
-  assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v5-critical-body-first');
-  const legacy = structuredClone(ci);
+  assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v6-all-critical-bodies-first');
+  const historicalV5 = structuredClone(ci);
+  historicalV5.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v5-critical-body-first';
+  historicalV5.jobs['native-mi'].needs = ['intent', 'source', 'native-units-mi', 'intel-homebrew-admission'];
+  historicalV5.jobs['intel-admission'].needs = ['intent', 'source', 'native-units-mi', 'intel-homebrew-admission'];
+  historicalV5.jobs['native-homebrew-mi'].needs = ['intent', 'source', 'arm-refresh-admission'];
+  historicalV5.jobs['intel-homebrew-admission'].steps[4].name = 'Wait for actual Intel Homebrew worker allocation';
+  historicalV5.jobs['intel-homebrew-admission'].steps[4].run =
+    historicalV5.jobs['intel-homebrew-admission'].steps[4].run.replace('--group intel-bodies', '--group intel-homebrew');
+  const legacy = structuredClone(historicalV5);
   const primaryPart = legacy.jobs['native-mi-retained'].strategy.matrix.include[0];
   const remainingParts = legacy.jobs['native-mi'].strategy.matrix.include;
   legacy.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v4-retained-first';
@@ -1600,6 +1608,17 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   const inspectDocument = document => inspectWorkflowTrust(workflows.map(workflow =>
     workflow.file === '.github/workflows/ci.yml' ? { ...workflow, contents: Object.entries(document)
       .map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n' } : workflow));
+  assert.equal(inspectDocument(historicalV5).complete, true,
+    'Historical v5 topology and closed receipt groups remain authentic without being relabeled');
+  const relabeledV5 = structuredClone(historicalV5);
+  relabeledV5.env.SDLC_MAC_ADMISSION_POLICY = ci.env.SDLC_MAC_ADMISSION_POLICY;
+  assert.equal(inspectDocument(relabeledV5).complete, false,
+    'A cosmetic v6 label cannot admit the old Homebrew-before-bodies graph');
+  const hybrid = structuredClone(ci);
+  hybrid.jobs['intel-homebrew-admission'].steps[4].run =
+    historicalV5.jobs['intel-homebrew-admission'].steps[4].run;
+  assert.equal(inspectDocument(hybrid).complete, false,
+    'Current dependencies cannot be combined with a historical Homebrew allocation receipt');
   assert.equal(inspectDocument(legacy).complete, true,
     'Historical v4 retained-first allocation and its original closed receipt group must remain authentic');
   const relabeled = structuredClone(legacy);
@@ -1608,15 +1627,15 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     'An old retained-body allocation cannot be relabeled as a current primary-body allocation');
   assert.deepEqual(ci.jobs['mac-admission'].needs, ['intent', 'source', 'native-units-ma']);
   assert.deepEqual(ci.jobs['native-ma'].needs, ['intent', 'source', 'native-units-ma']);
-  assert.deepEqual(ci.jobs['native-mi'].needs, ['intent', 'source', 'native-units-mi', 'intel-homebrew-admission']);
+  assert.deepEqual(ci.jobs['native-mi'].needs, ['intent', 'source', 'native-units-mi', 'arm-refresh-admission']);
   assert.deepEqual(ci.jobs['native-units-ma'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-units-mi'].needs, ['intent', 'source']);
-  assert.deepEqual(ci.jobs['intel-admission'].needs, ['intent', 'source', 'native-units-mi', 'intel-homebrew-admission']);
+  assert.deepEqual(ci.jobs['intel-admission'].needs, ['intent', 'source', 'native-units-mi', 'arm-refresh-admission']);
   assert.deepEqual(ci.jobs['native-mi-refresh'].needs,
     ['intent', 'source', 'native-units-mi', 'intel-admission']);
   assert.deepEqual(ci.jobs['intel-homebrew-admission'].needs,
     ['intent', 'source', 'native-units-mi', 'arm-refresh-admission']);
-  assert.deepEqual(ci.jobs['native-homebrew-mi'].needs, ['intent', 'source', 'arm-refresh-admission']);
+  assert.deepEqual(ci.jobs['native-homebrew-mi'].needs, ['intent', 'source', 'intel-homebrew-admission']);
   assert.deepEqual(ci.jobs['native-mi-retained'].needs, ['intent', 'source', 'native-units-mi', 'mac-admission']);
   assert.deepEqual(ci.jobs['native-ma-refresh'].needs, ['intent', 'source', 'native-units-ma', 'intel-retained-admission']);
   assert.deepEqual(ci.jobs['intel-retained-admission'].needs, ['intent', 'source', 'native-units-mi', 'mac-admission']);
@@ -1703,9 +1722,9 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     const part = ci.jobs[key].strategy.matrix.include[0];
     assert.deepEqual(ci.jobs[key].needs, ['intent', 'source',
       ...(part.shard && part.shard !== 'units' ? [nativePartJobKey({ ...part, shard: 'units' })] : []),
-      ...(key === 'native-mi' ? ['intel-homebrew-admission'] : []),
+      ...(key === 'native-mi' ? ['arm-refresh-admission'] : []),
       ...(key === 'native-mi-refresh' ? ['intel-admission'] : []),
-      ...(key === 'native-homebrew-mi' ? ['arm-refresh-admission'] : []),
+      ...(key === 'native-homebrew-mi' ? ['intel-homebrew-admission'] : []),
       ...(key === 'native-mi-retained' ? ['mac-admission'] : []),
       ...(key === 'native-ma-refresh' ? ['intel-retained-admission'] : [])]);
     if (part.shard === 'units') {
@@ -1944,8 +1963,8 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     ['refresh bypasses remaining Intel body allocation', doc => {
       doc.jobs['native-mi-refresh'].needs = ['intent', 'source', 'native-units-mi', 'intel-homebrew-admission'];
     }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
-    ['Homebrew waits for its own allocation gate', doc => {
-      doc.jobs['native-homebrew-mi'].needs = ['intent', 'source', 'intel-homebrew-admission'];
+    ['Homebrew bypasses critical body allocation gate', doc => {
+      doc.jobs['native-homebrew-mi'].needs = ['intent', 'source', 'arm-refresh-admission'];
     }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
     ['Homebrew admission waits for Homebrew completion', doc => {
       doc.jobs['intel-homebrew-admission'].needs.push('native-homebrew-mi');
@@ -1990,9 +2009,9 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
       const step = doc.jobs['intel-homebrew-admission'].steps[4];
       step.run = step.run.replace(' --attempt "$GITHUB_RUN_ATTEMPT"', '');
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
-    ['Homebrew admission polls the body group', doc => {
+    ['Homebrew admission polls its own worker instead of the body group', doc => {
       const step = doc.jobs['intel-homebrew-admission'].steps[4];
-      step.run = step.run.replace('--group intel-homebrew', '--group intel-bodies');
+      step.run = step.run.replace('--group intel-bodies', '--group intel-homebrew');
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
     ['Homebrew admission accepts queued timestamps', doc => {
       doc.jobs['intel-homebrew-admission'].steps[4].run = 'node -e "console.log(jobs.every(job => job.started_at))"';
@@ -2086,6 +2105,9 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     document.jobs['native-mi'].needs = ['intent', 'source', 'native-units-mi', 'mac-admission'];
     document.jobs['intel-admission'].needs = ['intent', 'source', 'native-units-mi', 'mac-admission'];
     document.jobs['intel-homebrew-admission'].needs = ['intent', 'source', 'native-units-mi', 'intel-admission'];
+    document.jobs['intel-homebrew-admission'].steps[4].name = 'Wait for actual Intel Homebrew worker allocation';
+    document.jobs['intel-homebrew-admission'].steps[4].run =
+      document.jobs['intel-homebrew-admission'].steps[4].run.replace('--group intel-bodies', '--group intel-homebrew');
     document.jobs['native-homebrew-mi'].needs = ['intent', 'source', 'intel-admission'];
     document.jobs['native-mi-refresh'].needs = ['intent', 'source', 'native-units-mi', 'intel-homebrew-admission'];
     document.jobs['producer-summary'].needs = document.jobs['producer-summary'].needs.filter(key =>

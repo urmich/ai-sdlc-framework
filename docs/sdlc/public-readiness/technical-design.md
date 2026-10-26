@@ -246,9 +246,9 @@ Archived native reconstruction selects the scheduling policy from the existing
 authenticated `definition.sourceFiles` entry for `scripts/test-scheduling.mjs`.
 The non-executing declaration tokenizer requires exact token-normalized
 fingerprints for the exported protocol, priority table and complete policy
-initializers. Current live execution uses literal v7; its complete budget binds
+initializers. Current live execution uses literal v8; its complete budget binds
 declared-demand-first ready backfill. Historical reconstruction retains
-the exact v6, v5, v4, v3 and v2 contracts, original file-admission budget labels
+the exact v7, v6, v5, v4, v3 and v2 contracts, original file-admission budget labels
 and digests. Missing,
 unknown, duplicate, spoofed or computed contracts fail `EVIDENCE`. Do not
 execute captured code, accept a report policy flag or try alternate digests.
@@ -447,20 +447,22 @@ Historical v2-v7 identities and captured-source replay remain unchanged.
 It does not cache cold Go builds, prune lifecycle/failure probes or alter assertions.
 
 The PR workflow uses five Linux read-only allocation coordinators under
-`arm-regression-allocation-v5-critical-body-first`. After ARM's own unit barrier,
+`arm-regression-allocation-v6-all-critical-bodies-first`. After ARM's own unit barrier,
 `mac-admission` observes its three long body workers before releasing Intel's
 measured critical body-0 producer, still behind both Intel unit jobs. The
 `intel-retained-admission` coordinator observes that actual worker before
 releasing ARM's separate short refresh, which retains its own ARM unit barrier.
 The coordinator retains its historical job/artifact identifier, while its
 current closed `intel-primary-body` group requires body-0 allocation.
-Then `arm-refresh-admission` observes the refresh worker before Intel's genuine
-Homebrew producer becomes eligible. ARM's genuine Homebrew producer retains
-its initial schedule.
-The `intel-homebrew-admission` coordinator observes the actual Intel Homebrew
-worker before releasing Intel body-1 and body-2, retaining both Intel unit jobs.
-Finally, `intel-admission` observes all three Intel body workers before releasing
-the separate short Intel refresh. No gate waits for a Homebrew command or any
+Then `arm-refresh-admission` observes the refresh worker before Intel body-1
+and body-2 become eligible, retaining both Intel unit jobs and no Homebrew
+dependency. ARM's genuine Homebrew producer retains its initial schedule.
+The existing `intel-homebrew-admission` coordinator now observes allocation
+of all three Intel bodies through the closed `intel-bodies` group before
+releasing Intel's genuine Homebrew producer. This lets eligible critical bodies
+take available Mac capacity first, without reserving an extra VM or waiting
+for a body to finish. `intel-admission` independently observes those same
+allocations before releasing the separate short Intel refresh. No gate waits for a Homebrew command or any
 producer's completion. Native part names, recipes, assertions, retention and
 cleanup remain unchanged.
 A queued `started_at` placeholder is not allocation evidence; a runner or
@@ -468,10 +470,11 @@ started step is required. Completed allocated parts also satisfy admission; no s
 waits for its allocated parts to finish. Each helper invocation selects only
 the closed `arm-bodies`, `intel-primary-body`, `arm-refresh`,
 `intel-homebrew` or `intel-bodies` group. The historical `arm-regressions`
-group remains the default for existing callers. Current v5 uses
-`intel-primary-body`; historical v4 retains `intel-retained-body` and its
-original body-1 receipt semantics. Retain the exact historical
-v1, v2, v3 and v4 resource graphs and unmarked native v1-v4 replay rather than
+group remains the default for existing callers. Current v6 and historical v5
+use `intel-primary-body`; historical v4 retains `intel-retained-body` and its
+original body-1 receipt semantics. Preserve v5's original Homebrew-allocation
+dependency only as historical v5, never relabel it as current v6.
+Retain the exact historical v1-v5 resource graphs and unmarked native v1-v4 replay rather than
 silently adopting new dependencies.
 No coordinator occupies a Mac VM while waiting or adds a native producer
 part. The policy does not change the twenty-five-part assertion union,
@@ -832,6 +835,21 @@ grace period or later destructive signal is introduced.
 The native ownership fixture reserves four aggregate worker slots for its
 test process and three real child processes, without changing host capacities
 or the one-second settlement bound.
+The controlled Windows settlement fixture separately reserves five slots for
+its test process and at most two independent owned root/writer pairs. Fresh
+VM contexts and unique paths isolate all six scenarios; each pair settles
+before another is admitted. Real peer provenance proves overlap, all six
+cleanup closures remain required, and the existing twenty-second test and
+one-second stop deadlines remain unchanged. Retain per-mode phase diagnostics
+so a later timeout identifies the unfinished boundary.
+The publication fixture arms its five-second ready deadline only when the
+parent releases the intentional write barrier, not while that barrier forbids
+progress. A controlled timer advance while paused must not consume the later
+readiness allowance. Complete atomic publication and exact writer reaping
+remain required within the unchanged fifteen-second test ceiling.
+Its separate five-second pause-announcement watchdog uses real timers even
+while the readiness regression controls virtual time, so a missing announcement
+still enters bounded failure cleanup.
 The denied installer lifecycle likewise reserves four slots for its observed
 test/runtime/runtime/CLI process chain. Its child environment still excludes
 broker credentials, so the owning test reserves their capacity in advance.

@@ -8,7 +8,7 @@ export const validationDeclarations = {
     "minimumSlots": 4
   }, {
     "root": "TOOL02 Windows validation settlement bounds exited roots and failed or stalled tree termination",
-    "minimumSlots": 4,
+    "minimumSlots": 5,
     "exclusiveResources": []
   }, {
     "root": "TOOL02 owned writer provenance is invisible until its complete publication",
@@ -54,6 +54,8 @@ const boundarySource = (await fs.readFile(new URL('./distribution-network-bounda
   .replace(/^import .+;\r?$/gmu, '').replace(/^export /gmu, '');
 
 test('TOOL02 owned writer provenance is invisible until its complete publication', { timeout: 15000 }, async t => {
+  const pauseClock = { schedule: setTimeout, cancel: clearTimeout };
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const directory = await fs.mkdtemp(path.join(root, '.test-data', 'writer-publication-'));
   const token = randomUUID();
   const publication = path.join(directory, `${token}.writer.json`);
@@ -88,11 +90,13 @@ syncBuiltinESMExports();
     new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal }))), outputClosed,
   ]).then(([result]) => result);
   const message = key => new Promise((resolve, reject) => {
-    const timer = setTimeout(() => finish(new Error(`Owned writer did not announce ${key}`)), 5000);
+    const schedule = key === 'paused' ? pauseClock.schedule : setTimeout;
+    const cancel = key === 'paused' ? pauseClock.cancel : clearTimeout;
+    const timer = schedule(() => finish(new Error(`Owned writer did not announce ${key}`)), 5000);
     const received = value => { if (value[key]) finish(null, value); };
     const exited = () => finish(new Error(`Owned writer exited before ${key}`));
     const finish = (error, value) => {
-      clearTimeout(timer);
+      cancel(timer);
       child.off('message', received);
       child.off('error', finish);
       child.off('close', exited);
@@ -101,14 +105,26 @@ syncBuiltinESMExports();
     child.on('message', received);
     child.once('error', finish);
     child.once('close', exited);
+    if (child.exitCode !== null || child.signalCode !== null) exited();
   });
   const paused = message('paused');
-  const ready = message('ready');
-  ready.catch(() => {});
+  let ready;
+  const writerErrors = [];
+  let writerReady = false;
+  const expectReady = () => {
+    if (!ready) {
+      ready = message('ready');
+      ready.then(() => { writerReady = true; }, () => {});
+      ready.catch(() => {});
+    }
+    return ready;
+  };
+  child.stderr.on('data', bytes => writerErrors.push(Buffer.from(bytes)));
   child.stdout.resume();
   child.stderr.resume();
   child.stdin.on('error', () => {});
   try {
+    t.mock.timers.tick(5001);
     await paused;
     const barrier = JSON.parse(await fs.readFile(pausedPath, 'utf8'));
     assert.equal(barrier.pid, child.pid);
@@ -120,15 +136,20 @@ syncBuiltinESMExports();
     assert.equal(path.dirname(barrier.file), directory);
     assert.equal(barrier.flag, 'wx', 'Only a unique owned pending file may be opened for publication');
     assert.equal((await fs.stat(barrier.file)).size, 0);
+    t.mock.timers.tick(5001);
+    t.mock.timers.reset();
+    const released = expectReady();
     child.stdin.end(Buffer.from([1]));
-    await ready;
+    await released;
     assert.deepEqual(JSON.parse(await fs.readFile(publication, 'utf8')),
       { pid: child.pid, parent: process.pid, token });
     await assert.rejects(fs.stat(barrier.file), { code: 'ENOENT' });
   } finally {
+    t.mock.timers.reset();
+    const released = expectReady();
     if (!child.stdin.destroyed && !child.stdin.writableEnded) child.stdin.end(Buffer.from([1]));
     await fs.writeFile(path.join(directory, `${token}.release`), '');
-    await ready.catch(() => {});
+    await released.catch(() => {});
     if (child.connected) child.disconnect();
     let timer;
     const result = await Promise.race([closed, new Promise(resolve => {
@@ -136,6 +157,11 @@ syncBuiltinESMExports();
     })]).finally(() => clearTimeout(timer));
     if (!result && child.exitCode === null && child.signalCode === null) child.kill();
     const drained = result ?? await closed;
+    const originalStderr = Buffer.concat(writerErrors);
+    t.diagnostic(JSON.stringify({ kind: 'owned-publication-writer-outcome',
+      pid: child.pid, writerReady, ...drained,
+      originalStderr: { sha256: digest(originalStderr), bytes: originalStderr.length },
+      ipcChannelClosed: originalStderr.includes(Buffer.from('ERR_IPC_CHANNEL_CLOSED')) }));
     assert.deepEqual(drained, { code: 0, signal: null }, 'The exact owned leaf writer must be reaped');
     t.diagnostic(JSON.stringify({ kind: 'owned-publication-writer-drained', pid: child.pid, ...drained }));
     await fs.rm(directory, { recursive: true, force: true });
@@ -145,7 +171,17 @@ syncBuiltinESMExports();
 test('TOOL02 Windows validation settlement bounds exited roots and failed or stalled tree termination',
   { timeout: 20000 }, async t => {
     const failures = [];
-    for (const mode of ['natural', 'root-exit', 'failed', 'stalled', 'reported-stopped', 'retention-failed']) {
+    const phases = new Map();
+    const completedModes = [];
+    const ready = { natural: Promise.withResolvers(), 'root-exit': Promise.withResolvers() };
+    t.after(() => t.diagnostic(JSON.stringify({
+      kind: 'owned-settlement-phases', phases: Object.fromEntries(phases),
+    })));
+    const modes = ['natural', 'root-exit', 'failed', 'stalled', 'reported-stopped', 'retention-failed'];
+    const runMode = async mode => {
+      const modeStarted = performance.now();
+      const phase = name => phases.set(mode, { phase: name, elapsedMs: performance.now() - modeStarted });
+      phase('directory');
       const directory = await fs.mkdtemp(path.join(root, '.test-data', 'tool02-'));
       const token = randomUUID();
       const cancellation = new AbortController();
@@ -197,6 +233,7 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
       pending.catch(() => {});
       const observed = pending.then(report => ({ report }), error => ({ error }));
       try {
+        phase('writer-provenance');
         const deadline = performance.now() + 5000;
         while (!identity) {
           identity = await fs.readFile(path.join(directory, `${token}.writer.json`), 'utf8')
@@ -206,7 +243,22 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
         }
         assert.equal(identity.token, token);
         assert.equal(identity.parent, child.pid);
+        if (Object.hasOwn(ready, mode)) {
+          ready[mode].resolve(identity);
+          let timer;
+          phase('peer-provenance');
+          const peer = await Promise.race([
+            ready[mode === 'natural' ? 'root-exit' : 'natural'].promise,
+            new Promise((_, reject) => {
+              timer = setTimeout(() => reject(new Error(
+                'Independent owned settlement scenarios must become ready together')), 5000);
+            }),
+          ]).finally(() => clearTimeout(timer));
+          assert.notEqual(peer.pid, identity.pid);
+          assert.notEqual(peer.token, identity.token);
+        }
         if (mode === 'natural') {
+          phase('natural-settlement');
           await fs.writeFile(path.join(directory, `${token}.release`), '');
           const report = await pending;
           assert.equal(report.complete, true);
@@ -215,7 +267,7 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
           assert.equal(launches, 0);
           assert.equal(lifetime.cleanupSafe, true);
           assert.deepEqual(lifetime.unsettledCommands, []);
-          continue;
+          return;
         }
         if (mode === 'root-exit') {
           while (child.exitCode === null) {
@@ -225,6 +277,7 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
           assert.equal(child.exitCode, 23);
         }
         const started = performance.now();
+        phase('cancellation-settlement');
         cancellation.abort();
         const sentinel = Symbol('unsettled');
         let timer;
@@ -240,7 +293,7 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
           assert.equal(outcome.error, retentionFailure);
           t.diagnostic(JSON.stringify({ mode, pid: child.pid, cleanupSafe: lifetime.cleanupSafe,
             primaryCode: outcome.error.code, cleanup: lifetime.unsettledCommands[0].cleanup }));
-          continue;
+          return;
         }
         assert.equal(outcome.error, undefined);
         const result = outcome.report;
@@ -260,8 +313,13 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
         t.diagnostic(JSON.stringify({ mode, pid: child.pid, complete: result.complete,
           exitCode: result.exitCode, cleanup: result.cleanup }));
       } catch (error) {
-        failures.push({ mode, message: error.message });
+        t.diagnostic(JSON.stringify({
+          kind: 'owned-settlement-scenario-failure', mode,
+          ...phases.get(mode), message: error.message,
+        }));
+        failures.push({ mode, message: error.message, ...phases.get(mode) });
       } finally {
+        phase('writer-drain');
         await fs.writeFile(path.join(directory, `${token}.release`), '');
         const deadline = performance.now() + 5000;
         while (!await fs.stat(path.join(directory, `${token}.drained`)).catch(error => {
@@ -279,17 +337,28 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
           assert.ok(performance.now() < deadline, 'Exact owned descendant must exit after releasing its barrier');
           await delay(10);
         }
+        phase('root-close');
         await closed;
         if (killer && killer.exitCode === null && killer.signalCode === null) {
           killer.exitCode = 1;
           killer.stderr.end();
           killer.emit('close', 1, null);
         }
+        phase('final-command-settlement');
         const finalOutcome = await observed;
         if (mode !== 'retention-failed') assert.equal(finalOutcome.error, undefined);
         await fs.rm(directory, { recursive: true, force: true });
+        phase('cleaned');
+        completedModes.push(mode);
+      }
+    };
+    for (let index = 0; index < modes.length; index += 2) {
+      const outcomes = await Promise.allSettled(modes.slice(index, index + 2).map(runMode));
+      for (const outcome of outcomes) {
+        if (outcome.status === 'rejected') throw outcome.reason;
       }
     }
+    assert.deepEqual([...completedModes].sort(), [...modes].sort());
     assert.deepEqual(failures, []);
   });
 

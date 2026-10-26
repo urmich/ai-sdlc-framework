@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 env:
-  SDLC_MAC_ADMISSION_POLICY: arm-regression-allocation-v5-critical-body-first
+  SDLC_MAC_ADMISSION_POLICY: arm-regression-allocation-v6-all-critical-bodies-first
   # Representative public regression input, not an installer version-support whitelist.
   SUPPORTED_PREVIOUS_REPOSITORY: urmich/ai-sdlc-framework
   SUPPORTED_PREVIOUS_VERSION: '0.3.1'
@@ -1427,7 +1427,7 @@ jobs:
           retention-days: 90
 
   native-mi:
-    needs: [intent, source, native-units-mi, intel-homebrew-admission]
+    needs: [intent, source, native-units-mi, arm-refresh-admission]
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
     name: native-${{ matrix.role }}
     strategy:
@@ -1532,7 +1532,7 @@ jobs:
           retention-days: 90
 
   intel-admission:
-    needs: [intent, source, native-units-mi, intel-homebrew-admission]
+    needs: [intent, source, native-units-mi, arm-refresh-admission]
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
     name: Intel body admission
     runs-on: ubuntu-24.04
@@ -1613,13 +1613,13 @@ jobs:
       - name: Select pinned native Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with: { node-version: '24.20.0', architecture: x64, check-latest: false }
-      - name: Wait for actual Intel Homebrew worker allocation
+      - name: Wait for actual Intel critical body worker allocation
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ADMISSION_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           mkdir -p .test-data
-          node scripts/macos-runner-admission.mjs --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --head-sha "$ADMISSION_HEAD_SHA" --group intel-homebrew --output .test-data/intel-homebrew-admission.json
+          node scripts/macos-runner-admission.mjs --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --head-sha "$ADMISSION_HEAD_SHA" --group intel-bodies --output .test-data/intel-homebrew-admission.json
       - name: Retain Intel Homebrew admission observation
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -1878,7 +1878,7 @@ jobs:
           retention-days: 90
 
   native-homebrew-mi:
-    needs: [intent, source, arm-refresh-admission]
+    needs: [intent, source, intel-homebrew-admission]
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
     name: native-${{ matrix.role }}
     strategy:
