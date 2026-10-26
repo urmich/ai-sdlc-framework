@@ -157,7 +157,10 @@ test('T-PRD018 Windows termination observations durably distinguish dispatch and
         pid: 731942, exitCode: null, signalCode: null, stderr: new PassThrough(), unref() {},
       });
       const launched = Promise.withResolvers();
+      const watchdogScheduled = Promise.withResolvers();
       const timers = [];
+      let controllerDispatched = false;
+      let watchdogRegistered = false;
       let clock = 0;
       let controllerStops = 0;
       let rootClosed = false;
@@ -176,9 +179,14 @@ test('T-PRD018 Windows termination observations durably distinguish dispatch and
         process: { platform: 'win32', version: process.version, arch: 'x64',
           env: { SystemRoot: 'C:\\Windows' } },
         setTimeout(callback, milliseconds) {
-          const timer = { callback, milliseconds, stop: new Error().stack.includes('stopOwnedProcessTree'),
+          // The backend registers its watchdog synchronously after the owned controller dispatch.
+          const timer = { callback, milliseconds, stop: controllerDispatched && !watchdogRegistered,
             unref() {}, cleared: false };
           timers.push(timer);
+          if (timer.stop) {
+            watchdogRegistered = true;
+            watchdogScheduled.resolve(timer);
+          }
           if (!timer.stop && milliseconds < 1000) queueMicrotask(() => {
             if (!timer.cleared) { clock += milliseconds; callback(); }
           });
@@ -191,11 +199,12 @@ test('T-PRD018 Windows termination observations durably distinguish dispatch and
             launched.resolve();
             return owned;
           }
-          assert.equal(command, 'C:\\Windows\\System32\\taskkill.exe');
+          assert.equal(command, path.join('C:\\Windows', 'System32', 'taskkill.exe'));
           assert.deepEqual(Array.from(args), ['/PID', String(owned.pid), '/T', '/F']);
           assert.equal(options.shell, false);
           clock += mode === 'spawn-consumes-budget' ? 1005 : 25;
           if (mode === 'spawn-error') throw Object.assign(new Error('Owned controller unavailable'), { code: 'EAGAIN' });
+          controllerDispatched = true;
           return killer;
         },
       });
@@ -221,7 +230,10 @@ test('T-PRD018 Windows termination observations durably distinguish dispatch and
         else {
           if (mode === 'root-exited-before-stop') closeRoot(7);
           cancellation.abort();
-          if (!noController) killer.stderr.write(stderr);
+          if (!noController) {
+            await watchdogScheduled.promise;
+            killer.stderr.write(stderr);
+          }
           if (noController) {
             assert.equal(controllerStops, 0);
           } else if (mode === 'root-first') {

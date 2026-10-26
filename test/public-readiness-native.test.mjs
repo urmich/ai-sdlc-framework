@@ -1212,14 +1212,17 @@ test('TOOL03 prefix cleanup requires bootstrap and native settlement with owned 
   for (const mode of ['safe', 'bootstrap-uncertain', 'bootstrap-throw', 'bootstrap-retention',
     'native-uncertain', 'native-throw', 'native-retention', 'missing-bootstrap', 'corrupt-bootstrap',
     'missing-native', 'corrupt-native', 'source-change', 'role-change', 'owner-change',
-    'native-pending', 'not-required', 'safe-native-failure', 'allocation-change']) {
+    'native-pending', 'not-required', 'safe-native-failure', 'allocation-change',
+    'child-uid', 'child-gid', 'child-group-writable', 'child-world-writable']) {
     const directory = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'tool03-prefix-'));
     const checkout = path.join(directory, 'source');
     const bootstrapDirectory = path.join(checkout, '.test-data', 'bootstrap');
     const prefix = path.join(directory, 'prefix');
     await fs.mkdir(bootstrapDirectory, { recursive: true });
     const stat = await fs.lstat(directory);
-    const binding = { host: { uid: stat.uid, gid: stat.gid }, job: 'owned-prefix', attempt: '1' };
+    const metadataDenial = mode.startsWith('child-');
+    const binding = { host: { uid: metadataDenial ? 501 : stat.uid, gid: metadataDenial ? 20 : stat.gid },
+      job: 'owned-prefix', attempt: '1' };
     const owner = { repositoryRoot: checkout, bootstrapDirectory, prefix, binding,
       createDirectory: selected => fs.mkdir(selected, { mode: 0o700 }), claimDirectory: async () => {} };
     const target = 'macos-x64';
@@ -1228,9 +1231,30 @@ test('TOOL03 prefix cleanup requires bootstrap and native settlement with owned 
       ImageOS: 'owned', ImageVersion: 'owned', GITHUB_WORKFLOW_REF: 'owned',
       GITHUB_RUN_ID: '1', GITHUB_RUN_ATTEMPT: '1', GITHUB_REPOSITORY_ID: '1',
       GITHUB_REPOSITORY: 'owned/repository', EXPECTED_SOURCE_COMMIT: revision };
-    const prefixContext = createContext({ fs, constants, path, os, randomBytes,
+    const rejectedChild = path.join(prefix, 'Library', 'vendor', 'portable-ruby', 'private-user-retained');
+    // The retained root owner was 501:20; rejected child facts are controlled, not observed native metadata.
+    const posixStat = (value, file) => new Proxy(value, { get(object, key) {
+      if (key === 'uid') return BigInt(binding.host.uid + (file === rejectedChild && mode === 'child-uid' ? 1 : 0));
+      if (key === 'gid') return BigInt(binding.host.gid + (file === rejectedChild && mode === 'child-gid' ? 1 : 0));
+      if (key === 'mode') return BigInt(file === rejectedChild && mode === 'child-group-writable' ? 0o100664 :
+        file === rejectedChild && mode === 'child-world-writable' ? 0o100646 :
+          object.isDirectory() ? 0o40700 : 0o100600);
+      const member = object[key];
+      return typeof member === 'function' ? member.bind(object) : member;
+    } });
+    const prefixFilesystem = metadataDenial ? { ...fs,
+      lstat: async (file, ...args) => posixStat(await fs.lstat(file, ...args), file),
+      open: async (file, ...args) => {
+        if ((await fs.lstat(file).catch(() => null))?.isDirectory()) return { sync: async () => {}, close: async () => {} };
+        const handle = await fs.open(file, ...args);
+        return { writeFile: bytes => handle.writeFile(bytes), sync: () => handle.sync(), close: () => handle.close(),
+          read: (...values) => handle.read(...values), stat: async (...values) => posixStat(await handle.stat(...values), file) };
+      },
+    } : fs;
+    const prefixContext = createContext({ fs: prefixFilesystem, constants, path, os, randomBytes,
       canonical: value => canonical(jsonValue(value)), digest: vmDigest, requireThat,
-      SdlcError, Buffer, process, promisify: () => async () => ({ stdout: revision }), owner,
+      SdlcError, Buffer, process: metadataDenial ? { ...process, platform: 'darwin' } : process,
+      promisify: () => async () => ({ stdout: revision }), owner,
       execFile: (_, __, ___, callback) => callback(null, revision, ''),
     });
     const api = runInContext(`${prefixSource}
@@ -1318,6 +1342,41 @@ requireShortHomebrewPrefix = value => value;
         assert.ok(mode.startsWith('bootstrap-'), error.stack);
         return null;
       });
+      if (metadataDenial) {
+        await fs.mkdir(path.dirname(rejectedChild), { recursive: true });
+        await fs.writeFile(rejectedChild, 'retain rejected descendant');
+        const marker = await fs.readFile(path.join(prefix, '.sdlc-native-homebrew-prefix.json'));
+        const allocationPath = path.join(bootstrapDirectory, 'native-homebrew-prefix-allocation.json');
+        const allocation = await fs.readFile(allocationPath);
+        await assert.rejects(api.cleanupHomebrewPrefix({ bootstrapDirectory, repositoryRoot: checkout,
+          target, role: target, sourceCommit: revision, environment,
+          run: async name => { calls.push(name); assert.fail('Unsafe descendant must prevent empty-root removal'); } }), error => {
+          assert.equal(error.code, 'HOST');
+          assert.ok(error.details, `Rejected ${mode} must identify the offending descendant and POSIX metadata: ${error.message}`);
+          assert.deepEqual(jsonValue(error.details), {
+            entrySha256: digest(path.relative(prefix, rejectedChild).split(path.sep).join('/')),
+            entryDepth: 4,
+            expected: { uid: binding.host.uid, gid: binding.host.gid },
+            actual: {
+              uid: binding.host.uid + (mode === 'child-uid' ? 1 : 0),
+              gid: binding.host.gid + (mode === 'child-gid' ? 1 : 0),
+              mode: mode === 'child-group-writable' ? '0664' : mode === 'child-world-writable' ? '0646' : '0600',
+              symbolicLink: false,
+            },
+          });
+          const diagnostic = JSON.stringify(error.details);
+          assert.equal(diagnostic.includes(directory), false, 'Ownership diagnostics must not disclose the user checkout');
+          assert.equal(diagnostic.includes('private-user-retained'), false, 'Unknown descendant names remain private');
+          return true;
+        });
+        assert.equal(await fs.readFile(rejectedChild, 'utf8'), 'retain rejected descendant');
+        assert.deepEqual(await fs.readFile(path.join(prefix, '.sdlc-native-homebrew-prefix.json')), marker);
+        assert.deepEqual(await fs.readFile(allocationPath), allocation);
+        await assert.rejects(fs.lstat(path.join(bootstrapDirectory, 'native-homebrew-prefix-cleanup.json')),
+          { code: 'ENOENT' });
+        assert.equal(calls.includes('brew-prefix-rmdir'), false);
+        continue;
+      }
       if (bootstrapped) Object.assign(environment, Object.fromEntries(Object.entries(bootstrapped).filter(([key]) => key !== 'report')));
       if ((mode.startsWith('native-') && mode !== 'native-pending') || mode === 'safe-native-failure') {
         const evidence = path.join(checkout, '.test-data', 'native');

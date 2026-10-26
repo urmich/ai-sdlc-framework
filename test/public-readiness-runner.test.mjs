@@ -2205,6 +2205,41 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
   ]) assert.throws(() => selectedPolicy(changed), { code: 'EVIDENCE' });
 });
 
+function assertPrDescriptionProcessIsolation(groups, observations) {
+  assert.equal(observations.length, groups.length);
+  const processes = groups.map((group, index) => {
+    const observed = observations[index];
+    assert.equal(group.processes.length, 1);
+    assert.deepEqual(group.processIds, [observed.pid]);
+    assert.equal(observed.group.id, group.id);
+    assert.equal(observed.group.minimumSlots, group.minimumSlots);
+    assert.deepEqual(observed.group.exclusiveResources, group.exclusiveResources);
+    assert.equal(observed.lease.finishedAt, null);
+    const lease = group.processes[0];
+    assert.equal(lease.pid, observed.pid);
+    for (const field of ['pid', 'slot', 'minimumSlots', 'exclusiveResources', 'startedAt']) {
+      assert.deepEqual(lease[field], observed.lease[field]);
+    }
+    assert.ok(Number.isFinite(Date.parse(lease.startedAt)));
+    assert.ok(Date.parse(lease.finishedAt) >= Date.parse(lease.startedAt));
+    return lease;
+  });
+  assert.equal(new Set(processes.map(lease => lease.slot)).size, groups.length,
+    'Every isolated root requires a distinct source-bound process lease');
+}
+
+function assertPrDescriptionLiveParticipants(retained, pr) {
+  assert.equal(retained.lease.minimumSlots, 4);
+  assert.equal(pr.lease.minimumSlots, 1);
+  assert.notEqual(retained.pid, pr.pid, 'Blocked live guard and PR workers cannot share a PID');
+  assert.notEqual(retained.lease.slot, pr.lease.slot);
+  assert.equal(retained.producer, pr.producer);
+  assert.equal(retained.budgetId, pr.budgetId);
+  assert.equal(retained.capacity, pr.capacity);
+  assert.equal(process.kill(retained.pid, 0), true);
+  assert.equal(process.kill(pr.pid, 0), true);
+}
+
 test('T-PRD010 PR-description priority admits its isolated closure before queued work while the retained guard is live',
   { timeout: 60000 }, async t => {
     const f = await runnerFixture(t);
@@ -2232,7 +2267,8 @@ const entered=async name=>{
   const lease=leases.find(value=>value.pid===process.pid&&value.slot===process.env.SDLC_TEST_BUDGET_SLOT);
   assert.ok(lease);assert.equal(lease.finishedAt,null);assert.equal(lease.minimumSlots,group.minimumSlots);
   const budget=await readTestBudget();
-  await publish(name,{pid:process.pid,group,lease,budgetId:budget.id,capacity:budget.capacity});
+  await publish(name,{pid:process.pid,group,lease,producer:process.env.SDLC_TEST_BUDGET_PRODUCER,
+    budgetId:budget.id,capacity:budget.capacity});
   test.after(async()=>{
     assert.equal(process.env.PR_DESCRIPTION_WORKER,String(process.pid));
     delete process.env.PR_DESCRIPTION_WORKER;
@@ -2276,6 +2312,8 @@ const entered=async name=>{
       const pending = f.invoke(args, { PR_DESCRIPTION_PRIORITY_EVIDENCE: evidence, SDLC_TEST_REPORT_FILE: reportPath });
       const deadline = performance.now() + 20000;
       let live;
+      let retainedLive;
+      let liveBudget;
       let queuedAtPr;
       try {
         while (true) {
@@ -2293,6 +2331,14 @@ const entered=async name=>{
           if (error.code !== 'ENOENT') throw error;
           return false;
         }), false, 'Observe the retained guard still live before releasing either participant');
+        retainedLive = JSON.parse(await fs.readFile(path.join(evidence, 'retained'), 'utf8'));
+        assertPrDescriptionLiveParticipants(retainedLive, live);
+        assert.throws(() => assertPrDescriptionLiveParticipants(retainedLive,
+          { ...live, pid: retainedLive.pid, lease: { ...live.lease, pid: retainedLive.pid } }),
+        /Blocked live guard and PR workers cannot share a PID/u);
+        liveBudget = await readTestBudget();
+        assert.equal(liveBudget.id, live.budgetId);
+        assert.ok(liveBudget.activeWorkers >= 2 && liveBudget.activeWorkers <= liveBudget.capacity);
       } finally {
         await fs.writeFile(path.join(evidence, 'release'), 'release');
         const result = await pending;
@@ -2304,7 +2350,31 @@ const entered=async name=>{
       assert.equal(report.selection.concurrency, 5);
       assert.equal(groups.length, 7);
       assert.ok(groups.every(group => group.status === 'Passed'));
-      assert.equal(new Set(groups.flatMap(group => group.processIds)).size, 7);
+      const observations = await Promise.all(groups.map(async group => {
+        const name = group.root === 'retained guard' ? 'retained' :
+          group.root === 'PR-description co-tail' ? 'pr-description' : group.root;
+        return JSON.parse(await fs.readFile(path.join(evidence, name), 'utf8'));
+      }));
+      assertPrDescriptionProcessIsolation(groups, observations);
+      const recycledGroups = structuredClone(groups);
+      const recycledObservations = structuredClone(observations);
+      const queued = groups.findIndex(group => group.root === 'queued source work');
+      const dependent = groups.findIndex(group => group.root === 'dependent queue');
+      assert.ok(Date.parse(groups[queued].processes[0].finishedAt) <=
+        Date.parse(groups[dependent].processes[0].startedAt));
+      // Independent broker cleanup callbacks may lag kernel exit and PID reuse.
+      const previous = groups.findIndex(group => group.root === 'catalog');
+      const next = groups.findIndex(group => group.root === 'launcher');
+      const recycledPid = groups[previous].processIds[0];
+      recycledGroups[next].processIds = [recycledPid];
+      recycledGroups[next].processes[0].pid = recycledPid;
+      recycledObservations[next].pid = recycledPid;
+      recycledObservations[next].lease.pid = recycledPid;
+      const brokerCleanup = new Date(Math.max(Date.parse(groups[previous].processes[0].startedAt),
+        Date.parse(groups[next].processes[0].startedAt)) + 1).toISOString();
+      recycledGroups[previous].processes[0].finishedAt = brokerCleanup;
+      recycledGroups[next].processes[0].finishedAt = brokerCleanup;
+      assertPrDescriptionProcessIsolation(recycledGroups, recycledObservations);
       assert.deepEqual(groups.flatMap(group => group.assertionIds).sort(),
         planned.groups.flatMap(group => group.assertionIds).sort());
       assert.equal(report.executions.length, 8);
@@ -2328,7 +2398,8 @@ const entered=async name=>{
       const cleaned = (await fs.readdir(evidence)).filter(file => file.endsWith('-cleaned'));
       assert.equal(cleaned.length, 7, 'Every isolated source root must finish its owned teardown');
       runs.push({ profile, order: planned.groups.map(group => group.root), queuedAtPr, groups,
-        budgetId: live.budgetId, capacity: live.capacity, peak: report.resources.budget.peakActiveWorkers });
+        budgetId: live.budgetId, capacity: live.capacity, peak: report.resources.budget.peakActiveWorkers,
+        liveBudget, liveParticipants: [retainedLive, live] });
     }
     assert.deepEqual(runs[1].order, ['retained guard', 'catalog', 'launcher', 'release report',
       'queued source work', 'dependent queue', 'PR-description co-tail'],
@@ -2339,7 +2410,10 @@ const entered=async name=>{
       'The same resource/closure probe must reject the explicit wrong-order negative control');
     for (const run of runs) {
       t.diagnostic(JSON.stringify({ profile: run.profile, order: run.order, queuedAtPr: run.queuedAtPr, participantSlots: 5,
-        liveGuardSlots: 4, livePrSlots: 1, budgetId: run.budgetId, capacity: run.capacity, peak: run.peak }));
+        liveGuardSlots: 4, livePrSlots: 1, budgetId: run.budgetId, capacity: run.capacity, peak: run.peak,
+        liveBudget: run.liveBudget, liveParticipants: run.liveParticipants,
+        processes: run.groups.flatMap(group => group.processes), recycledPidControl: 'Passed',
+        overlappingBrokerIntervalsControl: 'Accepted', simultaneousAliasControl: 'Rejected at live barrier' }));
     }
     admitsBeforeQueue(runs[0]);
   });

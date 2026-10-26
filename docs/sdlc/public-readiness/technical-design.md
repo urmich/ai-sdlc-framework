@@ -444,6 +444,11 @@ Place PR-description work immediately after that prefix, before shorter families
 on its same source-assigned shard. Its real ready-pool regression retains the
 five-slot nested participant, live four-slot guard, explicit caller-order
 negative control and every isolated outcome/cleanup; no worker allowance grows.
+Bind each isolated worker to its source group and distinct broker lease, not a
+globally unique numeric PID. A PID may be recycled before the old broker
+socket-close callback finalizes its lease. Only the deliberately blocked,
+simultaneously live guard and PR workers must have distinct PIDs; keep their
+live observations, separate slots and shared producer/budget checks.
 The catalog's independent long root can use the three remaining ARM slots while
 the retained guard reserves four of the existing seven. Retain the complete
 38-assertion closure, callback ordering/concurrency and every catalog root.
@@ -850,6 +855,10 @@ exit and close callbacks, stderr identity and a pre-cleanup watchdog snapshot.
 Missing events remain null; these are JavaScript observations, not independent
 kernel-exit measurements. Recording adds no timer, process, critical-path
 filesystem write or wait, and never converts uncertainty into safe cleanup.
+The cross-platform Windows VM fixture composes its exact mock executable path
+with the supplied host path module. Identify its termination watchdog through
+owned dispatch and registration, not platform-specific separators or error-stack
+text. Neither portability control changes the real termination implementation.
 The command-capture root reserves four process slots; its writer/producer peers
 reserve their actual two- or three-process minima before timed work begins.
 The native ownership fixture reserves four aggregate worker slots for its
@@ -1803,6 +1812,11 @@ Privileged operations are limited to exclusive creation, ownership transfer
 and removal of the exact empty directory; never use privileged recursive
 deletion. An always-evaluated cleanup step retains its outcome after native
 success, failure or interruption.
+If descendant ownership validation rejects cleanup, retain only the hashed
+prefix-relative entry identity, relative depth and expected/actual UID, GID,
+permission bits and symlink facts. Do not retain an absolute user path or raw
+entry name. These diagnostics are computed only after the unchanged guard fails;
+they neither permit deletion nor turn unsafe cleanup into success.
 
 All four full native lanes use the selected Node 24.20.0 baseline. A separate
 mandatory Linux Node 22.23.3 sanity/static job preserves minimum-supported-major

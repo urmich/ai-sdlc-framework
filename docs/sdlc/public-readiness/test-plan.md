@@ -177,6 +177,9 @@ final report and durable journal; unobserved events stay null and caller source,
 arguments and secrets stay absent. Preserve real cancellation, strict root
 closure, the one-second stop bound and every original failure outcome. Passing
 diagnostics do not attribute the historical C18 timeout or prove native cleanup.
+Run the Windows VM root with POSIX path composition and without error-stack
+labels. Both controlled variants must preserve the exact backend, flags, PID,
+watchdog snapshot and all ten settlement outcomes, without changing host globals.
 Observer artifact readers finish before their exact owned scratch directory is
 removed. Use the existing bounded filesystem-cleanup retry policy for classified
 transient sharing conflicts; persistent removal failure remains an error, never
@@ -382,6 +385,11 @@ directory after its owned contents are removed. Never adopt the global/default
 prefix, force an incompatible bottle, create a synthetic keg or compile a silent
 fallback. Native relocation and execution remain NotRun until the revised
 candidate actually passes both Mac lanes.
+Controlled descendant UID, GID, group-write and world-write denials must remain
+`HOST` failures before deletion. Require only a hashed relative entry identity,
+depth and safe expected/actual ownership-mode facts; retain original markers,
+allocation and contents, with no cleanup receipt or empty-prefix removal.
+Diagnostics alone do not repair or pass an actual unsafe native prefix.
 
 GitHub's standard labels select an OS image family, not an immutable VM image
 release. This plan does not pretend `macos-15` pins a selectable `ImageVersion`.
@@ -1132,7 +1140,12 @@ must observe the isolated description closure while the four-slot retained guard
 is live, within the declared five-slot nested participant and seven-slot outer
 allocation, and retain every dependency, outcome and cleanup. An explicit
 wrong-order targeted control must remain late and fail the positive overlap
-condition. Historical v2-v7 policy digests and archived source selection remain
+condition. Identify all seven workers by distinct source-bound leases and match
+their entered/finalized identities. Controlled PID reuse must remain valid even
+when old broker cleanup overlaps the replacement lease; lease timestamps are not
+kernel exit evidence. Reject a PID alias only for the deliberately blocked,
+simultaneously live guard and PR workers, preserving their live observations.
+Historical v2-v8 policy digests and archived source selection remain
 unchanged; no literal relabeling supplies current credit.
 Verify both hosted
 selection order and actual implicit dispatch; explicit targeted caller order

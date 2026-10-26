@@ -77,10 +77,20 @@ async function realDirectory(directory) {
   return stat;
 }
 
-function requireOwner(stat, binding) {
-  requireThat(Number(stat.uid) === binding.host.uid && Number(stat.gid) === binding.host.gid &&
-    (process.platform === 'win32' || stat.isSymbolicLink() || (Number(stat.mode) & 0o022) === 0),
-  'HOST', 'Ownership evidence and prefix must belong to the bound user/group and not be publicly writable');
+function requireOwner(stat, binding, selected, prefix) {
+  if (Number(stat.uid) === binding.host.uid && Number(stat.gid) === binding.host.gid &&
+    (process.platform === 'win32' || stat.isSymbolicLink() || (Number(stat.mode) & 0o022) === 0)) return;
+  const relative = selected === undefined ? undefined : path.relative(prefix, selected).split(path.sep).join('/');
+  requireThat(false,
+    'HOST', 'Ownership evidence and prefix must belong to the bound user/group and not be publicly writable',
+    relative === undefined ? undefined : {
+      entrySha256: digest(relative),
+      entryDepth: relative === '' ? 0 : relative.split('/').length,
+      expected: { uid: binding.host.uid, gid: binding.host.gid },
+      actual: { uid: Number(stat.uid), gid: Number(stat.gid),
+        mode: (Number(stat.mode) & 0o7777).toString(8).padStart(4, '0'),
+        symbolicLink: stat.isSymbolicLink() },
+    });
 }
 
 /** Actual Actions workspace stays unchanged; this repository is checked out only into its literal source child. */
@@ -499,19 +509,19 @@ async function verifyRoot(prefix, expected, binding) {
   requireThat(same(identity(stat), expected), 'HOST', 'Allocated prefix was replaced or its owner changed');
 }
 
-async function ownedChildren(directory, binding, device) {
+async function ownedChildren(directory, binding, device, prefix = directory) {
   const root = await realDirectory(directory);
-  requireOwner(root, binding);
+  requireOwner(root, binding, directory, prefix);
   requireThat(String(root.dev) === device, 'HOST', 'Prefix cleanup cannot cross filesystem boundaries');
   const children = [];
   for (const name of await fs.readdir(directory)) {
     const selected = path.join(directory, name);
     const stat = await fs.lstat(selected, { bigint: true });
-    requireOwner(stat, binding);
+    requireOwner(stat, binding, selected, prefix);
     requireThat(String(stat.dev) === device &&
       (stat.isDirectory() || stat.isFile() || stat.isSymbolicLink()),
     'HOST', 'Prefix cleanup requires user-owned ordinary contents on the allocated filesystem');
-    if (stat.isDirectory()) await ownedChildren(selected, binding, device);
+    if (stat.isDirectory()) await ownedChildren(selected, binding, device, prefix);
     children.push({ selected, identity: identity(stat) });
   }
   requireThat(same(identity(root), identity(await realDirectory(directory))),
