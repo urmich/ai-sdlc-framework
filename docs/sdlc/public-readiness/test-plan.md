@@ -1436,6 +1436,13 @@ the original subset. A new legitimate test must not erase preservation checks.
    preserve all URLs and native rewrite rules, and observe subsequent mutations.
    Retain exact configured/requested conflicts, missing/empty-remote errors and
    the same-SHA branch rejection; no cached identity supplies currentness.
+   The FR-063 immutable-fixture Git regression must reject the removed old
+   remote name using the fixture's native Git failure contract, then observe
+   the renamed destination's real URL query and unchanged URL. Do not require
+   redundant name enumeration. A controlled suppression of rename invalidation
+   must fail this regression; retain the real commit, URL mutation and
+   same-commit branch-switch controls. Bind the existing file directly to Git
+   selection so affected regressions include this caller.
    The two controlled Node-only Homebrew
    rollback-inventory roots in `test/homebrew-switch.test.mjs` must retain all
    real fixture bytes, modes and links, bound independent reads, serialize

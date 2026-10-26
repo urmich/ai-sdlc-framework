@@ -317,7 +317,12 @@ production lock deadlines, live-owner checks, durability and cleanup are unchang
 Its PR-only regression retains a real exclusion barrier, a finite clock step
 and an independently held live lock that must fail without progress.
 The retention fixture's existing immutable Git-read cache also recognizes the
-read-only current-ref query. Writes and unknown Git commands still invalidate
+read-only current-ref query. Its rename regression rejects the cached old
+destination and observes a fresh URL query for the renamed destination, rather
+than requiring redundant name enumeration. A targeted negative control must
+detect disabled rename invalidation; real commit, URL and branch-write guards
+remain intact.
+Writes and unknown Git commands still invalidate
 all cached fixture reads. This test-only reuse does not cache production state
 or replace any real refresh, archival, durability or cleanup operation.
 

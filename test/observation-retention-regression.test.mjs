@@ -1,6 +1,6 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
-  "surfaces": [{"coverage": "direct", "paths": ["src/observation-retention.mjs", "src/repository-observations.mjs", "src/pr.mjs"]}],
+  "surfaces": [{"coverage": "direct", "paths": ["src/observation-retention.mjs", "src/repository-observations.mjs", "src/pr.mjs", "src/git.mjs"]}],
   "variants": [
     {"expression": "`FR-063 sole ${status} action retains its source observation until released`", "domains": {"status": ["prepared", "uncertain"]}},
     {"expression": "`FR-063 sole ${consumer} retains superseded PR observations and facts`", "domains": {"consumer": ["facts-reference", "audit-reference", "recovery"]}},
@@ -66,10 +66,19 @@ test('FR-063 immutable fixture Git reads are reused without masking subsequent w
   await f.runGit('remote', 'rename', 'origin', remoteName);
   commands.length = 0;
   f.clock.advance(1);
+  await assert.rejects(observeFixtureRepository(f, { remoteName: 'origin' }),
+    error => error.code === 2 && error.message.includes("error: No such remote 'origin'"),
+    'A remote rename must reject the cached old destination');
+  assert.ok(commands.some(args => args[0] === 'remote' &&
+    args.includes('get-url') && args.includes('origin')),
+  'A remote rename must query the old destination instead of reusing cached URLs');
+  commands.length = 0;
+  f.clock.advance(1);
   assert.equal((await observeFixtureRepository(f, { remoteName })).remoteRepositoryURL,
     remoteRepositoryURL);
-  assert.ok(commands.some(args => args[0] === 'remote' && args.length === 1),
-    'A remote rename must invalidate the cached remote-name list');
+  assert.ok(commands.some(args => args[0] === 'remote' &&
+    args.includes('get-url') && args.includes(remoteName)),
+  'A remote rename must query the renamed destination without cached old URLs');
 
   await f.runGit('checkout', '-qb', 'feature/changed-retention');
   assert.equal(await f.runGit('rev-parse', 'HEAD'), revision);
