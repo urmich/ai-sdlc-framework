@@ -5,14 +5,16 @@ export const validationDeclarations = {
   ],
   "surfaces": [{"coverage": "direct", "paths": ["src/core.mjs", "src/files.mjs", "src/git.mjs", "src/store.mjs", "src/schemas.mjs", "src/audit.mjs", "src/validation-evidence.mjs", "src/artifacts.mjs"]}],
   "groups": [
-    {"root": "T-PRD083 managed Markdown parsing retains escaped expectations and selectors", "minimumSlots": 1, "dependsOn": [], "exclusiveResources": []}
+    {"root": "T-PRD083 managed Markdown parsing retains escaped expectations and selectors", "minimumSlots": 1, "dependsOn": [], "exclusiveResources": []},
+    {"root": "T-PRD010 Git history uses one fresh binding without hiding commits or branch changes", "minimumSlots": 2, "dependsOn": [], "exclusiveResources": []}
   ],
   "variants": [
     {"expression": "scenario", "names": ["settling-metadata", "changing-content", "changing-identity", "changing-size", "continued-churn"]}
   ],
   "plannedCases": [
     {"id": "T-PRD010", "selectors": [
-      {"name": "T-PRD010 real JSON entry reads overlap within sixteen slots and admit every sorted record", "parents": []}
+      {"name": "T-PRD010 real JSON entry reads overlap within sixteen slots and admit every sorted record", "parents": []},
+      {"name": "T-PRD010 Git history uses one fresh binding without hiding commits or branch changes", "parents": []}
     ]},
     {"id": "T-PRD013", "selectors": [
       {"name": "T-PRD013 JSON entry failures and consumer exits drain dispatched reads without admitting queued files", "parents": []},
@@ -38,7 +40,7 @@ import { promisify } from 'node:util';
 import { fixture, grant, observeFixtureRepository } from './helpers.mjs';
 import { canonical, digest, LIMITS } from '../src/core.mjs';
 import { atomicWrite, readBytes, readJson, readJsonEntries, updateJson, withLock, writeJson, safePath } from '../src/files.mjs';
-import { identity, selectedFetchRemote, selectedPushRemote, validateBinding } from '../src/git.mjs';
+import { history, identity, selectedFetchRemote, selectedPushRemote, validateBinding } from '../src/git.mjs';
 import { Store, orderRecordRemovals } from '../src/store.mjs';
 import { validateRecord } from '../src/schemas.mjs';
 import { repositoryObservationKey, pullRequestObservationKey } from '../src/repository-observations.mjs';
@@ -49,6 +51,43 @@ import { currentArtifact, currentDeployment } from '../src/current-evidence.mjs'
 import { formatAudit, recordAudit, replayAudit } from '../src/audit.mjs';
 import { prepareValidationHistory, validateRetainedPayload } from '../src/validation-evidence.mjs';
 import { parseTestPlan } from '../src/artifacts.mjs';
+
+test('T-PRD010 Git history uses one fresh binding without hiding commits or branch changes', async t => {
+  const f = await fixture(t, { initialize: false, compactPath: true });
+  const member = await identity(f.repo, 'primary');
+  assert.equal(member.head, null);
+  const commands = [];
+  const observe = ({ process: child }) => {
+    child.once('spawn', () => {
+      if (child.spawnargs[0] !== 'git') return;
+      commands.push(child.spawnargs.slice(1).filter(argument =>
+        !['--no-pager', '--no-optional-locks'].includes(argument)));
+    });
+  };
+  subscribe('child_process', observe);
+  t.after(() => unsubscribe('child_process', observe));
+  const currentHistory = async () => {
+    commands.length = 0;
+    const result = await history(member);
+    assert.equal(commands.filter(args =>
+      args[0] === 'rev-parse' && args.includes('--show-toplevel')).length, 1,
+    'History must reuse its freshly validated identity instead of probing the repository again');
+    return result;
+  };
+  assert.deepEqual(await currentHistory(), []);
+  await f.runGit('commit', '--allow-empty', '-qm', 'First isolated history commit');
+  const first = await f.runGit('rev-parse', 'HEAD');
+  assert.deepEqual((await currentHistory()).map(commit => commit.commit), [first]);
+  await f.runGit('commit', '--allow-empty', '-qm', 'Second isolated history commit');
+  const second = await f.runGit('rev-parse', 'HEAD');
+  assert.deepEqual((await currentHistory()).map(commit => commit.commit), [first, second]);
+  assert.equal(member.head, null, 'The original unborn binding must not become a cached HEAD');
+  await f.runGit('checkout', '-qb', 'feature/other-history');
+  commands.length = 0;
+  await assert.rejects(history(member), { code: 'BINDING' });
+  assert.equal(commands.some(args => args[0] === 'log'), false,
+    'A same-commit branch change must be rejected before reading history');
+});
 
 test('T-PRD083 managed Markdown parsing retains escaped expectations and selectors', () => {
   for (const [outcomeHeading, expected, implementation, decodedExpected, decodedImplementation] of [
