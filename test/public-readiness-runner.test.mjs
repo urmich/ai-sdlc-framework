@@ -516,6 +516,7 @@ async function runnerFixture(t, { riskBoundaries = false, timedUnit = false, blo
   }));
   const log = path.join(root, 'execution-order.ndjson');
   const enteredFile = path.join(root, '.test-data', 'blocked-unit-entered');
+  const processLog = path.join(root, '.test-data', 'blocked-unit-process.ndjson');
   const cases = new Map(unitFiles.map((file, index) => [file, [
     `unit ${file}`,
     ...Array.from({ length: (index === 0 ? 5 : 4) - (index === 0 && (timedUnit || blockedUnit) ? 1 : 0) },
@@ -627,6 +628,43 @@ async function runnerFixture(t, { riskBoundaries = false, timedUnit = false, blo
       ...declarations,
     ].join('\n'));
   }
+  if (blockedUnit) {
+    const worker = path.join(root, 'scripts', 'test-worker.mjs');
+    const source = await fs.readFile(worker, 'utf8');
+    const start = 'const tests = run(groupOptions);';
+    const finish = 'observationClosed = true;';
+    if (!source.includes(start) || !source.includes(finish)) {
+      throw new Error('Cancellation process observation requires the actual group execution boundaries');
+    }
+    await fs.writeFile(worker, source.replace(start,
+      'const stopCancellationObservation = observeCancellationChild(group, groupOptions);\n    ' + start)
+      .replace(finish, 'stopCancellationObservation();\n      ' + finish) + `
+import {channel as cancellationProcessChannel} from 'node:diagnostics_channel';
+import {appendFileSync as retainCancellationProcessEvent} from 'node:fs';
+function observeCancellationChild(group,options){
+  const root=declaredCases.find(row=>row.id===group.rootId);
+  if(group.file!==${JSON.stringify(unitFiles[0])}||root?.name!==${JSON.stringify(`unit ${unitFiles[0]}`)})
+    return ()=>{};
+  const events=cancellationProcessChannel('child_process');
+  const retain=(event,child,code=null,signal=null)=>{
+    try{retainCancellationProcessEvent(${JSON.stringify(processLog)},JSON.stringify({
+      event,pid:child.pid,parentPid:process.pid,at:new Date().toISOString(),
+      clockMs:performance.timeOrigin+performance.now(),code,signal})+'\\n');}
+    catch(error){process.stderr.write('[cancellation-process-observation] '+JSON.stringify({
+      event,code:/^[A-Z0-9_]{1,40}$/.test(error.code??'')?error.code:'UNAVAILABLE'})+'\\n');}
+  };
+  const observe=({process:child})=>child.once('spawn',()=>{
+    if(child.spawnargs.at(-1)!==options.files[0])return;
+    events.unsubscribe(observe);
+    retain('spawn',child);
+    child.once('exit',(code,signal)=>retain('exit',child,code,signal));
+    child.once('close',(code,signal)=>retain('close',child,code,signal));
+  });
+  events.subscribe(observe);
+  return ()=>events.unsubscribe(observe);
+}
+`);
+  }
   const invoke = async (args, env = {}) => {
     let completedAtMs;
     try {
@@ -643,7 +681,7 @@ async function runnerFixture(t, { riskBoundaries = false, timedUnit = false, blo
       return { stdout: error.stdout, stderr: error.stderr, exitCode: error.code, completedAtMs };
     }
   };
-  return { root, log, enteredFile, invoke, tests, unitNames,
+  return { root, log, enteredFile, processLog, invoke, tests, unitNames,
     planFile: path.join(planDirectory, 'test-plan.md') };
 }
 
@@ -1009,13 +1047,23 @@ process.once('message',()=>process.emit('SIGTERM'));
 process.exitCode=await run(await createPlan(parseOptions(['critical','--workers','2'])));
 if(process.connected)process.disconnect();
 `], { cwd: f.root, env, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+  const controllerEvents = [];
+  const observeController = (event, code = null, signal = null) => controllerEvents.push({
+    event, pid: child.pid, at: new Date().toISOString(),
+    clockMs: performance.timeOrigin + performance.now(), code, signal,
+  });
+  child.once('spawn', () => observeController('spawn'));
+  child.once('exit', (code, signal) => observeController('exit', code, signal));
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', value => { stdout += value; });
   child.stderr.on('data', value => { stderr += value; });
   const done = new Promise((resolve, reject) => {
     child.once('error', reject);
-    child.once('close', code => resolve(code));
+    child.once('close', (code, signal) => {
+      observeController('close', code, signal);
+      resolve(code);
+    });
   });
   let closed = false;
   done.then(() => { closed = true; }, () => { closed = true; });
@@ -1047,7 +1095,25 @@ if(process.connected)process.disconnect();
     assert.ok(observedStart, 'Cancel only after the actual leaf callback and producer case-start observation');
     await requestCancellation();
     assert.equal(await done, 143, stdout + stderr);
-    assert.throws(() => process.kill(workerPid, 0), error => error.code === 'ESRCH');
+    const probe = { at: new Date().toISOString(),
+      clockMs: performance.timeOrigin + performance.now(), outcome: 'Failed' };
+    try {
+      assert.throws(() => process.kill(workerPid, 0), error => error.code === 'ESRCH');
+      probe.outcome = 'ESRCH';
+    } finally {
+      let leafEvents = [];
+      let observationProblem = null;
+      try {
+        const events = (await fs.readFile(f.processLog, 'utf8')).split('\n').slice(0, -1).filter(Boolean);
+        leafEvents = events.map(JSON.parse).filter(event => event.pid === workerPid);
+      } catch (error) {
+        observationProblem = /^[A-Z0-9_]{1,40}$/u.test(error.code ?? '') ? error.code : 'UNAVAILABLE';
+      }
+      t.diagnostic(JSON.stringify({
+        kind: 'local-cancellation-process-lifetime', workerPid, probe,
+        controller: controllerEvents, leaf: leafEvents, observationProblem,
+      }));
+    }
     const sequence = criticalSequence(stdout);
     assert.equal(sequence.evidence.status, 'NotRun');
     const raw = JSON.parse(await fs.readFile(sequence.evidence.paths.execution, 'utf8'));

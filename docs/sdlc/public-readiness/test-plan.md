@@ -129,6 +129,10 @@ Full streams retain only those identities. Revalidate bounded primary messages
 after truncation so a cut JSON value cannot invalidate the complete diagnostic;
 an unretainable message keeps its original identity and an explicit safe fallback.
 Diagnostic recovery cannot change cancellation, cleanup or passing conditions.
+The cancelled-local-critical root records its exact owned leaf ChildProcess
+spawn/exit/close events and controller-close boundary in bounded scalar diagnostics.
+Retain these even when its unchanged immediate ESRCH assertion fails; observation
+after that assertion is diagnostic only, never passing exit evidence.
 Periodic worker reports and native command capture use the same bounded atomic
 replacement recovery for classified transient Windows sharing conflicts.
 The Windows-only periodic-checkpoint regression injects one conflict while the
