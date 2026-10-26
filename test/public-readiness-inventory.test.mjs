@@ -1,5 +1,50 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
+  "groups": [{
+    "root": "T-PRD018 capture admission reserves its complete process tree while independent peers progress",
+    "minimumSlots": 5
+  }, {
+    "root": "T-PRD018 command capture durably retains dispatched identity and sanitized progress before cancellation or abrupt termination",
+    "minimumSlots": 4
+  }, {
+    "root": "T-PRD018 command checkpoint capacity retains safe original streams without manufacturing completion",
+    "minimumSlots": 2
+  }, {
+    "root": "T-PRD018 streamed validation output preserves typed assertion failures and redacts complete records",
+    "minimumSlots": 3
+  }, {
+    "root": "T-PRD018 validation output keeps opaque malformed and over-budget streams explicitly incomplete",
+    "minimumSlots": 3
+  }],
+  "applicability": [{
+    "names": ["T-PRD018 Windows termination observations durably distinguish dispatch and original handle settlement without exposing caller data"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-termination-evidence-contract",
+    "reason": "PR-only VM-controlled Windows termination evidence, privacy, event ordering and fail-closed permutations; no real OS process or critical promotion.",
+    "prerequisites": ["Node VM and owned repository-local report/journal fixtures"]
+  }, {
+    "names": ["T-PRD018 capture admission reserves its complete process tree while independent peers progress"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "PR-only capture admission regression: controlled capacity pressure plus real isolated worker leases and peer capacity reuse; no critical promotion.",
+    "prerequisites": ["Node and five aggregate worker slots; owned repository-local process fixtures"]
+  }, {
+    "names": ["T-PRD018 command capture durably retains dispatched identity and sanitized progress before cancellation or abrupt termination"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "Reserve the test worker, IPC controller, owned command and Windows taskkill controller before the timed callback; journal, closure and cleanup assertions remain unchanged.",
+    "prerequisites": ["Node and four aggregate worker slots; owned repository-local process fixtures"]
+  }, {
+    "names": [
+      "T-PRD018 command checkpoint capacity retains safe original streams without manufacturing completion",
+      "T-PRD018 streamed validation output preserves typed assertion failures and redacts complete records",
+      "T-PRD018 validation output keeps opaque malformed and over-budget streams explicitly incomplete"
+    ],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "Capture peers must account for their own process trees: worker plus writer (two), real Node test coordinator plus isolated test child (three), or writer plus Windows termination controller (three).",
+    "prerequisites": ["Node and the declared aggregate worker slots; owned repository-local process fixtures"]
+  }],
   "surfaces": [{"coverage": "direct", "paths": ["src/coverage.mjs", "scripts/validation-inventory.mjs", "scripts/validation-tools.mjs"]}],
   "projects": [{
     "root": "test/calculator",
@@ -23,7 +68,7 @@ export const validationDeclarations = {
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { digest } from '../src/core.mjs';
+import { digest, SdlcError } from '../src/core.mjs';
 import { testSpecificationDigest } from '../src/artifacts.mjs';
 import { validateTestDefinitions } from '../src/validation-catalog.mjs';
 import { runCoverageCommand } from '../src/coverage-cli.mjs';
@@ -31,13 +76,22 @@ import { fixture } from './helpers.mjs';
 import { discoverDeclarations, compileValidationInventory,
   compileValidationSourceInventory, validationSourcePaths,
   compareValidationInventory, partitionValidationInventory,
-  reconcileNodeExecution, nodeStartDefinition, cancelledNodeStarts } from '../scripts/validation-inventory.mjs';
+  reconcileNodeExecution, nodeStartDefinition, cancelledNodeStarts, declarationTokens } from '../scripts/validation-inventory.mjs';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { createContext, runInContext } from 'node:vm';
+import { atomicWrite } from '../src/files.mjs';
+import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
 import { executeValidationCommand } from '../scripts/validation-tools.mjs';
+import { createPlan, parseOptions } from '../scripts/test-runner.mjs';
+import { runValidationReadyPool } from '../scripts/test-scheduling.mjs';
+import { enterTestBudget } from '../scripts/test-budget.mjs';
 import { runRefreshScenario } from './observation-refresh-worker.mjs';
 import { compileCoverage, prepareCoverage, renderCoverageSection, readCoverageSection,
   replaceCoverageSection, inspectCoverage } from '../src/coverage.mjs';
@@ -76,6 +130,327 @@ The prose mentions AC-901.99 and FR-999; neither is a definition.
     }],
   };
 }
+
+test('T-PRD018 Windows termination observations durably distinguish dispatch and original handle settlement without exposing caller data',
+  { timeout: 10000 }, async t => {
+    const modulePath = path.resolve('scripts', 'validation-tools.mjs');
+    const source = (await fs.readFile(modulePath, 'utf8'))
+      .replace(/^import .+;\r?$/gmu, '').replace(/^export /gmu, '')
+      .replaceAll('import.meta.url', JSON.stringify(pathToFileURL(modulePath).href));
+    const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'termination-observation-'));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const privateValue = 'fixture-termination-private-caller-value';
+    const stderr = `Authorization: ${privateValue}\n`;
+    for (const mode of ['timeout-live', 'spawn-consumes-budget', 'timeout-root-closed',
+      'timeout-controller-exited', 'root-first', 'controller-first', 'controller-error',
+      'spawn-error', 'root-exited-before-stop', 'natural-success']) {
+      const noController = mode === 'spawn-error' || mode === 'root-exited-before-stop';
+      const outputDir = path.join(directory, mode);
+      await fs.mkdir(outputDir);
+      const cancellation = new AbortController();
+      const lifetime = { cleanupSafe: true };
+      const owned = Object.assign(new EventEmitter(), {
+        pid: 731941, exitCode: null, signalCode: null,
+        stdout: new PassThrough(), stderr: new PassThrough(), unref() {},
+      });
+      const killer = Object.assign(new EventEmitter(), {
+        pid: 731942, exitCode: null, signalCode: null, stderr: new PassThrough(), unref() {},
+      });
+      const launched = Promise.withResolvers();
+      const timers = [];
+      let clock = 0;
+      let controllerStops = 0;
+      let rootClosed = false;
+      killer.kill = () => {
+        controllerStops++;
+        killer.signalCode = 'SIGTERM';
+        killer.emit('exit', null, 'SIGTERM');
+        killer.emit('close', null, 'SIGTERM');
+        return true;
+      };
+      const context = createContext({
+        Buffer, TextDecoder, URL, fileURLToPath, path, createHash, SdlcError, digest,
+        declarationTokens, sanitizeExecutionPayload, atomicWrite,
+        open: fs.open, realpath: fs.realpath,
+        performance: { now: () => clock },
+        process: { platform: 'win32', version: process.version, arch: 'x64',
+          env: { SystemRoot: 'C:\\Windows' } },
+        setTimeout(callback, milliseconds) {
+          const timer = { callback, milliseconds, stop: new Error().stack.includes('stopOwnedProcessTree'),
+            unref() {}, cleared: false };
+          timers.push(timer);
+          if (!timer.stop && milliseconds < 1000) queueMicrotask(() => {
+            if (!timer.cleared) { clock += milliseconds; callback(); }
+          });
+          return timer;
+        },
+        clearTimeout(timer) { if (timer) timer.cleared = true; },
+        spawn(command, args, options) {
+          if (command === 'owned-node') {
+            assert.equal(options.detached, false);
+            launched.resolve();
+            return owned;
+          }
+          assert.equal(command, 'C:\\Windows\\System32\\taskkill.exe');
+          assert.deepEqual(Array.from(args), ['/PID', String(owned.pid), '/T', '/F']);
+          assert.equal(options.shell, false);
+          clock += mode === 'spawn-consumes-budget' ? 1005 : 25;
+          if (mode === 'spawn-error') throw Object.assign(new Error('Owned controller unavailable'), { code: 'EAGAIN' });
+          return killer;
+        },
+      });
+      const execute = runInContext(`${source}\nexecuteValidationCommand;`, context);
+      const pending = execute({ name: 'observed', command: 'owned-node',
+        args: ['-e', `console.log(${JSON.stringify(privateValue)})`],
+        environment: {}, outputDir, signal: cancellation.signal, lifetime });
+      pending.catch(() => {});
+      const closeRoot = code => {
+        rootClosed = true;
+        owned.exitCode = code;
+        owned.stdout.end('ready\n'); owned.stderr.end();
+        owned.emit('exit', code, null); owned.emit('close', code, null);
+      };
+      const closeController = () => {
+        killer.exitCode = 0;
+        killer.stderr.end();
+        killer.emit('exit', 0, null); killer.emit('close', 0, null);
+      };
+      try {
+        await launched.promise;
+        if (mode === 'natural-success') closeRoot(0);
+        else {
+          if (mode === 'root-exited-before-stop') closeRoot(7);
+          cancellation.abort();
+          if (!noController) killer.stderr.write(stderr);
+          if (noController) {
+            assert.equal(controllerStops, 0);
+          } else if (mode === 'root-first') {
+            clock = 100; closeRoot(1);
+            clock = 200; closeController();
+          } else if (mode === 'controller-first') {
+            clock = 100; closeController();
+            clock = 200; closeRoot(1);
+          } else if (mode === 'controller-error') {
+            clock = 100;
+            killer.emit('error', Object.assign(new Error('Owned controller launch denied'), { code: 'EACCES' }));
+          } else {
+            if (mode === 'timeout-root-closed') { clock = 100; closeRoot(1); }
+            if (mode === 'timeout-controller-exited') {
+              clock = 100; killer.exitCode = 0; killer.emit('exit', 0, null);
+            }
+            const watchdog = timers.find(timer => timer.stop);
+            assert.ok(watchdog);
+            assert.equal(watchdog.milliseconds, mode === 'spawn-consumes-budget' ? 0 : 975);
+            clock = Math.max(clock, 1000);
+            watchdog.callback();
+          }
+        }
+        const report = await pending;
+        assert.deepEqual(JSON.parse(await fs.readFile(path.join(outputDir, 'observed.json'), 'utf8')), report);
+        const bytes = await fs.readFile(path.join(outputDir, 'observed.journal.ndjson'));
+        assert.equal(digest(bytes), report.checkpoint.originalJournalPrefix.sha256);
+        assert.equal(bytes.length, report.checkpoint.originalJournalPrefix.bytes);
+        assert.equal(report.checkpoint.journalDurable, true);
+        const events = bytes.toString('utf8').trim().split('\n').map(JSON.parse);
+        t.diagnostic(JSON.stringify({ vmObservationMode: mode, outcome: report.cleanup.outcome,
+          errorCode: report.cleanup.error?.code ?? null, observation: report.cleanup.terminationObservation,
+          journal: report.checkpoint.originalJournalPrefix }));
+        if (mode === 'natural-success') {
+          assert.equal(report.complete, true);
+          assert.equal(report.cleanup.requested, false);
+          assert.equal(report.cleanup.terminationObservation, undefined);
+          continue;
+        }
+        const observation = report.cleanup.terminationObservation;
+        assert.ok(observation, 'Durable cleanup must retain bounded Windows termination observations');
+        assert.deepEqual(events.findLast(row => row.kind === 'command-end').cleanup.terminationObservation, observation);
+        const uncertain = mode.startsWith('timeout-') || mode === 'spawn-consumes-budget' ||
+          mode === 'controller-error' || noController;
+        assert.equal(report.complete, false);
+        assert.equal(report.cleanup.outcome, uncertain ? 'uncertain' : 'reported-stopped');
+        assert.equal(lifetime.cleanupSafe, false, 'Observation metadata grants no survivor/cleanup authority');
+        assert.ok(report.causes.some(cause => cause.type === 'cancellation'));
+        const expectedError = mode === 'controller-error' ? 'EACCES' : mode === 'spawn-error' ? 'EAGAIN' :
+          mode === 'root-exited-before-stop' ? 'STOP_UNVERIFIED' : 'STOP_TIMEOUT';
+        if (uncertain) assert.ok(report.causes.some(cause => cause.type === 'cleanup' && cause.code === expectedError));
+        assert.equal(observation.backend, 'windows-taskkill');
+        assert.deepEqual(observation.flags, ['/PID', '/T', '/F']);
+        assert.equal(observation.root.pid, owned.pid);
+        if (noController) {
+          assert.equal(observation.controller.pid, null);
+          assert.equal(observation.controller.exit, null);
+          assert.equal(observation.controller.close, null);
+          assert.equal(observation.controller.stderr, null);
+          assert.equal(observation.beforeCleanup, null);
+          assert.equal(observation.watchdog, null);
+          assert.equal(controllerStops, 0);
+          assert.equal(observation.dispatch.beforeMs, mode === 'spawn-error' ? 0 : null);
+          assert.equal(observation.dispatch.afterMs, mode === 'spawn-error' ? 25 : null);
+          assert.equal(observation.dispatch.errorCode, mode === 'spawn-error' ? 'EAGAIN' : null);
+          continue;
+        }
+        assert.equal(observation.controller.pid, killer.pid);
+        assert.equal(observation.dispatch.afterMs - observation.dispatch.beforeMs,
+          mode === 'spawn-consumes-budget' ? 1005 : 25);
+        assert.deepEqual(observation.controller.stderr, { sha256: digest(stderr), bytes: Buffer.byteLength(stderr) });
+        const serialized = JSON.stringify(observation);
+        assert.ok(Buffer.byteLength(serialized) < 4096);
+        assert.ok(!serialized.includes(privateValue));
+        assert.ok(!serialized.includes(modulePath));
+        assert.ok(!serialized.includes('owned-node'));
+        assert.deepEqual(sanitizeExecutionPayload(Buffer.from(serialized)), observation);
+        const finite = value => {
+          if (typeof value === 'number') assert.ok(Number.isFinite(value));
+          else if (value && typeof value === 'object') Object.values(value).forEach(finite);
+        };
+        finite(observation);
+        if (mode === 'root-first' || mode === 'controller-first') {
+          assert.ok(observation.root.exit && observation.root.close);
+          assert.ok(observation.controller.exit && observation.controller.close);
+          assert.equal(observation.watchdog, null);
+          assert.equal(controllerStops, 0);
+          assert.equal(observation.root.close.elapsedMs < observation.controller.close.elapsedMs, mode === 'root-first');
+        } else if (mode === 'controller-error') {
+          assert.equal(observation.controller.errorCode, 'EACCES');
+          assert.equal(observation.watchdog, null);
+          assert.equal(controllerStops, 1);
+        } else {
+          const snapshot = observation.watchdog;
+          assert.ok(snapshot);
+          assert.equal(snapshot.root.exitCode, mode === 'timeout-root-closed' ? 1 : null);
+          assert.equal(snapshot.controller.exitCode, mode === 'timeout-controller-exited' ? 0 : null);
+          assert.equal(snapshot.controller.signalCode, null, 'Snapshot precedes the owned controller stop signal');
+          assert.deepEqual(snapshot.stderr, observation.controller.stderr);
+          assert.equal(observation.root.close === null, mode !== 'timeout-root-closed');
+          assert.equal(observation.controller.close === null, mode === 'timeout-controller-exited');
+          assert.equal(controllerStops, mode === 'timeout-controller-exited' ? 0 : 1);
+          if (controllerStops) assert.equal(observation.controller.exit.signal, 'SIGTERM');
+          assert.deepEqual(observation.beforeCleanup.controller, snapshot.controller);
+        }
+      } finally {
+        if (!rootClosed) closeRoot(1);
+        await pending;
+      }
+    }
+  });
+
+test('T-PRD018 capture admission reserves its complete process tree while independent peers progress',
+  { timeout: 30000 }, async t => {
+    const root = 'T-PRD018 command capture durably retains dispatched identity and sanitized progress before cancellation or abrupt termination';
+    const plan = await createPlan(parseOptions(['targeted', '--workers', '5', '--name',
+      '^T-PRD018 command capture durably', 'test/public-readiness-inventory.test.mjs']));
+    const capture = plan.groups.find(group => group.root === root);
+    const release = Promise.withResolvers();
+    const peer = Promise.withResolvers();
+    let released = false;
+    let entered = false;
+    const group = (id, minimumSlots, dependsOn = []) =>
+      ({ id, minimumSlots, dependsOn, exclusiveResources: [] });
+    const pending = runValidationReadyPool([
+      group('blocker', 2), group('seed', 1), group('peer', 1),
+      { ...capture, dependsOn: ['seed'] },
+    ], { concurrency: 5, capacity: 5, signal: t.signal, execute: async selected => {
+      if (selected.id === 'blocker') await release.promise;
+      else if (selected.id === 'seed') await peer.promise;
+      else if (selected.id === 'peer') peer.resolve();
+      else {
+        entered = true;
+        assert.equal(released, true,
+          'Capture must not start its timed callback with only three slots available for four live actors');
+      }
+      return 'Passed';
+    } });
+    try {
+      await peer.promise;
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(entered, false,
+        'An admitted peer must not allow the four-actor capture callback to oversubscribe a five-slot host');
+    } finally {
+      released = true;
+      release.resolve();
+      await pending;
+    }
+    assert.equal(entered, true);
+
+    const producers = await createPlan(parseOptions(['targeted', '--workers', '5', '--name',
+      '^T-PRD018 (command checkpoint capacity|streamed validation output|validation output keeps)',
+      'test/public-readiness-inventory.test.mjs']));
+    for (const producer of producers.groups) {
+      const finish = Promise.withResolvers();
+      let captureLive = false;
+      const pressure = runValidationReadyPool([capture, producer], {
+        concurrency: 5, capacity: 5, signal: t.signal, execute: async selected => {
+          if (selected.id === capture.id) {
+            captureLive = true;
+            await finish.promise;
+            captureLive = false;
+          } else assert.equal(captureLive, false,
+            `The capture tree cannot share its remaining single slot with this multi-process producer: ${producer.root}`);
+          return 'Passed';
+        },
+      });
+      try { await new Promise(resolve => setImmediate(resolve)); }
+      finally { finish.resolve(); await pressure; }
+    }
+
+    const budget = await enterTestBudget({ workers: 5, fileCount: 3 });
+    const children = [];
+    const environment = { ...process.env, ...budget.environment, NODE_OPTIONS: '', NODE_PATH: '' };
+    delete environment.NODE_TEST_CONTEXT;
+    delete environment.SDLC_TEST_REPORT_CONTEXT;
+    const module = new URL('../scripts/test-budget.mjs', import.meta.url).href;
+    const start = (id, slots) => {
+      const child = spawn(process.execPath, ['--input-type=module', '-e', `
+import {acquireTestWorker,readTestBudget,readTestGroupProcesses} from ${JSON.stringify(module)};
+const worker=await acquireTestWorker(${slots},{groupId:${JSON.stringify(id)}});
+const lease=(await readTestGroupProcesses(${JSON.stringify(id)})).find(row=>row.pid===process.pid);
+process.send({lease,budget:await readTestBudget()});
+await new Promise(resolve=>process.once('message',resolve));
+worker.close();process.disconnect();
+`], { cwd: process.cwd(), env: environment, shell: false, signal: t.signal,
+        stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+      let stderr = '';
+      child.stderr.on('data', bytes => { stderr += bytes; });
+      const ready = new Promise((resolve, reject) => {
+        child.once('message', resolve);
+        child.once('error', reject);
+        child.once('close', code => reject(new Error(`Worker closed before admission: ${code}: ${stderr}`)));
+      });
+      const done = new Promise((resolve, reject) => {
+        child.once('error', reject);
+        child.once('close', code => code === 0 ? resolve() : reject(new Error(stderr || `Worker exit ${code}`)));
+      });
+      children.push({ child, done });
+      return { child, ready, done };
+    };
+    try {
+      const owner = start(capture.id, capture.minimumSlots);
+      const owned = await owner.ready;
+      const first = start(digest('capture-peer-first'), 1);
+      const firstEvidence = await first.ready;
+      first.child.send({ release: true });
+      await first.done;
+      const next = start(digest('capture-peer-next'), 1);
+      const nextEvidence = await next.ready;
+      assert.equal(owner.child.exitCode, null, 'Peer capacity must be reused while capture retains its reservation');
+      assert.equal(owned.lease.minimumSlots, 4);
+      assert.equal(owned.lease.finishedAt, null);
+      assert.equal(firstEvidence.budget.id, owned.budget.id);
+      assert.equal(nextEvidence.budget.id, owned.budget.id);
+      assert.equal(owned.lease.minimumSlots + nextEvidence.lease.minimumSlots, 5);
+      assert.notEqual(nextEvidence.lease.slot, owned.lease.slot);
+      t.diagnostic(JSON.stringify({ capture: owned.lease, peer: nextEvidence.lease,
+        budgetId: owned.budget.id, capacity: owned.budget.capacity }));
+      next.child.send({ release: true });
+      owner.child.send({ release: true });
+    } finally {
+      for (const { child } of children) {
+        if (child.connected) child.send({ release: true }, () => {});
+      }
+      try { await Promise.all(children.map(({ done }) => done)); }
+      finally { await budget.close(); }
+    }
+  });
 
 test('T-PRD018 command capture durably retains dispatched identity and sanitized progress before cancellation or abrupt termination',
   { timeout: 30000 }, async t => {

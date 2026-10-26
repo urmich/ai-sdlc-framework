@@ -167,6 +167,16 @@ returning from cancellation, not merely observe root close. Only observed group
 remain incomplete failures. The bounded settlement happens before final report
 completion, never as a post-return test grace period. Windows termination and
 original command/test deadlines remain unchanged.
+The command-capture root and its peers reserve their complete declared process
+trees before timed callbacks. A PR-only admission regression must reject
+under-reservation while showing independent peer capacity reuse.
+The PR-only Windows termination-observation regression exercises controlled
+controller/root completion orders and timeout/error paths. Require bounded
+dispatch/event observations and the immutable pre-cleanup snapshot in both the
+final report and durable journal; unobserved events stay null and caller source,
+arguments and secrets stay absent. Preserve real cancellation, strict root
+closure, the one-second stop bound and every original failure outcome. Passing
+diagnostics do not attribute the historical C18 timeout or prove native cleanup.
 Observer artifact readers finish before their exact owned scratch directory is
 removed. Use the existing bounded filesystem-cleanup retry policy for classified
 transient sharing conflicts; persistent removal failure remains an error, never
@@ -1108,13 +1118,16 @@ not complete before the cutoff. Do not claim a whole-lane speedup before complet
 hosted results.
 Preserve initial observation refresh/regression and observer priorities, then
 prioritize the unchanged CI-input and retained-evidence families under implicit
-policy v8, preserving v7's existing higher-priority prefix. Next prioritize provider consumers, reproducible packaging,
+policy v9, preserving v8's existing higher-priority prefix. Next prioritize provider consumers, reproducible packaging,
 facts/archive recovery, distribution lifecycle and runner probes, in that order,
 without changing their real commands, negative controls or causal closures.
 Keep the measured retained-identity acceptance family, catalog,
 unchanged native WinGet launcher family and joined release-report family in
 their relative order for shards owning those files, ahead of shorter families.
-Then admit PR-description work on its same assigned shard. Its PR-only regression
+Then admit PR-description work on its same assigned shard, followed by the
+measured long native/bootstrap family before shorter queued remainder work.
+Keep its genuine bootstrap workload and every assertion unchanged.
+The PR-description regression
 must observe the isolated description closure while the four-slot retained guard
 is live, within the declared five-slot nested participant and seven-slot outer
 allocation, and retain every dependency, outcome and cleanup. An explicit
@@ -1212,8 +1225,10 @@ partial write; do not catch or retry invalid JSON, relax a barrier or extend its
 deadline to conceal incomplete publication.
 The PR-only `T-PRD074 archived scheduling reconstructs only its authenticated
 captured literal policy without current-credit fallback` root in
-`test/public-readiness-observer.test.mjs` checks current v8 and exact historical
-v7/v6/v5/v4/v3/v2 archives and their sharded SDK evidence.
+`test/public-readiness-observer.test.mjs` checks current v9 and exact historical
+v8/v7/v6/v5/v4/v3/v2 archives and their sharded SDK evidence.
+Preserve the exact original v8 digest
+`fed0e6652b9cad17576fdfb26e86369da226b82beb9a09fd100980460a02a80b`.
 Preserve the exact original v7 digest
 `996e99fc1a5c05e4e92048ab18142395859e0f158fb25091d1d37479a0e6acfc`.
 Preserve the exact original v6 digest
@@ -1236,6 +1251,14 @@ old-version/new-budget and new-version/old-budget hybrids, including a v7 report
 with a known v6 group-policy digest. The rejected unpublished v7 capacity-barrier
 label is not a historical policy. Historical reconstruction does not execute
 the live ready-pool scheduler or rename old admission semantics.
+
+The PR-only `T-PRD037 fresh readiness validation reuses only its own canonical
+input and retains every data guard` root checks two encodings for ordinary safe
+input, a fresh encoding after mutation, sensitive-data rejection and unchanged
+UTF-8 byte, shape, accessor, symbol, depth and redaction bounds. Top-level and
+nested changing proxies retain the original three fresh reads and unsafe-value
+rejection. No result, authority or mutable-input validation is cached between
+calls; full SDK and native correctness still require their declared PR coverage.
 
 The PR-only `T-PRD013 active events are checked on both transaction reads`
 root in `test/storage.test.mjs` preserves event-digest rejection after removing

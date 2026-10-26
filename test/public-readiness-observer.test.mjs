@@ -1103,8 +1103,13 @@ test('T-PRD074 archived native reconstruction uses original source and commands 
 test('T-PRD074 archived scheduling reconstructs only its authenticated captured literal policy without current-credit fallback', async t => {
   const f = await observerApiFixture(t, { nodeArtifactReader: true });
   const currentSource = await fs.readFile(new URL('../scripts/test-scheduling.mjs', import.meta.url), 'utf8');
+  const sourceV8 = currentSource.replace("  'public-readiness-native.test.mjs',\n", '')
+    .replace("schemaVersion: 9, algorithm: 'source-bound-ready-root-v9'",
+      "schemaVersion: 8, algorithm: 'source-bound-ready-root-v8'");
+  const replayedSources = new Set();
   const source65 = currentSource.replace("  'public-readiness-pr-description.test.mjs',\n", '')
-    .replace("schemaVersion: 8, algorithm: 'source-bound-ready-root-v8'",
+    .replace("  'public-readiness-native.test.mjs',\n", '')
+    .replace("schemaVersion: 9, algorithm: 'source-bound-ready-root-v9'",
       "schemaVersion: 7, algorithm: 'source-bound-ready-root-v7'");
   const source64 = source65.replace("schemaVersion: 7, algorithm: 'source-bound-ready-root-v7'",
     "schemaVersion: 6, algorithm: 'source-bound-ready-root-v6'")
@@ -1125,7 +1130,7 @@ test('T-PRD074 archived scheduling reconstructs only its authenticated captured 
   const legacySource = middleSource.replace("  'validation-catalog.test.mjs',\n", '')
     .replace("schemaVersion: 3, algorithm: 'source-bound-ready-root-v3'",
       "schemaVersion: 2, algorithm: 'source-bound-ready-root-v2'");
-  for (const schedulingSource of [legacySource, middleSource, previousSource, source63, source64, source65, currentSource]) {
+  for (const schedulingSource of [legacySource, middleSource, previousSource, source63, source64, source65, sourceV8, currentSource]) {
     const captured = nativeReplayFixture({ candidate: f.candidate, sourceCommit: f.revisions.merge,
       asOf: '2026-10-18T10:00:00.000Z', schedulingSource });
     const files = captured.definition.stages.find(stage=>stage.name==='regression').files;
@@ -1137,14 +1142,14 @@ test('T-PRD074 archived scheduling reconstructs only its authenticated captured 
     const launcherIndex = files.indexOf('test/winget-launcher-native.test.mjs');
     const reportIndex = files.indexOf('test/public-readiness-release-report.test.mjs');
     assert.ok(launcherIndex >= 0 && reportIndex >= 0);
-    if ([currentSource, source65, source64, source63, previousSource].includes(schedulingSource)) {
+    if ([currentSource, sourceV8, source65, source64, source63, previousSource].includes(schedulingSource)) {
       assert.equal(launcherIndex, catalogIndex + 1);
       assert.equal(reportIndex, launcherIndex + 1);
     }
     const ciIndex = files.indexOf('test/public-readiness-ci.test.mjs');
     const evidenceIndex = files.indexOf('test/public-readiness-evidence.test.mjs');
     assert.ok(ciIndex >= 0 && evidenceIndex >= 0);
-    if ([currentSource, source65, source64, source63].includes(schedulingSource)) {
+    if ([currentSource, sourceV8, source65, source64, source63].includes(schedulingSource)) {
       assert.equal(evidenceIndex, ciIndex + 1);
       assert.ok(ciIndex < retainedIndex && evidenceIndex < retainedIndex);
     } else {
@@ -1154,7 +1159,7 @@ test('T-PRD074 archived scheduling reconstructs only its authenticated captured 
       'pr-facts-archive-recovery.test.mjs', 'distribution-channels.test.mjs', 'test-runner.test.mjs']
       .map(file => files.indexOf(`test/${file}`));
     assert.ok(tailIndexes.every(index => index >= 0));
-    if ([currentSource, source65, source64].includes(schedulingSource)) {
+    if ([currentSource, sourceV8, source65, source64].includes(schedulingSource)) {
       assert.deepEqual(tailIndexes, tailIndexes.map((_, index) => evidenceIndex + index + 1));
       assert.equal(retainedIndex, tailIndexes.at(-1) + 1);
     }
@@ -1170,6 +1175,12 @@ test('T-PRD074 archived scheduling reconstructs only its authenticated captured 
     const restored = await replayNativeEvidence(input);
     assert.equal(restored.evaluation.status, 'Passed', JSON.stringify(restored.diagnostics));
     assert.equal(restored.currentCredit, 'NotRun');
+    replayedSources.add(captured.definition.sourceFiles.find(source =>
+      source.file === 'scripts/test-scheduling.mjs').contents);
+    if (schedulingSource === sourceV8) {
+      assert.equal(captured.data['unit.json'].groupExecution.policyDigest,
+        'fed0e6652b9cad17576fdfb26e86369da226b82beb9a09fd100980460a02a80b');
+    }
     const badSource = structuredClone(captured.definition);
     badSource.sourceFiles.find(source=>source.file==='scripts/test-scheduling.mjs').contents =
       currentSource.replace('maxWorkers: 32','maxWorkers: 31');
@@ -1190,7 +1201,9 @@ test('T-PRD074 archived scheduling reconstructs only its authenticated captured 
     }
     await assert.rejects(replayNativeEvidence({ ...input, verifyArchive: () => null }), { code: 'EVIDENCE' });
   }
-  for (const schedulingSource of [legacySource, middleSource, previousSource, source63, source64, source65]) {
+  assert.ok(replayedSources.has(sourceV8), 'The exact v8 source must pass genuine archival SDK replay');
+  const replayedShardSources = new Set();
+  for (const schedulingSource of [legacySource, middleSource, previousSource, source63, source64, source65, sourceV8]) {
   const oldShard = await observerApiFixture(t, { frameworkShards: true, bootstrapProtocol: nativeBootstrapProtocol,
     schedulingSource, nodeArtifactReader: true, ambient: false });
   const part = oldShard.parts.get('macos-arm64-framework-body-1');
@@ -1219,8 +1232,15 @@ test('T-PRD074 archived scheduling reconstructs only its authenticated captured 
     } });
   assert.equal(restoredShard.evaluation.status,'Passed',JSON.stringify(restoredShard.diagnostics));
   assert.equal(restoredShard.currentCredit,'NotRun');
+  replayedShardSources.add(definition.sourceFiles.find(source =>
+    source.file === 'scripts/test-scheduling.mjs').contents);
+  if (schedulingSource === sourceV8) {
+    assert.equal(data['regression.json'].groupExecution.policyDigest,
+      'fed0e6652b9cad17576fdfb26e86369da226b82beb9a09fd100980460a02a80b');
+  }
   assert.equal(oldShard.calls.length,0);
   }
+  assert.ok(replayedShardSources.has(sourceV8), 'The exact v8 shard source must pass genuine archival SDK replay');
   assert.equal(f.calls.length, 0, 'Historical reconstruction never fetches replacement provider evidence');
 });
 

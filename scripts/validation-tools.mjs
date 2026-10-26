@@ -297,31 +297,72 @@ async function settleOwnedProcessGroup(childClosed, cleanup, signalError, deadli
 }
 
 async function stopOwnedProcessTree(child, childClosed, cleanup, deadline) {
+  const started = performance.now();
+  const finiteDuration = value => Number.isFinite(value) && value >= 0 ?
+    Math.min(value, Number.MAX_SAFE_INTEGER) : null;
+  const elapsed = () => finiteDuration(performance.now() - started);
+  const numericCode = value => Number.isSafeInteger(value) ? value : null;
+  const signalCode = value => typeof value === 'string' && /^SIG[A-Z0-9]{1,16}$/u.test(value) ? value : null;
+  const errorCode = error => typeof error?.code === 'string' && /^[A-Z0-9_-]{1,80}$/u.test(error.code) ?
+    error.code : 'PROCESS_ERROR';
+  const event = (code, signal) => ({ elapsedMs: elapsed(), exitCode: numericCode(code), signal: signalCode(signal) });
+  const status = process => ({ exitCode: numericCode(process.exitCode), signalCode: signalCode(process.signalCode) });
+  // Callback times are JS observations, not kernel exit times; null means unobserved.
+  const observation = cleanup.terminationObservation = {
+    schemaVersion: 1, backend: 'windows-taskkill', flags: ['/PID', '/T', '/F'],
+    measurement: 'js-observed-monotonic',
+    budgetRemainingMsAtEntry: finiteDuration(Math.max(0, deadline - started)),
+    dispatch: { beforeMs: null, afterMs: null, errorCode: null },
+    root: { pid: Number.isSafeInteger(child.pid) && child.pid > 0 ? child.pid : null,
+      exit: null, close: null },
+    controller: { pid: null, exit: null, close: null, errorCode: null, stderr: null },
+    watchdog: null, beforeCleanup: null,
+  };
+  child.once('exit', (code, signal) => { observation.root.exit = event(code, signal); });
+  child.once('close', (code, signal) => { observation.root.close = event(code, signal); });
   if (child.exitCode !== null || child.signalCode !== null) {
     throw Object.assign(new Error('Owned root exited before tree termination; descendants remain unverified.'),
       { code: 'STOP_UNVERIFIED' });
   }
   // Dispatch while the original ChildProcess still owns a live root, never on a later PID retry.
-  const killer = spawn(path.join(process.env.SystemRoot, 'System32', 'taskkill.exe'),
-    ['/PID', String(child.pid), '/T', '/F'], { stdio: ['ignore', 'ignore', 'pipe'], shell: false });
+  let killer;
+  observation.dispatch.beforeMs = elapsed();
+  try {
+    killer = spawn(path.join(process.env.SystemRoot, 'System32', 'taskkill.exe'),
+      ['/PID', String(child.pid), '/T', '/F'], { stdio: ['ignore', 'ignore', 'pipe'], shell: false });
+  } catch (error) {
+    observation.dispatch.afterMs = elapsed();
+    observation.dispatch.errorCode = errorCode(error);
+    throw error;
+  }
+  observation.dispatch.afterMs = elapsed();
+  observation.controller.pid = Number.isSafeInteger(killer.pid) && killer.pid > 0 ? killer.pid : null;
+  killer.once('exit', (code, signal) => { observation.controller.exit = event(code, signal); });
   cleanup.control = { pid: killer.pid ?? null, exitCode: null, signal: null };
   let timer;
   let settled = false;
+  const original = createHash('sha256');
+  let bytesSeen = 0;
+  let retainedStderr;
+  const stderrIdentity = () => retainedStderr ?? { sha256: original.copy().digest('hex'), bytes: bytesSeen };
+  const snapshot = () => ({ elapsedMs: elapsed(), root: status(child), controller: status(killer),
+    stderr: stderrIdentity() });
   try {
     const termination = new Promise((resolve, reject) => {
       let diagnostic = '';
-      const original = createHash('sha256');
-      let bytesSeen = 0;
       killer.stderr.on('data', bytes => {
         original.update(bytes);
         bytesSeen += bytes.length;
         if (diagnostic.length < 2000) diagnostic += bytes.toString('utf8').slice(0, 2000 - diagnostic.length);
       });
       killer.stderr.once('error', reject);
-      killer.once('error', reject);
+      killer.once('error', error => { observation.controller.errorCode = errorCode(error); reject(error); });
       killer.once('close', (code, signal) => {
+        observation.controller.close = event(code, signal);
+        retainedStderr = { sha256: original.digest('hex'), bytes: bytesSeen };
+        observation.controller.stderr = retainedStderr;
         if (!settled) cleanup.control = { ...cleanup.control, exitCode: code, signal,
-          originalStderr: { sha256: original.digest('hex'), bytes: bytesSeen } };
+          originalStderr: retainedStderr };
         if (code === 0) resolve();
         else reject(Object.assign(new Error(`Cannot stop the owned validation process tree: ${diagnostic}`),
           { code: 'STOP_FAILED' }));
@@ -333,12 +374,17 @@ async function stopOwnedProcessTree(child, childClosed, cleanup, deadline) {
         await childClosed;
       }),
       new Promise((_, reject) => {
-        timer = setTimeout(() => reject(Object.assign(
+        timer = setTimeout(() => {
+          observation.watchdog = snapshot();
+          reject(Object.assign(
           new Error('Owned process tree or termination controller remains unsettled after its bounded termination settlement.'),
-          { code: 'STOP_TIMEOUT' })), Math.max(0, deadline - performance.now()));
+          { code: 'STOP_TIMEOUT' }));
+        }, Math.max(0, deadline - performance.now()));
       }),
     ]);
   } finally {
+    observation.controller.stderr = stderrIdentity();
+    observation.beforeCleanup = snapshot();
     settled = true;
     clearTimeout(timer);
     if (killer.exitCode === null && killer.signalCode === null) {

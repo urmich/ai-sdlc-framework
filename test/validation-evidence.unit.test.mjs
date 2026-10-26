@@ -1,11 +1,75 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
-  "surfaces": [{"coverage": "direct", "paths": ["src/validation-evidence.mjs", "src/core.mjs"]}]
+  "surfaces": [{"coverage": "direct", "paths": ["src/validation-evidence.mjs", "src/validation-readiness.mjs", "src/core.mjs"]}],
+  "applicability": [{
+    "names": ["T-PRD037 fresh readiness validation reuses only its own canonical input and retains every data guard"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "evidence-validation",
+    "reason": "PR-only pure Node regression for invocation-local serialization reuse, fresh mutable-input rejection and unchanged JSON/redaction bounds; no critical promotion or shared process concurrency.",
+    "prerequisites": ["Node"]
+  }]
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LIMITS, createSummarySanitizer, digest, safeSummary } from '../src/core.mjs';
 import { reduceTestHistory, sanitizeExecutionPayload, validateRetainedPayload } from '../src/validation-evidence.mjs';
+import { validateReadinessData } from '../src/validation-readiness.mjs';
+
+test('T-PRD037 fresh readiness validation reuses only its own canonical input and retains every data guard', t => {
+  const initial = 'owned-canonical-input-fixture';
+  const changed = `${initial}-changed`;
+  const stringify = JSON.stringify;
+  let encodings = 0;
+  t.mock.method(JSON, 'stringify', function (value, ...args) {
+    if (value === initial || value === changed) encodings++;
+    return Reflect.apply(stringify, this, [value, ...args]);
+  });
+  const source = { detail: initial, complete: true };
+  assert.equal(validateReadinessData(source), source);
+  assert.equal(encodings, 2, 'Encode the input and sanitized result once each, not the original twice');
+  source.detail = changed;
+  encodings = 0;
+  assert.equal(validateReadinessData(source), source);
+  assert.equal(encodings, 2, 'A later call must encode the changed input afresh');
+  source.detail = 'Authorization: owned-private-fixture';
+  assert.throws(() => validateReadinessData(source), { code: 'UNSAFE' });
+  source.detail = initial;
+  encodings = 0;
+  assert.equal(validateReadinessData(source), source);
+  assert.equal(encodings, 2, 'Neither passing nor rejected inputs confer cached validation');
+
+  const unicode = { detail: 'é' };
+  const bytes = Buffer.byteLength(stringify(unicode));
+  assert.equal(validateReadinessData(unicode, bytes), unicode);
+  assert.throws(() => validateReadinessData(unicode, bytes - 1), { code: 'CAPACITY' });
+  let getterReads = 0;
+  const accessor = { get detail() { getterReads++; return initial; } };
+  for (const value of [accessor, { [Symbol('hidden')]: initial },
+    Object.create({ inherited: initial }), new Date(), { detail: undefined },
+    { detail: Infinity }, { detail: () => initial }]) {
+    assert.throws(() => validateReadinessData(value), { code: 'INPUT' });
+  }
+  assert.equal(getterReads, 0, 'Plain-data admission must reject accessors without invoking them');
+  for (const wrap of [value => value, value => ({ nested: [value] })]) {
+    let reads = 0;
+    const changing = new Proxy({ detail: initial }, {
+      get(target, key, receiver) {
+        if (key === 'detail') return ++reads < 3 ? initial : 'Authorization: owned-private-fixture';
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    assert.throws(() => validateReadinessData(wrap(changing)), { code: 'UNSAFE' },
+      'A proxy may change during validation and must retain the original fresh equality read');
+    assert.equal(reads, 3);
+  }
+  for (const value of [{ detail: '\u0001' }, { password: 'owned-private-fixture' },
+    { detail: 'output {"token":"owned-private-fixture"}' }]) {
+    assert.throws(() => validateReadinessData(value), { code: 'UNSAFE' });
+  }
+  let deep = initial;
+  for (let index = 0; index < 34; index++) deep = { detail: deep };
+  assert.throws(() => validateReadinessData(deep), { code: 'CAPACITY' });
+});
 
 test('T-PRD037 markerless payload text retains core redaction without impossible structured scans', t => {
   const value = 'owned-markerless-path/0123456789abcdef';

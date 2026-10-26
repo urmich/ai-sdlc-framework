@@ -2,7 +2,7 @@ import { LIMITS, SdlcError, canonical, choice, digest, id, object, requireThat,
   safeRecord, strings, text } from './core.mjs';
 import { objectReference, validateObjectReference, OUTCOME_PAGE_SIZE } from './validation-catalog.mjs';
 import { executionSourceEligible, observationAfterReset, reduceTestHistory,
-  validateRetainedPayload } from './validation-evidence.mjs';
+  validationJsonText as jsonData, validateReadinessData } from './validation-evidence.mjs';
 import { canCreditExecutionIdentity, validateCurrentExecutionIdentity } from './provider-adapters.mjs';
 
 const reports = new WeakMap();
@@ -19,42 +19,7 @@ const compare = (left, right) => left < right ? -1 : left > right ? 1 : 0;
 export const MAX_OBJECTS = 10000;
 export const MAX_BUNDLE_BYTES = 64 * 1024 * 1024;
 
-function jsonData(value, limit = LIMITS.artifact) {
-  let nodes = 0;
-  const maxNodes = Math.max(200000, Math.floor(limit / 16));
-  function visit(item, depth) {
-    requireThat(depth <= 32 && ++nodes <= maxNodes, 'CAPACITY',
-      'Validation data exceeds the bounded JSON structure budget');
-    if (item === null || typeof item === 'boolean') return;
-    if (typeof item === 'string') {
-      requireThat(!/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(item),
-        'UNSAFE', 'Validation data contains unsupported control characters');
-      return;
-    }
-    if (typeof item === 'number') {
-      requireThat(Number.isFinite(item), 'INPUT', 'Validation data contains a non-finite number');
-      return;
-    }
-    requireThat(item && typeof item === 'object' &&
-      (Array.isArray(item) ? Object.getPrototypeOf(item) === Array.prototype :
-        Object.getPrototypeOf(item) === Object.prototype) &&
-      Object.getOwnPropertySymbols(item).length === 0,
-    'INPUT', 'Validation data must be plain JSON without executable values');
-    const fields = Object.getOwnPropertyDescriptors(item);
-    requireThat(Object.values(fields).every(field => Object.hasOwn(field, 'value')),
-      'INPUT', 'Validation data cannot contain accessors');
-    for (const key of Object.keys(item)) visit(fields[key].value, depth + 1);
-  }
-  visit(value, 0);
-  requireThat(Buffer.byteLength(canonical(value)) <= limit, 'CAPACITY',
-    'Validation data exceeds its byte budget');
-  return value;
-}
-export function validateReadinessData(value, limit = LIMITS.artifact) {
-  jsonData(value, limit);
-  validateRetainedPayload(value);
-  return value;
-}
+export { validateReadinessData };
 function record(value, allowed, required = allowed) {
   requireThat(value && Object.getPrototypeOf(value) === Object.prototype &&
     Object.values(Object.getOwnPropertyDescriptors(value)).every(field =>

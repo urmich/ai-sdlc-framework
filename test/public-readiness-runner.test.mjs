@@ -2042,6 +2042,8 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
       'test/public-readiness-release-report.test.mjs'),
     discoverDeclarations("import test from 'node:test';test('measured PR-description co-tail',()=>{});",
       'test/public-readiness-pr-description.test.mjs'),
+    discoverDeclarations("import test from 'node:test';test('unchanged measured bootstrap closure',()=>{});",
+      'test/public-readiness-native.test.mjs'),
     discoverDeclarations("import test from 'node:test';test('unchanged CI input family',()=>{});",
       'test/public-readiness-ci.test.mjs'),
     discoverDeclarations("import test from 'node:test';test('unchanged retained evidence family',()=>{});",
@@ -2059,7 +2061,10 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
   ] });
   assert.ok(selected.units.cases.some(test => test.name === 'unit family without local binding'));
   assert.ok(selected.units.cases.some(test => test.name === 'T-PRD008 selected planned unit'));
-  assert.deepEqual(selected.regression.files.slice(0, 13), [
+  assert.ok(selected.regression.files.indexOf('test/public-readiness-native.test.mjs') <
+    selected.regression.files.indexOf('test/mixed.test.mjs'),
+  'Measured bootstrap must not wait behind unprioritized regression work');
+  assert.deepEqual(selected.regression.files.slice(0, 14), [
     'test/observation-retention-refresh.test.mjs',
     'test/public-readiness-ci.test.mjs',
     'test/public-readiness-evidence.test.mjs',
@@ -2073,6 +2078,7 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
     'test/winget-launcher-native.test.mjs',
     'test/public-readiness-release-report.test.mjs',
     'test/public-readiness-pr-description.test.mjs',
+    'test/public-readiness-native.test.mjs',
   ]);
   assert.equal(selected.units.files[0], 'test/public-readiness-observer.test.mjs');
   assert.deepEqual(Object.values(selected).flatMap(stage => stage.cases.map(test => test.id)).sort(),
@@ -2093,6 +2099,7 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
     ['winget-launcher-native.test.mjs', 'native-launcher'],
     ['public-readiness-release-report.test.mjs', 'release-report'],
     ['public-readiness-pr-description.test.mjs', 'pr-description'],
+    ['public-readiness-native.test.mjs', 'native-bootstrap'],
     ['public-readiness-ci.test.mjs', 'ci'],
     ['public-readiness-evidence.test.mjs', 'evidence'],
     ['github-provider-consumers.test.mjs', 'consumers'],
@@ -2108,9 +2115,12 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
   assert.deepEqual((await fs.readFile(marker, 'utf8')).trim().split(/\r?\n/u),
     ['retention', 'observer', 'ci', 'evidence', 'consumers', 'package', 'recovery',
       'distribution', 'runner', 'retained-identity', 'catalog',
-      'native-launcher', 'release-report', 'pr-description', 'operation']);
+      'native-launcher', 'release-report', 'pr-description', 'native-bootstrap', 'operation']);
   const source = await fs.readFile(new URL('../scripts/test-scheduling.mjs', import.meta.url), 'utf8');
-  const source65 = source.replace("  'public-readiness-pr-description.test.mjs',\n", '')
+  const sourceV8 = source.replace("  'public-readiness-native.test.mjs',\n", '')
+    .replace("schemaVersion: 9, algorithm: 'source-bound-ready-root-v9'",
+      "schemaVersion: 8, algorithm: 'source-bound-ready-root-v8'");
+  const source65 = sourceV8.replace("  'public-readiness-pr-description.test.mjs',\n", '')
     .replace("schemaVersion: 8, algorithm: 'source-bound-ready-root-v8'",
       "schemaVersion: 7, algorithm: 'source-bound-ready-root-v7'");
   const source64 = source65.replace("schemaVersion: 7, algorithm: 'source-bound-ready-root-v7'",
@@ -2134,11 +2144,17 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
       "schemaVersion: 2, algorithm: 'source-bound-ready-root-v2'");
   const selectedPolicy = contents => sourceValidationSchedulingPolicy([{ file: 'scripts/test-scheduling.mjs', contents }]);
   assert.equal(selectedPolicy(source), validationSchedulingPolicy);
+  assert.equal(selectedPolicy(sourceV8).schemaVersion, 8);
+  assert.equal(validationSchedulingPolicyDigest(selectedPolicy(sourceV8)),
+    'fed0e6652b9cad17576fdfb26e86369da226b82beb9a09fd100980460a02a80b');
+  assert.deepEqual(validationSchedulingPolicy.priorities.filter(file =>
+    file !== 'public-readiness-native.test.mjs'), selectedPolicy(sourceV8).priorities);
   assert.equal(selectedPolicy(source65).schemaVersion, 7);
   assert.equal(validationSchedulingPolicyDigest(selectedPolicy(source65)),
     '996e99fc1a5c05e4e92048ab18142395859e0f158fb25091d1d37479a0e6acfc');
   assert.deepEqual(validationSchedulingPolicy.priorities.filter(file =>
-    file !== 'public-readiness-pr-description.test.mjs'), selectedPolicy(source65).priorities);
+    !['public-readiness-native.test.mjs', 'public-readiness-pr-description.test.mjs'].includes(file)),
+  selectedPolicy(source65).priorities);
   assert.deepEqual(validationSchedulingPolicy.budget, selectedPolicy(source65).budget);
   assert.equal(selectedPolicy(source64).schemaVersion, 6);
   assert.equal(validationSchedulingPolicyDigest(selectedPolicy(source64)),
@@ -2165,9 +2181,11 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
   for (const changed of [
     source.replace('maxWorkers: 32', 'maxWorkers: 31'),
     source.replace('; demand-first-ready-backfill', ''),
-    source.replace("schemaVersion: 8, algorithm: 'source-bound-ready-root-v8'",
+    source.replace("schemaVersion: 9, algorithm: 'source-bound-ready-root-v9'",
+      "schemaVersion: 8, algorithm: 'source-bound-ready-root-v8'"),
+    source.replace("schemaVersion: 9, algorithm: 'source-bound-ready-root-v9'",
       "schemaVersion: 7, algorithm: 'source-bound-ready-root-v7'"),
-    source.replace("schemaVersion: 8, algorithm: 'source-bound-ready-root-v8'",
+    source.replace("schemaVersion: 9, algorithm: 'source-bound-ready-root-v9'",
       "schemaVersion: 6, algorithm: 'source-bound-ready-root-v6'"),
     source.replace('demand-first-ready-backfill', 'demand-first-ready-bypass'),
     source.replace('demand-first-ready-backfill', 'priority-ready-capacity-barrier'),
@@ -2175,6 +2193,7 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
     source.replace("  'winget-launcher-native.test.mjs',\n", ''),
     source.replace("  'public-readiness-release-report.test.mjs',\n", ''),
     source.replace("  'public-readiness-pr-description.test.mjs',\n", ''),
+    source.replace("  'public-readiness-native.test.mjs',\n", ''),
     source.replace("  'public-readiness-ci.test.mjs',\n", ''),
     source.replace("  'public-readiness-evidence.test.mjs',\n", ''),
     ...['github-provider-consumers.test.mjs', 'package.test.mjs', 'pr-facts-archive-recovery.test.mjs',

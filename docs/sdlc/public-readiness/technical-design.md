@@ -246,9 +246,9 @@ Archived native reconstruction selects the scheduling policy from the existing
 authenticated `definition.sourceFiles` entry for `scripts/test-scheduling.mjs`.
 The non-executing declaration tokenizer requires exact token-normalized
 fingerprints for the exported protocol, priority table and complete policy
-initializers. Current live execution uses literal v8; its complete budget binds
+initializers. Current live execution uses literal v9; its complete budget binds
 declared-demand-first ready backfill. Historical reconstruction retains
-the exact v7, v6, v5, v4, v3 and v2 contracts, original file-admission budget labels
+the exact v8, v7, v6, v5, v4, v3 and v2 contracts, original file-admission budget labels
 and digests. Missing,
 unknown, duplicate, spoofed or computed contracts fail `EVIDENCE`. Do not
 execute captured code, accept a report policy flag or try alternate digests.
@@ -346,6 +346,14 @@ without a failed JSON parse. Object-shaped headers retain the existing parser,
 algorithm-field predicate and malformed-input handling; no token or payload
 limit changes.
 
+Readiness-data validation retains one invocation-private canonical input string
+for both its existing byte bound and sanitizer-equality check. Plain inputs
+therefore require two encodings rather than three. Keep the complete JSON shape,
+depth, node, byte, redaction and equality guards. Any top-level or nested proxy
+retains the original sanitizer-then-fresh-input comparison. Every invocation
+validates current values again; no caller-supplied encoding, object cache,
+authority or outcome is reused.
+
 After fresh binding validation, issue the independent candidate Git reads
 together: three index/diff/untracked queries for a dispatch stamp and those
 same queries plus object-format and file-mode configuration for a full snapshot.
@@ -421,7 +429,7 @@ without changing command watchdogs, owned-process settlement or other limits.
 Configured host fan-out, an isolated shard time or an elapsed-work estimate is
 not a passing latency result; fresh complete hosted measurements are required.
 Keep the existing observation refresh/regression and observer priorities first.
-Under implicit policy v8, preserve v7's existing higher-priority prefix: CI-input and retained-evidence
+Under implicit policy v9, preserve v8's existing higher-priority prefix: CI-input and retained-evidence
 families next, then prioritize provider consumers, reproducible packaging,
 facts/archive recovery, distribution lifecycle and runner probes, in that order,
 where those files belong to the selected shard, before shorter families.
@@ -441,9 +449,13 @@ the retained guard reserves four of the existing seven. Retain the complete
 38-assertion closure, callback ordering/concurrency and every catalog root.
 This changes neither host capacity, shard ownership nor explicit targeted
 caller order. Actual overlap and whole-lane improvement require native proof.
-Policy v8 changes only this source-adopted file-priority entry and retains v7's
+Immediately after PR-description work, admit the measured long
+`public-readiness-native.test.mjs` family before the shorter queued remainder.
+This advances bootstrap validation on its unchanged source-assigned shard;
+the bootstrap commands, assertions and resource allowance remain intact.
+Policy v9 adds only this source-adopted file-priority entry and retains v8's
 demand-first admission, declared minima, workloads and shard ownership.
-Historical v2-v7 identities and captured-source replay remain unchanged.
+Historical v2-v8 identities and captured-source replay remain unchanged.
 It does not cache cold Go builds, prune lifecycle/failure probes or alter assertions.
 
 The PR workflow uses five Linux read-only allocation coordinators under
@@ -832,6 +844,14 @@ Validation commands publish rejected-stop uncertainty before allowing read-only
 root/output drainage within the remaining original settlement deadline. Natural
 exit codes and complete output remain distinct from cleanup success; no second
 grace period or later destructive signal is introduced.
+Windows cleanup retains a bounded termination observation in the existing report
+and journal: relative monotonic dispatch durations, original root/controller
+exit and close callbacks, stderr identity and a pre-cleanup watchdog snapshot.
+Missing events remain null; these are JavaScript observations, not independent
+kernel-exit measurements. Recording adds no timer, process, critical-path
+filesystem write or wait, and never converts uncertainty into safe cleanup.
+The command-capture root reserves four process slots; its writer/producer peers
+reserve their actual two- or three-process minima before timed work begins.
 The native ownership fixture reserves four aggregate worker slots for its
 test process and three real child processes, without changing host capacities
 or the one-second settlement bound.

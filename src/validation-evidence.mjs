@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { types } from 'node:util';
 import { LIMITS, canonical, choice, createSummarySanitizer, digest, id, object, recordLimit, requireThat,
   safeRecord, safeSummary } from './core.mjs';
 import { readBytes, readJson, readJsonEntries, safePath } from './files.mjs';
@@ -133,9 +134,56 @@ function sanitizeRetainedValue(value, state = payloadSanitizerState(), depth = 0
     [key, sensitivePayloadKey(key, state) ? redactPayloadValue(item) :
       sanitizeRetainedValue(item, state, depth + 1)])));
 }
-export function validateRetainedPayload(value) {
-  requireThat(canonical(sanitizeRetainedValue(value)) === canonical(value),
+function requireRetainedPayloadText(sanitized, original) {
+  requireThat(sanitized === original,
     'UNSAFE', 'Retained payload or provenance contains unsupported sensitive content');
+}
+export function validateRetainedPayload(value) {
+  requireRetainedPayloadText(canonical(sanitizeRetainedValue(value)), canonical(value));
+}
+function validationJson(value, limit) {
+  let nodes = 0;
+  let canReuseInput = true;
+  const maxNodes = Math.max(200000, Math.floor(limit / 16));
+  function visit(item, depth) {
+    requireThat(depth <= 32 && ++nodes <= maxNodes, 'CAPACITY',
+      'Validation data exceeds the bounded JSON structure budget');
+    if (item === null || typeof item === 'boolean') return;
+    if (typeof item === 'string') {
+      requireThat(!/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(item),
+        'UNSAFE', 'Validation data contains unsupported control characters');
+      return;
+    }
+    if (typeof item === 'number') {
+      requireThat(Number.isFinite(item), 'INPUT', 'Validation data contains a non-finite number');
+      return;
+    }
+    requireThat(item && typeof item === 'object' &&
+      (Array.isArray(item) ? Object.getPrototypeOf(item) === Array.prototype :
+        Object.getPrototypeOf(item) === Object.prototype) &&
+      Object.getOwnPropertySymbols(item).length === 0,
+    'INPUT', 'Validation data must be plain JSON without executable values');
+    if (types.isProxy(item)) canReuseInput = false;
+    const fields = Object.getOwnPropertyDescriptors(item);
+    requireThat(Object.values(fields).every(field => Object.hasOwn(field, 'value')),
+      'INPUT', 'Validation data cannot contain accessors');
+    for (const key of Object.keys(item)) visit(fields[key].value, depth + 1);
+  }
+  visit(value, 0);
+  const encoded = canonical(value);
+  requireThat(Buffer.byteLength(encoded) <= limit, 'CAPACITY',
+    'Validation data exceeds its byte budget');
+  return { encoded, canReuseInput };
+}
+export function validationJsonText(value, limit = LIMITS.artifact) {
+  return validationJson(value, limit).encoded;
+}
+export function validateReadinessData(value, limit = LIMITS.artifact) {
+  const { encoded, canReuseInput } = validationJson(value, limit);
+  // Proxies retain the original second input read after sanitization.
+  if (canReuseInput) requireRetainedPayloadText(canonical(sanitizeRetainedValue(value)), encoded);
+  else validateRetainedPayload(value);
+  return value;
 }
 
 export function reduceTestHistory(history, { sourceTime = evidence => evidence.observedAt,
