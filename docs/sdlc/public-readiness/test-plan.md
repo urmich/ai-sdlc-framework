@@ -133,6 +133,12 @@ The cancelled-local-critical root records its exact owned leaf ChildProcess
 spawn/exit/close events and controller-close boundary in bounded scalar diagnostics.
 Retain these even when its unchanged immediate ESRCH assertion fails; observation
 after that assertion is diagnostic only, never passing exit evidence.
+Before cancellation on Windows, pin the live leaf's verified creation identity
+with an independent native handle and retain it through that immediate ESRCH
+probe. Release it in owner cleanup, not on leaf exit. A Windows-only PR regression
+uses native-handle inspection and explicit release barriers to verify an exited
+original stays pinned and a genuinely live original remains non-passing; no
+PID-reuse fishing, post-controller wait or production timeout change is permitted.
 Periodic worker reports and native command capture use the same bounded atomic
 replacement recovery for classified transient Windows sharing conflicts.
 The Windows-only periodic-checkpoint regression injects one conflict while the

@@ -1069,6 +1069,8 @@ if(process.connected)process.disconnect();
   done.then(() => { closed = true; }, () => { closed = true; });
   const requestCancellation = () => new Promise((resolve, reject) =>
     child.send('cancel', error => error ? reject(error) : resolve()));
+  let workerIdentity;
+  let originalFailure;
   try {
     const deadline = Date.now() + 30000;
     let workerPid;
@@ -1093,6 +1095,12 @@ if(process.connected)process.disconnect();
     }
     assert.ok(workerPid, stdout + stderr);
     assert.ok(observedStart, 'Cancel only after the actual leaf callback and producer case-start observation');
+    if (process.platform === 'win32') {
+      const ready = await fs.stat(f.enteredFile);
+      workerIdentity = await windowsProcessIdentity(workerPid,
+        path.join(f.root, '.test-data', 'blocked-unit-exit.json'),
+        { createdBeforeMs: Math.floor(ready.mtimeMs), retainUntilRelease: true });
+    }
     await requestCancellation();
     assert.equal(await done, 143, stdout + stderr);
     const probe = { at: new Date().toISOString(),
@@ -1141,10 +1149,28 @@ if(process.connected)process.disconnect();
     assert.ok(readiness.cases.every(test => test.testId !== 'T-PRD005'),
       'Finite sanity evidence must not invent a planned-case completion projection');
     assert.equal(sequence.localCheckpoint.status, 'NotRun');
+  } catch (error) {
+    originalFailure = error;
+    throw error;
   } finally {
-    if (!closed && child.connected) await requestCancellation();
-    else if (!closed) child.kill('SIGTERM');
-    await done;
+    try {
+      if (!closed && child.connected) await requestCancellation();
+      else if (!closed) child.kill('SIGTERM');
+      await done;
+    } finally {
+      if (workerIdentity) {
+        try {
+          assert.deepEqual(await workerIdentity.release(), { code: 0, signal: null },
+            'The owned process handle must be released after the unchanged exit probe');
+        } catch (cleanupError) {
+          if (originalFailure) {
+            throw new AggregateError([originalFailure, cleanupError],
+              'Cancellation assertion and owned identity release failed');
+          }
+          throw cleanupError;
+        }
+      }
+    }
   }
 });
 

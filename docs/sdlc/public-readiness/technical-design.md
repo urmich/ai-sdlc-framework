@@ -953,6 +953,11 @@ ambiguity fail. The sibling-capacity fixture keeps a real independent broker
 producer active across these checks; later global closure is not a substitute
 for each worker's own completion boundary. Await attached observer cleanup
 without changing deadlines or claiming the original CI proved PID reuse.
+For the cancelled-local-critical PID oracle, an explicit-retention observer mode
+pins the verified live Windows process until owner release after the unchanged
+immediate ESRCH probe. The observer also holds the owner identity so owner exit
+releases abandoned resources. It cannot terminate the original before owner
+release; normal automatic-exit observation remains the default for other callers.
 
 POSIX tool-cancellation fixtures retain their strict original PID-exit assertion.
 Publish owned-process ready identities before cancellation and retain bounded

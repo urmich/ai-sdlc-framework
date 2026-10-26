@@ -2,6 +2,9 @@ export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [{"coverage": "process", "paths": ["scripts/test-runner.mjs", "scripts/test-worker.mjs"]}],
   "groups": [{
+    "root": "T-PRD018 Windows process identity stays pinned through exit probes until explicit release",
+    "minimumSlots": 3
+  }, {
     "root": "T-PRD018 unsafe failure diagnostics terminate without hanging or manufacturing complete evidence",
     "minimumSlots": 4
   }],
@@ -16,6 +19,14 @@ export const validationDeclarations = {
     "reason": "These actual overlap/cancellation callbacks need two slots reserved before their deadlines start."
   },
   "applicability": [{
+    "names": [
+      "T-PRD018 Windows process identity stays pinned through exit probes until explicit release"
+    ],
+    "platforms": ["windows-x64"],
+    "owner": "runner-process-identity-contract",
+    "reason": "PR-only native Windows handle ownership prevents PID reuse without hiding a surviving original worker.",
+    "prerequisites": ["Windows PowerShell, owned Node child processes and three aggregate worker slots"]
+  }, {
     "names": [
       "T-PRD018 periodic checkpoints recover a transient Windows replacement conflict without losing the active worker"
     ],
@@ -53,6 +64,7 @@ export const validationDeclarations = {
     {"id": "T-PRD018", "selectors": [
       {"name": "T-PRD018 command cancellation settles the owned group before return and fails closed on unknown survivors", "parents": []},
       {"name": "T-PRD018 owned worker exit assertions distinguish reused identities from surviving workers", "parents": []},
+      {"name": "T-PRD018 Windows process identity stays pinned through exit probes until explicit release", "parents": []},
       {"name": "T-GHB24 native execution evidence distinguishes passing, failing and skipped assertions without overwriting reports", "parents": []},
       {"name": "T-130 SIGINT cancels active file workers before the public runner returns", "parents": []},
       {"name": "T-130 SIGTERM cancels active file workers before the public runner returns", "parents": []}
@@ -305,6 +317,80 @@ test('T-PRD018 owned worker exit assertions distinguish reused identities from s
       'Rejecting an unexpected creation must never terminate that process');
   }
 });
+
+test('T-PRD018 Windows process identity stays pinned through exit probes until explicit release',
+  { skip: process.platform !== 'win32' }, async t => {
+    const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'owned-pin-'));
+    t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+    for (const liveAtProbe of [false, true]) {
+      const child = spawn(process.execPath, ['--eval', `
+const timer=setInterval(()=>{},1000);
+process.once('message',()=>{clearInterval(timer);process.disconnect();});
+process.send({pid:process.pid,observedAtMs:Date.now()});
+`], { shell: false, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+      const closed = new Promise(resolve => child.once('close', (code, signal) => resolve({ code, signal })));
+      let monitor;
+      try {
+        const ready = await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('Owned pin fixture did not become ready')), 5000);
+          child.once('message', value => { clearTimeout(timer); resolve(value); });
+          child.once('error', error => { clearTimeout(timer); reject(error); });
+        });
+        assert.equal(ready.pid, child.pid);
+        const exitPath = path.join(evidence, `${liveAtProbe ? 'live' : 'exited'}-${ready.pid}.exit.json`);
+        monitor = await windowsProcessIdentity(ready.pid, exitPath, {
+          createdBeforeMs: ready.observedAtMs, retainUntilRelease: true,
+        });
+        assert.equal(monitor.identity.pid, ready.pid);
+        if (!liveAtProbe) {
+          child.send('exit');
+          assert.deepEqual(await closed, { code: 0, signal: null });
+        }
+        let observerClosed = false;
+        monitor.closed.then(() => { observerClosed = true; });
+        await fs.writeFile(`${exitPath}.inspect`, 'inspect', { flag: 'wx' });
+        const deadline = Date.now() + 5000;
+        let inspection;
+        while (Date.now() < deadline && !inspection) {
+          try { inspection = JSON.parse(await fs.readFile(`${exitPath}.inspection.json`, 'utf8')); }
+          catch (error) { if (error.code !== 'ENOENT') throw error; }
+          if (inspection) break;
+          assert.equal(observerClosed, false,
+            'The original Windows handle must not be released before the owner completes its exit probe');
+          await delay(10);
+        }
+        assert.ok(inspection, 'The held native handle must answer the ownership inspection');
+        assert.equal(inspection.pid, ready.pid);
+        assert.equal(inspection.creationTime, monitor.identity.creationTime);
+        assert.equal(inspection.handleOpen, true);
+        assert.equal(inspection.hasExited, !liveAtProbe);
+        if (liveAtProbe) {
+          assert.throws(() => assert.throws(() => process.kill(ready.pid, 0),
+            error => error.code === 'ESRCH'), { code: 'ERR_ASSERTION' },
+          'Pinning must not terminate a live original and manufacture a passing exit probe');
+        } else {
+          assert.throws(() => process.kill(ready.pid, 0), error => error.code === 'ESRCH',
+            'The unchanged immediate exit probe must succeed while the original identity remains pinned');
+        }
+        if (child.connected) child.send('exit');
+        await closed;
+        const released = await monitor.release();
+        assert.deepEqual(released, { code: 0, signal: null });
+        const observed = JSON.parse(await fs.readFile(exitPath, 'utf8'));
+        assert.equal(observed.pid, ready.pid);
+        assert.equal(observed.creationTime, monitor.identity.creationTime);
+        assert.equal(observed.present, false);
+        assert.equal(await fs.readFile(`${exitPath}.release`, 'utf8'), 'release');
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+        await closed;
+        if (monitor) {
+          if (typeof monitor.release === 'function') await monitor.release();
+          else await monitor.closed;
+        }
+      }
+    }
+  });
 
 test('T-PRD018 runner assertion diagnostics retain subprocess identities without inline source', () => {
   const source = 'JSON.stringify({platform:process.platform,arch:process.arch,major:Number(process.versions.node.split(".")[0])})';
