@@ -2545,8 +2545,9 @@ test('T-PRD016 twenty-five native shard selections preserve complete root unions
   await assert.rejects(runPass(unsafe, () => assert.fail('Unsafe input reached the pass')), { code: 'EVIDENCE' });
   const schedulingSource = await fs.readFile(new URL('../scripts/test-scheduling.mjs', import.meta.url), 'utf8');
   const historicalPolicy = sourceValidationSchedulingPolicy([{ file: 'scripts/test-scheduling.mjs',
-    contents: schedulingSource.replace("schemaVersion: 7, algorithm: 'source-bound-ready-root-v7'",
-      "schemaVersion: 6, algorithm: 'source-bound-ready-root-v6'").replace('; demand-first-ready-backfill', ''),
+    contents: schedulingSource.replace("  'public-readiness-pr-description.test.mjs',\n", '')
+      .replace("schemaVersion: 8, algorithm: 'source-bound-ready-root-v8'",
+        "schemaVersion: 6, algorithm: 'source-bound-ready-root-v6'").replace('; demand-first-ready-backfill', ''),
   }]);
   assert.equal(historicalPolicy.schemaVersion, 6, 'The fixture must select the historical policy, not silently retest the current one');
   for (const schedulingPolicy of [historicalPolicy, validationSchedulingPolicy]) {

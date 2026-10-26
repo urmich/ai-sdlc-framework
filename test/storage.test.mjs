@@ -618,6 +618,50 @@ test('T-16 bounded file confirmation tolerates settling metadata but rejects con
     });
   }
 });
+async function waitForLockProgress(progress) {
+  let timer;
+  try {
+    await Promise.race([progress, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Concurrent update made no progress')), 3000);
+    })]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function concurrentRevisionUpdates(file) {
+  const count = 8;
+  let completed = 0;
+  let progress = Promise.withResolvers();
+  let failure;
+  const updates = await Promise.allSettled(Array.from({ length: count }, () => {
+    let observed = 0;
+    let attempts = 0;
+    const startedAt = Date.now();
+    return updateJson(file, { revision: 0, count: 0 },
+      value => ({ ...value, count: value.count + 1 }), {
+        waitMs: 3000,
+        clock: { now: () => startedAt + attempts * 10 },
+        sleep: async () => {
+          // Bound retries by completed peers, not the host's durable-I/O speed.
+          assert.ok(attempts++ < count, 'Concurrent updates must make bounded progress');
+          if (completed === observed) await waitForLockProgress(progress.promise);
+          if (failure) throw failure;
+          observed = completed;
+        },
+      }).catch(error => {
+        failure ??= error;
+        throw error;
+      }).finally(() => {
+        completed++;
+        const previous = progress;
+        progress = Promise.withResolvers();
+        previous.resolve();
+      });
+  }));
+  for (const update of updates) if (update.status === 'rejected') throw update.reason;
+}
+
 test('T-16 old live locks are never stolen; concurrent revision updates serialize', async t => {
   const f = await fixture(t);
   const lock = path.join(f.root, 'old.lock');
@@ -651,12 +695,68 @@ test('T-16 old live locks are never stolen; concurrent revision updates serializ
     if (name.includes('.candidate')) await fs.unlink(path.join(f.root, name));
   }
   const file = path.join(f.root, 'registry.json');
-  const updates = await Promise.allSettled(Array.from({ length: 8 }, () =>
-    updateJson(file, { revision: 0, count: 0 },
-      value => ({ ...value, count: value.count + 1 }), { waitMs: 3000 })));
-  for (const update of updates) if (update.status === 'rejected') throw update.reason;
+  await concurrentRevisionUpdates(file);
   assert.deepEqual(await readJson(file), { revision: 8, count: 8 });
   await assert.rejects(updateJson(file, {}, value => value, { expectedRevision: 1 }), { code: 'STALE' });
+});
+test('T-16 concurrent revision oracle synchronizes on completion rather than elapsed durable I/O', async t => {
+  const f = await fixture(t);
+  const file = path.join(f.root, 'registry.json');
+  const guard = `${file}.lock.recovery-guard`;
+  const mkdir = fsPromises.mkdir;
+  const now = Date.now;
+  const acquired = Promise.withResolvers();
+  const contention = Promise.withResolvers();
+  let elapsed = 0;
+  let contended = false;
+  let first = true;
+  t.mock.method(Date, 'now', () => now() + elapsed);
+  const mocked = t.mock.method(fsPromises, 'mkdir', async (directory, ...args) => {
+    if (directory === guard && first) {
+      first = false;
+      const result = await mkdir(directory, ...args);
+      acquired.resolve();
+      await waitForLockProgress(contention.promise);
+      return result;
+    }
+    if (directory === guard) await waitForLockProgress(acquired.promise);
+    try { return await mkdir(directory, ...args); }
+    catch (error) {
+      if (directory === guard && error.code === 'EEXIST' && !contended) {
+        contended = true;
+        elapsed = 3001;
+        contention.resolve();
+      }
+      throw error;
+    }
+  });
+  syncBuiltinESMExports();
+  try {
+    await concurrentRevisionUpdates(file);
+    assert.equal(contended, true, 'The real guard must exclude a competing update');
+    assert.deepEqual(await readJson(file), { revision: 8, count: 8 });
+    await assert.rejects(updateJson(file, {}, value => value, { expectedRevision: 1 }),
+      { code: 'STALE' });
+    assert.ok(!(await fs.readdir(f.root)).some(name =>
+      name.startsWith('registry.json.lock')));
+  } finally {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+    t.mock.restoreAll();
+  }
+  const lock = `${file}.lock`;
+  const owner = { token: 'live-regression-owner', host: os.hostname(), pid: process.pid };
+  await writeJson(lock, owner);
+  try {
+    await assert.rejects(concurrentRevisionUpdates(file),
+      { message: 'Concurrent update made no progress' });
+    assert.deepEqual(await readJson(lock), owner);
+    assert.deepEqual(await readJson(file), { revision: 8, count: 8 });
+    assert.deepEqual((await fs.readdir(f.root)).filter(name =>
+      name.startsWith('registry.json.lock')), ['registry.json.lock']);
+  } finally {
+    await fs.unlink(lock);
+  }
 });
 test('T-16 a changing recovery-guard owner remains contention without stealing ownership', async t => {
   const f = await fixture(t);
@@ -855,14 +955,18 @@ test('T-19 remote selection validates fresh bindings without unused revision que
     assert.deepEqual(await selectedPushRemote(member, 'origin'), {
       selectedRemoteName: 'origin', pushURLs: ['https://example.invalid/repository.git'],
     });
-    assert.deepEqual(calls.map(args => args[2]), ['rev-parse', 'symbolic-ref', 'remote', 'remote']);
+    assert.deepEqual(calls.map(args => args[2]), ['rev-parse', 'symbolic-ref', 'remote']);
+    assert.deepEqual(calls[2], ['--no-pager', '--no-optional-locks',
+      'remote', 'get-url', '--push', '--all', 'origin']);
     await f.runGit('commit', '--allow-empty', '-qm', 'Advance remote binding fixture');
     await f.runGit('remote', 'set-url', 'origin', 'https://example.invalid/current.git');
     calls.length = 0;
     assert.deepEqual(await selectedFetchRemote(member, undefined, 'origin'), {
       selectedRemoteName: 'origin', fetchURLs: ['https://example.invalid/current.git'],
     });
-    assert.deepEqual(calls.map(args => args[2]), ['rev-parse', 'symbolic-ref', 'remote', 'remote']);
+    assert.deepEqual(calls.map(args => args[2]), ['rev-parse', 'symbolic-ref', 'remote']);
+    assert.deepEqual(calls[2], ['--no-pager', '--no-optional-locks',
+      'remote', 'get-url', '--all', 'origin']);
     await f.runGit('checkout', '-qb', 'feature/remote-same-head');
     calls.length = 0;
     await assert.rejects(selectedFetchRemote(member), { code: 'BINDING' });
@@ -870,6 +974,49 @@ test('T-19 remote selection validates fresh bindings without unused revision que
   } finally {
     unsubscribe('child_process', observe);
   }
+});
+
+test('T-19 explicit remote URL queries preserve native rewrites, all URLs and exact selection failures', async t => {
+  const f = await fixture(t);
+  const member = await identity(f.repo, 'primary');
+  await f.runGit('config', '--unset-all', 'remote.origin.url');
+  await f.runGit('config', '--add', 'remote.origin.url', 'fixture:one');
+  await f.runGit('config', '--add', 'remote.origin.url', 'fixture:two');
+  await f.runGit('config', 'url.https://example.invalid/fetch/.insteadOf', 'fixture:');
+  await f.runGit('config', '--add', 'remote.origin.pushurl', 'push:one');
+  await f.runGit('config', '--add', 'remote.origin.pushurl', 'push:two');
+  await f.runGit('config', 'url.https://example.invalid/push/.insteadOf', 'push:');
+  assert.deepEqual(await selectedFetchRemote(member, 'origin'), {
+    selectedRemoteName: 'origin',
+    fetchURLs: ['https://example.invalid/fetch/one', 'https://example.invalid/fetch/two'],
+  });
+  assert.deepEqual(await selectedPushRemote(member, undefined, 'origin'), {
+    selectedRemoteName: 'origin',
+    pushURLs: ['https://example.invalid/push/one', 'https://example.invalid/push/two'],
+  });
+  await f.runGit('config', '--unset-all', 'remote.origin.pushurl');
+  await f.runGit('config', '--add', 'remote.origin.pushurl', 'https://example.invalid/changed-push.git');
+  await f.runGit('config', '--add', 'remote.origin.pushurl', 'push:two');
+  assert.deepEqual((await selectedPushRemote(member, 'origin')).pushURLs,
+    ['https://example.invalid/changed-push.git', 'https://example.invalid/push/two']);
+  await assert.rejects(selectedFetchRemote(member, 'origin', 'missing'), {
+    code: 'CONFIG', message: 'Selected Git remote conflicts with repository configuration',
+  });
+  await assert.rejects(selectedFetchRemote(member, 'missing'), {
+    code: 'EVIDENCE', message: 'Selected Git remote does not exist',
+  });
+  await f.runGit('config', 'remote.empty.fetch', '+refs/heads/*:refs/remotes/empty/*');
+  const execute = promisify(execFile);
+  const native = await execute('git',
+    ['--no-pager', '--no-optional-locks', 'remote', 'get-url', '--all', 'empty'], {
+      cwd: f.repo, env: { ...process.env, LC_ALL: 'C', LANG: 'C' },
+  });
+  assert.deepEqual((await selectedFetchRemote(member, 'empty')).fetchURLs,
+    native.stdout.trimEnd().split(/\r?\n/u).filter(Boolean));
+  await f.runGit('remote', 'remove', 'origin');
+  await assert.rejects(selectedPushRemote(member, 'origin'), {
+    code: 'EVIDENCE', message: 'Selected Git remote does not exist',
+  });
 });
 
 test('T-19 remote selection preserves late branch and linked-worktree guards', async t => {

@@ -806,7 +806,7 @@ completeness rather than silently excluding work.
 | Actual public routes, effective provider policy and published consumers | Declared A / R-POST procedure and authorized host | These are not fork PR publication/admin actions or default local prerequisites. Require actual accessible destinations/effects; fixture success is separate. |
 
 Within a ready-work pool, acquire declared minimum/exclusive resources before
-starting a group's timed callback. Under policy v7, each admission pass stably
+starting a group's timed callback. Policy v8 retains v7's rule: each admission pass stably
 orders pending groups by declared `minimumSlots` descending, retaining input
 order for equal demand. Skip unmet dependencies, insufficient available capacity
 and exclusive conflicts; smaller fitting eligible groups backfill rather than
@@ -1091,12 +1091,19 @@ not complete before the cutoff. Do not claim a whole-lane speedup before complet
 hosted results.
 Preserve initial observation refresh/regression and observer priorities, then
 prioritize the unchanged CI-input and retained-evidence families under implicit
-policy v7, preserving the exact v6 priority table. Next prioritize provider consumers, reproducible packaging,
+policy v8, preserving v7's existing higher-priority prefix. Next prioritize provider consumers, reproducible packaging,
 facts/archive recovery, distribution lifecycle and runner probes, in that order,
 without changing their real commands, negative controls or causal closures.
 Keep the measured retained-identity acceptance family, catalog,
 unchanged native WinGet launcher family and joined release-report family in
 their relative order for shards owning those files, ahead of shorter families.
+Then admit PR-description work on its same assigned shard. Its PR-only regression
+must observe the isolated description closure while the four-slot retained guard
+is live, within the declared five-slot nested participant and seven-slot outer
+allocation, and retain every dependency, outcome and cleanup. An explicit
+wrong-order targeted control must remain late and fail the positive overlap
+condition. Historical v2-v7 policy digests and archived source selection remain
+unchanged; no literal relabeling supplies current credit.
 Verify both hosted
 selection order and actual implicit dispatch; explicit targeted caller order
 remains unchanged. Single-worker/equal-demand dispatch preserves that order;
@@ -1105,10 +1112,10 @@ Earlier dispatch is not itself proof of a native speedup.
 Verify the actual producer's requested/capacity fields and shared
 nested-allocation bounds; the default local gate and 32-slot ceiling do not
 change. Account for the personal-account limit of five concurrent hosted Mac
-jobs across both architectures. Cancel the attempt if a non-Intel lane is still
-active at 16 minutes or Intel is still active at 20 minutes; retain the original
-non-passing results and return to measured bottleneck work. A tighter delivery
-limit miss is reported separately, not used to cancel Intel before its cutoff.
+jobs across both architectures. Observation cutoffs do not authorize automatic
+cancellation: retain actual terminal results even after a delivery limit is
+missed, report that timing dimension as Failed, and return to measured bottleneck
+work. Do not rerun an unchanged candidate to replace a timing miss with a lucky pass.
 
 Use independent owned baseline and candidate workspaces on the **same host**
 with the same Node/tool versions, worker/resource limits and environment policy.
@@ -1409,13 +1416,27 @@ the original subset. A new legitimate test must not erase preservation checks.
    than the parts that happen to arrive. Require each substantive Go, Python,
    schema, static and calculator stage at its assigned producer; partitioning
    cannot omit a stage or count a repeated assertion as independent coverage.
+   The PR-only T-16 concurrent-revision oracle regression must force actual
+   guard contention before a finite clock step, retain all eight real updates
+   and exact revision/count outcomes, and preserve stale-revision rejection.
+   A separately held live lock must cause bounded no-progress failure without
+   changing its owner or data. Every update settles, timers clear, and owned
+   candidates/guards are absent. Keep process-local clock/filesystem
+   instrumentation isolated, at most eight contention retries per contender
+   and the unchanged three-second no-progress bound; production deadlines and
+   the finite critical selection do not change.
    Include the PR-only `Git identity batches fresh path queries and preserves
    unborn and linked worktrees` root in `test/storage.test.mjs`. It checks real
    process counts and fresh path, branch and HEAD behavior, not a proxy native
    latency pass. Its addition does not expand L or remove an existing check.
    Also execute the PR-only exact-current-ref binding regression in that file,
    including a same-commit different branch, fresh revision, prefix mismatch,
-   unborn and linked-worktree cases. The two controlled Node-only Homebrew
+   unborn and linked-worktree cases. Explicit remote selection must use fresh
+   direction-specific native URL queries without redundant name enumeration,
+   preserve all URLs and native rewrite rules, and observe subsequent mutations.
+   Retain exact configured/requested conflicts, missing/empty-remote errors and
+   the same-SHA branch rejection; no cached identity supplies currentness.
+   The two controlled Node-only Homebrew
    rollback-inventory roots in `test/homebrew-switch.test.mjs` must retain all
    real fixture bytes, modes and links, bound independent reads, serialize
    large payloads and drain injected failures before recovery-state cleanup.

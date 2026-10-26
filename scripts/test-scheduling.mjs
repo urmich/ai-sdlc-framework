@@ -19,6 +19,7 @@ export const measuredFilePriorities = Object.freeze([
   'validation-catalog.test.mjs',
   'winget-launcher-native.test.mjs',
   'public-readiness-release-report.test.mjs',
+  'public-readiness-pr-description.test.mjs',
   'github-operation-results.unit.test.mjs', 'github-existing-consumer-boundaries.unit.test.mjs',
   'github-consumer-policy.unit.test.mjs', 'github-operation-dispatch.unit.test.mjs',
   'github-consumer-source.unit.test.mjs', 'github-consumer-refresh.unit.test.mjs',
@@ -30,7 +31,7 @@ export const measuredFilePriorities = Object.freeze([
   'deployment-revisions.test.mjs', 'pr-publication.test.mjs',
 ]);
 export const validationSchedulingPolicy = Object.freeze({
-  schemaVersion: 7, algorithm: 'source-bound-ready-root-v7',
+  schemaVersion: 8, algorithm: 'source-bound-ready-root-v8',
   groupProtocol: validationGroupProtocol,
   priorities: measuredFilePriorities, hints: 'exact-assertion-and-source-digest; no nested double-counting',
   hostedUnits: 'complete-unit-test-files-plus-automated-plan-unit-root-closure',
@@ -42,16 +43,22 @@ export const validationSchedulingPolicy = Object.freeze({
     files: 'process-isolated-root-closures; dynamic-shared-ready-pool; minimum-and-exclusive-before-module-setup; demand-first-ready-backfill',
     nested: 'awaited-parent-yield; ancestor-token-loan; restore-before-return' }),
 });
-const source64SchedulingPolicy = Object.freeze({
+const source65SchedulingPolicy = Object.freeze({
   ...validationSchedulingPolicy,
+  schemaVersion: 7, algorithm: 'source-bound-ready-root-v7',
+  priorities: Object.freeze(measuredFilePriorities.filter(file =>
+    file !== 'public-readiness-pr-description.test.mjs')),
+});
+const source64SchedulingPolicy = Object.freeze({
+  ...source65SchedulingPolicy,
   schemaVersion: 6, algorithm: 'source-bound-ready-root-v6',
-  budget: Object.freeze({ ...validationSchedulingPolicy.budget,
+  budget: Object.freeze({ ...source65SchedulingPolicy.budget,
     files: 'process-isolated-root-closures; dynamic-shared-ready-pool; minimum-and-exclusive-before-module-setup' }),
 });
 const source63SchedulingPolicy = Object.freeze({
   ...source64SchedulingPolicy,
   schemaVersion: 5, algorithm: 'source-bound-ready-root-v5',
-  priorities: Object.freeze(measuredFilePriorities.filter(file =>
+  priorities: Object.freeze(source64SchedulingPolicy.priorities.filter(file =>
     !['github-provider-consumers.test.mjs', 'package.test.mjs', 'pr-facts-archive-recovery.test.mjs',
       'distribution-channels.test.mjs', 'test-runner.test.mjs'].includes(file))),
 });
@@ -72,7 +79,7 @@ const priorSchedulingPolicy = Object.freeze({
   schemaVersion: 2, algorithm: 'source-bound-ready-root-v2',
   priorities: Object.freeze(middleSchedulingPolicy.priorities.filter(file => file !== 'validation-catalog.test.mjs')),
 });
-const knownPolicies = new Set([validationSchedulingPolicy, source64SchedulingPolicy, source63SchedulingPolicy,
+const knownPolicies = new Set([validationSchedulingPolicy, source65SchedulingPolicy, source64SchedulingPolicy, source63SchedulingPolicy,
   previousSchedulingPolicy, middleSchedulingPolicy, priorSchedulingPolicy]);
 export function validationSchedulingPolicyDigest(policy = validationSchedulingPolicy) {
   requireThat(knownPolicies.has(policy), 'EVIDENCE', 'Scheduling policy must be current or independently source-selected');

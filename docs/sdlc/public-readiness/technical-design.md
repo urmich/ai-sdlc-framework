@@ -187,7 +187,7 @@ references/cycles and resource declarations before dispatch. Prerequisites must
 finish successfully; declared minimum/exclusive allocation is acquired before
 timed execution. Completion releases capacity for other ready groups; failure
 and cancellation block dependents without suppressing original diagnostics.
-Under policy v7, each admission pass stably orders pending groups by declared
+Policy v8 retains v7's admission rule: each pass stably orders pending groups by declared
 `minimumSlots` descending, retaining input order for equal demand. Skip groups
 with unmet dependencies, insufficient available capacity or an exclusive-resource
 conflict; admit the next fitting eligible group instead of stopping the pass.
@@ -302,9 +302,20 @@ Revision-bearing callers retain the complete identity queries and fallbacks.
 PR-only process and controlled branch-switch regressions preserve unborn,
 newly committed and same-commit branch behavior without trusting stored state.
 Remote-name selection uses that same fresh binding-only guard because choosing
-current fetch/push URLs does not consume a revision. Keep the actual remote-name
-enumeration, URL queries, configuration checks and full identity checks at
-revision-bearing consumers unchanged.
+current fetch/push URLs does not consume a revision. For an explicit selected
+remote, one native direction-specific `remote get-url --all` query supplies
+existence and the complete rewritten URLs. Only Git's exact missing-remote
+failure falls back to the original fresh name enumeration and selection error;
+other native errors propagate. Implicit selection still enumerates names.
+Repeat binding and URL reads on every call; do not cache identity or currentness.
+Revision-bearing consumers retain their full identity checks.
+The concurrent-revision test oracle coordinates eight real durable updates by
+observed peer completion, rather than treating elapsed host I/O as a lost update.
+Each contender has at most eight contention retries, and each no-progress
+barrier retains a three-second bound. Drain all updates and propagate failures;
+production lock deadlines, live-owner checks, durability and cleanup are unchanged.
+Its PR-only regression retains a real exclusion barrier, a finite clock step
+and an independently held live lock that must fail without progress.
 The retention fixture's existing immutable Git-read cache also recognizes the
 read-only current-ref query. Writes and unknown Git commands still invalidate
 all cached fixture reads. This test-only reuse does not cache production state
@@ -405,7 +416,7 @@ without changing command watchdogs, owned-process settlement or other limits.
 Configured host fan-out, an isolated shard time or an elapsed-work estimate is
 not a passing latency result; fresh complete hosted measurements are required.
 Keep the existing observation refresh/regression and observer priorities first.
-Under implicit policy v7, keep the unchanged v6 priority table: CI-input and retained-evidence
+Under implicit policy v8, preserve v7's existing higher-priority prefix: CI-input and retained-evidence
 families next, then prioritize provider consumers, reproducible packaging,
 facts/archive recovery, distribution lifecycle and runner probes, in that order,
 where those files belong to the selected shard, before shorter families.
@@ -416,14 +427,19 @@ declared demand first, so strict actual start order across unequal demands is
 not promised; equal-demand ties retain the input order.
 Preserve the relative retained-identity acceptance, catalog, native
 WinGet launcher and joined release-report prefix in shards that own those files.
+Place PR-description work immediately after that prefix, before shorter families
+on its same source-assigned shard. Its real ready-pool regression retains the
+five-slot nested participant, live four-slot guard, explicit caller-order
+negative control and every isolated outcome/cleanup; no worker allowance grows.
 The catalog's independent long root can use the three remaining ARM slots while
 the retained guard reserves four of the existing seven. Retain the complete
 38-assertion closure, callback ordering/concurrency and every catalog root.
 This changes neither host capacity, shard ownership nor explicit targeted
 caller order. Actual overlap and whole-lane improvement require native proof.
-Policy v7 changes admission semantics, not that file order, declared minima,
-workloads or shard ownership. It does not cache cold Go builds, prune
-lifecycle/failure probes, alter assertions or replace historical policies.
+Policy v8 changes only this source-adopted file-priority entry and retains v7's
+demand-first admission, declared minima, workloads and shard ownership.
+Historical v2-v7 identities and captured-source replay remain unchanged.
+It does not cache cold Go builds, prune lifecycle/failure probes or alter assertions.
 
 The PR workflow uses five Linux read-only allocation coordinators under
 `arm-regression-allocation-v5-critical-body-first`. After ARM's own unit barrier,

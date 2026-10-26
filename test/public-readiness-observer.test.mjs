@@ -1103,7 +1103,10 @@ test('T-PRD074 archived native reconstruction uses original source and commands 
 test('T-PRD074 archived scheduling reconstructs only its authenticated captured literal policy without current-credit fallback', async t => {
   const f = await observerApiFixture(t, { nodeArtifactReader: true });
   const currentSource = await fs.readFile(new URL('../scripts/test-scheduling.mjs', import.meta.url), 'utf8');
-  const source64 = currentSource.replace("schemaVersion: 7, algorithm: 'source-bound-ready-root-v7'",
+  const source65 = currentSource.replace("  'public-readiness-pr-description.test.mjs',\n", '')
+    .replace("schemaVersion: 8, algorithm: 'source-bound-ready-root-v8'",
+      "schemaVersion: 7, algorithm: 'source-bound-ready-root-v7'");
+  const source64 = source65.replace("schemaVersion: 7, algorithm: 'source-bound-ready-root-v7'",
     "schemaVersion: 6, algorithm: 'source-bound-ready-root-v6'")
     .replace('; demand-first-ready-backfill', '');
   const source63 = ['github-provider-consumers.test.mjs', 'package.test.mjs', 'pr-facts-archive-recovery.test.mjs',
@@ -1122,7 +1125,7 @@ test('T-PRD074 archived scheduling reconstructs only its authenticated captured 
   const legacySource = middleSource.replace("  'validation-catalog.test.mjs',\n", '')
     .replace("schemaVersion: 3, algorithm: 'source-bound-ready-root-v3'",
       "schemaVersion: 2, algorithm: 'source-bound-ready-root-v2'");
-  for (const schedulingSource of [legacySource, middleSource, previousSource, source63, source64, currentSource]) {
+  for (const schedulingSource of [legacySource, middleSource, previousSource, source63, source64, source65, currentSource]) {
     const captured = nativeReplayFixture({ candidate: f.candidate, sourceCommit: f.revisions.merge,
       asOf: '2026-10-18T10:00:00.000Z', schedulingSource });
     const files = captured.definition.stages.find(stage=>stage.name==='regression').files;
@@ -1134,14 +1137,14 @@ test('T-PRD074 archived scheduling reconstructs only its authenticated captured 
     const launcherIndex = files.indexOf('test/winget-launcher-native.test.mjs');
     const reportIndex = files.indexOf('test/public-readiness-release-report.test.mjs');
     assert.ok(launcherIndex >= 0 && reportIndex >= 0);
-    if ([currentSource, source64, source63, previousSource].includes(schedulingSource)) {
+    if ([currentSource, source65, source64, source63, previousSource].includes(schedulingSource)) {
       assert.equal(launcherIndex, catalogIndex + 1);
       assert.equal(reportIndex, launcherIndex + 1);
     }
     const ciIndex = files.indexOf('test/public-readiness-ci.test.mjs');
     const evidenceIndex = files.indexOf('test/public-readiness-evidence.test.mjs');
     assert.ok(ciIndex >= 0 && evidenceIndex >= 0);
-    if ([currentSource, source64, source63].includes(schedulingSource)) {
+    if ([currentSource, source65, source64, source63].includes(schedulingSource)) {
       assert.equal(evidenceIndex, ciIndex + 1);
       assert.ok(ciIndex < retainedIndex && evidenceIndex < retainedIndex);
     } else {
@@ -1151,7 +1154,7 @@ test('T-PRD074 archived scheduling reconstructs only its authenticated captured 
       'pr-facts-archive-recovery.test.mjs', 'distribution-channels.test.mjs', 'test-runner.test.mjs']
       .map(file => files.indexOf(`test/${file}`));
     assert.ok(tailIndexes.every(index => index >= 0));
-    if (schedulingSource === currentSource || schedulingSource === source64) {
+    if ([currentSource, source65, source64].includes(schedulingSource)) {
       assert.deepEqual(tailIndexes, tailIndexes.map((_, index) => evidenceIndex + index + 1));
       assert.equal(retainedIndex, tailIndexes.at(-1) + 1);
     }
@@ -1181,10 +1184,13 @@ test('T-PRD074 archived scheduling reconstructs only its authenticated captured 
       previousAdmission['unit.json'].groupExecution.policyDigest =
         'abc5f21ad9e5b998a0f0ce3341ced66f3784d7122e8d72d7cd5a6b67e9fb609a';
       await assert.rejects(replayNativeEvidence({ ...input, data: previousAdmission }), { code: 'EVIDENCE' });
+      previousAdmission['unit.json'].groupExecution.policyDigest =
+        '996e99fc1a5c05e4e92048ab18142395859e0f158fb25091d1d37479a0e6acfc';
+      await assert.rejects(replayNativeEvidence({ ...input, data: previousAdmission }), { code: 'EVIDENCE' });
     }
     await assert.rejects(replayNativeEvidence({ ...input, verifyArchive: () => null }), { code: 'EVIDENCE' });
   }
-  for (const schedulingSource of [legacySource, middleSource, previousSource, source63, source64]) {
+  for (const schedulingSource of [legacySource, middleSource, previousSource, source63, source64, source65]) {
   const oldShard = await observerApiFixture(t, { frameworkShards: true, bootstrapProtocol: nativeBootstrapProtocol,
     schedulingSource, nodeArtifactReader: true, ambient: false });
   const part = oldShard.parts.get('macos-arm64-framework-body-1');

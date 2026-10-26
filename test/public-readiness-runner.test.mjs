@@ -5,6 +5,9 @@ export const validationDeclarations = {
     {"coverage": "direct", "paths": ["scripts/test-scheduling.mjs", "scripts/test-budget.mjs", "scripts/test-local-evidence.mjs", "scripts/validation-benchmark.mjs"]}
   ],
   "groups": [{
+    "root": "T-PRD010 PR-description priority admits its isolated closure before queued work while the retained guard is live",
+    "minimumSlots": 5
+  }, {
     "root": "T-PRD010-CATALOG catalog third root overlaps a live four-slot retained guard within seven shared slots",
     "minimumSlots": 7
   }, {
@@ -13,6 +16,12 @@ export const validationDeclarations = {
     "exclusiveResources": []
   }],
   "applicability": [{
+    "names": ["T-PRD010 PR-description priority admits its isolated closure before queued work while the retained guard is live"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "PR-only measured co-tail admission regression; real isolated workers and observable barriers retain the same five-slot budget, source closures and explicit caller order.",
+    "prerequisites": ["Node and five aggregate worker slots; owned repository-local fixtures"]
+  }, {
     "names": ["T-PRD010 protocol pool retains uncertain writers and cleans only proven safe operations"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "runner-resource-contract",
@@ -44,6 +53,9 @@ export const validationDeclarations = {
     "reason": "Reserve two host slots before these callbacks so nested overlap deadlines do not begin while capacity is unavailable."
   },
   "plannedCases": [
+    {"id": "T-PRD010", "selectors": [
+      {"name": "T-PRD010 PR-description priority admits its isolated closure before queued work while the retained guard is live", "parents": []}
+    ]},
     {"id": "T-PRD011", "selectors": [
       {"name": "T-PRD010 independent file workers overlap without sharing environment, module patches or fixture ownership", "parents": []}
     ]}
@@ -2028,6 +2040,8 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
       'test/winget-launcher-native.test.mjs'),
     discoverDeclarations("import test from 'node:test';test('unchanged joined release-report family',()=>{});",
       'test/public-readiness-release-report.test.mjs'),
+    discoverDeclarations("import test from 'node:test';test('measured PR-description co-tail',()=>{});",
+      'test/public-readiness-pr-description.test.mjs'),
     discoverDeclarations("import test from 'node:test';test('unchanged CI input family',()=>{});",
       'test/public-readiness-ci.test.mjs'),
     discoverDeclarations("import test from 'node:test';test('unchanged retained evidence family',()=>{});",
@@ -2045,7 +2059,7 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
   ] });
   assert.ok(selected.units.cases.some(test => test.name === 'unit family without local binding'));
   assert.ok(selected.units.cases.some(test => test.name === 'T-PRD008 selected planned unit'));
-  assert.deepEqual(selected.regression.files.slice(0, 12), [
+  assert.deepEqual(selected.regression.files.slice(0, 13), [
     'test/observation-retention-refresh.test.mjs',
     'test/public-readiness-ci.test.mjs',
     'test/public-readiness-evidence.test.mjs',
@@ -2058,6 +2072,7 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
     'test/validation-catalog.test.mjs',
     'test/winget-launcher-native.test.mjs',
     'test/public-readiness-release-report.test.mjs',
+    'test/public-readiness-pr-description.test.mjs',
   ]);
   assert.equal(selected.units.files[0], 'test/public-readiness-observer.test.mjs');
   assert.deepEqual(Object.values(selected).flatMap(stage => stage.cases.map(test => test.id)).sort(),
@@ -2077,6 +2092,7 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
     ['validation-catalog.test.mjs', 'catalog'],
     ['winget-launcher-native.test.mjs', 'native-launcher'],
     ['public-readiness-release-report.test.mjs', 'release-report'],
+    ['public-readiness-pr-description.test.mjs', 'pr-description'],
     ['public-readiness-ci.test.mjs', 'ci'],
     ['public-readiness-evidence.test.mjs', 'evidence'],
     ['github-provider-consumers.test.mjs', 'consumers'],
@@ -2092,9 +2108,12 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
   assert.deepEqual((await fs.readFile(marker, 'utf8')).trim().split(/\r?\n/u),
     ['retention', 'observer', 'ci', 'evidence', 'consumers', 'package', 'recovery',
       'distribution', 'runner', 'retained-identity', 'catalog',
-      'native-launcher', 'release-report', 'operation']);
+      'native-launcher', 'release-report', 'pr-description', 'operation']);
   const source = await fs.readFile(new URL('../scripts/test-scheduling.mjs', import.meta.url), 'utf8');
-  const source64 = source.replace("schemaVersion: 7, algorithm: 'source-bound-ready-root-v7'",
+  const source65 = source.replace("  'public-readiness-pr-description.test.mjs',\n", '')
+    .replace("schemaVersion: 8, algorithm: 'source-bound-ready-root-v8'",
+      "schemaVersion: 7, algorithm: 'source-bound-ready-root-v7'");
+  const source64 = source65.replace("schemaVersion: 7, algorithm: 'source-bound-ready-root-v7'",
     "schemaVersion: 6, algorithm: 'source-bound-ready-root-v6'")
     .replace('; demand-first-ready-backfill', '');
   const source63 = ['github-provider-consumers.test.mjs', 'package.test.mjs', 'pr-facts-archive-recovery.test.mjs',
@@ -2115,10 +2134,16 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
       "schemaVersion: 2, algorithm: 'source-bound-ready-root-v2'");
   const selectedPolicy = contents => sourceValidationSchedulingPolicy([{ file: 'scripts/test-scheduling.mjs', contents }]);
   assert.equal(selectedPolicy(source), validationSchedulingPolicy);
+  assert.equal(selectedPolicy(source65).schemaVersion, 7);
+  assert.equal(validationSchedulingPolicyDigest(selectedPolicy(source65)),
+    '996e99fc1a5c05e4e92048ab18142395859e0f158fb25091d1d37479a0e6acfc');
+  assert.deepEqual(validationSchedulingPolicy.priorities.filter(file =>
+    file !== 'public-readiness-pr-description.test.mjs'), selectedPolicy(source65).priorities);
+  assert.deepEqual(validationSchedulingPolicy.budget, selectedPolicy(source65).budget);
   assert.equal(selectedPolicy(source64).schemaVersion, 6);
   assert.equal(validationSchedulingPolicyDigest(selectedPolicy(source64)),
     'abc5f21ad9e5b998a0f0ce3341ced66f3784d7122e8d72d7cd5a6b67e9fb609a');
-  assert.deepEqual(validationSchedulingPolicy.priorities, selectedPolicy(source64).priorities);
+  assert.deepEqual(selectedPolicy(source65).priorities, selectedPolicy(source64).priorities);
   assert.equal(validationSchedulingPolicy.budget.files,
     `${selectedPolicy(source64).budget.files}; demand-first-ready-backfill`);
   assert.deepEqual({ ...validationSchedulingPolicy.budget, files: selectedPolicy(source64).budget.files },
@@ -2140,13 +2165,16 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
   for (const changed of [
     source.replace('maxWorkers: 32', 'maxWorkers: 31'),
     source.replace('; demand-first-ready-backfill', ''),
-    source.replace("schemaVersion: 7, algorithm: 'source-bound-ready-root-v7'",
+    source.replace("schemaVersion: 8, algorithm: 'source-bound-ready-root-v8'",
+      "schemaVersion: 7, algorithm: 'source-bound-ready-root-v7'"),
+    source.replace("schemaVersion: 8, algorithm: 'source-bound-ready-root-v8'",
       "schemaVersion: 6, algorithm: 'source-bound-ready-root-v6'"),
     source.replace('demand-first-ready-backfill', 'demand-first-ready-bypass'),
     source.replace('demand-first-ready-backfill', 'priority-ready-capacity-barrier'),
     source.replace("  'validation-catalog.test.mjs',\n", ''),
     source.replace("  'winget-launcher-native.test.mjs',\n", ''),
     source.replace("  'public-readiness-release-report.test.mjs',\n", ''),
+    source.replace("  'public-readiness-pr-description.test.mjs',\n", ''),
     source.replace("  'public-readiness-ci.test.mjs',\n", ''),
     source.replace("  'public-readiness-evidence.test.mjs',\n", ''),
     ...['github-provider-consumers.test.mjs', 'package.test.mjs', 'pr-facts-archive-recovery.test.mjs',
@@ -2157,6 +2185,145 @@ test('T-PRD010 complete hosted units and actual implicit dispatch use the adopte
     source.replace('Object.freeze([', 'untrustedFactory(['),
   ]) assert.throws(() => selectedPolicy(changed), { code: 'EVIDENCE' });
 });
+
+test('T-PRD010 PR-description priority admits its isolated closure before queued work while the retained guard is live',
+  { timeout: 60000 }, async t => {
+    const f = await runnerFixture(t);
+    await fs.rm(path.join(f.root, 'test'), { recursive: true });
+    await fs.mkdir(path.join(f.root, 'test'));
+    const shared = `import test from 'node:test';import assert from 'node:assert/strict';
+import * as fs from 'node:fs/promises';import path from 'node:path';
+import {setTimeout as delay} from 'node:timers/promises';
+import {readTestBudget,readTestGroupProcesses} from ${JSON.stringify(new URL('../scripts/test-budget.mjs', import.meta.url).href)};
+const root=process.env.PR_DESCRIPTION_PRIORITY_EVIDENCE;
+const exists=name=>fs.stat(path.join(root,name)).then(()=>true,error=>{
+  if(error.code!=='ENOENT')throw error;return false;});
+const wait=async name=>{const end=performance.now()+15000;while(!await exists(name)){
+  assert.ok(performance.now()<end,'Owned admission barrier expired: '+name);await delay(10);}};
+const publish=async(name,value)=>{
+  await fs.writeFile(path.join(root,name+'.pending'),JSON.stringify(value),{flag:'wx'});
+  await fs.rename(path.join(root,name+'.pending'),path.join(root,name));
+};
+const entered=async name=>{
+  assert.equal(process.env.PR_DESCRIPTION_WORKER,undefined);
+  process.env.PR_DESCRIPTION_WORKER=String(process.pid);
+  const encoded=process.execArgv.find(value=>value.startsWith('--conditions=sdlc-group-'));
+  const group=JSON.parse(Buffer.from(encoded.slice('--conditions=sdlc-group-'.length),'base64url').toString('utf8'));
+  const leases=await readTestGroupProcesses(group.id);
+  const lease=leases.find(value=>value.pid===process.pid&&value.slot===process.env.SDLC_TEST_BUDGET_SLOT);
+  assert.ok(lease);assert.equal(lease.finishedAt,null);assert.equal(lease.minimumSlots,group.minimumSlots);
+  const budget=await readTestBudget();
+  await publish(name,{pid:process.pid,group,lease,budgetId:budget.id,capacity:budget.capacity});
+  test.after(async()=>{
+    assert.equal(process.env.PR_DESCRIPTION_WORKER,String(process.pid));
+    delete process.env.PR_DESCRIPTION_WORKER;
+    await publish(name+'-cleaned',{pid:process.pid});
+  });
+};
+`;
+    const files = [
+      ['github-retained-identity-acceptance.test.mjs', 'retained guard'],
+      ['validation-catalog.test.mjs', 'catalog'],
+      ['winget-launcher-native.test.mjs', 'launcher'],
+      ['public-readiness-release-report.test.mjs', 'release report'],
+      ['github-operation-results.unit.test.mjs', 'queued source work'],
+      ['public-readiness-pr-description.test.mjs', 'PR-description co-tail'],
+    ];
+    for (const [file, name] of files) {
+      const groups = file === files[0][0] ? [{ root: name, minimumSlots: 4 }] :
+        file === files[4][0] ? [{ root: 'dependent queue', dependsOn: [name],
+          exclusiveResources: ['owned-queue-state'] }, { root: name, exclusiveResources: ['owned-queue-state'] }] : [];
+      const body = file === files[0][0] ?
+        "await entered('retained');await wait('pr-description');await wait('release');" :
+        file === files[5][0] ?
+          "await wait('retained');await entered('pr-description');await wait('release');" +
+          "await t.test('complete selected child',async()=>assert.equal(await exists('retained'),true));" :
+          `await wait('retained');await entered(${JSON.stringify(name)});`;
+      await fs.writeFile(path.join(f.root, 'test', file),
+        `export const validationDeclarations=${JSON.stringify({ schemaVersion: 1, groups })};\n` + shared +
+        `test(${JSON.stringify(name)},async t=>{${body}});` +
+        (file === files[4][0] ?
+          "test('dependent queue',async()=>{assert.equal(await exists('queued source work-cleaned'),true);" +
+          "await entered('dependent queue');});" : ''));
+    }
+    const explicit = files.map(([file]) => path.join(f.root, 'test', file));
+    const runs = [];
+    for (const profile of ['full', 'targeted']) {
+      const evidence = path.join(f.root, '.test-data', `pr-description-${profile}`);
+      await fs.mkdir(evidence, { recursive: true });
+      const args = [profile, '--workers', '5', ...(profile === 'targeted' ? explicit : [])];
+      const planned = await createPlan(parseOptions(args), f.root);
+      const reportPath = path.join(evidence, 'report.json');
+      const pending = f.invoke(args, { PR_DESCRIPTION_PRIORITY_EVIDENCE: evidence, SDLC_TEST_REPORT_FILE: reportPath });
+      const deadline = performance.now() + 20000;
+      let live;
+      let queuedAtPr;
+      try {
+        while (true) {
+          try { live = JSON.parse(await fs.readFile(path.join(evidence, 'pr-description'), 'utf8')); break; }
+          catch (error) { if (error.code !== 'ENOENT') throw error; }
+          assert.ok(performance.now() < deadline, 'PR-description worker did not reach its owned barrier');
+          t.signal.throwIfAborted();
+          await delay(10, undefined, { signal: t.signal });
+        }
+        queuedAtPr = await fs.stat(path.join(evidence, 'queued source work')).then(() => true, error => {
+          if (error.code !== 'ENOENT') throw error;
+          return false;
+        });
+        assert.equal(await fs.stat(path.join(evidence, 'retained-cleaned')).then(() => true, error => {
+          if (error.code !== 'ENOENT') throw error;
+          return false;
+        }), false, 'Observe the retained guard still live before releasing either participant');
+      } finally {
+        await fs.writeFile(path.join(evidence, 'release'), 'release');
+        const result = await pending;
+        assert.equal(result.exitCode, 0, result.stdout + result.stderr);
+      }
+      const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+      const groups = report.groupExecution.groups;
+      assert.equal(report.complete, true);
+      assert.equal(report.selection.concurrency, 5);
+      assert.equal(groups.length, 7);
+      assert.ok(groups.every(group => group.status === 'Passed'));
+      assert.equal(new Set(groups.flatMap(group => group.processIds)).size, 7);
+      assert.deepEqual(groups.flatMap(group => group.assertionIds).sort(),
+        planned.groups.flatMap(group => group.assertionIds).sort());
+      assert.equal(report.executions.length, 8);
+      const retained = groups.find(group => group.root === 'retained guard');
+      const pr = groups.find(group => group.root === 'PR-description co-tail');
+      assert.equal(retained.minimumSlots, 4);
+      assert.equal(pr.minimumSlots, 1);
+      assert.deepEqual(pr.dependsOn, []);
+      assert.deepEqual(pr.exclusiveResources, []);
+      assert.ok(Date.parse(pr.startedAt) < Date.parse(retained.finishedAt));
+      assert.notEqual(live.pid, (JSON.parse(await fs.readFile(path.join(evidence, 'retained'), 'utf8'))).pid);
+      assert.equal(live.lease.minimumSlots, 1);
+      assert.equal(live.budgetId, report.resources.budget.id);
+      assert.ok(report.resources.budget.peakActiveWorkers <= report.resources.budget.capacity);
+      for (const group of groups) {
+        const expected = planned.groups.find(item => item.id === group.id);
+        for (const field of ['rootId', 'sourceDigest', 'assertionIds', 'minimumSlots', 'dependsOn', 'exclusiveResources']) {
+          assert.deepEqual(group[field], expected[field]);
+        }
+      }
+      const cleaned = (await fs.readdir(evidence)).filter(file => file.endsWith('-cleaned'));
+      assert.equal(cleaned.length, 7, 'Every isolated source root must finish its owned teardown');
+      runs.push({ profile, order: planned.groups.map(group => group.root), queuedAtPr, groups,
+        budgetId: live.budgetId, capacity: live.capacity, peak: report.resources.budget.peakActiveWorkers });
+    }
+    assert.deepEqual(runs[1].order, ['retained guard', 'catalog', 'launcher', 'release report',
+      'queued source work', 'dependent queue', 'PR-description co-tail'],
+    'Explicit targeted file/root order remains caller-owned, even when it leaves PR-description last');
+    const admitsBeforeQueue = run => assert.equal(run.queuedAtPr, false,
+      'PR-description must be admitted before queued source work');
+    assert.throws(() => admitsBeforeQueue(runs[1]), /PR-description must be admitted/u,
+      'The same resource/closure probe must reject the explicit wrong-order negative control');
+    for (const run of runs) {
+      t.diagnostic(JSON.stringify({ profile: run.profile, order: run.order, queuedAtPr: run.queuedAtPr, participantSlots: 5,
+        liveGuardSlots: 4, livePrSlots: 1, budgetId: run.budgetId, capacity: run.capacity, peak: run.peak }));
+    }
+    admitsBeforeQueue(runs[0]);
+  });
 
 test('T-PRD010-CATALOG catalog third root overlaps a live four-slot retained guard within seven shared slots', async t => {
   const f = await runnerFixture(t);

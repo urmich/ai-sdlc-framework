@@ -67,23 +67,32 @@ async function selectedRemoteName(member, configuredName, requestedName, directi
   if (requestedName !== undefined) validateRemoteName(requestedName);
   requireThat(!configuredName || !requestedName || configuredName === requestedName,
     'CONFIG', 'Selected Git remote conflicts with repository configuration');
+  const readURLs = name => git(member.root, ['remote', 'get-url',
+    ...(direction === 'push' ? ['--push'] : []), '--all', name]);
+  const selected = configuredName ?? requestedName;
+  if (selected) {
+    try {
+      return { name: selected, urls: await readURLs(selected) };
+    } catch (error) {
+      if (error.code !== 'GIT' ||
+          error.details?.cause !== `error: No such remote '${selected}'`) throw error;
+    }
+  }
   const names = (await git(member.root, ['remote'])).split(/\r?\n/u).filter(Boolean);
-  const name = configuredName ?? requestedName ?? (names.length === 1 ? names[0] : undefined);
+  const name = selected ?? (names.length === 1 ? names[0] : undefined);
   requireThat(name, 'EVIDENCE',
     `Select a Git remote: no unique current ${direction} destination is available`);
   requireThat(names.includes(name), 'EVIDENCE', 'Selected Git remote does not exist');
-  return name;
+  return { name, urls: await readURLs(name) };
 }
 export async function selectedFetchRemote(member, configuredName, requestedName) {
-  const name = await selectedRemoteName(member, configuredName, requestedName, 'fetch');
-  const fetchURLs = (await git(member.root, ['remote', 'get-url', '--all', name]))
-    .split(/\r?\n/u).filter(Boolean);
+  const { name, urls } = await selectedRemoteName(member, configuredName, requestedName, 'fetch');
+  const fetchURLs = urls.split(/\r?\n/u).filter(Boolean);
   return { selectedRemoteName: name, fetchURLs };
 }
 export async function selectedPushRemote(member, configuredName, requestedName) {
-  const name = await selectedRemoteName(member, configuredName, requestedName, 'push');
-  const pushURLs = (await git(member.root, ['remote', 'get-url', '--push', '--all', name]))
-    .split(/\r?\n/u).filter(Boolean);
+  const { name, urls } = await selectedRemoteName(member, configuredName, requestedName, 'push');
+  const pushURLs = urls.split(/\r?\n/u).filter(Boolean);
   return { selectedRemoteName: name, pushURLs };
 }
 export function bindingKey(member) { return digest({ root: member.root, commonDir: member.commonDir, branch: member.branch }); }
