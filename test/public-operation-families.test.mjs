@@ -1,3 +1,11 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "direct", "paths": ["src/operations.mjs", "src/external-results.mjs"]}],
+  "variants": [
+    {"expression": "kind", "names": ["build", "pipeline", "pr-validation", "test", "artifact", "artifact-produce", "deploy", "pr-create", "pr-update", "push", "merge", "configuration", "auto-merge", "policy-bypass", "notification"]},
+    {"expression": "`closure ${archived ? 'archived' : 'active'} ${incomplete ? 'historical incomplete' : 'current'} artifact resource cannot be borrowed by a predeclared retry after Store reload`", "domains": {"archived ? 'archived' : 'active'": ["active", "archived"], "incomplete ? 'historical incomplete' : 'current'": ["current", "historical incomplete"]}}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';

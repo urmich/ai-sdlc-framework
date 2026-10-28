@@ -252,8 +252,8 @@ export async function verifyPackage({ artifact, environment = process.env } = {}
     }
     for (const required of ['package.json', 'bin/sdlc.mjs', 'src/install.mjs',
       'src/provider-adapters.mjs', 'assets/instructions.md',
-      'assets/lifecycle-intent.md', 'assets/hooks/sdlc.json', 'docs/cli.md',
-      'docs/provider-adapters.md', 'docs/github-adapters.md',
+      'assets/lifecycle-intent.md', 'assets/hooks/sdlc.json', 'docs/reference/cli.md',
+      'docs/integrations/provider-adapters.md', 'docs/integrations/github-adapters.md',
       'src/github.mjs', 'src/validation-catalog.mjs', 'src/validation-evidence.mjs',
       ...githubModuleNames.map(name => `src/github/${name}.mjs`)]) {
       if (!actualFiles.some(file => file.path === required)) {

@@ -1,3 +1,23 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "direct", "paths": ["src/github/transport.mjs", "src/github/connection.mjs"]}],
+  "variants": [
+    {"expression": "`write preflight binds the actual resolved authorization before HTTP: ${Object.keys(changed)[0]}`", "domains": {"Object.keys(changed)[0]": ["generation", "actorVisibility", "permissions"]}},
+    {"expression": "`current ${state} entitlement cannot reuse an available preflight to dispatch`", "domains": {"state": ["unknown", "unavailable", "omitted"]}},
+    {"expression": "`HTTP ${status}/${code} case ${caseIndex} is explicit denial/contract failure, never absence or empty success`", "names": ["HTTP 401/AUTH case 0 is explicit denial/contract failure, never absence or empty success", "HTTP 403/PERMISSION case 1 is explicit denial/contract failure, never absence or empty success", "HTTP 404/INACCESSIBLE case 2 is explicit denial/contract failure, never absence or empty success", "HTTP 429/RATE_LIMIT case 3 is explicit denial/contract failure, never absence or empty success", "HTTP 403/RATE_LIMIT case 4 is explicit denial/contract failure, never absence or empty success", "HTTP 403/RATE_LIMIT case 5 is explicit denial/contract failure, never absence or empty success", "HTTP 500/PROVIDER case 6 is explicit denial/contract failure, never absence or empty success", "HTTP 202/CONTRACT case 7 is explicit denial/contract failure, never absence or empty success"]},
+    {"expression": "`${name} fails the bounded response contract`", "domains": {"name": ["malformed JSON", "wrong JSON type", "login HTML", "declared oversized", "streamed oversized", "malformed UTF-8"]}},
+    {"expression": "`unsafe/out-of-scope relative route is rejected: ${pathIndex}`", "domains": {"pathIndex": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]}},
+    {"expression": "`connection rejects noncanonical origin ${originIndex}`", "domains": {"originIndex": ["0", "1", "2", "3", "4", "5"]}},
+    {"expression": "`REST pagination rejects ${name} without a false complete result`", "domains": {"name": ["other origin", "changed filters", "changed resource", "malformed link", "cycle", "bounded pages", "duplicate next"]}},
+    {"expression": "`cache isolation rejects a changed ${change} before conditional dispatch`", "domains": {"change": ["request", "profile", "generation", "visibility", "connection", "forged-entry"]}},
+    {"expression": "`${protocol} pagination rejects actor/credential generation changes before the second page`", "domains": {"protocol": ["rest", "graphql"]}},
+    {"expression": "`cleanup failure preserves the primary ${code} category and reports the additional gap`", "domains": {"code": ["PERMISSION", "REDIRECT", "PROVIDER"]}},
+    {"expression": "`incompatible credential origin, token class, header or generation case ${incompatibleIndex} is rejected before dispatch`", "domains": {"incompatibleIndex": ["0", "1", "2", "3"]}},
+    {"expression": "`archive refuses untrusted origins, unsafe URLs and forwarding its API token case ${targetIndex}`", "domains": {"targetIndex": ["0", "1", "2", "3", "4"]}},
+    {"expression": "`GraphQL errors, partial data and failed mandatory typed selections case ${bodyIndex} cannot become complete facts`", "domains": {"bodyIndex": ["0", "1", "2", "3", "4"]}},
+    {"expression": "`GraphQL rejects cyclic, absent or unbounded cursors case ${cursorIndex} without partial success`", "domains": {"cursorIndex": ["0", "1", "2"]}}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SdlcError } from '../src/core.mjs';
@@ -310,14 +330,14 @@ test('capability permissions and entitlements are facts, not write authority', a
   });
 });
 
-for (const [status, code, headers] of [
+for (const [caseIndex, [status, code, headers]] of [
   [401, 'AUTH', {}], [403, 'PERMISSION', {}], [404, 'INACCESSIBLE', {}],
   [429, 'RATE_LIMIT', { 'retry-after': '60' }],
   [403, 'RATE_LIMIT', { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1800000000' }],
   [403, 'RATE_LIMIT', { 'retry-after': '120' }],
   [500, 'PROVIDER', {}], [202, 'CONTRACT', {}],
-]) {
-  test(`HTTP ${status}/${code} is explicit denial/contract failure, never absence or empty success`, async () => {
+].entries()) {
+  test(`HTTP ${status}/${code} case ${caseIndex} is explicit denial/contract failure, never absence or empty success`, async () => {
     const transport = createGitHubTransport({ connection: connection(), fetch: async () =>
       response({ message: 'private-sensitive-response', token }, status, headers) });
     await assert.rejects(transport.execute(rest(transport)), error => {
@@ -381,26 +401,26 @@ test('raw provider bodies remain acquisition-only and cannot be mutated into cac
   assert.equal(capture.body.nested.id, 17);
 });
 
-for (const path of [
+for (const [pathIndex, path] of [
   'https://attacker.invalid/repos/a/b', '//attacker.invalid/x', '/repos/fixture-owner/other/issues',
   '/repos/fixture-owner/fixture-repo/../other', '/repos/fixture-owner/fixture-repo/%2e%2e/other',
   '/repos/fixture-owner/fixture-repo/issues?access_token=private',
   '/repos/fixture-owner/fixture-repo/issues?%2574oken=private',
   '/repos/fixture-owner/fixture-repo/issues?filter=token%3Dprivate',
   '/repos/fixture-owner/fixture-repo/issues#fragment', '/repos/fixture-owner/fixture-repo\\issues',
-]) {
-  test(`unsafe/out-of-scope relative route is rejected: ${path}`, () => {
+].entries()) {
+  test(`unsafe/out-of-scope relative route is rejected: ${pathIndex}`, () => {
     const transport = createGitHubTransport({ connection: connection(), fetch: async () => response() });
     assert.throws(() => rest(transport, { path }), error => ['INPUT', 'SCOPE'].includes(error.code));
   });
 }
 
-for (const apiOrigin of [
+for (const [originIndex, apiOrigin] of [
   'http://api.github.com', 'https://api.github.com.attacker.invalid/path',
   'https://user:password@api.github.com', 'https://api.github.com?token=private',
   'https://api.github.com/', 'https://api.github.com#fragment',
-]) {
-  test(`connection rejects noncanonical origin ${apiOrigin}`, () => {
+].entries()) {
+  test(`connection rejects noncanonical origin ${originIndex}`, () => {
     assert.throws(() => connection({ apiOrigin }), { code: 'INPUT' });
   });
 }
@@ -440,13 +460,13 @@ test('enterprise origins require explicit reviewed profiles; no guessed version 
   assert.throws(() => rest(transport, { profile: '2026-03-10' }), { code: 'CONTRACT' });
 });
 
-for (const incompatible of [
+for (const [incompatibleIndex, incompatible] of [
   credential({ apiOrigin: 'https://other.invalid' }),
   credential({ tokenClass: 'app-installation' }),
   credential({ token: 'bad\r\nAuthorization: injected' }),
   credential({ generation: token }),
-]) {
-  test('incompatible credential origin, token class, header or generation is rejected before dispatch', async () => {
+].entries()) {
+  test(`incompatible credential origin, token class, header or generation case ${incompatibleIndex} is rejected before dispatch`, async () => {
     let calls = 0;
     const transport = createGitHubTransport({
       connection: connection({ credentialResolver: async () => incompatible }),
@@ -517,13 +537,13 @@ test('archive acquisition strips auth/version headers and protects signed URLs i
   assert.deepEqual([...new Uint8Array(await new Response(capture.bodyStream).arrayBuffer())], [80, 75, 3, 4]);
 });
 
-for (const target of [
+for (const [targetIndex, target] of [
   'https://archives.fixture.invalid.attacker.invalid/file',
   'http://archives.fixture.invalid/file', 'https://user:password@archives.fixture.invalid/file',
   `${api}/repos/other/repo/actions/artifacts/31/zip`,
   `https://archives.fixture.invalid/file?token=${token}`,
-]) {
-  test('archive refuses untrusted origins, unsafe URLs and forwarding its API token', async () => {
+].entries()) {
+  test(`archive refuses untrusted origins, unsafe URLs and forwarding its API token case ${targetIndex}`, async () => {
     let calls = 0;
     const transport = createGitHubTransport({
       connection: connection({ archiveOrigins: ['https://archives.fixture.invalid'],
@@ -653,12 +673,12 @@ test('GraphQL uses a named static document, explicit variables and a real schema
   assert.equal(JSON.stringify(capture).includes('fixture-owner'), false);
 });
 
-for (const body of [
+for (const [bodyIndex, body] of [
   gqlBody(null, false, { errors: [{ message: 'private-graphql-error', extensions: { token } }] }),
   { errors: [{ message: 'private-graphql-error' }] },
   { data: null }, { data: { repository: null } }, { data: { repository: { issues: { nodes: [42], pageInfo: {} } } } },
-]) {
-  test('GraphQL errors, partial data and failed mandatory typed selections cannot become complete facts', async () => {
+].entries()) {
+  test(`GraphQL errors, partial data and failed mandatory typed selections case ${bodyIndex} cannot become complete facts`, async () => {
     const transport = createGitHubTransport({ connection: graphqlConnection(), fetch: async () => response(body) });
     await assert.rejects(transport.execute(graphql(transport)), error => {
       assert.ok(['GRAPHQL', 'CONTRACT'].includes(error.code));
@@ -696,8 +716,8 @@ test('GraphQL cursor acquisition changes only the cursor and preserves exact que
   assert.equal(result.pages[1].requestIdentity.schemaVersion, 'schema-2026-03');
 });
 
-for (const [cursor, maxPages, expectedCalls] of [['same-cursor', 5, 2], [null, 5, 1], ['cursor-1', 1, 1]]) {
-  test('GraphQL rejects cyclic, absent or unbounded cursors without partial success', async () => {
+for (const [cursorIndex, [cursor, maxPages, expectedCalls]] of [['same-cursor', 5, 2], [null, 5, 1], ['cursor-1', 1, 1]].entries()) {
+  test(`GraphQL rejects cyclic, absent or unbounded cursors case ${cursorIndex} without partial success`, async () => {
     let calls = 0;
     const transport = createGitHubTransport({ connection: graphqlConnection(), fetch: async () => {
       calls++;
@@ -1048,4 +1068,69 @@ test('failing owned reader cancellation still releases the lock and preserves th
     return true;
   });
   assert.equal(released, true);
+});
+
+async function cleanupWithinDeadline(pending, release) {
+  let guard;
+  try {
+    return await Promise.race([pending, new Promise((_, reject) => {
+      guard = setTimeout(() => reject(new Error('Response cleanup exceeded its request deadline')), 1000);
+    })]);
+  } finally {
+    clearTimeout(guard);
+    release();
+    await Promise.allSettled([pending]);
+  }
+}
+
+test('owned reader cleanup cannot outlive the request deadline or lose the primary error', async () => {
+  let release;
+  let released = false;
+  let cancellations = 0;
+  const cleanup = new Promise(resolve => { release = resolve; });
+  const transport = createGitHubTransport({ connection: connection(), maxResponseBytes: 8, fetch: async () => ({
+    status: 200, url: '', headers: new Headers({ 'content-type': 'application/json' }),
+    body: { getReader() { return {
+      read: async () => ({ done: false, value: new Uint8Array(9) }),
+      cancel() { cancellations++; return cleanup; },
+      releaseLock() { released = true; },
+    }; } },
+  }) });
+  const pending = transport.execute(rest(transport), { timeoutMs: 20 });
+  await assert.rejects(cleanupWithinDeadline(pending, release), error => {
+    assert.ok(error.code === 'RESPONSE_LIMIT', 'Cleanup must preserve the primary response-limit failure');
+    assert.equal(error.details.cleanupFailed, true);
+    assert.equal(error.details.cleanupTimedOut, true);
+    return true;
+  });
+  assert.equal(cancellations, 1);
+  assert.equal(released, true);
+});
+
+test('archive redirect cleanup respects the request deadline without duplicate cancellation or follow-up HTTP', async () => {
+  let release;
+  let calls = 0;
+  let cancellations = 0;
+  const cleanup = new Promise(resolve => { release = resolve; });
+  const transport = createGitHubTransport({
+    connection: connection({ archiveOrigins: ['https://archives.fixture.invalid'] }),
+    fetch: async () => {
+      calls++;
+      return { status: 302, url: '', redirected: false,
+        headers: new Headers({ location: 'https://archives.fixture.invalid/file.zip' }),
+        body: { cancel() { cancellations++; return cleanup; } } };
+    },
+  });
+  const request = rest(transport, {
+    path: '/repos/fixture-owner/fixture-repo/actions/artifacts/31/zip', responseType: 'bytes',
+  });
+  const pending = transport.downloadArchive(request, { timeoutMs: 20 });
+  await assert.rejects(cleanupWithinDeadline(pending, release), error => {
+    assert.ok(error.code === 'TIMEOUT', 'Redirect cleanup must return the original request timeout');
+    assert.equal(error.details.cleanupFailed, true);
+    assert.equal(error.details.cleanupTimedOut, true);
+    return true;
+  });
+  assert.equal(cancellations, 1);
+  assert.equal(calls, 1);
 });

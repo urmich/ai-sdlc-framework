@@ -2,6 +2,11 @@ name: Protected npm OIDC publication
 
 on:
   workflow_call:
+    outputs:
+      result_artifact_id:
+        value: ${{ jobs.publish.outputs.result_artifact_id }}
+      result_artifact_digest:
+        value: ${{ jobs.publish.outputs.result_artifact_digest }}
     inputs:
       bundle_artifact_id:
         type: string
@@ -15,6 +20,12 @@ on:
       npm_handoff:
         type: string
         required: true
+      source_run_id:
+        type: string
+        required: true
+      evidence_artifact_id:
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -26,11 +37,15 @@ defaults:
 jobs:
   publish:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
+    outputs:
+      result_artifact_id: ${{ steps.result.outputs.artifact-id }}
+      result_artifact_digest: ${{ steps.result.outputs.artifact-digest }}
     # Protection belongs on the actual publishing job, not the reusable caller.
     environment: npm
     permissions:
       contents: read
+      actions: read
       id-token: write
     env:
       NPM_CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
@@ -46,10 +61,9 @@ jobs:
       # No checkout, repository scripts, application dependency install, or package execution.
       # The only install allowed is an integrity-pinned npm CLI tooling upgrade with scripts disabled.
       # Artifact signing permissions belong in a different job. npm adds OIDC provenance automatically.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '24'
-          check-latest: true
+          node-version: '24.22.0'
       - name: Ensure Node 24 and npm 11.15+ with token-free effective auth configuration
         run: |
           node --input-type=module <<'NPM_OIDC_PREFLIGHT'
@@ -59,6 +73,7 @@ jobs:
           import { execFileSync } from 'node:child_process';
           const env = process.env;
           if (env.GITHUB_ACTIONS !== 'true' || env.RUNNER_ENVIRONMENT !== 'github-hosted' ||
+              env.GITHUB_EVENT_NAME !== 'workflow_dispatch' || env.GITHUB_REF !== 'refs/heads/main' ||
               env.GITHUB_REPOSITORY !== 'urmich/ai-sdlc-framework' || env.NPM_SOURCE_PRIVATE !== 'false' ||
               env.NPM_TRUST_ENVIRONMENT !== 'npm' ||
               env.GITHUB_SERVER_URL !== 'https://github.com' ||
@@ -66,12 +81,12 @@ jobs:
               !env.NPM_CALLER_WORKFLOW_REF?.endsWith(`@${env.GITHUB_REF}`) ||
               !/^[1-9]\d*$/u.test(env.GITHUB_RUN_ID ?? '') || !/^[1-9]\d*$/u.test(env.GITHUB_RUN_ATTEMPT ?? '') ||
               !/^[1-9]\d*$/u.test(env.EXPECTED_BUNDLE_ARTIFACT_ID ?? '') ||
-              !/^urmich\/ai-sdlc-framework\/\.github\/workflows\/release\.yml@refs\/(?:heads|tags)\/.+$/u.test(env.NPM_CALLER_WORKFLOW_REF ?? '') ||
+              env.NPM_CALLER_WORKFLOW_REF !== 'urmich/ai-sdlc-framework/.github/workflows/release.yml@refs/heads/main' ||
               !/^[a-f0-9]{40}$/u.test(env.EXPECTED_SOURCE_COMMIT ?? '') || env.GITHUB_SHA !== env.EXPECTED_SOURCE_COMMIT ||
               !env.ACTIONS_ID_TOKEN_REQUEST_URL || !env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) {
             throw new Error('npm OIDC requires the public trusted repository, actual release.yml caller, npm environment, exact source and hosted OIDC permissions');
           }
-          if (!/^24\.\d+\.\d+$/u.test(process.versions.node)) throw new Error('npm publication requires stable Node.js 24');
+          if (process.versions.node !== '24.22.0') throw new Error('npm publication requires pinned Node.js 24.22.0');
           for (const [key, value] of Object.entries(env)) {
             if (/^(?:node_auth_token|npm_token|npm_auth_token|npm_id_token)$/iu.test(key) ||
                 /^npm_config_/iu.test(key) && /auth|token/iu.test(key)) {
@@ -111,11 +126,11 @@ jobs:
           let command = 'npm';
           let prefix = [];
           let upgrade = 'NotNeeded';
-          if (!supported(beforeVersion)) {
+          if (beforeVersion !== env.NPM_TOOL_VERSION) {
             if (env.NPM_TOOL_VERSION !== '11.16.0' || !/^sha512-[A-Za-z0-9+/]{86}==$/u.test(env.NPM_TOOL_INTEGRITY ?? '')) {
               throw new Error('Invalid pinned npm tooling upgrade');
             }
-            const response = await fetch(`https://registry.npmjs.org/npm/-/npm-${env.NPM_TOOL_VERSION}.tgz`);
+            const response = await fetch(`https://registry.npmjs.org/npm/-/npm-${env.NPM_TOOL_VERSION}.tgz`, { signal: AbortSignal.timeout(30_000) });
             if (!response.ok) throw new Error(`npm tooling download failed: ${response.status}`);
             const bytes = Buffer.from(await response.arrayBuffer());
             if (`sha512-${createHash('sha512').update(bytes).digest('base64')}` !== env.NPM_TOOL_INTEGRITY) {
@@ -131,8 +146,8 @@ jobs:
             upgrade = 'IntegrityVerifiedPinnedToolUpgrade';
           }
           const npmVersion = execFileSync(command, [...prefix, '--version'], options).trim();
-          if (!supported(npmVersion) || upgrade !== 'NotNeeded' && npmVersion !== env.NPM_TOOL_VERSION) {
-            throw new Error('Trusted publishing requires npm >=11.15.0 after the pinned tool upgrade; token fallback is forbidden');
+          if (!supported(npmVersion) || npmVersion !== '11.16.0') {
+            throw new Error('Trusted publishing requires pinned npm 11.16.0 after the pinned tool upgrade; token fallback is forbidden');
           }
           assertAuthConfig(command, prefix);
           await fs.writeFile(path.join(work, 'npm-tool.json'), JSON.stringify({ command, prefix, beforeVersion, npmVersion, upgrade }), { flag: 'wx' });
@@ -145,10 +160,71 @@ jobs:
             environment: 'npm', node: process.versions.node, npm: npmVersion, upgrade, effectiveAuthConfig: 'TokenFree', authentication: 'OIDC only',
             provenance: 'Automatic for public-repository trusted publishing' }));
           NPM_OIDC_PREFLIGHT
-      - uses: actions/download-artifact@v4
+      - name: Independently verify exact saved artifact and read-only verifier origins
+        env:
+          ARTIFACT_READ_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          EVIDENCE_ARTIFACT_ID: ${{ inputs.evidence_artifact_id }}
+        run: |
+          node --input-type=module <<'NPM_ORIGIN_VERIFY'
+          const env = process.env;
+          const data = JSON.parse(env.EXPECTED_NPM_HANDOFF);
+          const origin = data.artifactOrigin;
+          const verifier = data.verifierOrigin;
+          if (data.schemaVersion !== 2 || origin?.bundleArtifactId !== env.EXPECTED_BUNDLE_ARTIFACT_ID ||
+              origin.sourceRunId !== env.SOURCE_RUN_ID || origin.evidenceArtifactId !== env.EVIDENCE_ARTIFACT_ID ||
+              verifier?.runId !== env.GITHUB_RUN_ID || verifier.attempt !== env.GITHUB_RUN_ATTEMPT ||
+              verifier.workflowRef !== env.GITHUB_WORKFLOW_REF || verifier.job !== 'npm-readiness') {
+            throw new Error('Saved artifact/verifier origins do not match this exact trusted caller');
+          }
+          const get = async route => {
+            const response = await fetch(`https://api.github.com/repos/${env.GITHUB_REPOSITORY}${route}`, {
+              headers: { Authorization: `Bearer ${env.ARTIFACT_READ_TOKEN}`, Accept: 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28' }, signal: AbortSignal.timeout(30_000) });
+            if (!response.ok) throw new Error(`Independent publication origin read failed: ${response.status}`);
+            return response.json();
+          };
+          for (const [id, expectedDigest] of [[origin.bundleArtifactId, origin.bundleArtifactDigest],
+            [origin.evidenceArtifactId, origin.evidenceArtifactDigest]]) {
+            if (!/^[1-9]\d*$/u.test(id ?? '') || !/^sha256:[a-f0-9]{64}$/u.test(expectedDigest ?? '')) {
+              throw new Error('Invalid exact saved artifact identity');
+            }
+            const artifact = await get(`/actions/artifacts/${id}`);
+            if (String(artifact.id) !== id || artifact.expired || artifact.digest !== expectedDigest ||
+                String(artifact.workflow_run?.id) !== origin.sourceRunId ||
+                artifact.workflow_run?.head_sha !== env.EXPECTED_SOURCE_COMMIT) {
+              throw new Error('Saved publication artifact differs from independently acquired provider origin');
+            }
+          }
+          const run = await get(`/actions/runs/${verifier.runId}/attempts/${verifier.attempt}`);
+          if (run.head_sha !== env.EXPECTED_SOURCE_COMMIT || run.event !== 'workflow_dispatch' ||
+              run.path !== '.github/workflows/release.yml') throw new Error('Untrusted verifier workflow/run');
+          const jobs = [];
+          for (let page = 1; ; page++) {
+            const data = await get(`/actions/runs/${verifier.runId}/attempts/${verifier.attempt}/jobs?per_page=100&page=${page}`);
+            jobs.push(...data.jobs);
+            if (jobs.length >= data.total_count) break;
+            if (!data.jobs.length) throw new Error('Incomplete verifier job pagination');
+          }
+          const matches = jobs.filter(job => job.name === 'npm-readiness');
+          if (matches.length !== 1 || matches[0].conclusion !== 'success' ||
+              !matches[0].steps?.some(step => step.name === 'Validate readiness and prepare npm identity data without OIDC permission' &&
+                step.conclusion === 'success')) throw new Error('Read-only framework readiness verifier did not complete successfully');
+          console.log(JSON.stringify({ artifactOrigins: 'Verified', verifierOrigin: 'Verified' }));
+          NPM_ORIGIN_VERIFY
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           artifact-ids: ${{ inputs.bundle_artifact_id }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
           path: bundle-data
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ inputs.evidence_artifact_id }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+          path: readiness-data
           merge-multiple: true
       - name: Verify immutable data and copy only the exact approved tgz
         run: |
@@ -161,8 +237,8 @@ jobs:
           const root = path.join(process.env.GITHUB_WORKSPACE, 'bundle-data');
           const work = path.join(process.env.GITHUB_WORKSPACE, 'npm-work');
           const handoff = JSON.parse(process.env.EXPECTED_NPM_HANDOFF);
-          if (Object.keys(handoff).sort().join(',') !== 'bundleSha256,distTag,filename,integrity,packageName,schemaVersion,sha256,size,sourceCommit,sourceRepository,version' ||
-              handoff.schemaVersion !== 1 || handoff.sourceRepository !== 'urmich/ai-sdlc-framework' ||
+          if (Object.keys(handoff).sort().join(',') !== 'artifactOrigin,bundleSha256,distTag,filename,integrity,packageName,publicationRecovery,readinessSha256,releaseBinding,releaseIntentId,schemaVersion,sha256,size,sourceCommit,sourceRepository,verifierOrigin,version' ||
+              handoff.schemaVersion !== 2 || handoff.sourceRepository !== 'urmich/ai-sdlc-framework' ||
               handoff.sourceCommit !== process.env.EXPECTED_SOURCE_COMMIT || handoff.sourceCommit !== process.env.GITHUB_SHA ||
               handoff.bundleSha256 !== process.env.EXPECTED_BUNDLE_SHA256 ||
               !/^[a-f0-9]{64}$/u.test(handoff.bundleSha256 ?? '') || !/^[a-f0-9]{64}$/u.test(handoff.sha256 ?? '') ||
@@ -185,8 +261,26 @@ jobs:
           const bundle = JSON.parse(manifestBytes);
           if (bundle.schemaVersion !== 1 || bundle.publicationReady !== true ||
               bundle.identity.sourceCommit !== handoff.sourceCommit || bundle.identity.version !== handoff.version ||
-              bundle.identity.payloadSha256 !== handoff.sha256 || !Array.isArray(bundle.files) || bundle.files.length > 256) {
+              bundle.identity.payloadSha256 !== handoff.sha256 || bundle.releaseIntentId !== handoff.releaseIntentId ||
+              !Array.isArray(bundle.files) || !bundle.files.length || bundle.files.length > 10000) {
             throw new Error('Bundle readiness or source identity mismatch');
+          }
+          if (handoff.releaseBinding?.releaseRepository !== bundle.releaseRepository ||
+              handoff.releaseBinding.descriptorSha256 !== bundle.identity.descriptorSha256 ||
+              handoff.releaseBinding.checksumsSha256 !== bundle.identity.checksumsSha256) {
+            throw new Error('Publication destinations and immutable metadata cannot change across attempts');
+          }
+          const readinessBytes = await regular(path.join(process.env.GITHUB_WORKSPACE, 'readiness-data', 'readiness.json'), 4 * 1024 * 1024);
+          const readiness = JSON.parse(readinessBytes);
+          if (hash(readinessBytes) !== handoff.readinessSha256 || readiness.status !== 'Passed' ||
+              readiness.profile !== 'r-pre' || readiness.bundleSha256 !== handoff.bundleSha256 ||
+              readiness.releaseIntentId !== handoff.releaseIntentId ||
+              Object.values(readiness.requiredCases ?? {}).sort().join(',') !==
+                'T-PRD079-LX,T-PRD079-MA,T-PRD079-MI,T-PRD079-WX' ||
+              readiness.originalExecutions?.length !== 4 ||
+              readiness.originalExecutions.some(record => !Number.isFinite(Date.parse(record.finishedAt)) ||
+                Date.parse(record.finishedAt) > Date.now() || Date.now() - Date.parse(record.finishedAt) > 86_400_000)) {
+            throw new Error('Exact four-native R-PRE readiness handoff is absent or changed');
           }
           const expected = new Map();
           for (const file of bundle.files) {
@@ -231,8 +325,8 @@ jobs:
           if (payload.length !== handoff.size || hash(payload) !== handoff.sha256 ||
               `sha512-${hash(payload, 'sha512', 'base64')}` !== handoff.integrity) throw new Error('Exact tgz integrity mismatch');
           // Read package metadata to stdout as data only: never extract or import package code.
-          const pkg = JSON.parse(execFileSync('tar', ['-xOzf', source, 'package/package.json'],
-            { encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, timeout: 30_000 }));
+          const pkg = JSON.parse(execFileSync('tar', ['-xOzf', handoff.filename, 'package/package.json'],
+            { cwd: path.dirname(source), encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, timeout: 30_000 }));
           if (pkg.name !== handoff.packageName || pkg.version !== handoff.version ||
               pkg.repository?.url !== 'https://github.com/urmich/ai-sdlc-framework.git' ||
               Object.keys(pkg.publishConfig ?? {}).sort().join(',') !== 'access,registry' ||
@@ -243,8 +337,92 @@ jobs:
           await fs.writeFile(path.join(work, 'publication.json'), JSON.stringify(handoff), { flag: 'wx' });
           console.log(JSON.stringify({ verified: true, filename: handoff.filename, sha256: handoff.sha256, sourceCommit: handoff.sourceCommit }));
           NPM_DATA_VERIFY
+      - name: Prepare immutable publication dispatch and reconcile-only identity
+        working-directory: npm-work
+        id: dispatch-record
+        run: |
+          node --input-type=module <<'NPM_DISPATCH_PREPARE'
+          import fs from 'node:fs/promises';
+          import { createHash } from 'node:crypto';
+          const data = JSON.parse(await fs.readFile('publication.json', 'utf8'));
+          const canonical = value => value === null || typeof value !== 'object' ? JSON.stringify(value) :
+            Array.isArray(value) ? `[${value.map(canonical).join(',')}]` :
+            `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+          const binding = { releaseIntentId: data.releaseIntentId, sourceRepository: data.sourceRepository,
+            sourceCommit: data.sourceCommit, releaseRepository: data.releaseBinding?.releaseRepository,
+            packageName: data.packageName, version: data.version, payloadSha256: data.sha256,
+            descriptorSha256: data.releaseBinding?.descriptorSha256, checksumsSha256: data.releaseBinding?.checksumsSha256,
+            registry: 'https://registry.npmjs.org' };
+          const history = data.publicationRecovery;
+          if (history?.schemaVersion !== 1 || history.kind !== 'npm-publication-recovery' ||
+              canonical(history.binding) !== canonical(binding) || !Array.isArray(history.history) || history.history.length > 64) {
+            throw new Error('Independently acquired complete publication history is required before dispatch');
+          }
+          const physicalAttempts = new Set();
+          const artifactIds = new Set();
+          for (const original of history.history) {
+            if (original.schemaVersion !== 1 || original.kind !== 'npm-publication-attempt' ||
+                canonical(original.binding) !== canonical(binding) || !['publish', 'reconcile-only'].includes(original.mode) ||
+                !/^[1-9]\d*$/u.test(original.run?.id ?? '') || !/^[1-9]\d*$/u.test(original.run?.attempt ?? '') ||
+                !/^[1-9]\d*$/u.test(original.dispatchArtifact?.id ?? '') ||
+                !/^sha256:[a-f0-9]{64}$/u.test(original.dispatchArtifact?.digest ?? '') ||
+                original.invocationRef !== `https://github.com/${binding.sourceRepository}/actions/runs/${original.run.id}/attempts/${original.run.attempt}` ||
+                original.priorDispatchArtifacts !== undefined && !Array.isArray(original.priorDispatchArtifacts)) {
+              throw new Error('Publication history conflicts with this immutable source/destination/intent');
+            }
+            const physical = `${original.run.id}/${original.run.attempt}`;
+            if (physicalAttempts.has(physical) || artifactIds.has(original.dispatchArtifact.id)) {
+              throw new Error('Original physical publication attempts and artifact identities must be distinct');
+            }
+            physicalAttempts.add(physical);
+            artifactIds.add(original.dispatchArtifact.id);
+          }
+          for (const original of history.history) {
+            if (original.mode === 'reconcile-only' && !original.priorDispatchArtifacts?.length) {
+              throw new Error('Publication reconciliation cannot forget its original publish root');
+            }
+            for (const dependency of original.priorDispatchArtifacts ?? []) {
+              const root = history.history.find(row => row.dispatchArtifact.id === dependency?.id &&
+                row.dispatchArtifact.digest === dependency.digest);
+              if (!root || root === original || root.mode !== 'publish' ||
+                  !(BigInt(root.run.id) < BigInt(original.run.id) ||
+                    root.run.id === original.run.id && BigInt(root.run.attempt) < BigInt(original.run.attempt))) {
+                throw new Error('Publication reconciliation cannot forget an unresolved original dispatch');
+              }
+            }
+          }
+          const unresolved = history.history.filter(row => row.mode === 'publish' &&
+            !['NotStarted', 'RejectedWithoutEffect'].includes(row.confirmedEffect));
+          const mayDispatch = unresolved.length === 0;
+          if (history.mayDispatch !== mayDispatch) throw new Error('A saved status flag cannot clear an uncertain publication');
+          const record = { schemaVersion: 1, kind: 'npm-publication-attempt', binding,
+            mode: mayDispatch ? 'publish' : 'reconcile-only', state: mayDispatch ? 'Dispatching' : 'Observing',
+            run: { id: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT },
+            sourceWorkflowRef: process.env.GITHUB_WORKFLOW_REF, bundleSha256: data.bundleSha256,
+            preparedAt: new Date().toISOString(),
+            priorDispatchArtifacts: unresolved.map(row => row.dispatchArtifact),
+            invocationRef: `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}/attempts/${process.env.GITHUB_RUN_ATTEMPT}` };
+          const bytes = Buffer.from(`${canonical(record)}\n`);
+          const handle = await fs.open('publication-dispatch.json', 'wx');
+          try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
+          if (process.env.GITHUB_OUTPUT) await fs.appendFile(process.env.GITHUB_OUTPUT,
+            `dispatch_sha256=${createHash('sha256').update(bytes).digest('hex')}\n`);
+          NPM_DISPATCH_PREPARE
+      - name: Durably retain dispatch intent before any irreversible npm call
+        id: dispatch
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: npm-publication-dispatch-${{ fromJSON(inputs.npm_handoff).releaseIntentId }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: npm-work/publication-dispatch.json
+          if-no-files-found: error
+          retention-days: 90
       - name: Publish exact tgz through OIDC only, with automatic npm provenance
         working-directory: npm-work
+        env:
+          EXPECTED_DISPATCH_ARTIFACT_ID: ${{ steps.dispatch.outputs.artifact-id }}
+          EXPECTED_DISPATCH_ARTIFACT_DIGEST: ${{ steps.dispatch.outputs.artifact-digest }}
+          EXPECTED_DISPATCH_RECORD_SHA256: ${{ steps.dispatch-record.outputs.dispatch_sha256 }}
+          ARTIFACT_READ_TOKEN: ${{ github.token }}
         run: |
           node --input-type=module <<'NPM_OIDC_PUBLISH'
           import fs from 'node:fs/promises';
@@ -255,6 +433,62 @@ jobs:
           const execute = promisify(execFile);
           const data = JSON.parse(await fs.readFile('publication.json', 'utf8'));
           const tool = JSON.parse(await fs.readFile('npm-tool.json', 'utf8'));
+          const dispatchBytes = await fs.readFile('publication-dispatch.json');
+          const dispatch = JSON.parse(dispatchBytes);
+          const canonical = value => value === null || typeof value !== 'object' ? JSON.stringify(value) :
+            Array.isArray(value) ? `[${value.map(canonical).join(',')}]` :
+            `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+          const expectedBinding = { releaseIntentId: data.releaseIntentId, sourceRepository: data.sourceRepository,
+            sourceCommit: data.sourceCommit, releaseRepository: data.releaseBinding?.releaseRepository,
+            packageName: data.packageName, version: data.version, payloadSha256: data.sha256,
+            descriptorSha256: data.releaseBinding?.descriptorSha256, checksumsSha256: data.releaseBinding?.checksumsSha256,
+            registry: 'https://registry.npmjs.org' };
+          if (dispatch.schemaVersion !== 1 || dispatch.kind !== 'npm-publication-attempt' ||
+              canonical(dispatch.binding) !== canonical(expectedBinding) ||
+              dispatch.run?.id !== process.env.GITHUB_RUN_ID || dispatch.run?.attempt !== process.env.GITHUB_RUN_ATTEMPT ||
+              dispatch.sourceWorkflowRef !== process.env.GITHUB_WORKFLOW_REF ||
+              !['publish', 'reconcile-only'].includes(dispatch.mode) ||
+              !/^[1-9]\d*$/u.test(process.env.EXPECTED_DISPATCH_ARTIFACT_ID ?? '') ||
+              !/^(?:sha256:)?[a-f0-9]{64}$/u.test(process.env.EXPECTED_DISPATCH_ARTIFACT_DIGEST ?? '') ||
+              createHash('sha256').update(dispatchBytes).digest('hex') !== process.env.EXPECTED_DISPATCH_RECORD_SHA256) {
+            throw new Error('A durably retained exact dispatch intent must precede any npm effect');
+          }
+          const sanitize = value => String(value ?? '')
+            .replace(/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/gu, '[redacted]')
+            .replace(/\b(?:ghp|github_pat)_[A-Za-z0-9_]{20,}\b/gu, '[redacted]')
+            .replace(/\b(?:Authorization|Proxy-Authorization)\s*[:=]\s*(?:Basic|Bearer)\s+[^\s"'<>]+/giu, '[redacted]')
+            .replace(/\bBearer\s+[^\s"'<>]+/giu, '[redacted]')
+            .replace(/\b(?:Cookie|Set-Cookie)\s*:\s*[^\r\n]+/giu, '[redacted]')
+            .replace(/(https?:\/\/)[^/\s"'<>@]+@/giu, '$1')
+            .replace(/[?&](?:jwt|sig|signature|token|access[_-]?token|api[_-]?key|key|password|x-amz-(?:signature|credential|security-token))=[^&#\s"'<>]+/giu, '?redacted')
+            .replace(/\b[A-Za-z0-9_]*(?:TOKEN|PASSWORD|SECRET|CREDENTIAL|AUTHORIZATION|API_KEY)[A-Za-z0-9_]*\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;}]+)/giu, '[redacted]')
+            .replace(/(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(?![A-Za-z0-9_-])/gu, token => {
+              try {
+                const header = JSON.parse(Buffer.from(token.split('.')[0], 'base64url'));
+                return typeof header.alg === 'string' || /jwt/iu.test(header.typ ?? '') ? '[redacted]' : token;
+              } catch { return token; }
+            });
+          const cancellation = new AbortController();
+          let cancellationSignal;
+          const cancel = signal => { cancellationSignal = signal; cancellation.abort(); };
+          const onTerm = () => cancel('SIGTERM');
+          const onInt = () => cancel('SIGINT');
+          process.on('SIGTERM', onTerm);
+          process.on('SIGINT', onInt);
+          let propagationDeadline;
+          let providerRetryDelay = 0;
+          let activeReadback;
+          const anonymous = url => fetch(url, { signal: AbortSignal.timeout(Math.max(1,
+            Math.min(30_000, propagationDeadline ? propagationDeadline - Date.now() : 30_000))) });
+          const propagating = response => {
+            if (!propagationDeadline || ![429, 500, 502, 503, 504].includes(response.status)) return false;
+            const retry = response.headers.get('retry-after');
+            providerRetryDelay = retry ? /^\d+$/u.test(retry) ? Number(retry) * 1000 : Math.max(0, Date.parse(retry) - Date.now()) : 0;
+            if (!Number.isFinite(providerRetryDelay) || providerRetryDelay > 30_000) {
+              throw new Error('Provider retry policy exceeds the approved polling interval; preserve this uncertain effect for reconciliation');
+            }
+            return true;
+          };
           const validTool = tool.command === 'npm' && tool.prefix?.length === 0 ||
             tool.command === process.execPath && tool.prefix?.length === 1 &&
             tool.prefix[0] === path.resolve('npm-tool/node_modules/npm/bin/npm-cli.js');
@@ -264,7 +498,8 @@ jobs:
                 /^npm_config_/iu.test(key) && /auth|token/iu.test(key)) throw new Error('npm token authentication is forbidden');
           }
           const npmEnvironment = {
-            ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^npm_/iu.test(key))),
+            ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^npm_/iu.test(key) &&
+              (!/token|secret|credential|password/iu.test(key) || key === 'ACTIONS_ID_TOKEN_REQUEST_TOKEN'))),
             HOME: path.resolve('home'), NPM_CONFIG_USERCONFIG: path.resolve('user.npmrc'),
             NPM_CONFIG_GLOBALCONFIG: path.resolve('global.npmrc'), NPM_CONFIG_CACHE: path.resolve('cache'),
             NPM_CONFIG_REGISTRY: 'https://registry.npmjs.org', NPM_CONFIG_IGNORE_SCRIPTS: 'true',
@@ -274,11 +509,12 @@ jobs:
               await fs.readFile('global.npmrc', 'utf8') !== '') throw new Error('Controlled npm auth configuration changed');
           await fs.lstat('.npmrc').then(() => { throw new Error('Unexpected project npm auth configuration'); },
             error => { if (error.code !== 'ENOENT') throw error; });
-          const npmVersion = (await execute(tool.command, [...tool.prefix, '--version'], { env: npmEnvironment })).stdout.trim();
+          const npmVersion = (await execute(tool.command, [...tool.prefix, '--version'],
+            { env: npmEnvironment, timeout: 30_000, signal: cancellation.signal })).stdout.trim();
           const version = /^(\d+)\.(\d+)\.(\d+)$/u.exec(npmVersion);
-          if (!version || Number(version[1]) < 11 || Number(version[1]) === 11 && Number(version[2]) < 15) throw new Error('npm >=11.15.0 is required at publication');
+          if (!version || npmVersion !== '11.16.0' || process.versions.node !== '24.22.0') throw new Error('Pinned Node 24.22.0/npm 11.16.0 are required at publication');
           const effective = JSON.parse((await execute(tool.command, [...tool.prefix, 'config', 'list', '--json'],
-            { env: npmEnvironment, maxBuffer: 4 * 1024 * 1024 })).stdout);
+            { env: npmEnvironment, maxBuffer: 4 * 1024 * 1024, timeout: 30_000, signal: cancellation.signal })).stdout);
           if (Object.entries(effective).some(([key, value]) =>
             /(?:^|:)(?:_auth(?:token)?|_password|username|password|cert(?:file)?|key(?:file)?)$/iu.test(key) &&
             value !== null && value !== undefined && value !== '')) throw new Error('Effective npm auth config is not token-free');
@@ -290,21 +526,27 @@ jobs:
             throw new Error('Approved payload changed before npm handoff');
           }
           async function registryVersion() {
-            const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(data.packageName)}/${encodeURIComponent(data.version)}`);
-            if (response.status === 404) return null;
+            const response = await anonymous(`https://registry.npmjs.org/${encodeURIComponent(data.packageName)}/${encodeURIComponent(data.version)}`);
+            if (response.status === 404 || propagating(response)) return null;
             if (!response.ok) throw new Error(`Anonymous npm query failed: ${response.status}`);
             return response.json();
           }
           async function verifyProvenanceMetadata(metadata) {
             const location = metadata.dist?.attestations?.url;
-            if (!location) return null;
+            if (!location) {
+              if (activeReadback) activeReadback.provenance = 'MissingMetadata';
+              return null;
+            }
             const url = new URL(location);
             if (url.protocol !== 'https:' || url.hostname !== 'registry.npmjs.org' || url.username || url.password ||
                 url.search || url.hash || decodeURIComponent(url.pathname) !== `/-/npm/v1/attestations/${data.packageName}@${data.version}`) {
               throw new Error('Unexpected npm provenance metadata location');
             }
-            const response = await fetch(url);
-            if (response.status === 404) return null;
+            const response = await anonymous(url);
+            if (response.status === 404 || propagating(response)) {
+              if (activeReadback) activeReadback.provenance = 'Missing';
+              return null;
+            }
             if (!response.ok) throw new Error(`Anonymous provenance metadata fetch failed: ${response.status}`);
             const body = await response.json();
             const matches = body.attestations?.filter(entry => entry.predicateType === 'https://slsa.dev/provenance/v1');
@@ -348,59 +590,182 @@ jobs:
                 url.username || url.password || url.search || url.hash || metadata.dist.integrity !== data.integrity) {
               throw new Error('Existing npm version differs from the approved package identity');
             }
-            const response = await fetch(url);
+            const response = await anonymous(url);
+            if (response.status === 404 || propagating(response)) {
+              if (activeReadback) activeReadback.tarball = 'Missing';
+              return null;
+            }
             if (!response.ok) throw new Error(`Anonymous npm tarball fetch failed: ${response.status}`);
             const bytes = Buffer.from(await response.arrayBuffer());
             if (hash(bytes) !== data.sha256 || `sha512-${hash(bytes, 'sha512', 'base64')}` !== data.integrity) {
               throw new Error('Published npm bytes differ from the immutable candidate');
             }
+            if (activeReadback) activeReadback.tarball = 'Verified';
             return verifyProvenanceMetadata(metadata);
           }
           const evidence = { version: data.version, sourceCommit: data.sourceCommit,
+            binding: expectedBinding, dispatch: { ...dispatch,
+              artifact: { id: process.env.EXPECTED_DISPATCH_ARTIFACT_ID,
+                digest: process.env.EXPECTED_DISPATCH_ARTIFACT_DIGEST.startsWith('sha256:') ?
+                  process.env.EXPECTED_DISPATCH_ARTIFACT_DIGEST : `sha256:${process.env.EXPECTED_DISPATCH_ARTIFACT_DIGEST}` } },
+            history: data.publicationRecovery.history, invocationRef: dispatch.invocationRef,
+            releaseIntentId: data.releaseIntentId, bundleSha256: data.bundleSha256,
+            run: { id: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT },
             callerFilename: 'release.yml', environment: 'npm', tokenFreeAuthConfig: 'Verified',
-            publishAttempted: false, provenanceMetadata: 'NotVerified' };
+            publishAttempted: false, command: null, effect: 'NotStarted', oidcPublication: 'NotRun',
+            provenanceMetadata: 'NotVerified', readbacks: [], readback: { status: 'NotRun' } };
+          const journal = await fs.open('npm-publication-journal.ndjson', 'wx');
+          const record = async value => { await journal.write(`${JSON.stringify(value)}\n`); await journal.sync(); };
+          const checkCancellation = () => {
+            if (cancellationSignal) throw Object.assign(new Error(`Publication interrupted by ${cancellationSignal}; original dispatch requires reconciliation`),
+              { code: 'PUBLICATION_CANCELLED' });
+          };
+          const commandOutcome = (output, error, startedAt, durationMs) => {
+            const stdout = output?.stdout ?? error?.stdout ?? '';
+            const stderr = output?.stderr ?? error?.stderr ?? '';
+            let rejectionCode;
+            try { rejectionCode = JSON.parse(stdout).error?.code; } catch {}
+            rejectionCode ??= /\bnpm\s+(?:ERR!|error)\s+code\s+(E[A-Z0-9]+)/u.exec(stderr)?.[1];
+            return { startedAt, finishedAt: new Date().toISOString(), durationMs,
+              exitCode: error ? Number.isInteger(error.code) ? error.code : null : 0,
+              code: error?.code ?? null, signal: error?.signal ?? cancellationSignal ?? null,
+              killed: error?.killed === true, stdout: sanitize(stdout), stderr: sanitize(stderr),
+              stdoutSha256: hash(Buffer.from(stdout)), stderrSha256: hash(Buffer.from(stderr)),
+              reason: error ? sanitize(error.message) : null,
+              rejectionCode: rejectionCode ?? null,
+              confirmedRejected: Boolean(error && Number.isInteger(error.code) && error.code !== 0 &&
+                !error.signal && !cancellationSignal &&
+                ['E400', 'E401', 'E403', 'E422', 'EOTP', 'ENEEDAUTH'].includes(rejectionCode)) };
+          };
+          const poll = async initial => {
+            const deadline = Date.now() + 600_000;
+            propagationDeadline = deadline;
+            evidence.readback = { status: 'Running', startedAt: new Date().toISOString(),
+              deadline: new Date(deadline).toISOString() };
+            for (let attempt = 0; ; attempt++) {
+              checkCancellation();
+              activeReadback = { attempt: attempt + 1, at: new Date().toISOString(),
+                packageAvailable: false, tarball: 'NotRun', provenance: 'NotRun' };
+              let provenance;
+              try {
+                const published = attempt === 0 && initial ? initial : await registryVersion();
+                checkCancellation();
+                if (published) evidence.observedExisting = true;
+                activeReadback.packageAvailable = Boolean(published);
+                provenance = published ? await verifyPublished(published) : null;
+              } catch (error) {
+                if (cancellationSignal) throw error;
+                const code = error.cause?.code ?? error.code;
+                if (!['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET'].includes(code) &&
+                    error.name !== 'TimeoutError' && !(error.name === 'AbortError' && Date.now() >= deadline)) throw error;
+                activeReadback.transportFailure = { code: code ?? error.name, reason: sanitize(error.message) };
+              }
+              checkCancellation();
+              activeReadback.provenanceAvailable = Boolean(provenance);
+              if (provenance) activeReadback.provenance = 'Verified';
+              evidence.readbacks.push(activeReadback);
+              if (provenance) {
+                evidence.readback.status = 'Verified';
+                await record({ kind: 'readback', ...activeReadback });
+                return provenance;
+              }
+              const remaining = deadline - Date.now();
+              if (remaining <= 0) {
+                evidence.readback.status = 'Expired';
+                await record({ kind: 'readback', ...activeReadback });
+                throw Object.assign(new Error('npm publication remains uncertain/incomplete after ten-minute exact-byte/provenance readback; another 404 is not permission to republish'),
+                  { code: 'PUBLICATION_UNCERTAIN' });
+              }
+              const delayMs = Math.min(remaining, Math.max(providerRetryDelay,
+                [1000, 2000, 4000, 8000, 16000][attempt] ?? 30000));
+              providerRetryDelay = 0;
+              activeReadback.delayMs = delayMs;
+              await record({ kind: 'readback', ...activeReadback });
+              await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
+          };
           try {
+            await record({ kind: 'attempt-started', dispatch: evidence.dispatch, binding: expectedBinding });
+            checkCancellation();
             const existing = await registryVersion();
+            evidence.observedExisting = Boolean(existing);
             if (existing) {
-              const provenance = await verifyPublished(existing);
-              if (!provenance) throw new Error('Existing identical npm version lacks matching provenance metadata; do not republish or credit token-free OIDC publication');
+              const provenance = await poll(existing);
               Object.assign(evidence, { status: 'AlreadyPublishedIdentical', distTagsChanged: false,
                 publicationAuthentication: 'NotVerifiedExistingPublication', oidcPublication: 'NotRun',
                 provenanceMetadata: provenance });
+            } else if (dispatch.mode === 'reconcile-only') {
+              evidence.effect = 'OriginalDispatchUncertain';
+              const provenance = await poll(null);
+              Object.assign(evidence, { status: 'AlreadyPublishedIdentical', distTagsChanged: false,
+                publicationAuthentication: 'NotVerifiedOriginalPublication', oidcPublication: 'NotRun',
+                provenanceMetadata: provenance });
             } else {
               evidence.publishAttempted = true;
-              const result = await execute(tool.command, [...tool.prefix, 'publish', `./${data.filename}`, '--ignore-scripts', '--access', 'public',
+              evidence.effect = 'Dispatching';
+              let commandError;
+              const startedAt = new Date().toISOString();
+              const clock = performance.now();
+              await record({ kind: 'dispatching', binding: expectedBinding, run: evidence.run,
+                originalDispatchArtifact: evidence.dispatch.artifact });
+              try {
+                checkCancellation();
+                const pending = execute(tool.command, [...tool.prefix, 'publish', `./${data.filename}`, '--ignore-scripts', '--access', 'public', '--json',
                 '--tag', data.distTag, '--registry', 'https://registry.npmjs.org'],
-              { env: npmEnvironment, timeout: 300_000, maxBuffer: 4 * 1024 * 1024 });
-              process.stdout.write(result.stdout);
-              process.stderr.write(result.stderr);
-              let provenance;
-              for (let attempt = 0; attempt < 6; attempt++) {
-                const published = await registryVersion();
-                if (published) provenance = await verifyPublished(published);
-                if (provenance) break;
-                if (attempt < 5) await new Promise(resolve => setTimeout(resolve, 10_000));
+                { env: npmEnvironment, timeout: 300_000, maxBuffer: 4 * 1024 * 1024, signal: cancellation.signal });
+                pending.child.stdin?.end();
+                const result = await pending;
+                evidence.command = commandOutcome(result, null, startedAt, performance.now() - clock);
+                evidence.effect = 'CommandSucceeded';
+              } catch (error) {
+                commandError = error;
+                evidence.command = commandOutcome(null, error, startedAt, performance.now() - clock);
+                evidence.effect = evidence.command.confirmedRejected ? 'RejectedWithoutEffect' : 'Uncertain';
               }
-              if (!provenance) throw new Error('npm returned success but exact-version bytes and provenance metadata are not available');
-              Object.assign(evidence, { status: 'PublishedAndBytesVerified', authentication: 'OIDCOnly',
+              await record({ kind: 'command-outcome', command: evidence.command, effect: evidence.effect });
+              checkCancellation();
+              if (evidence.command.confirmedRejected) {
+                const visible = await registryVersion();
+                if (!visible) throw Object.assign(new Error(`npm command was rejected without an effect (${evidence.command.rejectionCode}); original command diagnostics retained`),
+                  { code: 'PUBLICATION_REJECTED' });
+              }
+              const provenance = await poll(null);
+              Object.assign(evidence, { status: 'PublishedAndBytesVerified',
+                authentication: commandError ? 'NotVerifiedUncertainCommand' : 'OIDCOnly',
+                oidcPublication: commandError ? 'NotRun' : 'Passed',
                 provenanceMetadata: provenance });
             }
             console.log(JSON.stringify(evidence));
           } catch (error) {
-            evidence.status = 'FailedOrIncomplete';
-            evidence.reason = error.message;
-            throw error;
+            evidence.status = cancellationSignal ? 'Cancelled' :
+              evidence.effect === 'RejectedWithoutEffect' ? 'RejectedWithoutEffect' : 'FailedOrIncomplete';
+            evidence.reason = sanitize(error.message);
+            if (cancellationSignal) {
+              evidence.interruptionSignal = cancellationSignal;
+              evidence.readback.status = 'Cancelled';
+            }
+            evidence.readback.cause = { code: error.code ?? null, reason: sanitize(error.message) };
+            throw Object.assign(new Error(evidence.reason), { code: error.code ?? 'PUBLICATION_INCOMPLETE' });
           } finally {
-            await fs.writeFile('npm-publication-result.json', JSON.stringify(evidence));
+            process.removeListener('SIGTERM', onTerm);
+            process.removeListener('SIGINT', onInt);
+            await record({ kind: 'attempt-finished', status: evidence.status, effect: evidence.effect,
+              command: evidence.command, readback: evidence.readback });
+            await journal.close();
+            const result = await fs.open('npm-publication-result.json', 'wx');
+            try { await result.writeFile(JSON.stringify(evidence)); await result.sync(); } finally { await result.close(); }
           }
           NPM_OIDC_PUBLISH
       - name: Retain token-free auth and provenance metadata results without credentials
+        id: result
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: npm-oidc-result-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             npm-work/auth-config-evidence.json
             npm-work/npm-publication-result.json
+            npm-work/npm-publication-journal.ndjson
+            npm-work/publication-dispatch.json
           if-no-files-found: warn
           retention-days: 90

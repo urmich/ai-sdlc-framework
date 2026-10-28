@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import sys
 
 import jsonschema
 import yaml
@@ -56,4 +57,20 @@ if __name__ == "__main__":
     parser.add_argument("--manifest-dir", required=True, type=Path)
     parser.add_argument("--schema-dir", required=True, type=Path)
     args = parser.parse_args()
-    print(json.dumps(validate(args.manifest_dir, args.schema_dir), sort_keys=True))
+    try:
+        print(json.dumps(validate(args.manifest_dir, args.schema_dir), sort_keys=True))
+    except jsonschema.ValidationError as error:
+        print(json.dumps({
+            "schemaValidation": "Failed",
+            "message": "Manifest does not satisfy the locked official schema",
+            "instancePath": list(error.absolute_path),
+            "schemaPath": list(error.absolute_schema_path),
+            "validator": error.validator,
+            "expected": error.validator_value,
+            "actual": error.instance,
+        }, sort_keys=True), file=sys.stderr)
+        sys.exit(1)
+    except ValueError as error:
+        print(json.dumps({"schemaValidation": "Failed", "message": str(error)},
+                         sort_keys=True), file=sys.stderr)
+        sys.exit(1)

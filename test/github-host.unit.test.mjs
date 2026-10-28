@@ -1,3 +1,10 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "direct", "paths": ["src/github.mjs", "src/github/host.mjs"]}],
+  "variants": [
+    {"expression": "name", "names": ["verifyRepository", "verifyPullRequest", "verifyCheckResults", "verifyOperationResult", "verifyArtifact", "verifyProviderVersion"]}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';

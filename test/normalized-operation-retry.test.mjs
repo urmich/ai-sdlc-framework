@@ -1,3 +1,12 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "variants": [
+    {"expression": "kind === 'cycle' ? 'current cycle' : 'captured approval event'", "names": ["current cycle", "captured approval event"]},
+    {"expression": "`T-124 SHA-256 ${field} comparison`", "domains": {"field": ["sourceRevision", "targetRevision"]}},
+    {"expression": "`T-124 legacy different ${difference}`", "domains": {"difference": ["destination", "revision", "configuration", "target"]}},
+    {"expression": "`T-124 ${kind} normalized retry`", "domains": {"kind": ["configuration", "build", "pipeline", "pr-validation", "test", "deploy", "pr-create", "pr-update", "merge", "auto-merge", "policy-bypass", "push"]}}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';

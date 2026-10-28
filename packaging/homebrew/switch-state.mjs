@@ -6,6 +6,23 @@ import { isDeepStrictEqual } from 'node:util';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const leaf = value => typeof value === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9@+_.-]*$/u.test(value);
+const processGuards = new WeakMap();
+
+function recoveryAllowed(state, allowUnregistered = false) {
+  if (!processGuards.has(state)) return allowUnregistered;
+  const guard = processGuards.get(state);
+  // Null is the captured legacy standalone contract, never a value admitted from JSON.
+  if (guard === null) return true;
+  try { return guard() === true; } catch { return false; }
+}
+
+function requireRecovery(state, error, allowUnregistered = false) {
+  if (recoveryAllowed(state, allowUnregistered)) return;
+  const failure = error ?? Object.assign(new Error('Homebrew writers are unverified; recovery inputs and lock are retained.'),
+    { code: 'HOMEBREW_SWITCH_UNSETTLED' });
+  failure.switchRecovery = { stateFile: state.stateFile, lock: state.lock, phase: 'awaiting-process-settlement' };
+  throw failure;
+}
 
 export async function linkState(file) {
   try {
@@ -22,20 +39,52 @@ export async function linkState(file) {
 export const ownsLauncher = (state, keg) => Boolean(keg) && state.kind === 'link' &&
   state.absolute === path.join(keg, 'bin', 'sdlc');
 
+async function boundedFileHash(file, size) {
+  const handle = await fs.open(file, 'r');
+  try {
+    let buffer = Buffer.alloc(Math.max(1, Math.min(size + 1, 1024 * 1024)));
+    const hash = createHash('sha256');
+    for (;;) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+      if (bytesRead === 0) return hash.digest('hex');
+      hash.update(buffer.subarray(0, bytesRead));
+      if (bytesRead === buffer.length && buffer.length < 1024 * 1024) {
+        buffer = Buffer.alloc(Math.min(buffer.length * 2, 1024 * 1024));
+      }
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
 async function inventory(root, relative = '') {
   const result = [];
-  for (const name of (await fs.readdir(path.join(root, relative))).sort()) {
-    const entry = path.join(relative, name);
-    const file = path.join(root, entry);
-    const stat = await fs.lstat(file);
-    if (stat.isDirectory()) result.push(...await inventory(root, entry));
-    else if (stat.isSymbolicLink()) result.push({ path: entry, link: await fs.readlink(file) });
-    else if (stat.isFile()) {
+  const names = (await fs.readdir(path.join(root, relative))).sort();
+  for (let offset = 0; offset < names.length; offset += 16) {
+    const batch = await Promise.allSettled(names.slice(offset, offset + 16).map(async name => {
+      const entry = path.join(relative, name);
+      const file = path.join(root, entry);
+      const stat = await fs.lstat(file);
+      if (stat.isDirectory()) return { directory: entry };
+      if (stat.isSymbolicLink()) return { record: { path: entry, link: await fs.readlink(file) } };
+      if (!stat.isFile()) throw new Error(`Unsupported Homebrew keg entry: ${file}`);
       // Homebrew may legitimately change installed-on-request flags in the receipt.
-      if (entry !== 'INSTALL_RECEIPT.json') result.push({
-        path: entry, mode: stat.mode & 0o777, sha256: sha256(await fs.readFile(file)),
-      });
-    } else throw new Error(`Unsupported Homebrew keg entry: ${file}`);
+      if (entry === 'INSTALL_RECEIPT.json') return {};
+      const record = { path: entry, mode: stat.mode & 0o777 };
+      // Keep larger payload buffers serial; this is not an accepted file-size limit.
+      if (stat.size > 1024 * 1024) return { record, file };
+      return { record: { ...record, sha256: await boundedFileHash(file, stat.size) } };
+    }));
+    // Drain dispatched reads before recursion, ordered failure or recovery cleanup.
+    for (const entry of batch) {
+      if (entry.status === 'rejected') throw entry.reason;
+      const { directory, record, file } = entry.value;
+      if (directory !== undefined) result.push(...await inventory(root, directory));
+      else if (record) {
+        if (file) record.sha256 = sha256(await fs.readFile(file));
+        result.push(record);
+      }
+    }
   }
   return result;
 }
@@ -56,11 +105,12 @@ async function persist(state) {
     await fs.rename(candidate, state.stateFile);
     renamed = true;
   } finally {
-    if (created && !renamed) await fs.rm(candidate, { force: true });
+    if (created && !renamed && recoveryAllowed(state)) await fs.rm(candidate, { force: true });
   }
 }
 
 export async function advanceSwitchState(state, phase) {
+  requireRecovery(state);
   state.phase = phase;
   await persist(state);
 }
@@ -129,12 +179,23 @@ export async function resolveHomebrewCandidate(runBrew, formula, cellar) {
 }
 
 /** Capture every rollback input before the first mutating Homebrew command. */
-export async function captureSwitchState({ prefix, cellar, formula, previousFormula, runBrew }) {
+export async function captureSwitchState({ prefix, cellar, formula, previousFormula, runBrew, processSettlement }) {
+  if (processSettlement !== undefined && typeof processSettlement !== 'function') {
+    throw new TypeError('Homebrew recovery requires an in-process settlement observer, not serialized state.');
+  }
+  if (processSettlement !== undefined) {
+    let settled = false;
+    try { settled = processSettlement() === true; } catch {}
+    if (!settled) throw Object.assign(new Error('Homebrew capture cannot begin while owned writers are unverified.'),
+      { code: 'HOMEBREW_SWITCH_UNSETTLED' });
+  }
   const storage = await acquireState(prefix);
   const state = { schemaVersion: 1, ...storage, stateFile: path.join(storage.root, 'state.json'),
     prefix, cellar, formula, previousFormula, phase: 'capturing', kegs: [], links: [],
     destination: path.join(prefix, 'bin', 'sdlc') };
+  processGuards.set(state, processSettlement ?? null);
   try {
+    requireRecovery(state);
     state.capturedLink = await linkState(state.destination);
     state.targetKeg = await findInstalledKeg(runBrew, formula, cellar, { optional: true });
     state.previousKeg = previousFormula
@@ -242,7 +303,9 @@ export async function captureSwitchState({ prefix, cellar, formula, previousForm
     await persist(state);
     return state;
   } catch (error) {
+    requireRecovery(state, error);
     await fs.rm(state.root, { recursive: true, force: true });
+    requireRecovery(state, error);
     await fs.unlink(state.lock);
     throw error;
   }
@@ -260,7 +323,9 @@ export async function verifyCapturedKegs(state) {
 }
 
 export async function preserveCapturedKegs(state, { restoreMissing = true } = {}) {
+  requireRecovery(state);
   for (const keg of state.kegs) {
+    requireRecovery(state);
     try {
       if (!(await fs.lstat(keg.path)).isDirectory() || await fs.realpath(keg.path) !== keg.path) {
         throw new Error(`Captured keg was replaced by an unidentified entry: ${keg.path}`);
@@ -268,12 +333,15 @@ export async function preserveCapturedKegs(state, { restoreMissing = true } = {}
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
       if (!restoreMissing) throw new Error(`Homebrew did not retain the captured keg: ${keg.path}`, { cause: error });
+      requireRecovery(state);
       await fs.mkdir(path.dirname(keg.path), { recursive: true });
       if (await fs.realpath(path.dirname(keg.path)) !== path.dirname(keg.path)) {
         throw new Error(`Captured keg parent was replaced: ${keg.path}`);
       }
+      requireRecovery(state);
       await fs.mkdir(keg.path);
       for (const name of await fs.readdir(keg.backup)) {
+        requireRecovery(state);
         await fs.cp(path.join(keg.backup, name), path.join(keg.path, name),
           { recursive: true, verbatimSymlinks: true,
             force: false, errorOnExist: true, mode: constants.COPYFILE_FICLONE });
@@ -291,33 +359,58 @@ export async function preserveCapturedKegs(state, { restoreMissing = true } = {}
   }
 }
 
-async function restoreLink(file, captured, isOwned) {
+async function restoreLink(file, captured, isOwned, beforeMutation = () => {}) {
   const current = await linkState(file);
   if (current.kind === captured.kind && current.target === captured.target) return;
   if (current.kind !== 'absent') {
     if (current.kind !== 'link' || !isOwned(current)) {
       throw new Error(`Unidentified replacement retained at ${file}`);
     }
+    beforeMutation();
     await fs.unlink(file);
   }
   if (captured.kind === 'link') {
+    beforeMutation();
     await fs.mkdir(path.dirname(file), { recursive: true });
+    beforeMutation();
     await fs.symlink(captured.target, file);
   }
 }
 
+export async function restoreCapturedUpgradeLinks(state, newKeg) {
+  requireRecovery(state, undefined, true);
+  const name = path.basename(path.dirname(newKeg));
+  const records = [
+    path.join(state.prefix, 'opt', name),
+    path.join(state.prefix, 'var', 'homebrew', 'linked', name),
+  ].map(file => {
+    const record = state.links.find(link => link.name === name && link.path === file);
+    if (!record) throw new Error(`Captured Homebrew link record is missing: ${file}`);
+    return record;
+  });
+  for (const record of records) {
+    await restoreLink(record.path, record.captured, current =>
+      current.absolute === newKeg || current.absolute === state.previousKeg,
+    () => requireRecovery(state, undefined, true));
+  }
+}
+
 export async function finishSwitchState(state, { error, newKeg } = {}) {
+  requireRecovery(state, error);
   let recoveryError;
   if (error) {
     try {
       await preserveCapturedKegs(state);
       for (const link of state.links) {
         await restoreLink(link.path, link.captured, current =>
-          current.absolute === newKeg || state.kegs.some(keg => keg.path === current.absolute));
+          current.absolute === newKeg || state.kegs.some(keg => keg.path === current.absolute),
+        () => requireRecovery(state, error));
       }
       await restoreLink(state.destination, state.capturedLink, current =>
-        ownsLauncher(current, newKeg) || ownsLauncher(current, state.previousKeg));
+        ownsLauncher(current, newKeg) || ownsLauncher(current, state.previousKeg),
+      () => requireRecovery(state, error));
     } catch (failure) {
+      requireRecovery(state, error ?? failure);
       recoveryError = failure;
     }
   }
@@ -325,10 +418,14 @@ export async function finishSwitchState(state, { error, newKeg } = {}) {
   state.error = error?.message;
   state.recoveryError = recoveryError?.message;
   try {
+    requireRecovery(state, error);
     await persist(state);
+    requireRecovery(state, error);
     if (!recoveryError) await fs.rm(path.join(state.root, 'kegs'), { recursive: true, force: true });
+    requireRecovery(state, error);
     await fs.unlink(state.lock);
   } catch (failure) {
+    requireRecovery(state, error ?? failure);
     const incomplete = new Error(`Homebrew switch ${error ? 'recovery' : 'completed'}, but recovery-state cleanup is incomplete. Inspect ${state.stateFile} and ${state.lock}: ${failure.message}`,
       { cause: failure });
     incomplete.code = 'HOMEBREW_SWITCH_CLEANUP_INCOMPLETE';

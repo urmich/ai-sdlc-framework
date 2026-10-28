@@ -1,3 +1,10 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "variants": [
+    {"expression": "`FR-064 fact versions recover after ${interruption} and repeated refresh`", "domains": {"interruption": ["archive:pr-facts:version", "archive:pr-facts", "record:pr-observation", "checkpoint", "remove:pr-facts:", "remove:pr-observation:"]}},
+    {"expression": "`FR-063/064 facts refresh at 262044 bytes recovers ${interruption} within original/pending union budget`", "domains": {"interruption": ["retention:remove:repository-observation", "record:pr-observation"]}}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';

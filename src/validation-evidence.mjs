@@ -1,11 +1,13 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LIMITS, canonical, choice, digest, id, object, recordLimit, requireThat,
+import { types } from 'node:util';
+import { LIMITS, canonical, choice, createSummarySanitizer, digest, id, object, recordLimit, requireThat,
   safeRecord, safeSummary } from './core.mjs';
-import { listJson, readBytes, readJson, safePath } from './files.mjs';
+import { readBytes, readJson, readJsonEntries, safePath } from './files.mjs';
 import { validateRecord } from './schemas.mjs';
 import { bindCycleCatalog, buildTestCatalog, cycleTests, OUTCOME_PAGE_SIZE,
   readValidationObject, stageValidationObject, validateObjectReference } from './validation-catalog.mjs';
+import { MAX_BUNDLE_BYTES, MAX_OBJECTS, validateRetainedEvidenceBundle } from './validation-readiness.mjs';
 
 const views = new WeakMap();
 const operationHistories = new WeakMap();
@@ -15,14 +17,21 @@ const rank = { Passed: 0, NotRun: 1, Failed: 2 };
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 const redactedPayloadValue = /^\[redacted(?::[a-f0-9]{64})?\]$/u;
 const sensitiveHeader = /^(?:authorization|proxy[-_]authorization|cookie|set[-_]cookie|x[-_]api[-_]key|x[-_]auth[-_]token|x[-_]amz[-_]security[-_]token)$/iu;
-const environmentSecret = /(?:^|_)(?:secret|password|passwd|token|credential|credentials|private_key|access_key|api_key|client_secret)(?:_|$)/iu;
+const environmentSecret = /(?:^|_)(?:secret|password|passwd|token|jwt|credential|credentials|private_key|access_key|api_key|client_secret)(?:_|$)/iu;
+const payloadTextMarkers = /["\[{:=]/u;
 
-function sensitivePayloadKey(key) {
+function sensitivePayloadKey(key, state) {
+  const cached = state?.keyClassifications.get(key);
+  if (cached !== undefined) return cached;
   const normalized = key.replace(/([a-z0-9])([A-Z])/gu, '$1_$2')
     .replace(/[.-]/gu, '_');
-  return sensitiveHeader.test(key) ||
+  const sensitive = sensitiveHeader.test(key) ||
     sensitiveHeader.test(normalized) ||
     /^[A-Za-z_][A-Za-z0-9_]*$/u.test(normalized) && environmentSecret.test(normalized);
+  if (state && state.keyClassifications.size < 256 && key.length <= 128) {
+    state.keyClassifications.set(key, sensitive);
+  }
+  return sensitive;
 }
 function unsupportedPayloadFragment(value) {
   if (/["'\\]/u.test(value)) return true;
@@ -34,7 +43,8 @@ function redactPayloadValue(value) {
     value : `[redacted:${digest(value)}]`;
 }
 function payloadSanitizerState() {
-  return { nodes: 0, parsedBytes: 0, scannedCharacters: 0 };
+  return { nodes: 0, parsedBytes: 0, scannedCharacters: 0,
+    keyClassifications: new Map(), summarize: createSummarySanitizer() };
 }
 function checkPayloadWork(state, depth) {
   requireThat(depth <= 32 && ++state.nodes <= 65536, 'CAPACITY',
@@ -71,10 +81,12 @@ function sanitizePayloadText(value, state = payloadSanitizerState(), depth = 0) 
   requireThat(Buffer.byteLength(value) <= LIMITS.artifact, 'CAPACITY',
     'Retained text exceeds the immutable-object byte budget');
   if (redactedPayloadValue.test(value)) return value;
+  if (!payloadTextMarkers.test(value)) return state.summarize(value);
   let text = '';
   let start = 0;
   for (let index = 0; index < value.length; index++) {
-    if (!['{', '[', '"'].includes(value[index])) continue;
+    const character = value[index];
+    if (character !== '{' && character !== '[' && character !== '"') continue;
     const marker = value.startsWith('[redacted', index) ?
       /^\[redacted(?::[a-f0-9]{64})?\]/u.exec(value.slice(index, index + 80)) : null;
     if (marker) { index += marker[0].length - 1; continue; }
@@ -109,22 +121,69 @@ function sanitizePayloadText(value, state = payloadSanitizerState(), depth = 0) 
     (_, start, name, content) => `${start}${name}${redactPayloadValue(content.trim())}`);
   const assignments = headers.replace(
     /(?<![A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)([ \t]*=[ \t]*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s;&]+)/gu,
-    (assignment, name, separator, content) => sensitivePayloadKey(name) ?
+    (assignment, name, separator, content) => sensitivePayloadKey(name, state) ?
       `${name}${separator}${redactPayloadValue(content)}` : assignment);
-  return safeSummary(assignments);
+  return state.summarize(assignments);
 }
 function sanitizeRetainedValue(value, state = payloadSanitizerState(), depth = 0) {
   checkPayloadWork(state, depth);
   if (typeof value === 'string') return sanitizePayloadText(value, state, depth);
   if (Array.isArray(value)) return value.map(item => sanitizeRetainedValue(item, state, depth + 1));
   if (!value || typeof value !== 'object') return value;
-  return safeSummary(Object.fromEntries(Object.entries(value).map(([key, item]) =>
-    [key, sensitivePayloadKey(key) ? redactPayloadValue(item) :
+  return state.summarize(Object.fromEntries(Object.entries(value).map(([key, item]) =>
+    [key, sensitivePayloadKey(key, state) ? redactPayloadValue(item) :
       sanitizeRetainedValue(item, state, depth + 1)])));
 }
-export function validateRetainedPayload(value) {
-  requireThat(canonical(sanitizeRetainedValue(value)) === canonical(value),
+function requireRetainedPayloadText(sanitized, original) {
+  requireThat(sanitized === original,
     'UNSAFE', 'Retained payload or provenance contains unsupported sensitive content');
+}
+export function validateRetainedPayload(value) {
+  requireRetainedPayloadText(canonical(sanitizeRetainedValue(value)), canonical(value));
+}
+function validationJson(value, limit) {
+  let nodes = 0;
+  let canReuseInput = true;
+  const maxNodes = Math.max(200000, Math.floor(limit / 16));
+  function visit(item, depth) {
+    requireThat(depth <= 32 && ++nodes <= maxNodes, 'CAPACITY',
+      'Validation data exceeds the bounded JSON structure budget');
+    if (item === null || typeof item === 'boolean') return;
+    if (typeof item === 'string') {
+      requireThat(!/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(item),
+        'UNSAFE', 'Validation data contains unsupported control characters');
+      return;
+    }
+    if (typeof item === 'number') {
+      requireThat(Number.isFinite(item), 'INPUT', 'Validation data contains a non-finite number');
+      return;
+    }
+    requireThat(item && typeof item === 'object' &&
+      (Array.isArray(item) ? Object.getPrototypeOf(item) === Array.prototype :
+        Object.getPrototypeOf(item) === Object.prototype) &&
+      Object.getOwnPropertySymbols(item).length === 0,
+    'INPUT', 'Validation data must be plain JSON without executable values');
+    if (types.isProxy(item)) canReuseInput = false;
+    const fields = Object.getOwnPropertyDescriptors(item);
+    requireThat(Object.values(fields).every(field => Object.hasOwn(field, 'value')),
+      'INPUT', 'Validation data cannot contain accessors');
+    for (const key of Object.keys(item)) visit(fields[key].value, depth + 1);
+  }
+  visit(value, 0);
+  const encoded = canonical(value);
+  requireThat(Buffer.byteLength(encoded) <= limit, 'CAPACITY',
+    'Validation data exceeds its byte budget');
+  return { encoded, canReuseInput };
+}
+export function validationJsonText(value, limit = LIMITS.artifact) {
+  return validationJson(value, limit).encoded;
+}
+export function validateReadinessData(value, limit = LIMITS.artifact) {
+  const { encoded, canReuseInput } = validationJson(value, limit);
+  // Proxies retain the original second input read after sanitization.
+  if (canReuseInput) requireRetainedPayloadText(canonical(sanitizeRetainedValue(value)), encoded);
+  else validateRetainedPayload(value);
+  return value;
 }
 
 export function reduceTestHistory(history, { sourceTime = evidence => evidence.observedAt,
@@ -148,15 +207,17 @@ export function reduceTestHistory(history, { sourceTime = evidence => evidence.o
   const producers = new Map();
   for (const evidence of group) {
     const direct = !evidence.operationId && !evidence.eventId;
-    const producer = evidence.operationId ? `operation:${evidence.operationId}` :
+    const producer = evidence.executionProducerKey ? `execution:${evidence.executionProducerKey}` :
+      evidence.operationId ? `operation:${evidence.operationId}` :
       evidence.eventId ? `event:${evidence.eventId}` :
         `direct:${digest([evidence.owner ?? null, evidence.host ?? null,
           evidence.executionSourceDigest ?? null])}`;
     const previous = producers.get(producer);
     const tie = item => canonical([producer, item.id, digest(item)]);
+    const sequence = item => item.sourceSequence ?? item.sequence ?? 0;
     if (!previous || (direct ?
-      (evidence.sequence ?? 0) > (previous.sequence ?? 0) ||
-        (evidence.sequence ?? 0) === (previous.sequence ?? 0) &&
+      sequence(evidence) > sequence(previous) ||
+        sequence(evidence) === sequence(previous) &&
           compare(tie(evidence), tie(previous)) > 0 :
       rank[evidence.status] > rank[previous.status] ||
         rank[evidence.status] === rank[previous.status] &&
@@ -197,8 +258,7 @@ export async function prepareValidationHistory(store, workItemId, active) {
   const evidence = new Map();
   const events = new Map();
   const directory = path.join(store.workPath(workItemId), 'evidence');
-  for (const name of await listJson(directory)) {
-    const record = await readJson(await safePath(directory, name), { limit: LIMITS.workingSet + 1 });
+  for await (const { name, record } of readJsonEntries(directory, { limit: LIMITS.workingSet + 1 })) {
     if (['test-evidence', 'event'].includes(record.type)) {
       requireThat(record.workItemId === workItemId && record.id === name.slice(0, -5),
         'BINDING', 'Archived evidence or event identity differs from its locator');
@@ -297,6 +357,9 @@ export function observationAfterReset(cycle, records, evidence) {
   const barrier = cycle.storageVersion === 2 ?
     viewFor(cycle).slots.get(evidence.testId)?.barrier : cycle.resultBarriers?.[evidence.testId];
   if (!barrier) return true;
+  if (evidence.sourceObservedAt !== undefined &&
+      (!Number.isFinite(Date.parse(evidence.sourceObservedAt)) ||
+        Date.parse(evidence.sourceObservedAt) <= Date.parse(barrier.at))) return false;
   if (evidence.eventId) {
     const event = records.find(record => record.id === evidence.eventId);
     return evidence.eventId === barrier.eventId || Boolean(event && event.sequence > barrier.eventSequence);
@@ -306,19 +369,25 @@ export function observationAfterReset(cycle, records, evidence) {
     const operation = lookupOperation(records, evidence.operationId);
     return Boolean(operation && Date.parse(operation.dispatchStartedAt ?? operation.createdAt) > Date.parse(barrier.at));
   }
-  return (evidence.sequence ?? 0) > barrier.sequence;
+  return (evidence.sequence ?? evidence.sourceSequence ?? 0) > barrier.sequence;
 }
-export function executionSourceEligible(cycle, evidence) {
+export function sameExecutionSources(left, right, { requireRevision = true } = {}) {
+  return Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
+    new Set(left.map(source => source.repositoryId)).size === left.length &&
+    new Set(right.map(source => source.repositoryId)).size === right.length &&
+    left.every(source => right.some(selected =>
+      selected.repositoryId === source.repositoryId &&
+      selected.contentDigest === source.contentDigest &&
+      (!requireRevision || selected.revision === source.revision)));
+}
+export function executionSourceEligible(cycle, evidence,
+  { requireRevision = evidence.environment !== 'local' } = {}) {
   if (!evidence.executionSources) return cycle.storageVersion !== 2;
   return evidence.configDigest === cycle.configDigest &&
     evidence.candidateDigest === cycle.candidateDigest &&
     evidence.testSpecDigest === cycle.testSpecDigest &&
     evidence.executionSourceDigest === digest(evidence.executionSources) &&
-    evidence.executionSources.length === cycle.sources.length &&
-    evidence.executionSources.every(source => cycle.sources.some(selected =>
-      selected.repositoryId === source.repositoryId &&
-      selected.contentDigest === source.contentDigest &&
-      (evidence.environment === 'local' || selected.revision === source.revision)));
+    sameExecutionSources(evidence.executionSources, cycle.sources, { requireRevision });
 }
 export function validateExecutionSource(source, operation) {
   object(source, ['schemaVersion', 'kind', 'workItemId', 'operationId', 'cycleId',
@@ -399,8 +468,112 @@ export function initializeReferencedCycle(tx, cycle, specification) {
   cycle.testOutcomeRef = stageValidationObject(tx, root);
   attachView(cycle, pages, refs, root);
 }
+async function prepareRetainedReadinessEvidence(store, cycle, evidence, payload, context) {
+  const admission = payload.content;
+  if (admission?.kind !== 'normalized-case-admission') return;
+  object(admission, ['kind', 'cycleId', 'testId', 'status', 'importRef', 'assertionPageRefs', 'blockers'],
+    ['kind', 'cycleId', 'testId', 'status', 'importRef', 'assertionPageRefs', 'blockers']);
+  requireThat(admission.cycleId === cycle.id && admission.testId === evidence.testId &&
+    admission.status === evidence.status && Array.isArray(admission.assertionPageRefs),
+  'EVIDENCE', 'Retained normalized admission differs from its immutable case result');
+  const readContent = async ref => {
+    const retained = await readValidationObject(store, cycle.workItemId, ref, context);
+    requireThat(retained.kind === 'execution-payload' &&
+      retained.provenance?.sanitizer === 'sdlc-normalized-v1' &&
+      retained.provenance.sourceDigest === digest(retained.content),
+    'EVIDENCE', 'Normalized evidence dependency is not its original retained content');
+    return retained.content;
+  };
+  validateObjectReference(admission.importRef);
+  const imports = context.normalizedReadinessImports ??= new Map();
+  let imported = imports.get(admission.importRef.sha256);
+  if (imported) requireThat(imported.bytes === admission.importRef.bytes, 'DIGEST',
+    'Normalized import reference length differs from its retained bytes');
+  else {
+    const retained = await readContent(admission.importRef);
+    object(retained, ['kind', 'manifest', 'manifestRef', 'objectMapRefs'],
+      ['kind', 'manifest', 'manifestRef', 'objectMapRefs']);
+    requireThat(retained.kind === 'normalized-readiness-import' &&
+      Array.isArray(retained.manifest?.objectRefs) &&
+      retained.manifest.objectRefs.length > 0 &&
+      retained.manifest.objectRefs.length <= MAX_OBJECTS &&
+      Array.isArray(retained.objectMapRefs) &&
+      retained.objectMapRefs.length === Math.ceil(retained.manifest.objectRefs.length / OUTCOME_PAGE_SIZE),
+    'EVIDENCE', 'Normalized import has no complete bounded object mapping');
+    const objects = [];
+    let bytes = 0;
+    for (const [index, ref] of retained.objectMapRefs.entries()) {
+      const page = await readContent(ref);
+      object(page, ['kind', 'index', 'objects'], ['kind', 'index', 'objects']);
+      const count = Math.min(OUTCOME_PAGE_SIZE,
+        retained.manifest.objectRefs.length - objects.length);
+      requireThat(page.kind === 'normalized-object-map' && page.index === index &&
+        Array.isArray(page.objects) && page.objects.length === count,
+      'EVIDENCE', 'Normalized object-map page is unavailable or incomplete');
+      for (const entry of page.objects) {
+        object(entry, ['originalRef', 'retainedRef'], ['originalRef', 'retainedRef']);
+        validateObjectReference(entry.originalRef);
+        bytes += entry.originalRef.bytes;
+        requireThat(bytes <= MAX_BUNDLE_BYTES, 'CAPACITY',
+          'Normalized import exceeds the retained bundle byte budget');
+        objects.push({ ref: entry.originalRef, value: await readContent(entry.retainedRef) });
+      }
+    }
+    imported = { bytes: admission.importRef.bytes,
+      ...validateRetainedEvidenceBundle({
+        manifest: retained.manifest, manifestRef: retained.manifestRef, objects,
+      }) };
+    imports.set(admission.importRef.sha256, imported);
+  }
+  const definition = imported.specification.cases.find(test => test.id === evidence.testId);
+  const test = cycleTests(cycle).find(test => test.id === evidence.testId);
+  const execution = imported.context.executions.find(item => item.id === definition?.executionId)?.context;
+  requireThat(definition && test && definition.expectedDigest === digest(test.expected) &&
+    execution && execution.candidateDigest === evidence.candidateDigest &&
+    execution.testSpecDigest === evidence.testSpecDigest &&
+    execution.configDigest === evidence.configDigest &&
+    sameExecutionSources(execution.sources, evidence.executionSources) &&
+    admission.assertionPageRefs.length <= Math.ceil(definition.assertions.length / OUTCOME_PAGE_SIZE),
+  'EVIDENCE', 'Retained normalized input is not bound to its original managed case');
+  const assertions = new Set();
+  for (const [index, ref] of admission.assertionPageRefs.entries()) {
+    const page = await readContent(ref);
+    object(page, ['kind', 'testId', 'index', 'observations'],
+      ['kind', 'testId', 'index', 'observations']);
+    requireThat(page.kind === 'normalized-case-observations' &&
+      page.testId === test.id && page.index === index &&
+      Array.isArray(page.observations) && page.observations.length > 0 &&
+      page.observations.length <= OUTCOME_PAGE_SIZE,
+    'EVIDENCE', 'Normalized admission assertion page is unavailable or misbound');
+    for (const selected of page.observations) {
+      const report = imported.reports.find(item => item.id === selected.reportId);
+      const observation = report?.observations.find(item => item.id === selected.observationId);
+      requireThat(observation && observation.testId === test.id &&
+        definition.assertions.some(item => item.id === observation.assertionId) &&
+        !assertions.has(observation.assertionId) &&
+        digest(selected) === digest({
+          reportId: report.id, observationId: observation.id,
+          observedAt: observation.observedAt, sourceSequence: observation.sourceSequence,
+          startedAt: report.startedAt, completedAt: report.finishedAt,
+        }),
+      'EVIDENCE', 'Normalized admission relabeled or duplicated an original assertion');
+      assertions.add(observation.assertionId);
+    }
+  }
+  requireThat(admission.status !== 'Passed' || assertions.size === definition.assertions.length,
+    'EVIDENCE', 'Passing normalized admission is missing original assertion proof');
+}
 export async function prepareCycleEvidence(store, cycle, context) {
-  if (cycle.storageVersion !== 2) return;
+  if (cycle.storageVersion !== 2) {
+    for (const test of cycleTests(cycle)) {
+      for (const evidence of testHistory(cycle, context.all(), test.id)) {
+        if (!evidence.retainedPayloadRef) continue;
+        const payload = await readValidationObject(store, cycle.workItemId, evidence.retainedPayloadRef, context);
+        await prepareRetainedReadinessEvidence(store, cycle, evidence, payload, context);
+      }
+    }
+    return;
+  }
   const catalog = await readValidationObject(store, cycle.workItemId, cycle.testCatalogRef, context);
   bindCycleCatalog(cycle, catalog);
   for (const binding of catalog.bindings) if (binding.snapshotRef) {
@@ -492,8 +665,9 @@ export async function prepareCycleEvidence(store, cycle, context) {
           'EVIDENCE', 'Retained observation relabeled its producer execution source');
         }
         if (item.retainedPayloadRef && !payloads.has(item.retainedPayloadRef.sha256)) {
-          payloads.set(item.retainedPayloadRef.sha256,
-            await readValidationObject(store, cycle.workItemId, item.retainedPayloadRef, context));
+          const payload = await readValidationObject(store, cycle.workItemId, item.retainedPayloadRef, context);
+          await prepareRetainedReadinessEvidence(store, cycle, item, payload, context);
+          payloads.set(item.retainedPayloadRef.sha256, payload);
         }
       }
       requireThat(slot.selected === null || slot.history.some(item => item.id === slot.selected),
@@ -663,6 +837,10 @@ export async function bindExecutionEvidence(store, tx, cycle, test, evidence) {
     if (operation.executionSourceRef) {
       const source = validateExecutionSource(await readValidationObject(store, cycle.workItemId,
         operation.executionSourceRef, tx), operation);
+      if (tx.normalizedImports?.has(test.id)) requireThat(
+        evidence.configDigest === source.configDigest &&
+          sameExecutionSources(evidence.executionSources, source.sources),
+        'EVIDENCE', 'Normalized report differs from the original dispatched execution source');
       evidence.configDigest = source.configDigest;
       evidence.executionSources = structuredClone(source.sources);
       evidence.executionSourceDigest = source.sourceDigest;
@@ -670,6 +848,12 @@ export async function bindExecutionEvidence(store, tx, cycle, test, evidence) {
         'Producer execution source is not eligible for the current candidate/spec/config');
     } else requireThat(cycle.storageVersion !== 2 && terminal.has(operation.status), 'EVIDENCE',
       'Dispatched test evidence requires the original immutable execution source');
+  }
+  if (tx.normalizedImports?.has(test.id)) {
+    requireThat(executionSourceEligible(cycle, evidence, { requireRevision: true }),
+      'STALE', 'Normalized execution does not match the current managed source/specification/configuration');
+    if (operation) evidence.operationDigest = digest(operation);
+    return;
   }
   if (cycle.storageVersion !== 2) return;
   if (!operation) {

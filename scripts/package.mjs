@@ -1,10 +1,10 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { readTarGzip, safePath, sha256, tarGzip } from '../packaging/standalone/archive.mjs';
 
 const execute = promisify(execFile);
 const ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
@@ -25,11 +25,54 @@ export function npmInvocation(args, {
   return { command: 'npm', args };
 }
 
-async function sha256(file) {
-  return createHash('sha256').update(await fs.readFile(file)).digest('hex');
+// npm owns file selection and contents; Git, not host filesystem permissions,
+// owns executable modes. Re-encode only metadata through the shared codec.
+export function canonicalPackageArchive(bytes, { gitIndex, files }) {
+  if (typeof gitIndex !== 'string' || !gitIndex.endsWith('\0')) {
+    throw new Error('Package modes require a NUL-terminated Git index');
+  }
+  const indexed = new Map();
+  for (const record of gitIndex.slice(0, -1).split('\0')) {
+    const match = /^([0-7]{6}) ([a-f0-9]{40}|[a-f0-9]{64}) ([0-3])\t(.+)$/su.exec(record);
+    if (!match || match[3] !== '0' || indexed.has(match[4])) {
+      throw new Error('Package modes require unique, merged Git index entries');
+    }
+    indexed.set(match[4], match[1]);
+  }
+  if (!Array.isArray(files) || !files.length) throw new Error('npm pack must report its selected files');
+  const selected = new Map();
+  const names = new Set();
+  for (const file of files) {
+    const name = safePath(file.path);
+    if (!Number.isSafeInteger(file.size) || file.size < 0 || names.has(name.toLowerCase())) {
+      throw new Error(`Invalid or duplicate npm file selection: ${name}`);
+    }
+    names.add(name.toLowerCase());
+    selected.set(name, file.size);
+  }
+  const entries = readTarGzip(bytes);
+  if (entries.length !== selected.size) throw new Error('npm archive and reported file selection disagree');
+  const canonicalEntries = entries.map(entry => {
+    if (!entry.path.startsWith('package/')) throw new Error('npm archive entry is outside package/');
+    const name = safePath(entry.path.slice('package/'.length));
+    if (!selected.has(name) || selected.get(name) !== entry.data.length) {
+      throw new Error(`npm archive and reported file selection disagree: ${name}`);
+    }
+    const mode = indexed.get(name);
+    if (!['100644', '100755'].includes(mode)) {
+      throw new Error(`Package file requires a regular tracked Git mode: ${name}`);
+    }
+    return { ...entry, mode: mode === '100755' ? 0o755 : 0o644 };
+  });
+  const archive = tarGzip(canonicalEntries);
+  const inventory = canonicalEntries.map(entry => ({
+    path: entry.path.slice('package/'.length), size: entry.data.length,
+  })).sort((left, right) => left.path.localeCompare(right.path));
+  return { bytes: archive, sha256: sha256(archive), size: archive.length,
+    unpackedSize: inventory.reduce((total, file) => total + file.size, 0), files: inventory };
 }
 
-async function packOnce(destination, environment) {
+async function packOnce(destination, environment, expectedFilename, gitIndex) {
   await fs.mkdir(destination, { recursive: true });
   const invocation = npmInvocation(
     ['pack', '--json', '--ignore-scripts', '--pack-destination', destination],
@@ -41,8 +84,17 @@ async function packOnce(destination, environment) {
     throw new Error('npm pack must produce exactly one package');
   }
   const result = results[0];
+  if (result.filename !== expectedFilename) {
+    throw new Error(`Expected ${expectedFilename}, received ${result.filename}`);
+  }
   const file = path.join(destination, result.filename);
-  return { result, file, digest: await sha256(file) };
+  const { bytes, ...manifest } = canonicalPackageArchive(await fs.readFile(file),
+    { gitIndex, files: result.files });
+  if (result.unpackedSize !== manifest.unpackedSize) {
+    throw new Error('npm archive and reported unpacked size disagree');
+  }
+  await fs.writeFile(file, bytes);
+  return { file, ...manifest };
 }
 
 export async function buildPackage({
@@ -67,27 +119,23 @@ export async function buildPackage({
   for (const name of ownedNames) {
     await fs.rm(path.join(destination, name), { force: true });
   }
-  const first = await packOnce(destination, environment);
-  if (first.result.filename !== expectedFilename) {
-    throw new Error(`Expected ${expectedFilename}, received ${first.result.filename}`);
-  }
+  const { stdout: gitIndex } = await execute('git', ['ls-files', '--stage', '-z'],
+    { cwd: ROOT, maxBuffer: 4 * 1024 * 1024 });
+  const first = await packOnce(destination, environment, expectedFilename, gitIndex);
 
   const comparisonRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-sdlc-pack-'));
   try {
-    const second = await packOnce(comparisonRoot, environment);
-    if (second.result.filename !== expectedFilename || second.digest !== first.digest) {
+    const second = await packOnce(comparisonRoot, environment, expectedFilename, gitIndex);
+    if (second.sha256 !== first.sha256) {
       throw new Error('Repeated packaging did not produce the same artifact digest');
     }
   } finally {
     await fs.rm(comparisonRoot, { recursive: true, force: true });
   }
 
-  const files = [...first.result.files]
-    .map(file => ({ path: file.path, size: file.size }))
-    .sort((left, right) => left.path.localeCompare(right.path));
   const manifest = { schemaVersion: 1, name: pkg.name, version: pkg.version,
-    filename: expectedFilename, sha256: first.digest,
-    size: first.result.size, unpackedSize: first.result.unpackedSize, files };
+    filename: expectedFilename, sha256: first.sha256,
+    size: first.size, unpackedSize: first.unpackedSize, files: first.files };
   return { artifact: first.file, ...manifest };
 }
 

@@ -6,6 +6,11 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { canonical, digest, newId, parseJson, LIMITS, requireThat } from './core.mjs';
 import { isWindowsDevicePath, sameNativePath, withinNativePath } from './platform.mjs';
+import { beginInstallActivity, finishInstallActivity } from './install-progress.mjs';
+
+export function resolveCopilotHome(home = process.env.COPILOT_HOME || path.join(os.homedir(), '.copilot')) {
+  return path.resolve(home);
+}
 
 export async function exists(file) {
   try { await fs.lstat(file); return true; }
@@ -29,6 +34,9 @@ export function within(root, file) {
 export async function safePath(root, relative) {
   requireThat(typeof relative === 'string' && relative && !path.isAbsolute(relative), 'PATH', 'Expected a relative path');
   const canonicalRoot = await canonicalPath(root);
+  return resolveSafePath(canonicalRoot, relative);
+}
+async function resolveSafePath(canonicalRoot, relative) {
   const absolute = path.resolve(canonicalRoot, relative);
   let current = canonicalRoot;
   for (const part of path.relative(canonicalRoot, absolute).split(path.sep)) {
@@ -58,11 +66,14 @@ export async function safePath(root, relative) {
 export async function privateDirectory(directory) {
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
 }
-async function boundedHandleBytes(handle, limit, file) {
+async function boundedHandleBytes(handle, limit, file, expectedSize) {
   const chunks = [];
   let size = 0;
+  const expectedBytes = Number(expectedSize);
   while (true) {
-    const chunk = Buffer.alloc(Math.min(65536, limit + 1 - size));
+    const remaining = expectedBytes - size;
+    const chunk = Buffer.alloc(Math.min(65536, limit + 1 - size,
+      remaining >= 0 ? remaining + 1 : 65536));
     const { bytesRead } = await handle.read(chunk, 0, chunk.length, size);
     if (!bytesRead) break;
     size += bytesRead;
@@ -84,14 +95,14 @@ export async function readBytes(file, limit = LIMITS.input) {
     requireThat(stat.isFile() && stat.dev === before.dev && stat.ino === before.ino,
       'STALE', 'File identity changed while opening');
     requireThat(stat.size <= BigInt(limit), 'CAPACITY', `File exceeds ${limit} bytes: ${file}`);
-    const bytes = await boundedHandleBytes(handle, limit, file);
+    const bytes = await boundedHandleBytes(handle, limit, file, stat.size);
     let after = await handle.stat({ bigint: true });
     if (after.mtimeNs !== stat.mtimeNs || after.ctimeNs !== stat.ctimeNs) {
       let settled = false;
       // Bound metadata settling; content or identity changes are never retried.
       for (let confirmation = 0; confirmation < 2; confirmation++) {
         const confirmationStart = after;
-        const confirmed = await boundedHandleBytes(handle, limit, file);
+        const confirmed = await boundedHandleBytes(handle, limit, file, confirmationStart.size);
         const confirmationEnd = await handle.stat({ bigint: true });
         requireThat(confirmationEnd.isFile() &&
           confirmationEnd.dev === stat.dev &&
@@ -123,6 +134,7 @@ export async function readJson(file, { optional = false, limit = LIMITS.input } 
   catch (error) { if (optional && error.code === 'ENOENT') return null; throw error; }
 }
 async function syncDirectory(directory) {
+  const activity = beginInstallActivity('directory-flush');
   let handle;
   try {
     handle = await fs.open(directory, 'r');
@@ -130,6 +142,7 @@ async function syncDirectory(directory) {
   } catch (error) {
     if (!['EINVAL', 'ENOTSUP', 'EISDIR', ...(process.platform === 'win32' ? ['EPERM', 'EACCES'] : [])].includes(error.code)) throw error;
   } finally { if (handle) await handle.close(); }
+  finishInstallActivity(activity);
 }
 export async function atomicWrite(file, content, {
   fault = async () => {},
@@ -146,9 +159,13 @@ export async function atomicWrite(file, content, {
   try {
     handle = await fs.open(temporary, 'wx', mode);
     await fault('created');
+    const write = beginInstallActivity('file-write');
     await handle.writeFile(content);
+    finishInstallActivity(write);
     await fault('written');
+    const flush = beginInstallActivity('file-flush');
     await handle.sync();
+    finishInstallActivity(flush);
     await handle.close();
     handle = undefined;
     await fault('flushed');
@@ -186,7 +203,7 @@ async function recoverDeadLockGuarded(file) {
   let current;
   try { current = await readJson(file, { optional: true, limit: 2048 }); }
   catch (error) {
-    if (!competingWindowsLockRead(error)) throw error;
+    if (error.code !== 'STALE' && !competingWindowsLockRead(error)) throw error;
     return false;
   }
   if (!confirmedDead(current)) return false;
@@ -208,7 +225,17 @@ async function withRecoveryGuard(file, action) {
     const guard = `${file}.recovery-guard`;
     try { await fs.mkdir(guard, { mode: 0o700 }); }
     catch (error) {
-      if (error.code === 'EEXIST') {
+      let existingGuard = error.code === 'EEXIST';
+      if (!existingGuard && process.platform === 'win32' && error.code === 'EPERM') {
+        // A guard being removed can still occupy its name on Windows.
+        let stat;
+        try { stat = await fs.lstat(guard); }
+        catch (inspectionError) {
+          if (inspectionError.code !== 'ENOENT') throw error;
+        }
+        existingGuard = stat?.isDirectory() && !stat.isSymbolicLink();
+      }
+      if (existingGuard) {
         const owner = await readJson(path.join(guard, 'owner.json'), {
           optional: true,
           limit: 2048,
@@ -338,11 +365,35 @@ export async function updateJson(file, initial, update, { expectedRevision, limi
     return after;
   }, lockOptions);
 }
-export async function listJson(directory) {
-  let names;
-  try { names = await fs.readdir(directory); }
+async function readDirectory(directory, options) {
+  try { return await fs.readdir(directory, options); }
   catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+}
+export async function listJson(directory) {
+  const names = await readDirectory(directory);
   return names.filter(name => name.endsWith('.json')).sort();
+}
+export async function* readJsonEntries(directory, { limit = LIMITS.input } = {}) {
+  const canonicalDirectory = await canonicalPath(directory);
+  const entries = (await readDirectory(canonicalDirectory, { withFileTypes: true }))
+    .filter(entry => entry.name.endsWith('.json'))
+    .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+  const batchSize = 16;
+  for (let offset = 0; offset < entries.length; offset += batchSize) {
+    const batch = await Promise.allSettled(entries.slice(offset, offset + batchSize).map(async entry => {
+      const name = entry.name;
+      requireThat(path.basename(name) === name && !path.isAbsolute(name),
+        'PATH', 'JSON directory entries must be relative basenames');
+      const file = entry.isSymbolicLink() ? await resolveSafePath(canonicalDirectory, name) :
+        path.join(canonicalDirectory, name);
+      return { name, record: await readJson(file, { limit }) };
+    }));
+    // Drain every dispatched read before yielding, even when a read or caller fails.
+    for (const result of batch) {
+      if (result.status === 'rejected') throw result.reason;
+      yield result.value;
+    }
+  }
 }
 export async function immutableJson(file, value, options) {
   const old = await readJson(file, { optional: true });

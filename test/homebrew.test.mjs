@@ -1,3 +1,16 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "applicability": [
+    {"names": ["T-PRD041 public Homebrew formula verification requires the independently frozen destination"], "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "release-consumer", "reason": "PR-only TOOL04 destination-authority and exact published-byte regression; local data-only formula fixtures, no brew/network or critical-profile growth.", "prerequisites": ["Node >=22", "Owned repository-local formula fixtures"]},
+    {"options": "nativeMac", "platforms": ["macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Native Mac link promotion and rollback cannot be credited from Windows simulation.", "prerequisites": ["Native Mac Node", "Owned package-manager prefix"]}
+  ],
+  "surfaces": [{"coverage": "direct", "paths": ["packaging/homebrew/generate-formula.mjs", "scripts/homebrew-switch.mjs", "scripts/homebrew-lifecycle.mjs"]}],
+  "plannedCases": [{"id": "T-PRD041", "selectors": [
+    {"name": "T-PRD041 public Homebrew formula verification requires the independently frozen destination", "parents": []}
+  ]}],
+  "groups": [{"root": "T-PRD041 public Homebrew formula verification requires the independently frozen destination",
+    "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
@@ -5,17 +18,19 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { generateHomebrewFormula } from '../packaging/homebrew/generate-formula.mjs';
 import { promoteHomebrewLink, switchToHomebrew } from '../scripts/homebrew-switch.mjs';
+import { validateInitialHomebrewFormula } from '../scripts/release-bundle.mjs';
+import { publicHomebrewFormula } from '../scripts/homebrew-lifecycle.mjs';
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const nativeMac = { skip: process.platform !== 'darwin' };
 
-async function fixture(t, version = '0.3.0') {
+async function fixture(t, version = '0.3.0', shared = false) {
   const root = path.resolve('.test-data', `homebrew-${randomUUID()}`);
   await fs.mkdir(root, { recursive: true });
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const files = [];
-  for (const arch of ['x64', 'arm64']) {
-    const filename = `ai-sdlc-framework-${version}-macos-${arch}.tar.gz`;
+  for (const arch of shared ? ['shared'] : ['x64', 'arm64']) {
+    const filename = `ai-sdlc-framework-${version}-macos${shared ? '' : `-${arch}`}.tar.gz`;
     const bytes = Buffer.from(`checksum fixture ${version} ${arch}`);
     await fs.writeFile(path.join(root, filename), bytes);
     files.push({ filename, kind: 'archive', sha256: digest(bytes), size: bytes.length });
@@ -27,6 +42,86 @@ async function fixture(t, version = '0.3.0') {
     }, files };
   return { root, descriptor, artifactDirectory: root };
 }
+
+test('T-PRD041 public Homebrew formula verification requires the independently frozen destination', async t => {
+  const previousRepository = 'PreviousOwner/prior-releases';
+  const currentRepository = 'ApprovedOwner/public-releases';
+  const inputs = [];
+  for (const [version, repository] of [['0.4.0', previousRepository], ['0.5.0', currentRepository],
+    ['0.6.0', 'UrMiCh/AI-SDLC-Framework']]) {
+    const input = await fixture(t, version, true);
+    const generated = await generateHomebrewFormula(input);
+    const contents = generated.contents.replaceAll('https://github.com/urmich/ai-sdlc-framework/releases/download/',
+      `https://github.com/${repository}/releases/download/`);
+    const record = { filename: 'ai-sdlc-framework.rb', kind: 'homebrew', sha256: digest(contents),
+      size: Buffer.byteLength(contents) };
+    input.descriptor.files.push(record);
+    await fs.writeFile(path.join(input.root, record.filename), contents);
+    const descriptorBefore = JSON.stringify(input.descriptor);
+    const verified = await publicHomebrewFormula(input.root, input.descriptor, repository);
+    assert.equal(verified.contents, contents);
+    assert.equal(verified.sha256, record.sha256);
+    assert.equal(JSON.stringify(input.descriptor), descriptorBefore);
+    assert.equal(await fs.readFile(path.join(input.root, record.filename), 'utf8'), contents);
+    await assert.rejects(publicHomebrewFormula(input.root, input.descriptor), { code: 'RELEASE_INTEGRATION_BLOCKED' });
+    await assert.rejects(publicHomebrewFormula(input.root, input.descriptor, 'https://github.com/other/release'),
+      /approved.*repository|destination/iu);
+    await assert.rejects(publicHomebrewFormula(input.root, input.descriptor,
+      repository === previousRepository ? currentRepository : previousRepository), /exact public archive URLs/u);
+    const wrongSource = structuredClone(input.descriptor);
+    wrongSource.files[0].filename = `ai-sdlc-framework-${version}-linux-x64.tar.gz`;
+    await assert.rejects(publicHomebrewFormula(input.root, wrongSource, repository), /exact public archive URLs/u);
+    const wrongVersion = { ...input.descriptor, version: '9.0.0' };
+    await assert.rejects(publicHomebrewFormula(input.root, wrongVersion, repository), /exact public archive URLs/u);
+    await fs.appendFile(path.join(input.root, record.filename), '\n');
+    await assert.rejects(publicHomebrewFormula(input.root, input.descriptor, repository));
+    await fs.writeFile(path.join(input.root, record.filename), contents.replace('class AiSdlcFramework', 'class AiSdlcFrameworX'));
+    await assert.rejects(publicHomebrewFormula(input.root, input.descriptor, repository), /bytes differ/u);
+    inputs.push({ input, repository });
+  }
+  await assert.rejects(publicHomebrewFormula(inputs[0].input.root, inputs[0].input.descriptor, currentRepository));
+});
+
+test('T-PRD061 shared Mac metadata has one verified URL/hash and native Node dependency for both consumers', async t => {
+  const input = await fixture(t, '0.5.0', true);
+  const formula = await generateHomebrewFormula(input);
+  assert.deepEqual(await generateHomebrewFormula({ ...input, architectures: ['x64', 'arm64'] }), formula);
+  const record = input.descriptor.files[0];
+  assert.deepEqual([...formula.contents.matchAll(/^\s*url "([^"]+)"/gmu)].map(match => match[1]),
+    [`https://github.com/urmich/ai-sdlc-framework/releases/download/v0.5.0/${record.filename}`]);
+  assert.deepEqual([...formula.contents.matchAll(/^\s*sha256 "([^"]+)"/gmu)].map(match => match[1]), [record.sha256]);
+  assert.doesNotMatch(formula.contents, /on_arm|on_intel|macos-(?:arm64|x64)|depends_on arch:/u);
+  assert.match(formula.contents, /^  depends_on "node@24"$/mu);
+  assert.match(formula.contents, /SDLC_NODE: "#\{formula_opt_bin\("node@24"\)\}\/node"/u);
+  const validated = validateInitialHomebrewFormula({ descriptor: input.descriptor,
+    repository: 'urmich/ai-sdlc-framework', contents: formula.contents });
+  assert.deepEqual(validated.nodeDependency, {
+    validation: 'Passed', formula: 'node@24', major: 24, scope: 'runtime', conditional: false,
+  });
+  assert.throws(() => validateInitialHomebrewFormula({ descriptor: input.descriptor,
+    repository: 'urmich/ai-sdlc-framework', contents: formula.contents.replaceAll('node@24', 'node@22') }),
+  /Node dependency contract mismatch/u);
+  assert.equal(formula.sha256, digest(formula.contents));
+  for (const arch of ['arm64', 'x64']) {
+    const candidate = await generateHomebrewFormula({ ...input, mode: 'candidate', architectures: [arch],
+      candidateBaseUrl: 'http://127.0.0.1:8123/' });
+    assert.deepEqual([...candidate.contents.matchAll(/^\s*url "([^"]+)"/gmu)].map(match => match[1]),
+      [`http://127.0.0.1:8123/${record.filename}`]);
+    assert.deepEqual([...candidate.contents.matchAll(/^\s*sha256 "([^"]+)"/gmu)].map(match => match[1]), [record.sha256]);
+    assert.match(candidate.contents, /^  depends_on "node@24"$/mu);
+  }
+  await fs.appendFile(path.join(input.root, record.filename), 'modified');
+  await assert.rejects(generateHomebrewFormula(input), /checksum or size/u);
+});
+
+test('T-PRD061 shared formula rejects stale CPU assets and missing archives rather than selecting another URL', async t => {
+  const input = await fixture(t, '0.5.0', true);
+  const descriptor = structuredClone(input.descriptor);
+  descriptor.files.push({ ...descriptor.files[0], filename: 'ai-sdlc-framework-0.5.0-macos-arm64.tar.gz' });
+  await assert.rejects(generateHomebrewFormula({ ...input, descriptor }), /architecture-specific/u);
+  await fs.unlink(path.join(input.root, input.descriptor.files[0].filename));
+  await assert.rejects(generateHomebrewFormula(input), { code: 'ENOENT' });
+});
 
 test('T-51 stable Homebrew metadata deterministically binds both architectures and lifecycle ownership', async t => {
   const input = await fixture(t);
@@ -40,12 +135,12 @@ test('T-51 stable Homebrew metadata deterministically binds both architectures a
   }
   assert.deepEqual(await generateHomebrewFormula({ ...input, architectures: ['x64', 'arm64'] }), first);
   assert.doesNotMatch(first.contents, /depends_on arch:/u);
-  assert.match(first.contents, /depends_on "node@22"/u);
+  assert.match(first.contents, /depends_on "node@24"/u);
   assert.match(first.contents, /libexec.install Dir\["\*"\]/u);
   assert.match(first.contents, /skip_clean "libexec"/u);
   assert.match(first.contents, /cp libexec\/"LICENSE", prefix\/"LICENSE"/u);
-  assert.match(first.contents, /write_env_script libexec\/"bin\/sdlc",\n\s+PATH: +"#\{formula_opt_bin\("node@22"\)\}:\$PATH"/u);
-  assert.match(first.contents, /SDLC_NODE: "#\{formula_opt_bin\("node@22"\)\}\/node"/u);
+  assert.match(first.contents, /write_env_script libexec\/"bin\/sdlc",\n\s+PATH: +"#\{formula_opt_bin\("node@24"\)\}:\$PATH"/u);
+  assert.match(first.contents, /SDLC_NODE: "#\{formula_opt_bin\("node@24"\)\}\/node"/u);
   const install = first.contents.split('  def install\n')[1].split('  end\n')[0];
   assert.doesNotMatch(install, /COPILOT_HOME|system|purge|uninstall/u);
   assert.doesNotMatch(first.contents, /def (post_install|uninstall)|latest|--overwrite/u);

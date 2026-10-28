@@ -1,11 +1,98 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "process", "paths": ["scripts/test-runner.mjs", "scripts/test-worker.mjs"]}],
+  "groups": [{
+    "root": "T-PRD018 Windows process identity stays pinned through exit probes until explicit release",
+    "minimumSlots": 3
+  }, {
+    "root": "T-PRD018 unsafe failure diagnostics terminate without hanging or manufacturing complete evidence",
+    "minimumSlots": 4
+  }],
+  "resources": {
+    "workers": 2,
+    "names": [
+      "T-130 SIGINT cancels active file workers before the public runner returns",
+      "T-130 SIGTERM cancels active file workers before the public runner returns",
+      "T-136 public runner enforces 2 real file workers and executes every file once"
+    ],
+    "owner": "runner-resource-contract",
+    "reason": "These actual overlap/cancellation callbacks need two slots reserved before their deadlines start."
+  },
+  "applicability": [{
+    "names": [
+      "T-PRD018 Windows process identity stays pinned through exit probes until explicit release"
+    ],
+    "platforms": ["windows-x64"],
+    "owner": "runner-process-identity-contract",
+    "reason": "PR-only native Windows handle ownership prevents PID reuse without hiding a surviving original worker.",
+    "prerequisites": ["Windows PowerShell, owned Node child processes and three aggregate worker slots"]
+  }, {
+    "names": [
+      "T-PRD018 periodic checkpoints recover a transient Windows replacement conflict without losing the active worker"
+    ],
+    "platforms": ["windows-x64"],
+    "owner": "runner-checkpoint-contract",
+    "reason": "Classified Windows sharing conflicts must recover within the existing atomic replacement budget.",
+    "prerequisites": ["Native Windows atomic file replacement"]
+  }, {
+    "names": [
+      "T-130 SIGINT cancels active file workers before the public runner returns",
+      "T-130 SIGTERM cancels active file workers before the public runner returns",
+      "T-136 public runner enforces 1 real file workers and executes every file once",
+      "T-136 public runner enforces 2 real file workers and executes every file once"
+    ],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "The requested real worker count is an execution prerequisite, not permission to multiply a nested host allocation.",
+    "prerequisites": ["Aggregate host allocation supports the declared one/two actual file workers"]
+  }],
+  "variants": [
+    {"expression": "`T-130 ${signal} cancels active file workers before the public runner returns`", "domains": {"signal": ["SIGINT", "SIGTERM"]}},
+    {"expression": "`T-136 public runner enforces ${workers} real file workers and executes every file once`", "domains": {"workers": ["1", "2"]}}
+  ],
+  "plannedCases": [
+    {"id": "T-PRD010", "selectors": [
+      {"name": "T-130 public runner preserves caller file order rather than sorting the expensive-first queue", "parents": []},
+      {"name": "T-136 public runner enforces 1 real file workers and executes every file once", "parents": []},
+      {"name": "T-136 public runner enforces 2 real file workers and executes every file once", "parents": []}
+    ]},
+    {"id": "T-PRD007", "selectors": [
+      {"name": "T-130 public runner preserves a real failing child and still executes the passing sibling", "parents": []},
+      {"name": "T-130 SIGINT cancels active file workers before the public runner returns", "parents": []},
+      {"name": "T-130 SIGTERM cancels active file workers before the public runner returns", "parents": []}
+    ]},
+    {"id": "T-PRD018", "selectors": [
+      {"name": "T-PRD018 command cancellation settles the owned group before return and fails closed on unknown survivors", "parents": []},
+      {"name": "T-PRD018 owned worker exit assertions distinguish reused identities from surviving workers", "parents": []},
+      {"name": "T-PRD018 Windows process identity stays pinned through exit probes until explicit release", "parents": []},
+      {"name": "T-GHB24 native execution evidence distinguishes passing, failing and skipped assertions without overwriting reports", "parents": []},
+      {"name": "T-130 SIGINT cancels active file workers before the public runner returns", "parents": []},
+      {"name": "T-130 SIGTERM cancels active file workers before the public runner returns", "parents": []}
+    ]}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { createContext, runInContext } from 'node:vm';
 import { setTimeout as delay } from 'node:timers/promises';
-import { pathToFileURL } from 'node:url';
-import { createPlan, parseOptions, repositoryRoot, unitFiles } from '../scripts/test-runner.mjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createPlan, parseOptions, repositoryRoot, unitFiles, validationSelectionDescriptor,
+  validationSelectionProtocol, writeValidationSelection } from '../scripts/test-runner.mjs';
+import { declarationTokens, discoverDeclarations } from '../scripts/validation-inventory.mjs';
+import { nativeStageSelections, validateNativeGroupReport } from '../scripts/native-validation.mjs';
+import { readTestBudget } from '../scripts/test-budget.mjs';
+import { digest, SdlcError } from '../src/core.mjs';
+import { atomicWrite } from '../src/files.mjs';
+import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
+import { executeValidationCommand, processDiagnostic } from '../scripts/validation-tools.mjs';
+import { windowsProcessIdentity, assertOwnedProcessExited } from './owned-process-fixture.mjs';
 
 const canonicalNames = [
   'T-101 selected fetch remote requires exactly one credential-free URL',
@@ -26,33 +113,330 @@ const canonicalNames = [
   'T-109 the gate rejects a prepared PR ID different from the actual tool argument',
 ];
 
-async function scratch(t) {
-  const directory = await fs.mkdtemp(path.join(repositoryRoot, 'test', '.runner-fixture-'));
+async function scratch(t, root = repositoryRoot) {
+  const directory = await fs.mkdtemp(path.join(root, 'test', '.runner-fixture-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   return directory;
 }
 
-function invoke(args, environment = {}) {
+function invoke(args, environment = {}, root = repositoryRoot) {
   const child = spawn(process.execPath, [
-    path.join(repositoryRoot, 'scripts', 'test-runner.mjs'), ...args,
-  ], { cwd: repositoryRoot, env: { ...process.env, SDLC_TEST_WORKERS: '2', ...environment }, shell: false });
+    path.join(root, 'scripts', 'test-runner.mjs'), ...args,
+  ], { cwd: root, env: { ...process.env, SDLC_TEST_WORKERS: '2', ...environment }, shell: false });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', data => { stdout += data; });
   child.stderr.on('data', data => { stderr += data; });
   const done = new Promise((resolve, reject) => {
     child.once('error', reject);
-    child.once('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
+    child.once('close', (code, signal) => resolve({ code, signal, stdout, stderr, completedAtMs: Date.now() }));
   });
   return { child, done };
+}
+
+function runnerFailureDiagnostic({ stdout, stderr = '', ...context }) {
+  const errorPrefix = /^(?:\[(?:test-runner|test-worker):error\] |(?:[A-Za-z]+)?Error(?: \[[A-Z0-9_]+\])?: )/u;
+  const errors = `${stdout}\n${stderr}`.split(/\r?\n/u)
+    .filter(line => errorPrefix.test(line))
+    .slice(0, 4).map(line => processDiagnostic(line.replace(errorPrefix, '')));
+  return JSON.stringify({ kind: 'runner-subprocess-failure', ...context, errors,
+    originalOutput: {
+      stdout: { sha256: digest(stdout), bytes: Buffer.byteLength(stdout) },
+      stderr: { sha256: digest(stderr), bytes: Buffer.byteLength(stderr) },
+    } });
 }
 
 function summary(output, kind) {
   const prefix = `[test-runner:${kind}] `;
   const line = output.split(/\r?\n/u).find(value => value.startsWith(prefix));
-  assert.ok(line, output);
+  assert.ok(line, line ? undefined : runnerFailureDiagnostic({ stdout: output, expectedSummary: kind }));
   return JSON.parse(line.slice(prefix.length));
 }
+
+test('T-PRD018 command cancellation settles the owned group before return and fails closed on unknown survivors', async t => {
+  const modulePath = path.join(repositoryRoot, 'scripts', 'validation-tools.mjs');
+  const source = (await fs.readFile(modulePath, 'utf8'))
+    .replace(/^import .+;\r?$/gmu, '').replace(/^export /gmu, '')
+    .replaceAll('import.meta.url', JSON.stringify(pathToFileURL(modulePath).href));
+  const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'group-boundary-'));
+  t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+  const partial = 'Authorization: Bearer owned-group-fixture\n';
+  for (const mode of ['drain', 'root-exits-before-stop', 'stop-after-root-close', 'persistent', 'denied', 'unknown', 'missing', 'root-never-closes']) {
+    const directory = path.join(evidence, mode);
+    await fs.mkdir(directory);
+    const cancellation = new AbortController();
+    const owned = Object.assign(new EventEmitter(), {
+      pid: 731941, exitCode: null, signalCode: null,
+      stdout: new PassThrough(), stderr: new PassThrough(),
+    });
+    let spawned;
+    const launched = new Promise(resolve => { spawned = resolve; });
+    let observedDrain;
+    const draining = new Promise(resolve => { observedDrain = resolve; });
+    let releaseDrain;
+    const released = new Promise(resolve => { releaseDrain = resolve; });
+    let present = mode !== 'missing';
+    let rootClosed = false;
+    let clock = 0;
+    let returned = false;
+    const signals = [];
+    // Only this VM kernel sees these synthetic group IDs; no host process is signalled.
+    const context = createContext({
+      Buffer, TextDecoder, URL, fileURLToPath, path, createHash, SdlcError, digest,
+      declarationTokens, sanitizeExecutionPayload, atomicWrite, setTimeout, clearTimeout,
+      open: fs.open, realpath: fs.realpath,
+      performance: { now: () => clock },
+      delay: async milliseconds => {
+        assert.equal(milliseconds, 10);
+        clock += milliseconds;
+        if (['persistent', 'denied', 'missing', 'root-never-closes'].includes(mode)) return;
+        observedDrain('draining');
+        await released;
+        present = false;
+      },
+      process: { platform: 'darwin', version: process.version, arch: 'x64', env: {},
+        kill(pid, signal) {
+          assert.equal(pid, -owned.pid);
+          signals.push(signal);
+          if (signal === 'SIGTERM') {
+            assert.equal(rootClosed, false, 'Never signal a group after losing its tracked root');
+            if (mode === 'missing') throw Object.assign(new Error('Owned group absent'), { code: 'ESRCH' });
+            return true;
+          }
+          assert.equal(signal, 0, 'Settlement must not send a delayed destructive signal');
+          if (mode === 'denied') throw Object.assign(new Error('Owned group observation denied'), { code: 'EPERM' });
+          if (mode === 'unknown') return false;
+          if (!present) throw Object.assign(new Error('Owned group absent'), { code: 'ESRCH' });
+          return true;
+        } },
+      spawn(command, args, options) {
+        assert.equal(command, 'controlled-owned-producer');
+        assert.equal(options.detached, true);
+        spawned();
+        return owned;
+      },
+    });
+    const execute = runInContext(`${source}\nexecuteValidationCommand;`, context);
+    const pending = execute({ name: 'cancelled', command: 'controlled-owned-producer', args: [],
+      outputDir: directory, signal: cancellation.signal });
+    const settled = pending.then(value => { returned = true; return value; });
+    try {
+      await launched;
+      owned.stdout.end(partial);
+      owned.stderr.end('original validator failure\n');
+      const close = () => {
+        rootClosed = true;
+        owned.signalCode = mode === 'drain' || ['persistent', 'denied', 'unknown', 'missing'].includes(mode) ? 'SIGTERM' : null;
+        owned.exitCode = owned.signalCode ? null : 7;
+        owned.emit('close', owned.exitCode, owned.signalCode);
+      };
+      if (mode === 'stop-after-root-close') close();
+      cancellation.abort();
+      if (mode === 'root-exits-before-stop' || mode === 'stop-after-root-close') {
+        if (!rootClosed) close();
+      } else if (mode !== 'root-never-closes') {
+        // Let the actual stop callback send TERM before publishing root close.
+        await Promise.resolve();
+        close();
+      }
+      if (['drain', 'root-exits-before-stop', 'stop-after-root-close'].includes(mode)) {
+        assert.equal(await Promise.race([draining, settled.then(() => 'returned')]), 'draining',
+          'Root close must not finish a command while its owned group remains');
+        assert.equal(returned, false);
+        const journal = await fs.readFile(path.join(directory, 'cancelled.journal.ndjson'), 'utf8');
+        assert.ok(!journal.split('\n').filter(Boolean).map(JSON.parse).some(row => row.kind === 'command-end'));
+        assert.equal(JSON.parse(await fs.readFile(path.join(directory, 'cancelled.json'), 'utf8')).complete, false);
+        releaseDrain();
+      }
+      const report = await settled;
+      assert.equal(report.complete, false);
+      assert.equal(report.cleanup.rootExitObserved, mode !== 'root-never-closes');
+      assert.equal(report.cleanup.survivorsVerified, !['persistent', 'denied', 'unknown', 'root-never-closes'].includes(mode));
+      assert.equal(report.signal, owned.signalCode);
+      assert.equal(report.exitCode, owned.exitCode);
+      assert.ok(report.causes.some(cause => cause.type === 'cancellation'));
+      assert.equal(report.originalOutput.stdout.sha256, digest(partial));
+      assert.equal(report.originalOutput.stderr.sha256, digest('original validator failure\n'));
+      assert.ok(!report.stdout.includes('owned-group-fixture'));
+      if (['persistent', 'denied', 'unknown', 'root-never-closes'].includes(mode)) {
+        const code = ['persistent', 'root-never-closes'].includes(mode) ? 'STOP_TIMEOUT' : mode === 'denied' ? 'EPERM' : 'STOP_UNVERIFIED';
+        assert.equal(report.cleanup.outcome, 'uncertain');
+        assert.equal(report.cleanup.error.code, code);
+        assert.ok(report.causes.some(cause => cause.type === 'cleanup' && cause.code === code));
+        if (mode === 'denied') {
+          assert.equal(clock, 1000);
+          assert.ok(report.cleanup.probeDeniedCount > 0);
+          assert.ok(signals.filter(signal => signal === 0).length > 1);
+        } else if (!['persistent', 'root-never-closes'].includes(mode)) {
+          assert.equal(signals.filter(signal => signal === 0).length, 1);
+        }
+      } else {
+        assert.equal(report.cleanup.outcome, 'group-exited');
+        assert.equal(signals.at(-1), 0);
+      }
+      if (mode === 'stop-after-root-close') assert.ok(!signals.includes('SIGTERM'));
+      if (mode === 'root-exits-before-stop') assert.equal(signals.filter(signal => signal === 'SIGTERM').length, 1,
+        'The live root is signalled synchronously, before the later root-close event');
+      if (mode === 'missing') assert.ok(signals[0] === 'SIGTERM' && signals.slice(1).every(signal => signal === 0));
+      assert.ok(clock <= 1000, 'Persistent groups use a bounded settlement budget');
+      assert.deepEqual(JSON.parse(await fs.readFile(path.join(directory, 'cancelled.json'), 'utf8')), report);
+    } finally {
+      releaseDrain();
+      await settled;
+    }
+  }
+});
+
+test('T-PRD018 owned worker exit assertions distinguish reused identities from surviving workers', async t => {
+  const owned = { pid: process.pid, present: true, creationTime: '100', image: 'node' };
+  const reused = { ...owned, creationTime: '101' };
+  assert.doesNotThrow(() => process.kill(process.pid, 0));
+  assertOwnedProcessExited(owned, reused);
+  assert.throws(() => assertOwnedProcessExited(owned, { ...owned }),
+    /No owned file process may survive the nested command/u);
+  const exited = { ...owned, present: false, exitTimeTicks: '621355968000010000' };
+  assertOwnedProcessExited(owned, exited, 2);
+  assert.throws(() => assertOwnedProcessExited(owned, exited, 1),
+    /No owned file process may survive the nested command/u);
+  assert.throws(() => assertOwnedProcessExited(owned,
+    { ...exited, exitTimeTicks: '621355968000030000' }, 2),
+  /No owned file process may survive the nested command/u);
+  assert.throws(() => assertOwnedProcessExited(owned, { pid: owned.pid, present: false }, 2));
+  assert.throws(() => assertOwnedProcessExited({ ...owned, present: false }, reused),
+    /captured while the worker is alive/u);
+  assert.throws(() => assertOwnedProcessExited(owned, { ...owned, creationTime: undefined }));
+  if (process.platform === 'win32') {
+    const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'owned-identity-'));
+    t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+    const exitPath = path.join(evidence, 'unexpected-creation.json');
+    await assert.rejects(windowsProcessIdentity(process.pid, exitPath), /live ready observation/u);
+    await assert.rejects(windowsProcessIdentity(process.pid, exitPath, { createdBeforeMs: 0 }),
+      /process-identity-unavailable/u);
+    assert.match(await fs.readFile(`${exitPath}.error`, 'utf8'), /creation does not predate its ready observation/u);
+    assert.doesNotThrow(() => process.kill(process.pid, 0),
+      'Rejecting an unexpected creation must never terminate that process');
+  }
+});
+
+test('T-PRD018 Windows process identity stays pinned through exit probes until explicit release',
+  { skip: process.platform !== 'win32' }, async t => {
+    const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'owned-pin-'));
+    t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+    for (const liveAtProbe of [false, true]) {
+      const child = spawn(process.execPath, ['--eval', `
+const timer=setInterval(()=>{},1000);
+process.once('message',()=>{clearInterval(timer);process.disconnect();});
+process.send({pid:process.pid,observedAtMs:Date.now()});
+`], { shell: false, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+      const closed = new Promise(resolve => child.once('close', (code, signal) => resolve({ code, signal })));
+      let monitor;
+      try {
+        const ready = await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('Owned pin fixture did not become ready')), 5000);
+          child.once('message', value => { clearTimeout(timer); resolve(value); });
+          child.once('error', error => { clearTimeout(timer); reject(error); });
+        });
+        assert.equal(ready.pid, child.pid);
+        const exitPath = path.join(evidence, `${liveAtProbe ? 'live' : 'exited'}-${ready.pid}.exit.json`);
+        monitor = await windowsProcessIdentity(ready.pid, exitPath, {
+          createdBeforeMs: ready.observedAtMs, retainUntilRelease: true,
+        });
+        assert.equal(monitor.identity.pid, ready.pid);
+        if (!liveAtProbe) {
+          child.send('exit');
+          assert.deepEqual(await closed, { code: 0, signal: null });
+        }
+        let observerClosed = false;
+        monitor.closed.then(() => { observerClosed = true; });
+        await fs.writeFile(`${exitPath}.inspect`, 'inspect', { flag: 'wx' });
+        const deadline = Date.now() + 5000;
+        let inspection;
+        while (Date.now() < deadline && !inspection) {
+          try { inspection = JSON.parse(await fs.readFile(`${exitPath}.inspection.json`, 'utf8')); }
+          catch (error) { if (error.code !== 'ENOENT') throw error; }
+          if (inspection) break;
+          assert.equal(observerClosed, false,
+            'The original Windows handle must not be released before the owner completes its exit probe');
+          await delay(10);
+        }
+        assert.ok(inspection, 'The held native handle must answer the ownership inspection');
+        assert.equal(inspection.pid, ready.pid);
+        assert.equal(inspection.creationTime, monitor.identity.creationTime);
+        assert.equal(inspection.handleOpen, true);
+        assert.equal(inspection.hasExited, !liveAtProbe);
+        if (liveAtProbe) {
+          assert.throws(() => assert.throws(() => process.kill(ready.pid, 0),
+            error => error.code === 'ESRCH'), { code: 'ERR_ASSERTION' },
+          'Pinning must not terminate a live original and manufacture a passing exit probe');
+        } else {
+          assert.throws(() => process.kill(ready.pid, 0), error => error.code === 'ESRCH',
+            'The unchanged immediate exit probe must succeed while the original identity remains pinned');
+        }
+        if (child.connected) child.send('exit');
+        await closed;
+        const released = await monitor.release();
+        assert.deepEqual(released, { code: 0, signal: null });
+        const observed = JSON.parse(await fs.readFile(exitPath, 'utf8'));
+        assert.equal(observed.pid, ready.pid);
+        assert.equal(observed.creationTime, monitor.identity.creationTime);
+        assert.equal(observed.present, false);
+        assert.equal(await fs.readFile(`${exitPath}.release`, 'utf8'), 'release');
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+        await closed;
+        if (monitor) {
+          if (typeof monitor.release === 'function') await monitor.release();
+          else await monitor.closed;
+        }
+      }
+    }
+  });
+
+test('T-PRD018 runner assertion diagnostics retain subprocess identities without inline source', () => {
+  const source = 'JSON.stringify({platform:process.platform,arch:process.arch,major:Number(process.versions.node.split(".")[0])})';
+  const stdout = `[test-runner:error] Owned cancellation fixture did not complete\n` +
+    `[test-runner:start] ${JSON.stringify({ command: ['node', '--eval', source] })}\n`;
+  assert.throws(() => summary(stdout, 'end'), error => {
+    const retained = sanitizeExecutionPayload(Buffer.from(JSON.stringify({ message: error.message })));
+    const diagnostic = JSON.parse(retained.message.split('\n')[0]);
+    assert.equal(diagnostic.kind, 'runner-subprocess-failure');
+    assert.equal(diagnostic.expectedSummary, 'end');
+    assert.equal(diagnostic.errors[0].message, 'Owned cancellation fixture did not complete');
+    assert.deepEqual(diagnostic.originalOutput.stdout, { sha256: digest(stdout), bytes: Buffer.byteLength(stdout) });
+    assert.ok(!retained.message.includes(source));
+    return true;
+  });
+  assert.throws(() => assert.equal(1, 130, runnerFailureDiagnostic({
+    stdout, stderr: 'Error: Owned cancellation delivery failed\n',
+    expectedExitCode: 130, actualExitCode: 1,
+  })), error => {
+    const retained = sanitizeExecutionPayload(Buffer.from(JSON.stringify({ message: error.message })));
+    const diagnostic = JSON.parse(retained.message.split('\n')[0]);
+    assert.equal(diagnostic.expectedExitCode, 130);
+    assert.equal(diagnostic.actualExitCode, 1);
+    assert.equal(diagnostic.errors[1].message, 'Owned cancellation delivery failed');
+    assert.ok(!retained.message.includes(source));
+    return true;
+  });
+  const structured = JSON.stringify({ detail: 'x'.repeat(2100) });
+  const stderr = `Error: ${structured}\n`;
+  assert.throws(() => assert.equal(1, 130, runnerFailureDiagnostic({
+    stdout: structured, stderr, expectedExitCode: 130, actualExitCode: 1,
+  })), error => {
+    const retained = sanitizeExecutionPayload(Buffer.from(JSON.stringify({ message: error.message })));
+    const diagnostic = JSON.parse(retained.message.split('\n')[0]);
+    assert.equal(diagnostic.actualExitCode, 1);
+    assert.equal(diagnostic.expectedExitCode, 130);
+    assert.deepEqual(diagnostic.originalOutput.stdout,
+      { sha256: digest(structured), bytes: Buffer.byteLength(structured) });
+    assert.deepEqual(diagnostic.originalOutput.stderr,
+      { sha256: digest(stderr), bytes: Buffer.byteLength(stderr) });
+    assert.deepEqual(diagnostic.errors[0].original,
+      { sha256: digest(structured), bytes: Buffer.byteLength(structured) });
+    assert.ok(diagnostic.errors[0].message.length <= 2000);
+    return true;
+  });
+});
 
 test('T-130 canonical fast manifest preserves the exact three files and 16 original case names', async () => {
   assert.deepEqual(unitFiles, [
@@ -79,7 +463,7 @@ test('T-130 full and coverage profiles discover every top-level test file exactl
     assert.deepEqual(plan.files.map(file => path.basename(file)).sort(), expected);
     assert.equal(new Set(plan.files).size, expected.length);
     assert.equal(plan.args.includes('--experimental-test-coverage'), profile === 'coverage');
-    assert.equal(path.basename(plan.files[0]), 'deployment.test.mjs');
+    assert.equal(path.basename(plan.files[0]), 'observation-retention-refresh.test.mjs');
   }
 });
 
@@ -112,6 +496,118 @@ test('T-130 targeted selection rejects missing, escaping, non-test and duplicate
   }
 });
 
+test('T-PRD017 owned selection files preserve a complete large native stage without Windows-sized argv', async t => {
+  const directory = await scratch(t);
+  const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'selection-transport-'));
+  t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+  const marker = path.join(directory, 'executed');
+  const file = path.join(directory, 'large.unit.test.mjs');
+  const relative = path.relative(repositoryRoot, file).split(path.sep).join('/');
+  const names = [0, 1].map(index => `large selected unit ${index} ${'x'.repeat(22000)}`);
+  const source = "import test from 'node:test';import {appendFile} from 'node:fs/promises';" +
+    names.map((name, index) =>
+      `test(${JSON.stringify(name)},()=>appendFile(${JSON.stringify(marker)},'${index}\\n'));`).join('\n');
+  await fs.writeFile(file, source);
+  const declarations = [
+    ...unitFiles.map((unit, index) => discoverDeclarations(
+      `import test from 'node:test';test('canonical fixture ${index}',()=>{});`, unit)),
+    discoverDeclarations(source, relative),
+    discoverDeclarations("import test from 'node:test';test('remaining regression fixture',()=>{});",
+      'test/transport-remainder.test.mjs'),
+  ];
+  const inventory = { complete: true, unresolved: [], nodeUnresolved: [],
+    files: declarations.map(({ file, sourceDigest }) => ({ file, sourceDigest })),
+    cases: declarations.flatMap(declaration => declaration.cases) };
+  const stages = nativeStageSelections(inventory, JSON.stringify({ tests: [] }));
+  const stage = stages.find(stage => stage.name === 'required-units');
+  assert.deepEqual(stages.map(stage => stage.name), ['unit', 'required-units', 'regression']);
+  assert.deepEqual(stages[0].args, ['unit']);
+  assert.ok(stage.selectorName.length > 32767);
+  assert.deepEqual(stage.cases.map(test => test.name), names);
+  assert.deepEqual(stage.args, ['targeted', '--selection-file', stage.selection.path]);
+  assert.ok(stage.args.join(' ').length < 200);
+  const legacyArgs = ['--eval', 'process.exit(0)', '--', 'scripts/test-runner.mjs',
+    'targeted', '--name', stage.selectorName, ...stage.files];
+  let launch;
+  try {
+    const child = spawn(process.execPath, legacyArgs, { cwd: repositoryRoot, stdio: 'ignore', shell: false });
+    launch = await new Promise(resolve => {
+      child.once('error', error => resolve({ error: error.code, pid: child.pid }));
+      child.once('close', code => resolve({ code, pid: child.pid }));
+    });
+  } catch (error) { launch = { error: error.code }; }
+  if (process.platform === 'win32') {
+    assert.equal(launch.error, 'ENAMETOOLONG');
+    assert.equal(launch.pid, undefined);
+  } else assert.equal(launch.code, 0, 'The inert compatibility probe must never execute fixture tests');
+  const reference = await writeValidationSelection({ files: stage.files, name: stage.selectorName });
+  t.after(() => fs.unlink(path.join(repositoryRoot, reference.path)));
+  assert.deepEqual(reference, stage.selection);
+  assert.deepEqual(await writeValidationSelection({ files: stage.files, name: stage.selectorName }), reference);
+  const selected = await createPlan(parseOptions([...stage.args, '--workers', '1'], {}));
+  assert.deepEqual(selected.testOptions.testNamePatterns, [stage.selectorName]);
+  assert.deepEqual(selected.groups.flatMap(group => group.assertionIds).sort(),
+    stage.cases.map(test => test.id).sort());
+  const reportPath = path.join(evidence, 'large-stage.json');
+  const result = await invoke([...stage.args, '--workers', '1'], { SDLC_TEST_REPORT_FILE: reportPath }).done;
+  assert.equal(result.code, 0, 'The bounded public command must execute every large-selected fixture root');
+  assert.deepEqual((await fs.readFile(marker, 'utf8')).trim().split('\n'), ['0', '1']);
+  const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+  assert.equal(report.complete, true);
+  assert.deepEqual(report.selection.namePatterns, [stage.selectorName]);
+  assert.deepEqual(report.executions.map(test => test.name), names);
+  assert.equal(report.summary.counts.passed, 2);
+  assert.deepEqual(report.command.slice(2), [...stage.args, '--workers', '1']);
+  const journal = await fs.readFile(`${reportPath}.journal.ndjson`, 'utf8');
+  const target = `${{ win32: 'windows', darwin: 'macos', linux: 'linux' }[process.platform]}-${process.arch}`;
+  assert.equal(validateNativeGroupReport({ inventory, stage, report, journal, target }).length, 2);
+  const changed = structuredClone(report);
+  changed.selection.namePatterns = ['different selector'];
+  assert.throws(() => validateNativeGroupReport({ inventory, stage, report: changed, journal, target }),
+    /selection patterns/u);
+
+  const malformed = [
+    { ...validationSelectionDescriptor({ files: [relative] }).payload, workers: 32 },
+    { schemaVersion: 2, protocol: validationSelectionProtocol, files: [relative] },
+    { schemaVersion: 1, protocol: 'unknown', files: [relative] },
+    { schemaVersion: 1, protocol: validationSelectionProtocol, files: [relative, relative] },
+    { schemaVersion: 1, protocol: validationSelectionProtocol, files: ['test/../outside.test.mjs'] },
+    { schemaVersion: 1, protocol: validationSelectionProtocol, files: ['src/outside.test.mjs'] },
+    { schemaVersion: 1, protocol: validationSelectionProtocol, files: [relative], name: '[' },
+  ];
+  const inputs = malformed.map(value => Buffer.from(JSON.stringify(value)));
+  inputs.push(Buffer.from('{'), Buffer.from([255]), Buffer.from(
+    `{"schemaVersion":1,"protocol":${JSON.stringify(validationSelectionProtocol)},"files":[${JSON.stringify(relative)}],"files":[${JSON.stringify(relative)}]}`));
+  await fs.unlink(marker);
+  for (const bytes of inputs) {
+    const ref = `.test-data/test-selections/${digest(bytes)}.json`;
+    const absolute = path.join(repositoryRoot, ref);
+    try {
+      await fs.writeFile(absolute, bytes, { flag: 'wx' });
+      t.after(() => fs.unlink(absolute));
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      assert.deepEqual(await fs.readFile(absolute), bytes);
+    }
+    const denied = await invoke(['targeted', '--selection-file', ref]).done;
+    assert.notEqual(denied.code, 0, 'Malformed, unknown or escaping input cannot reach a callback');
+    await assert.rejects(fs.stat(marker), { code: 'ENOENT' });
+  }
+  const tampered = `.test-data/test-selections/${digest(`mismatched-${relative}`)}.json`;
+  await fs.writeFile(path.join(repositoryRoot, tampered),
+    JSON.stringify(validationSelectionDescriptor({ files: [relative] }).payload), { flag: 'wx' });
+  t.after(() => fs.unlink(path.join(repositoryRoot, tampered)));
+  assert.notEqual((await invoke(['targeted', '--selection-file', tampered]).done).code, 0);
+  await assert.rejects(fs.stat(marker), { code: 'ENOENT' });
+  for (const args of [
+    ['unit', '--selection-file', reference.path],
+    ['targeted', '--selection-file', reference.path, relative],
+    ['targeted', '--selection-file', reference.path, '--name', 'inline override'],
+    ['targeted', '--selection-file', '../outside.json'],
+    ['targeted', '--selection-file', path.join(evidence, 'outside.json')],
+  ]) assert.throws(() => parseOptions(args, {}));
+});
+
 test('T-130 public targeted runner supports filenames with spaces and exact name filtering', async t => {
   const directory = await scratch(t);
   const file = path.join(directory, 'test with spaces.test.mjs');
@@ -136,6 +632,9 @@ test('unselected failure', () => assert.fail('must not run'));
   assert.ok(end.elapsedMs > 0);
   assert.equal(end.exitCode, 0);
   assert.equal(end.signal, null);
+  const missing = await invoke(['targeted', '--workers', '1', '--name', '^no matching assertion$', file]).done;
+  assert.equal(missing.code, 2, missing.stdout + missing.stderr);
+  assert.match(missing.stderr, /no test assertions/u);
 });
 
 test('T-130 public runner preserves a real failing child and still executes the passing sibling', async t => {
@@ -152,6 +651,58 @@ test('T-130 public runner preserves a real failing child and still executes the 
   assert.equal(summary(result.stdout, 'end').exitCode, 1);
 });
 
+test('T-PRD018 coded failures preserve safe command output and do not interrupt sibling roots', async t => {
+  const directory = await scratch(t);
+  const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'runner-coded-failure-'));
+  t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+  const fail = path.join(directory, 'coded-failure.test.mjs');
+  const pass = path.join(directory, 'sibling.test.mjs');
+  const marker = path.join(directory, 'sibling-finished');
+  await fs.writeFile(fail, "import test from 'node:test';import assert from 'node:assert/strict';" +
+    "test('owned coded failure',()=>{" +
+    "throw Object.assign(new Error('Owned lock contention'),{code:'LOCK_BUSY',details:{lock:'owned-lock'}});});" +
+    "test('owned JSON assertion failure',()=>assert.equal('NotRun','Passed',JSON.stringify({" +
+    "status:'NotRun',blockers:['EVIDENCE','Required source is absent, linked or oversized']," +
+    "authorization:'fixture-reporter-secret'})));\n");
+  await fs.writeFile(pass, "import test from 'node:test';import {writeFile} from 'node:fs/promises';" +
+    `test('passing independent root',()=>writeFile(${JSON.stringify(marker)},'finished'));\n`);
+  const reportPath = path.join(evidence, 'runner.json');
+  const environment = { ...process.env, NO_COLOR: '1', SDLC_TEST_REPORT_FILE: reportPath };
+  delete environment.FORCE_COLOR;
+  const result = await executeValidationCommand({
+    name: 'coded-failure', command: process.execPath,
+    args: ['scripts/test-runner.mjs', 'targeted', '--workers', '1', fail, pass],
+    cwd: repositoryRoot, outputDir: evidence, signal: t.signal,
+    environment,
+  });
+  assert.equal(result.complete, true, result.diagnostic);
+  assert.equal(result.exitCode, 1, 'The genuine failed assertion remains non-passing');
+  assert.deepEqual(result.causes, []);
+  assert.equal(result.cleanup.requested, false);
+  assert.match(result.stdout, /Owned lock contention/u);
+  assert.match(result.stdout, /"status":"NotRun"/u);
+  assert.match(result.stdout, /Required source is absent, linked or oversized/u);
+  assert.match(result.stdout, /'NotRun'[\s\S]*'Passed'/u);
+  assert.equal(await fs.readFile(marker, 'utf8'), 'finished');
+  const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+  assert.equal(report.complete, true);
+  assert.deepEqual([report.summary.counts.failed, report.summary.counts.passed,
+    report.summary.counts.cancelled], [2, 1, 0]);
+  assert.equal(report.executions.find(row => row.name === 'owned coded failure').diagnostic.message,
+    'Owned lock contention');
+  const failed = report.executions.find(row => row.name === 'owned JSON assertion failure');
+  assert.equal(failed.status, 'Failed');
+  assert.match(failed.diagnostic.message, /"status":"NotRun"/u);
+  assert.match(failed.diagnostic.message, /'NotRun'[\s\S]*'Passed'/u);
+  const retained = JSON.parse(await fs.readFile(path.join(evidence, 'coded-failure.json'), 'utf8'));
+  assert.deepEqual(retained, result);
+  const journal = await fs.readFile(path.join(evidence, 'coded-failure.journal.ndjson'), 'utf8');
+  assert.ok(!journal.trim().split('\n').map(JSON.parse).some(row => row.kind === 'output-rejected'));
+  for (const text of [result.stdout, result.stderr, JSON.stringify(report), journal]) {
+    assert.ok(!text.includes('fixture-reporter-secret'));
+  }
+});
+
 test('T-GHB24 native execution evidence distinguishes passing, failing and skipped assertions without overwriting reports', async t => {
   const directory = await scratch(t);
   const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'runner-evidence-'));
@@ -161,12 +712,14 @@ test('T-GHB24 native execution evidence distinguishes passing, failing and skipp
 import assert from 'node:assert/strict';
 test('actual passing assertion', () => assert.equal(2 + 2, 4));
 test('actual failing assertion', () => assert.equal(2 + 2, 5));
-test('unexecuted assertion', {skip: true}, () => assert.fail('must not execute'));
+test('unexecuted assertion', {skip: 'Owned unavailable-adapter fixture'}, () => assert.fail('must not execute'));
 `);
   const reportPath = path.join(evidence, 'outcomes.json');
-  const result = await invoke(['targeted', file], { SDLC_TEST_REPORT_FILE: reportPath }).done;
+  const result = await invoke(['targeted', '--workers', '1', file], { SDLC_TEST_REPORT_FILE: reportPath }).done;
   assert.equal(result.code, 1, result.stdout + result.stderr);
-  const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+  const retainedReport = await fs.readFile(reportPath, 'utf8');
+  assert.ok(retainedReport.trim(), result.stdout + result.stderr);
+  const report = JSON.parse(retainedReport);
   assert.equal(report.profile, 'targeted');
   assert.equal(report.platform, process.platform);
   assert.equal(report.architecture, process.arch);
@@ -174,7 +727,25 @@ test('unexecuted assertion', {skip: true}, () => assert.fail('must not execute')
   assert.equal(outcomes['actual passing assertion'], 'Passed');
   assert.equal(outcomes['actual failing assertion'], 'Failed');
   assert.equal(outcomes['unexecuted assertion'], 'Skipped');
+  assert.equal(report.executions.find(item => item.name === 'unexecuted assertion').skipReason,
+    'Owned unavailable-adapter fixture');
+  assert.ok(report.command.includes('targeted'));
+  assert.equal(report.executable, process.execPath);
   assert.equal(report.summary.success, false);
+  assert.equal(report.complete, true);
+  assert.equal(report.exitCode, 1);
+  assert.ok(Date.parse(report.finishedAt) >= Date.parse(report.startedAt));
+  const journalPath = `${reportPath}.journal.ndjson`;
+  const originalJournal = await fs.readFile(journalPath);
+  const journal = originalJournal.toString('utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(journal[0].kind, 'execution-start');
+  assert.equal(journal.at(-1).kind, 'execution-end');
+  assert.ok(journal.some(event => event.kind === 'registration'));
+  assert.ok(journal.some(event => event.kind === 'start'));
+  assert.deepEqual(journal.map(event => event.sequence),
+    Array.from({ length: journal.length }, (_, index) => index + 1));
+  assert.ok(journal.some(event => event.kind === 'completion' &&
+    event.status === 'Failed' && event.diagnostic.message));
   assert.deepEqual([report.summary.counts.passed, report.summary.counts.failed,
     report.summary.counts.skipped], [1, 1, 1]);
   assert.ok(report.executions.every(item => item.file.startsWith('test/') && !path.isAbsolute(item.file)));
@@ -182,10 +753,246 @@ test('unexecuted assertion', {skip: true}, () => assert.fail('must not execute')
   const overwrite = await invoke(['targeted', file], { SDLC_TEST_REPORT_FILE: reportPath }).done;
   assert.equal(overwrite.code, 1);
   assert.deepEqual(await fs.readFile(reportPath), original);
+  assert.deepEqual(await fs.readFile(journalPath), originalJournal);
   const outside = await invoke(['targeted', file],
     { SDLC_TEST_REPORT_FILE: path.join(directory, 'outside.json') }).done;
   assert.equal(outside.code, 1);
   await assert.rejects(fs.stat(path.join(directory, 'outside.json')), { code: 'ENOENT' });
+});
+
+test('T-PRD018 unsafe failure diagnostics terminate without hanging or manufacturing complete evidence',
+  { timeout: 30000 }, async t => {
+    const directory = await scratch(t);
+    const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'runner-rejected-'));
+    t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+    const file = path.join(directory, 'rejected.test.mjs');
+    await fs.writeFile(file, "import test from 'node:test';import assert from 'node:assert/strict';" +
+      "test('unsupported diagnostic fixture',()=>assert.fail(\"unsupported ['quoted diagnostic']\"));\n");
+    const reportPath = path.join(evidence, 'rejected.json');
+    const pending = invoke(['targeted', file], { SDLC_TEST_REPORT_FILE: reportPath });
+    t.after(async () => {
+      if (pending.child.exitCode === null && pending.child.signalCode === null) pending.child.kill();
+      await pending.done;
+    });
+    const result = await pending.done;
+    assert.notEqual(result.code, 0);
+    const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+    assert.equal(report.complete, false);
+    assert.equal(report.evidenceError.code, 'UNSAFE');
+    assert.ok(!report.executions.some(row => row.status === 'Passed'));
+    const rows = (await fs.readFile(`${reportPath}.journal.ndjson`, 'utf8')).trim().split('\n').map(JSON.parse);
+    assert.ok(rows.some(row => row.kind === 'evidence-rejected' && row.code === 'UNSAFE'));
+    assert.ok(rows.some(row => row.kind === 'evidence-rejected' && row.cause?.message &&
+      /^[a-f0-9]{64}$/u.test(row.original?.sha256) && row.original.bytes > 0));
+    assert.equal(report.executions.find(row => row.name === 'unsupported diagnostic fixture').status, 'Failed');
+    assert.equal(rows.at(-1).kind, 'execution-end');
+    assert.equal(rows.at(-1).complete, false);
+
+    const legitimate = path.join(directory, 'markdown-failure.test.mjs');
+    const identityFile = path.join(directory, 'message-identity.json');
+    const workerIdentities = path.join(evidence, 'owned-worker-identities.ndjson');
+    const siblingMarker = path.join(directory, 'sibling-finished');
+    const privateValue = 'fixture-worker-private-value';
+    const guide = `# Current installation\n\n\`\`\`js\nconst config = { authorization: '${privateValue}' };\n\`\`\`\n`;
+    await fs.writeFile(legitimate, `import test from 'node:test';import assert from 'node:assert/strict';
+import {writeFileSync,existsSync,renameSync} from 'node:fs';import {createHash} from 'node:crypto';
+import path from 'node:path';
+import {setTimeout as delay} from 'node:timers/promises';
+async function captureOwnedIdentity(label){
+  if(process.platform!=='win32')return;
+  const ready=path.join(${JSON.stringify(evidence)},label+'.ready');
+  writeFileSync(ready+'.pending',JSON.stringify({pid:process.pid,observedAtMs:Date.now()}));
+  renameSync(ready+'.pending',ready);
+  while(!existsSync(path.join(${JSON.stringify(evidence)},label+'.release')))await delay(10);
+}
+test('legitimate Markdown assertion failure',async()=>{
+  await captureOwnedIdentity('failure');
+  try{assert.match(${JSON.stringify(guide)},/Old local title/u);}
+  catch(error){writeFileSync(${JSON.stringify(identityFile)},JSON.stringify({
+    sha256:createHash('sha256').update(error.message).digest('hex'),bytes:Buffer.byteLength(error.message)
+  }));throw error;}
+});
+test('passing sibling after diagnostic rejection',async()=>{
+  await captureOwnedIdentity('sibling');
+  await delay(75);writeFileSync(${JSON.stringify(siblingMarker)},'finished');
+});
+`);
+    const legitimateReportPath = path.join(evidence, 'markdown-failure.json');
+    const legitimatePending = invoke(['targeted', '--workers', '1', legitimate], {
+      SDLC_TEST_REPORT_FILE: legitimateReportPath,
+    });
+    const monitors = [];
+    const capture = (async () => {
+      if (process.platform !== 'win32') return;
+      try {
+        for (const label of ['failure', 'sibling']) {
+          const ready = path.join(evidence, `${label}.ready`);
+          await waitFor(async () => fs.stat(ready).then(() => true, error => {
+            if (error.code === 'ENOENT') return false;
+            throw error;
+          }), 'owned worker identity barrier');
+          const readyIdentity = JSON.parse(await fs.readFile(ready, 'utf8'));
+          const pid = readyIdentity.pid;
+          const monitor = await windowsProcessIdentity(pid, path.join(evidence, `${pid}.exit.json`),
+            { createdBeforeMs: readyIdentity.observedAtMs });
+          monitors.push(monitor.closed);
+          t.diagnostic(JSON.stringify({ kind: 'owned-worker-identity-captured',
+            owned: monitor.identity, capturedBeforeTrigger: true }));
+          await fs.appendFile(workerIdentities, JSON.stringify(monitor.identity) + '\n');
+          await fs.writeFile(path.join(evidence, `${label}.release`), 'captured');
+        }
+      } finally {
+        for (const label of ['failure', 'sibling']) {
+          await fs.writeFile(path.join(evidence, `${label}.release`), 'released');
+        }
+      }
+    })();
+    const captureResult = capture.then(() => null, error => error);
+    const observed = await legitimatePending.done;
+    const captureError = await captureResult;
+    t.diagnostic(JSON.stringify({ kind: 'owned-worker-command-completed',
+      completedAtMs: observed.completedAtMs, completionClockPrecisionMs: 1 }));
+    for (const monitor of monitors) assert.deepEqual(await monitor, { code: 0, signal: null },
+      'The held process observer must finish successfully');
+    if (captureError) throw captureError;
+    const processObservations = new Map();
+    if (process.platform === 'win32') {
+      const retainedIdentities = await fs.readFile(workerIdentities, 'utf8').catch(async error => {
+        t.diagnostic(runnerFailureDiagnostic(observed));
+        const failedCapture = JSON.parse(await fs.readFile(legitimateReportPath, 'utf8'));
+        t.diagnostic(JSON.stringify({ kind: 'owned-identity-capture-failed',
+          diagnostics: failedCapture.executions.filter(row => row.status === 'Failed').map(row => row.diagnostic) }));
+        throw error;
+      });
+      const identities = retainedIdentities.trim().split('\n').map(JSON.parse);
+      for (const identity of identities) {
+        t.diagnostic(JSON.stringify({ kind: 'owned-worker-identity-captured', owned: identity,
+          completedAtMs: observed.completedAtMs, completionClockPrecisionMs: 1 }));
+        const exitPath = path.join(evidence, `${identity.pid}.exit.json`);
+        await waitFor(async () => {
+          const failure = await fs.readFile(`${exitPath}.error`, 'utf8').catch(error => {
+            if (error.code === 'ENOENT') return null;
+            throw error;
+          });
+          assert.equal(failure, null, 'Held process exit observation failed: ' + failure);
+          return fs.stat(exitPath).then(() => true, error => {
+          if (error.code === 'ENOENT') return false;
+          throw error;
+          });
+        }, 'held owned process exit observation');
+        const afterReturn = JSON.parse(await fs.readFile(exitPath, 'utf8'));
+        const observation = { kind: 'owned-worker-exit-observation', owned: identity, afterReturn,
+          completedAtMs: observed.completedAtMs, completionClockPrecisionMs: 1 };
+        t.diagnostic(JSON.stringify(observation));
+        processObservations.set(identity.pid, observation);
+      }
+    }
+    assert.equal(observed.code, 1, 'Keep the genuine failed assertion non-passing');
+    const preserved = JSON.parse(await fs.readFile(legitimateReportPath, 'utf8'));
+    assert.equal(preserved.complete, false, 'Rejected diagnostic text must not manufacture complete evidence');
+    assert.equal(preserved.evidenceError.scope, 'failure-diagnostic');
+    assert.equal(preserved.evidenceError.fatal, false);
+    assert.deepEqual([preserved.summary.counts.failed, preserved.summary.counts.passed,
+      preserved.summary.counts.cancelled], [1, 1, 0]);
+    const failed = preserved.executions.find(row => row.name === 'legitimate Markdown assertion failure');
+    assert.equal(failed.status, 'Failed');
+    assert.equal(failed.diagnostic.retention.status, 'Rejected');
+    assert.deepEqual(failed.diagnostic.originalMessage, JSON.parse(await fs.readFile(identityFile, 'utf8')));
+    assert.equal(await fs.readFile(siblingMarker, 'utf8'), 'finished');
+    const journalText = await fs.readFile(`${legitimateReportPath}.journal.ndjson`, 'utf8');
+    const notices = journalText.trim().split('\n').map(JSON.parse);
+    const rejected = notices.find(row => row.kind === 'evidence-rejected');
+    assert.equal(rejected.scope, 'failure-diagnostic');
+    assert.equal(rejected.nameDigest, digest(failed.name));
+    assert.equal(rejected.groupId, failed.groupId);
+    assert.ok(rejected.original.bytes > failed.diagnostic.originalMessage.bytes);
+    assert.deepEqual(rejected.original, preserved.evidenceError.original);
+    const { status, ...cause } = failed.diagnostic.retention;
+    assert.equal(status, 'Rejected');
+    assert.deepEqual(rejected.cause, cause, 'Retain the actual sanitizer cause identity, not a manufactured exception');
+    assert.match(rejected.cause.message, /structured log fragment/u);
+    assert.deepEqual(notices.filter(row => row.kind === 'completion').map(({ kind, ...row }) => row),
+      preserved.executions);
+    assert.ok(notices.every((row, index) => row.sequence === index + 1));
+    for (const text of [journalText, JSON.stringify(preserved), observed.stdout, observed.stderr]) {
+      assert.ok(!text.includes(privateValue), 'Rejected failure text must not escape through artifacts or the reporter');
+    }
+    sanitizeExecutionPayload(Buffer.from(JSON.stringify({ stdout: observed.stdout, stderr: observed.stderr })));
+    const budget = preserved.resources.budget;
+    assert.ok(budget.activeWorkers <= budget.capacity && budget.peakActiveWorkers <= budget.capacity);
+    assert.ok(budget.residentWorkers <= budget.residentLimit &&
+      budget.peakResidentWorkers <= budget.residentLimit &&
+      budget.peakPotentialResidentWorkers <= budget.residentLimit);
+    assert.ok(budget.producers <= budget.producerLimit && budget.peakProducers <= budget.producerLimit &&
+      budget.controls <= budget.controlLimit && budget.peakControls <= budget.controlLimit);
+    const owned = preserved.groupExecution.groups;
+    assert.equal(owned.length, 2);
+    assert.equal(new Set(owned.flatMap(group => group.processIds)).size, 2);
+    for (const group of owned) {
+      assert.equal(group.processes.length, 1);
+      const lease = group.processes[0];
+      assert.deepEqual(group.processIds, [lease.pid]);
+      assert.ok(Number.isFinite(Date.parse(lease.startedAt)) && Number.isFinite(Date.parse(lease.finishedAt)) &&
+        Date.parse(lease.finishedAt) >= Date.parse(lease.startedAt), 'Every owned worker lease must be closed');
+      assert.equal(group.finishedAt, lease.finishedAt);
+      if (process.platform === 'win32') {
+        const observation = processObservations.get(lease.pid);
+        assert.ok(observation, 'Every owned worker requires its live creation identity and exit observation');
+        assertOwnedProcessExited(observation.owned, observation.afterReturn, observation.completedAtMs);
+      } else {
+        assert.throws(() => process.kill(lease.pid, 0), error => error.code === 'ESRCH',
+          'No owned file process may survive the nested command');
+      }
+    }
+    if (process.env.SDLC_TEST_BUDGET) {
+      assert.equal(budget.id, (await readTestBudget()).id,
+        'Nested validation must share its real ancestor allocation, not create a replacement budget');
+    } else {
+      assert.equal(budget.activeWorkers, 0);
+      assert.equal(budget.residentWorkers, 0);
+      assert.equal(budget.pendingParentRestorations, 0);
+    }
+
+    const opaque = path.join(directory, 'opaque-diagnostic.test.mjs');
+    await fs.writeFile(opaque, "import test from 'node:test';" +
+      "test('opaque non-failure diagnostic',t=>t.diagnostic('opaque \\u001b[31m payload'));");
+    const opaquePath = path.join(evidence, 'opaque-diagnostic.json');
+    const denied = await invoke(['targeted', opaque], { SDLC_TEST_REPORT_FILE: opaquePath }).done;
+    assert.notEqual(denied.code, 0);
+    const incomplete = JSON.parse(await fs.readFile(opaquePath, 'utf8'));
+    assert.equal(incomplete.complete, false);
+    assert.equal(incomplete.evidenceError.scope, 'event');
+    assert.equal(incomplete.evidenceError.fatal, true);
+    assert.equal(incomplete.evidenceError.cause.code, 'UNSAFE');
+    assert.ok(!denied.stdout.includes('\u001b'));
+  });
+
+test('T-PRD018 nested concurrent results retain exact ancestry and safe original selector identities', async t => {
+  const directory = await scratch(t);
+  const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'runner-nested-'));
+  t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+  const file = path.join(directory, 'nested.test.mjs');
+  await fs.writeFile(file, `export const validationDeclarations = {"schemaVersion":1,"variants":[
+  {"expression":"name","names":["first","second"]}
+]};
+import test from 'node:test';
+import assert from 'node:assert/strict';
+test('outer', {concurrency: 2}, async parent => {
+  await Promise.all(['first','second'].map(name => parent.test(name, async child => {
+    await child.test('same leaf name', () => assert.equal(name.length > 0, true));
+  })));
+});
+`);
+  const reportPath = path.join(evidence, 'nested.json');
+  const result = await invoke(['targeted', file], { SDLC_TEST_REPORT_FILE: reportPath }).done;
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+  assert.equal(report.complete, true);
+  const leaves = report.executions.filter(item => item.name === 'same leaf name');
+  assert.equal(leaves.length, 2);
+  assert.deepEqual(leaves.map(item => item.parents).sort(),
+    [['outer', 'first'], ['outer', 'second']]);
+  assert.ok(leaves.every(item => item.nameDigest && item.parentDigests.length === 2));
 });
 
 test('T-130 public runner preserves caller file order rather than sorting the expensive-first queue', async t => {
@@ -221,8 +1028,279 @@ function processRunning(pid) {
   }
 }
 
+async function assertJournalCheckpoint(reportPath, report) {
+  const journal = await fs.readFile(`${reportPath}.journal.ndjson`);
+  const reference = report.checkpoint.originalJournalPrefix;
+  assert.equal(report.checkpoint.journalDurable, true);
+  assert.ok(journal.length >= reference.bytes);
+  const prefix = journal.subarray(0, reference.bytes);
+  assert.equal(digest(prefix), reference.sha256);
+  const rows = prefix.length ? prefix.toString('utf8').trim().split('\n').map(JSON.parse) : [];
+  assert.equal(rows.at(-1)?.sequence ?? 0, report.checkpoint.journalSequence);
+  assert.ok(rows.every((row, index) => row.sequence === index + 1));
+  return rows;
+}
+
+async function assertDurableRunningCheckpoint(t, {
+  hiddenLease = false, replacementConflict = false,
+} = {}) {
+    let root = repositoryRoot;
+    if (hiddenLease) {
+      root = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'checkpoint-observer-copy-'));
+      t.after(() => fs.rm(root, { recursive: true, force: true }));
+      await Promise.all(['src', 'scripts', 'packaging'].map(directory =>
+        fs.cp(path.join(repositoryRoot, directory), path.join(root, directory), { recursive: true })));
+      await fs.copyFile(path.join(repositoryRoot, 'package.json'), path.join(root, 'package.json'));
+      await fs.mkdir(path.join(root, 'test'));
+      await fs.mkdir(path.join(root, '.test-data'));
+    }
+    const directory = await scratch(t, root);
+    const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'runner-checkpoint-'));
+    let preserveFailure = false;
+    t.after(() => preserveFailure ? undefined : fs.rm(evidence, { recursive: true, force: true }));
+    const marker = path.join(directory, 'entered.json');
+    const release = path.join(directory, 'release');
+    const file = path.join(directory, 'silent.test.mjs');
+    await fs.writeFile(file, `import test from 'node:test';import assert from 'node:assert/strict';
+import * as fs from 'node:fs/promises';import {setTimeout as delay} from 'node:timers/promises';
+test('completed root before blocker',()=>assert.equal(2+2,4));
+test('silent blocked root',async()=>{
+  await fs.writeFile(${JSON.stringify(`${marker}.pending`)},JSON.stringify({pid:process.pid,producerPid:process.ppid}),{flag:'wx'});
+  await fs.rename(${JSON.stringify(`${marker}.pending`)},${JSON.stringify(marker)});
+  const deadline=Date.now()+20000;
+  while(!(await fs.stat(${JSON.stringify(release)}).catch(error=>{
+    if(error.code!=='ENOENT')throw error;return null;
+  }))){
+    assert.ok(Date.now()<deadline,'Owned checkpoint fixture release timed out');await delay(20);
+  }
+});
+test('queued root must remain unstarted',()=>assert.fail('queued root executed'));
+`);
+    const reportPath = path.join(hiddenLease ? path.join(root, '.test-data') : evidence, 'partial.json');
+    const gate = path.join(directory, 'lease-visible');
+    const observationPath = path.join(directory, 'lease-observations.ndjson');
+    const conflictMarker = path.join(directory, 'replacement-conflict.json');
+    if (hiddenLease) {
+      if (replacementConflict) {
+        await fs.writeFile(`${conflictMarker}.pending`,
+          JSON.stringify({ code: 'EPERM', phase: 'running' }), { flag: 'wx' });
+      }
+      const plan = await createPlan(parseOptions(['targeted', '--workers', '1', file], {}), root);
+      const group = plan.groups.find(group => group.name.includes('silent blocked root'));
+      assert.ok(group);
+      await fs.rename(path.join(root, 'scripts', 'test-budget.mjs'),
+        path.join(root, 'scripts', 'test-budget-observer-original.mjs'));
+      const replacementProbe = replacementConflict ? `
+import mutableFs from 'node:fs/promises';import {syncBuiltinESMExports} from 'node:module';
+const originalRename=mutableFs.rename;
+let conflictArmed=false;
+let conflictInjected=false;
+let conflictRecorded=false;
+mutableFs.rename=async(from,to)=>{
+  if(conflictArmed&&!conflictInjected&&to===${JSON.stringify(reportPath)}){
+    conflictInjected=true;
+    throw Object.assign(new Error('Controlled transient checkpoint replacement conflict'),{code:'EPERM'});
+  }
+  const result=await originalRename(from,to);
+  if(conflictInjected&&!conflictRecorded&&to===${JSON.stringify(reportPath)}){
+    await originalRename(${JSON.stringify(`${conflictMarker}.pending`)},${JSON.stringify(conflictMarker)});
+    conflictRecorded=true;
+  }
+  return result;
+};
+syncBuiltinESMExports();
+` : '';
+      await fs.writeFile(path.join(root, 'scripts', 'test-budget.mjs'), `
+export * from './test-budget-observer-original.mjs';
+import {readTestGroupProcesses as actualProcesses,readTestBudget as actualBudget}
+  from './test-budget-observer-original.mjs';
+import {existsSync} from 'node:fs';import {appendFile} from 'node:fs/promises';
+${replacementProbe}
+export async function readTestGroupProcesses(groupId){
+  const hidden=groupId===${JSON.stringify(group.id)}&&!existsSync(${JSON.stringify(gate)});
+  const processes=await actualProcesses(groupId);
+  if(groupId===${JSON.stringify(group.id)})await appendFile(${JSON.stringify(observationPath)},
+    JSON.stringify({hidden,groupId,processes,returned:hidden?[]:processes,budget:await actualBudget()})+'\\n');
+  ${replacementConflict ? `// Arm before atomicWrite starts its replacement deadline; the injected failure performs no I/O.
+  if(groupId===${JSON.stringify(group.id)}&&!hidden&&processes.length)conflictArmed=true;` : ''}
+  return hidden?[]:processes;
+}
+`);
+    }
+    const pending = invoke(['targeted', '--workers', '1', file], { SDLC_TEST_REPORT_FILE: reportPath }, root);
+    let owned;
+    try {
+      await waitFor(async () => {
+        try { owned = JSON.parse(await fs.readFile(marker, 'utf8')); return true; }
+        catch (error) { if (error.code !== 'ENOENT') throw error; return false; }
+      }, 'silent fixture process identity');
+      if (hiddenLease) {
+        await waitFor(async () => {
+          let observations;
+          try { observations = (await fs.readFile(observationPath, 'utf8')).split('\n').slice(0, -1).map(JSON.parse); }
+          catch (error) { if (error.code !== 'ENOENT') throw error; return false; }
+          const events = (await fs.readFile(`${reportPath}.journal.ndjson`, 'utf8'))
+            .split('\n').slice(0, -1).map(JSON.parse);
+          return observations.some(row => row.hidden && row.returned.length === 0) &&
+            events.some(row => row.kind === 'start' && row.name === 'silent blocked root') &&
+            events.some(row => row.kind === 'group-end' && row.status === 'Passed');
+        }, 'dequeued root whose first lease observation was withheld');
+        await fs.writeFile(gate, '', { flag: 'wx' });
+      }
+      let report;
+      await waitFor(async () => {
+        // Do not retain a Windows replacement-blocking read handle across thread-pool turns.
+        const bytes = readFileSync(reportPath);
+        if (!bytes.length) return false;
+        report = JSON.parse(bytes);
+        assert.equal(report.checkpointError, undefined, JSON.stringify({
+          kind: 'checkpoint-persistence-failed', checkpoint: report.checkpoint,
+          cause: report.checkpointError,
+        }));
+        return report.groupExecution.groups.some(group =>
+          report.checkpoint.activeGroupIds.includes(group.id) && group.processIds.includes(owned.pid));
+      }, 'periodic durable checkpoint while the next root is silently blocked');
+      assert.equal(report.process.pid, owned.producerPid);
+      assert.ok(processRunning(owned.pid) && processRunning(owned.producerPid));
+      assert.equal(report.complete, false);
+      assert.equal(report.finishedAt, null);
+      assert.equal(report.exitCode, null);
+      assert.equal(report.summary, null);
+      assert.deepEqual(report.executions.map(row => [row.name, row.status]),
+        [['completed root before blocker', 'Passed']]);
+      assert.equal(report.checkpoint.pendingGroups, 1);
+      const active = report.groupExecution.groups.find(group => group.startedAt && !group.finishedAt);
+      assert.deepEqual(active.processIds, [owned.pid]);
+      assert.equal(active.finishedAt, null);
+      const events = await assertJournalCheckpoint(reportPath, report);
+      assert.ok(events.some(row => row.kind === 'start' && row.name === 'silent blocked root'));
+      assert.ok(events.some(row => row.kind === 'group-start' && row.groupId === active.id));
+      assert.deepEqual(events.filter(row => row.kind === 'completion').map(row => [row.name, row.status]),
+        [['completed root before blocker', 'Passed']]);
+      assert.ok(events.find(row => row.kind === 'group-start' && row.groupId === active.id).sequence >
+        events.find(row => row.kind === 'completion').sequence);
+      if (hiddenLease) {
+        const observations = (await fs.readFile(observationPath, 'utf8')).trim().split('\n').map(JSON.parse);
+        assert.equal(observations[0].hidden, true);
+        assert.deepEqual(observations[0].returned, []);
+        assert.ok(observations.length <= 3, 'Startup queries and one periodic refresh must remain bounded');
+        assert.equal(observations.filter(row => !row.hidden).length, 1,
+          'Concurrent progress requests must coalesce into one real refresh');
+        const visible = observations.find(row => !row.hidden);
+        assert.ok(visible, 'A periodic refresh must query the real broker again after the first miss');
+        assert.deepEqual(visible.returned, visible.processes);
+        assert.deepEqual(active.processes, visible.processes);
+        assert.deepEqual(visible.processes.map(process => process.pid), [owned.pid]);
+        for (const { budget } of observations) {
+          for (const [peak, limit] of [['peakActiveWorkers', 'capacity'],
+            ['peakResidentWorkers', 'residentLimit'], ['peakPotentialResidentWorkers', 'residentLimit'],
+            ['peakProducers', 'producerLimit'], ['peakControls', 'controlLimit']]) {
+            assert.ok(budget[peak] <= budget[limit], `${peak} must remain within the actual broker allocation`);
+          }
+        }
+      }
+      if (replacementConflict) {
+        await waitFor(async () => {
+          try { await fs.access(conflictMarker); return true; }
+          catch (error) { if (error.code !== 'ENOENT') throw error; return false; }
+        }, 'successful real replacement after the injected conflict');
+        assert.deepEqual(JSON.parse(await fs.readFile(conflictMarker, 'utf8')),
+          { code: 'EPERM', phase: 'running' });
+      }
+      process.kill(owned.producerPid, 'SIGKILL');
+      await waitFor(() => !processRunning(owned.producerPid), 'owned producer termination');
+      const preserved = await fs.readFile(reportPath);
+      await fs.writeFile(release, '');
+      const result = await pending.done;
+      assert.notEqual(result.code, 0);
+      assert.deepEqual(await fs.readFile(reportPath), preserved);
+      await assertJournalCheckpoint(reportPath, JSON.parse(preserved));
+      assert.deepEqual(JSON.parse(preserved).executions.map(row => [row.name, row.status]),
+        [['completed root before blocker', 'Passed']]);
+    } catch (error) {
+      preserveFailure = true;
+      const [snapshot, journal] = await Promise.all([
+        fs.readFile(reportPath), fs.readFile(`${reportPath}.journal.ndjson`),
+      ]);
+      await fs.writeFile(path.join(evidence, 'failure-progress-original.json'), snapshot, { flag: 'wx' });
+      await fs.writeFile(path.join(evidence, 'failure-journal-original.ndjson'), journal, { flag: 'wx' });
+      if (hiddenLease) {
+        await fs.writeFile(path.join(evidence, 'failure-lease-observations.ndjson'),
+          await fs.readFile(observationPath), { flag: 'wx' });
+      }
+      const progress = snapshot.length ? JSON.parse(snapshot) : null;
+      t.diagnostic(JSON.stringify({
+        evidence: path.relative(repositoryRoot, evidence).split(path.sep).join('/'), owned,
+        checkpoint: progress?.checkpoint,
+        checkpointError: progress?.checkpointError,
+        evidenceError: progress?.evidenceError,
+        groups: progress?.groupExecution.groups.map(group => ({
+          id: group.id, name: group.name, startedAt: group.startedAt,
+          finishedAt: group.finishedAt, processIds: group.processIds,
+        })),
+        journal: { sha256: digest(journal), bytes: journal.length,
+          events: journal.toString('utf8').trim().split('\n').filter(Boolean).map(JSON.parse)
+            .filter(row => ['group-start', 'group-end', 'start', 'completion'].includes(row.kind))
+            .map(({ kind, name, groupId, status, processIds }) => ({ kind, name, groupId, status, processIds })) },
+      }));
+      throw error;
+    } finally {
+      await fs.writeFile(release, '');
+      if (owned && processRunning(owned.producerPid)) process.kill(owned.producerPid, 'SIGTERM');
+      if (owned && processRunning(owned.pid)) process.kill(owned.pid, 'SIGKILL');
+      await pending.done;
+      await waitFor(() => !owned || !processRunning(owned.pid), 'owned silent worker cleanup');
+    }
+}
+
+test('T-PRD018 silent active roots retain durable partial JSON and original journal after abrupt producer termination',
+  { timeout: 30000 }, t => assertDurableRunningCheckpoint(t));
+
+test('T-PRD018 periodic checkpoints refresh a hidden real worker lease before retaining progress',
+  { timeout: 30000 }, t => assertDurableRunningCheckpoint(t, { hiddenLease: true }));
+
+test('T-PRD018 periodic checkpoints recover a transient Windows replacement conflict without losing the active worker',
+  { timeout: 30000 }, t => {
+    if (process.platform !== 'win32') { t.skip('Native Windows atomic file replacement is required'); return; }
+    return assertDurableRunningCheckpoint(t, { hiddenLease: true, replacementConflict: true });
+  });
+
+test('T-PRD018 checkpoint capacity rejection preserves a bounded incomplete report and the original journal',
+  { timeout: 30000 }, async t => {
+    const directory = await scratch(t);
+    const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'runner-checkpoint-bound-'));
+    t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+    const file = path.join(directory, 'bounded.test.mjs');
+    await fs.writeFile(file, "import test from 'node:test';test('large safe diagnostic fixture',t=>{" +
+      "for(let index=0;index<12;index++)t.diagnostic('safe original diagnostic '+index+' '+'x'.repeat(350000));});");
+    const reportPath = path.join(evidence, 'bounded.json');
+    const result = await invoke(['targeted', '--workers', '1', file], {
+      SDLC_TEST_REPORT_FILE: reportPath,
+    }).done;
+    assert.equal(result.code, 2, result.stderr.slice(0, 2000));
+    const bytes = await fs.readFile(reportPath);
+    assert.ok(bytes.length > 0 && bytes.length <= 4 * 1024 * 1024);
+    const report = JSON.parse(bytes);
+    assert.equal(report.kind, 'invalid-partial-report');
+    assert.equal(report.complete, false);
+    assert.equal(report.evidenceError.code, 'CAPACITY');
+    assert.ok(report.evidenceError.original.bytes > 4 * 1024 * 1024);
+    assert.deepEqual(report.executions, []);
+    const journal = await fs.readFile(`${reportPath}.journal.ndjson`);
+    const events = journal.toString('utf8').trim().split('\n').map(JSON.parse);
+    assert.equal(events.filter(row => row.kind === 'diagnostic' &&
+      row.message.startsWith('safe original diagnostic ')).length, 12);
+    assert.ok(events.some(row => row.kind === 'completion' &&
+      row.name === 'large safe diagnostic fixture' && row.status === 'Passed'));
+    assert.equal(events.at(-1).kind, 'checkpoint-rejected');
+    assert.equal(events.at(-1).code, 'CAPACITY');
+    await assertJournalCheckpoint(reportPath, report);
+  });
+
 for (const [signal, exitCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
   test(`T-130 ${signal} cancels active file workers before the public runner returns`, async t => {
+    const allocation = process.env.SDLC_TEST_BUDGET ? await readTestBudget() : null;
+    if (allocation && allocation.capacity < 2) { t.skip('Two real file workers require two host slots'); return; }
     const directory = await scratch(t);
     const entered = path.join(directory, 'entered');
     const release = path.join(directory, 'release');
@@ -247,6 +1325,10 @@ test('cancel worker ${id}', async () => {
     }
     const env = { ...process.env };
     delete env.NODE_TEST_CONTEXT;
+    const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'runner-cancellation-'));
+    t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+    const reportPath = path.join(evidence, 'cancelled.json');
+    env.SDLC_TEST_REPORT_FILE = reportPath;
     const runner = pathToFileURL(path.join(repositoryRoot, 'scripts', 'test-runner.mjs')).href;
     const child = spawn(process.execPath, ['--input-type=module', '--eval', `
 import {createPlan,parseOptions,run} from ${JSON.stringify(runner)};
@@ -268,13 +1350,30 @@ if(process.connected) process.disconnect();
       await waitFor(async () => (await fs.readdir(entered)).length === 2, 'two running cancellation workers');
       pids = (await fs.readdir(entered)).map(Number);
       assert.ok(pids.every(processRunning));
+      await waitFor(async () => {
+        const contents = await fs.readFile(`${reportPath}.journal.ndjson`, 'utf8');
+        return contents.includes('"kind":"start"');
+      }, 'durably flushed running output before final report');
+      const partial = JSON.parse(readFileSync(reportPath, 'utf8'));
+      assert.equal(partial.complete, false);
+      assert.equal(partial.finishedAt, null);
+      assert.equal(partial.exitCode, null);
+      await assertJournalCheckpoint(reportPath, partial);
       await new Promise((resolve, reject) =>
         child.send({ signal }, error => error ? reject(error) : resolve()));
       const actual = await done;
-      assert.equal(actual, exitCode, stdout + stderr);
+      assert.equal(actual, exitCode, actual === exitCode ? undefined :
+        runnerFailureDiagnostic({ stdout, stderr, expectedExitCode: exitCode, actualExitCode: actual }));
       assert.match(stdout, /\bcancelled [1-9]\d*\b/u);
       assert.equal(summary(stdout, 'end').interruptedBy, signal);
       assert.ok(pids.every(pid => !processRunning(pid)), 'Runner returned with surviving file workers');
+      const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+      assert.equal(report.complete, false);
+      assert.equal(report.exitCode, exitCode);
+      assert.ok(report.summary.counts.cancelled > 0);
+      assert.ok(report.executions.some(item => item.status === 'Cancelled'));
+      assert.equal(report.checkpoint.phase, 'finished');
+      await assertJournalCheckpoint(reportPath, report);
     } finally {
       await fs.writeFile(path.join(release, 'stop'), '');
       await done;
@@ -285,6 +1384,8 @@ if(process.connected) process.disconnect();
 
 for (const workers of [1, 2]) {
   test(`T-136 public runner enforces ${workers} real file workers and executes every file once`, async t => {
+    const allocation = process.env.SDLC_TEST_BUDGET ? await readTestBudget() : null;
+    if (allocation && allocation.capacity < workers) { t.skip('Requested real workers exceed the host allocation'); return; }
     const directory = await scratch(t);
     const entered = path.join(directory, 'entered');
     const finished = path.join(directory, 'finished');

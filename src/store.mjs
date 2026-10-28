@@ -1,9 +1,8 @@
 import path from 'node:path';
-import os from 'node:os';
 import * as fs from 'node:fs/promises';
 import { LIMITS, PHASES, budget, byteSize, choice, digest, id, newId, object, recordLimit, requireThat, safeRecord, text } from './core.mjs';
-import { atomicWrite, canonicalPath, exists, immutableJson, listJson, privateDirectory, readBytes, readJson, safePath, updateJson, withLock, writeJson } from './files.mjs';
-import { bindingKey, identity, sameBinding, validateBinding } from './git.mjs';
+import { atomicWrite, canonicalPath, exists, immutableJson, listJson, privateDirectory, readBytes, readJson, readJsonEntries, resolveCopilotHome, safePath, updateJson, withLock, writeJson } from './files.mjs';
+import { bindingKey, identity, sameBinding, validateBinding, validateWorktreeBinding } from './git.mjs';
 import { validateManifest, validateRecord } from './schemas.mjs';
 import { sameNativePath } from './platform.mjs';
 import { currentTestEvidence, testCheckpoint } from './authority.mjs';
@@ -310,8 +309,8 @@ export async function isNonRepositoryWorkspace(cwd, error) {
   return isNonRepositoryFailure(error) && await repositoryMetadataAbsent(cwd);
 }
 export class Store {
-  constructor(home = process.env.COPILOT_HOME || path.join(os.homedir(), '.copilot'), options = {}) {
-    this.home = path.resolve(home);
+  constructor(home = undefined, options = {}) {
+    this.home = resolveCopilotHome(home);
     this.runtime = path.join(this.home, 'sdlc', 'runtime');
     this.clock = options.clock ?? Date;
     this.fault = options.fault ?? (async () => {});
@@ -426,16 +425,10 @@ export class Store {
   async records(workItemId) {
     const directory = path.join(this.workPath(workItemId), 'records');
     const records = [];
-    for (const name of await listJson(directory)) {
-      const file = await safePath(directory, name);
-      const record = await readJson(file, { limit: LIMITS.workingSet });
+    for await (const { record } of readJsonEntries(directory, { limit: LIMITS.workingSet })) {
       validateRecord(record);
       budget(record, recordLimit(record), 'Active record');
       requireThat(record.workItemId === workItemId && typeof record.type === 'string', 'SCHEMA', 'Record identity/type is invalid');
-      if (record.type === 'event') {
-        const { digest: expected, ...content } = record;
-        requireThat(expected === digest(content), 'DIGEST', 'Effective event content digest mismatch; recover authoritative records');
-      }
       records.push(record);
     }
     budget(records, LIMITS.workingSet, 'Active work-item records');
@@ -451,7 +444,7 @@ export class Store {
     const metadata = await this.metadata(workItemId);
     const coordinator = metadata.members.find(member => member.repositoryId === metadata.coordinatorId);
     requireThat(coordinator, 'BINDING', 'Coordinator mapping is unavailable');
-    await validateBinding(coordinator);
+    await validateWorktreeBinding(coordinator);
     const file = await safePath(coordinator.root, `.sdlc/work-items/${workItemId}.json`);
     const manifest = await readJson(file, { limit: LIMITS.checkpoint });
     validateManifest(manifest);

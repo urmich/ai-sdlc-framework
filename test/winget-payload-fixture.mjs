@@ -2,6 +2,11 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
+import { fileURLToPath } from 'node:url';
+import { buildLauncher } from '../packaging/winget/build-launcher.mjs';
+import { validateWindowsLauncher } from '../packaging/standalone/protocol.mjs';
+import { sameNativePath } from '../src/platform.mjs';
+import { readBytes } from '../src/files.mjs';
 
 export const fixtureSHA = bytes => createHash('sha256').update(bytes).digest('hex');
 export function fixtureCanonical(value) {
@@ -9,6 +14,51 @@ export function fixtureCanonical(value) {
     item !== null && typeof item === 'object' ?
       Object.fromEntries(Object.keys(item).sort().map(key => [key, sorted(item[key])])) : item;
   return `${JSON.stringify(sorted(value))}\n`;
+}
+
+export async function fixtureWindowsLauncher({
+  outputDir, goCommand, environment = process.env,
+}) {
+  if (environment.SDLC_WINDOWS_LAUNCHER === undefined) {
+    return buildLauncher({ outputDir, goCommand, environment });
+  }
+  const source = environment.SDLC_RELEASE_SOURCE_COMMIT;
+  const expected = environment.SDLC_WINDOWS_LAUNCHER_SHA256;
+  const context = JSON.parse(environment.SDLC_WINDOWS_LAUNCHER_CONTEXT ?? 'null');
+  if (!/^[a-f0-9]{40}$/u.test(source ?? '') ||
+      !/^[a-f0-9]{64}$/u.test(expected ?? '') ||
+      !Array.isArray(context?.sources) || !context.sources.length) {
+    throw new Error('Frozen launcher fixture requires its source-bound native context and expected byte digest');
+  }
+  if (!context.sources.every(item => item?.revision === source)) {
+    throw new Error('Frozen launcher fixture source differs from the current native source');
+  }
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const owned = file => {
+    const relative = path.relative(root, file);
+    return relative.split(path.sep)[0] === '.test-data' &&
+      !relative.split(path.sep).includes('..') && !path.isAbsolute(relative);
+  };
+  const input = environment.SDLC_WINDOWS_LAUNCHER;
+  const destination = path.resolve(outputDir);
+  if (typeof input !== 'string' || !path.isAbsolute(input) || !owned(input) || !owned(destination)) {
+    throw new Error('Frozen launcher fixture must use owned repository-local files');
+  }
+  const stat = await fs.lstat(input);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 128 * 1024 * 1024 ||
+      !sameNativePath(await fs.realpath(input), input) ||
+      !sameNativePath(await fs.realpath(path.dirname(destination)), path.dirname(destination))) {
+    throw new Error('Frozen launcher fixture must be a regular owned repository-local file');
+  }
+  const bytes = await readBytes(input, 128 * 1024 * 1024);
+  if (fixtureSHA(bytes) !== expected) {
+    throw new Error('Frozen launcher fixture bytes differ from their verified source digest');
+  }
+  validateWindowsLauncher(bytes);
+  await fs.mkdir(destination);
+  const artifact = path.join(destination, 'sdlc.exe');
+  await fs.writeFile(artifact, bytes, { flag: 'wx', mode: 0o644 });
+  return { artifact, filename: 'sdlc.exe', sha256: expected, size: bytes.length };
 }
 
 // Test-only USTAR fixtures keep launcher tests independent of the shared packager.

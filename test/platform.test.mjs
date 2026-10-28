@@ -1,3 +1,11 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "applicability": [
+    {"options": "{skip:process.platform!=='darwin'}", "platforms": ["macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Mac shell/filesystem/Git evidence is native-host specific.", "prerequisites": ["Native Mac Node", "Bash", "zsh", "Git"]},
+    {"options": "{skip:process.platform!=='win32'}", "platforms": ["windows-x64"], "owner": "maintainer", "reason": "PowerShell and cmd argument contracts require actual native Windows execution.", "prerequisites": ["Native Windows x64 Node", "Windows PowerShell 5.1", "cmd.exe"]}
+  ],
+  "surfaces": [{"coverage": "direct", "paths": ["src/platform.mjs"]}]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';

@@ -1,12 +1,31 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "applicability": [
+    {
+      "names": ["T-41 RC66 TEST02 malformed launcher probe never inherits an ambient home"],
+      "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+      "owner": "maintainer",
+      "reason": "PR-only process-isolated caller regression; the ambient home is an owned sentinel even against unfixed code.",
+      "prerequisites": ["Node and repository-local owned homes"]
+    },
+    {"names": ["T-42 authentic public installation upgrades through the new package while preserving owned content"], "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "The exact public release establishes a real earlier installation; the replacement package performs the upgrade without requiring private Git history.", "prerequisites": ["Pinned offline public v0.3.1 source fixture with its original MIT license"]}
+  ],
+  "variants": [
+    {"expression": "`T-42 recognized manifest format upgrades independently of version label ${version}`", "domains": {"version": ["0.1.0", "0.3.0", "1.2.0", "1.2.1", "1.3.0", "legacy-build"]}}
+  ],
+  "surfaces": [{"coverage": "process", "paths": ["src/gate.mjs"]}]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { pathToFileURL } from 'node:url';
 import { coding, completeReview, fixture, grant, grantPush, observeFixtureRepository } from './helpers.mjs';
 import { currentCycle, stagePassed } from '../src/authority.mjs';
-import { fingerprint } from '../src/core.mjs';
+import { digest, fingerprint } from '../src/core.mjs';
 import { captureReceipt } from '../src/decisions.mjs';
 import { canonicalPath } from '../src/files.mjs';
 import { evaluateGate, gate, recordStageAdvisory } from '../src/gate.mjs';
@@ -15,26 +34,24 @@ import { doctor, install, selectMaintenanceSource } from '../src/install.mjs';
 import { markDispatching, nextDeploymentSequence, prepareOperation, recordOperation } from '../src/operations.mjs';
 import { resume } from '../src/recovery.mjs';
 import { recordArtifact, recordTest, startCycle } from '../src/validation.mjs';
+import { readTarGzip } from '../packaging/standalone/archive.mjs';
 
 const entry = path.resolve('bin/sdlc.mjs');
+const packageVersion = JSON.parse(await fs.readFile(
+  new URL('../package.json', import.meta.url), 'utf8')).version;
 
 function runEntry(executable, args, input) {
+  const home = args[args.indexOf('--home') + 1];
+  assert.ok(args.includes('--home') && typeof home === 'string' && path.isAbsolute(home),
+    'Launcher probes require an explicit owned fixture home');
   return new Promise((resolve, reject) => {
-    const child = execFile(executable, args, { encoding: 'utf8' },
+    const child = execFile(executable, args, { encoding: 'utf8',
+      env: { ...process.env, COPILOT_HOME: home } },
       (error, stdout, stderr) => {
         if (error && typeof error.code !== 'number') reject(error);
         else resolve({ code: error?.code ?? 0, stdout, stderr });
       });
     child.stdin.end(input);
-  });
-}
-
-function runFile(executable, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    execFile(executable, args, options, (error, stdout, stderr) => {
-      if (error) reject(Object.assign(error, { stdout, stderr }));
-      else resolve({ stdout, stderr });
-    });
   });
 }
 
@@ -134,19 +151,25 @@ test('T-41 only lifecycle-stage findings become one-time advisories', async t =>
 });
 
 test('T-41 command-hook launcher fails open for malformed input and import failure', async t => {
-  const malformed = await runEntry(process.execPath, [entry, 'gate'], '{not-json');
+  await fs.mkdir(path.resolve('.test-data'), { recursive: true });
+  const root = await fs.realpath(await fs.mkdtemp(
+    path.resolve('.test-data', 'sdlc-missing-runtime-')));
+  t.after(async () => {
+    await fs.rm(root, { recursive: true });
+    await assert.rejects(fs.stat(root), { code: 'ENOENT' });
+  });
+  const malformed = await runEntry(process.execPath,
+    [entry, 'gate', '--home', path.join(root, 'malformed hook home')], '{not-json');
   assert.equal(malformed.code, 0);
   assert.equal(malformed.stderr, '');
   assert.deepEqual(finalHookOutput(malformed.stdout), {});
   assert.doesNotMatch(malformed.stdout, /advisory/iu);
 
-  const root = await fs.realpath(await fs.mkdtemp(
-    path.join(os.tmpdir(), 'sdlc-missing-runtime-')));
-  t.after(async () => fs.rm(root, { recursive: true, force: true }));
   const copiedEntry = path.join(root, 'bin', 'sdlc.mjs');
   await fs.mkdir(path.dirname(copiedEntry), { recursive: true });
   await fs.copyFile(entry, copiedEntry);
-  const missingRuntime = await runEntry(process.execPath, [copiedEntry, 'gate'], '{}');
+  const missingRuntime = await runEntry(process.execPath,
+    [copiedEntry, 'gate', '--home', path.join(root, 'missing runtime home')], '{}');
   assert.equal(missingRuntime.code, 0);
   assert.deepEqual(finalHookOutput(missingRuntime.stdout), {});
   assert.doesNotMatch(missingRuntime.stdout, /advisory/iu);
@@ -166,6 +189,58 @@ test('T-41 command-hook launcher fails open for malformed input and import failu
     }));
   assert.equal(unmanaged.code, 0);
   assert.deepEqual(finalHookOutput(unmanaged.stdout), {});
+});
+
+test('T-41 RC66 TEST02 malformed launcher probe never inherits an ambient home', async t => {
+  await fs.mkdir(path.resolve('.test-data'), { recursive: true });
+  const root = await fs.mkdtemp(path.resolve('.test-data', 'rc66-advisory-'));
+  t.after(async () => {
+    await fs.rm(root, { recursive: true });
+    await assert.rejects(fs.stat(root), { code: 'ENOENT' });
+  });
+  const ambientHome = path.join(root, 'protected ambient home');
+  const trace = path.join(root, 'launcher-calls.ndjson');
+  const preload = path.join(root, 'observe-launchers.mjs');
+  await fs.writeFile(preload, `
+import cp from 'node:child_process';
+import {appendFileSync} from 'node:fs';
+import {syncBuiltinESMExports} from 'node:module';
+const original = cp.execFile;
+cp.execFile = function(executable, args, options, callback) {
+  if (args[1] === 'gate') appendFileSync(${JSON.stringify(trace)},
+    JSON.stringify({args, home: options?.env?.COPILOT_HOME ?? process.env.COPILOT_HOME}) + '\\n');
+  return original.apply(this, arguments);
+};
+syncBuiltinESMExports();
+`);
+  const reportPath = path.join(root, 'probe.json');
+  const result = await promisify(execFile)(process.execPath, [
+    path.resolve('scripts/test-runner.mjs'), 'targeted', '--workers', '1',
+    '--name', '^T-41 command-hook launcher fails open for malformed input and import failure$',
+    'test/advisory-gate.test.mjs',
+  ], { cwd: path.resolve('.'), timeout: 60000, maxBuffer: 1024 * 1024,
+    env: { ...process.env, COPILOT_HOME: ambientHome,
+      HOME: path.join(root, 'user'), USERPROFILE: path.join(root, 'user'),
+      TMPDIR: root, TMP: root, TEMP: root,
+      NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`,
+      SDLC_TEST_REPORT_FILE: reportPath } });
+  const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+  assert.equal(report.complete, true, result.stdout + result.stderr);
+  assert.equal(report.exitCode, 0);
+  const calls = (await fs.readFile(trace, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(calls.length, 3);
+  for (const call of calls) {
+    const index = call.args.indexOf('--home');
+    assert.ok(index >= 0, 'Every launcher probe must explicitly select its own fixture home');
+    const home = call.args[index + 1];
+    assert.notEqual(home, ambientHome);
+    assert.equal(call.home, home, 'The helper must isolate its child environment as well as CLI arguments');
+    assert.ok(path.resolve(home).startsWith(`${path.resolve('.test-data')}${path.sep}`));
+    await assert.rejects(fs.stat(home), { code: 'ENOENT' });
+  }
+  await assert.rejects(fs.stat(ambientHome), { code: 'ENOENT' });
+  t.diagnostic(JSON.stringify({ ownedLauncherProbe: { complete: report.complete,
+    exitCode: report.exitCode, calls, ambientHomeUntouched: true } }));
 });
 
 test('T-41 unmanaged tool execution invalidates stale candidate evidence when files changed', async t => {
@@ -863,58 +938,66 @@ test('T-42 receipt-selected framework source is trusted; variants stay advisory'
   }
 });
 
-async function oldSourceRoot(root) {
-  const source = path.join(root, 'version 1.2.0 source');
-  await fs.mkdir(source, { recursive: true });
-  let listed;
-  try {
-    listed = await runFile('git', ['ls-tree', '-r', '--name-only', 'v1.2.0',
-      '--', 'bin', 'src', 'assets', 'docs/cli.md', 'package.json'], {
-      cwd: path.resolve('.'),
-      encoding: 'utf8',
-    });
-  } catch {
-    return null;
-  }
-  const names = listed.stdout.trim().split('\n').filter(Boolean);
-  assert.ok(names.includes('bin/sdlc.mjs'));
-  assert.ok(names.includes('src/install.mjs'));
-  for (const name of names) {
-    const file = path.join(source, name);
+async function publicReleaseSourceRoot(root) {
+  const provenance = JSON.parse(await fs.readFile(
+    new URL('./fixtures/upgrade-v0.3.1-source.json', import.meta.url), 'utf8'));
+  assert.equal(provenance.source.commit, '8b2e4e8719b407454e28f84d716907b0ff834d3c');
+  assert.equal(provenance.version, '0.3.1');
+  const archive = await fs.readFile(new URL('./fixtures/upgrade-v0.3.1-source.tar.gz', import.meta.url));
+  assert.equal(archive.length, provenance.archive.bytes);
+  assert.equal(digest(archive), '598c42d038b53cb0b3573f993b31e518daa839952f1f01e747387a4fae4a4a62');
+  const entries = readTarGzip(archive);
+  assert.equal(entries.length, provenance.files.length);
+  const source = path.join(root, 'public 0.3.1 source');
+  for (const entry of entries) {
+    const original = provenance.files.find(file => file.path === entry.path);
+    assert.ok(original);
+    assert.equal(digest(entry.data), original.sha256);
+    assert.equal(entry.mode, original.mode);
+    const file = path.join(source, ...entry.path.split('/'));
     await fs.mkdir(path.dirname(file), { recursive: true });
-    const historical = await runFile('git', ['show', `v1.2.0:${name}`], {
-      cwd: path.resolve('.'),
-      encoding: 'buffer',
-      maxBuffer: 2 * 1024 * 1024,
-    });
-    await fs.writeFile(file, historical.stdout);
+    await fs.writeFile(file, entry.data, { flag: 'wx', mode: entry.mode });
   }
+  const pkg = JSON.parse(await fs.readFile(path.join(source, 'package.json'), 'utf8'));
+  assert.equal(pkg.name, 'ai-sdlc-framework');
+  assert.equal(pkg.version, provenance.version);
+  assert.equal(pkg.license, 'MIT');
   return source;
 }
 
-test('T-42 intact 1.2.0 installation updates while conflicts preserve owned content', async t => {
+test('T-42 authentic public installation upgrades through the new package while preserving owned content', async t => {
   const intact = await fixture(t, { initialize: false });
-  const old = await oldSourceRoot(intact.root);
-  if (!old) {
-    t.skip('Authentic v1.2.0 source is unavailable in this non-Git OSS workspace');
-    return;
-  }
-  await install(intact.store, { sourceRoot: old });
+  const old = await publicReleaseSourceRoot(intact.root);
+  const installOld = async f => {
+    // Let the released CLI create its own runtime, not the current fixture's defaults.
+    await fs.rm(f.home, { recursive: true });
+    const result = await runEntry(process.execPath, [
+      path.join(old, 'bin', 'sdlc.mjs'), 'install', '--home', f.home, '--source-root', old,
+    ], '');
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).installed, true);
+  };
+  await installOld(intact);
   const runtime = path.join(intact.home, 'sdlc', 'runtime', 'retained.json');
   await fs.mkdir(path.dirname(runtime), { recursive: true });
   await fs.writeFile(runtime, '{"retained":true}\n');
   await fs.writeFile(path.join(intact.home, 'unowned.txt'), 'keep\n');
-  assert.equal((await doctor(intact.store)).frameworkVersion, '1.2.0');
+  assert.equal((await doctor(intact.store)).frameworkVersion, '0.3.1');
   const installedEntry = path.join(intact.home, 'sdlc', 'bin', 'sdlc.mjs');
+  const previous = await runEntry(process.execPath, [
+    installedEntry, 'doctor', '--home', intact.home,
+  ], '');
+  assert.equal(previous.code, 0, previous.stderr);
+  assert.equal(JSON.parse(previous.stdout).frameworkVersion, '0.3.1');
   const updated = await runEntry(process.execPath, [
-    installedEntry,
+    entry,
     'update',
     '--home',
     intact.home,
     '--source-root',
     path.resolve('.'),
   ], '');
-  assert.equal(updated.code, 0);
+  assert.equal(updated.code, 0, updated.stderr);
   assert.equal(JSON.parse(updated.stdout).installed, true);
   const current = await doctor(intact.store);
   assert.equal(current.installed, true);
@@ -922,48 +1005,140 @@ test('T-42 intact 1.2.0 installation updates while conflicts preserve owned cont
   assert.deepEqual(current.findings, []);
   assert.equal(await fs.readFile(runtime, 'utf8'), '{"retained":true}\n');
   assert.equal(await fs.readFile(path.join(intact.home, 'unowned.txt'), 'utf8'), 'keep\n');
+  const repeated = await runEntry(process.execPath, [
+    installedEntry, 'update', '--home', intact.home, '--source-root', path.resolve('.'),
+  ], '');
+  assert.equal(repeated.code, 0, repeated.stderr);
+  assert.equal(JSON.parse(repeated.stdout).installed, true);
+  assert.deepEqual(JSON.parse(repeated.stdout).changedFiles, []);
+  assert.deepEqual((await doctor(intact.store)).findings, []);
+  assert.equal(await fs.readFile(runtime, 'utf8'), '{"retained":true}\n');
+  assert.equal(await fs.readFile(path.join(intact.home, 'unowned.txt'), 'utf8'), 'keep\n');
 
   const conflicted = await fixture(t, { initialize: false });
-  const conflictedOld = await oldSourceRoot(conflicted.root);
-  await install(conflicted.store, { sourceRoot: conflictedOld });
+  await installOld(conflicted);
   const owned = path.join(conflicted.home, 'skills', 'sdlc', 'SKILL.md');
   await fs.appendFile(owned, '\nUser-owned modification.\n');
   const before = await fs.readFile(owned, 'utf8');
   await assert.rejects(install(conflicted.store), { code: 'INSTALL_CONFLICT' });
   assert.equal(await fs.readFile(owned, 'utf8'), before);
   const report = await doctor(conflicted.store);
-  assert.equal(report.frameworkVersion, '1.2.0');
+  assert.equal(report.frameworkVersion, '0.3.1');
   assert.ok(report.findings.some(finding => finding.includes('skills/sdlc/SKILL.md')));
+});
+
+// These labels describe controlled manifest fixtures, not historical release binaries.
+for (const version of ['0.1.0', '0.3.0', '1.2.0', '1.2.1', '1.3.0', 'legacy-build']) {
+  test(`T-42 recognized manifest format upgrades independently of version label ${version}`, async t => {
+    const f = await fixture(t, { initialize: false });
+    await install(f.store);
+    const manifestFile = path.join(f.home, 'sdlc', 'install-manifest.json');
+    const manifest = JSON.parse(await fs.readFile(manifestFile, 'utf8'));
+    const ownedPath = 'skills/sdlc/SKILL.md';
+    const owned = path.join(f.home, ...ownedPath.split('/'));
+    const earlier = Buffer.from(`Controlled earlier owned skill for ${version}.\n`);
+    const obsoletePath = 'sdlc/obsolete-owned-fixture.txt';
+    const obsolete = path.join(f.home, ...obsoletePath.split('/'));
+    await fs.writeFile(owned, earlier);
+    await fs.writeFile(obsolete, 'obsolete owned fixture\n');
+    manifest.version = version;
+    manifest.files[ownedPath] = digest(earlier);
+    manifest.files[obsoletePath] = digest(Buffer.from('obsolete owned fixture\n'));
+    await fs.writeFile(manifestFile, `${JSON.stringify(manifest)}\n`);
+    const runtime = path.join(f.home, 'sdlc', 'runtime', 'retained-version-fixture.json');
+    const unowned = path.join(f.home, 'unowned.txt');
+    await fs.writeFile(runtime, '{"retained":true}\n');
+    await fs.writeFile(unowned, 'unrelated user content\n');
+    assert.equal((await doctor(f.store)).frameworkVersion, version);
+    assert.equal((await install(f.store)).installed, true);
+    const current = await doctor(f.store);
+    assert.equal(current.frameworkVersion, packageVersion);
+    assert.deepEqual(current.findings, []);
+    await assert.rejects(fs.stat(obsolete), { code: 'ENOENT' });
+    assert.equal(await fs.readFile(runtime, 'utf8'), '{"retained":true}\n');
+    assert.equal(await fs.readFile(unowned, 'utf8'), 'unrelated user content\n');
+
+    const conflicted = JSON.parse(await fs.readFile(manifestFile, 'utf8'));
+    conflicted.version = version;
+    await fs.writeFile(manifestFile, `${JSON.stringify(conflicted)}\n`);
+    await fs.appendFile(owned, '\nUser-owned modification.\n');
+    const before = await fs.readFile(owned);
+    const previousManifest = await fs.readFile(manifestFile);
+    await assert.rejects(install(f.store), { code: 'INSTALL_CONFLICT' });
+    assert.deepEqual(await fs.readFile(owned), before);
+    assert.deepEqual(await fs.readFile(manifestFile), previousManifest);
+    assert.equal((await doctor(f.store)).frameworkVersion, version);
+    assert.equal(await fs.readFile(runtime, 'utf8'), '{"retained":true}\n');
+    assert.equal(await fs.readFile(unowned, 'utf8'), 'unrelated user content\n');
+  });
+}
+
+test('T-42 unknown ownership manifests refuse upgrades without mutating installed content or state', async t => {
+  for (const previous of [
+    { owner: 'another-owner', schemaVersion: 1 },
+    { owner: 'ai-sdlc-framework', schemaVersion: 0 },
+    { owner: 'ai-sdlc-framework', schemaVersion: 2 },
+  ]) {
+    const f = await fixture(t, { initialize: false });
+    await install(f.store);
+    const manifestFile = path.join(f.home, 'sdlc', 'install-manifest.json');
+    const manifest = JSON.parse(await fs.readFile(manifestFile, 'utf8'));
+    Object.assign(manifest, previous);
+    await fs.writeFile(manifestFile, `${JSON.stringify(manifest)}\n`);
+    const runtime = path.join(f.home, 'sdlc', 'runtime', 'retained-format-fixture.json');
+    const unowned = path.join(f.home, 'unowned.txt');
+    await fs.writeFile(runtime, '{"retained":true}\n');
+    await fs.writeFile(unowned, 'unrelated user content\n');
+    const paths = [...Object.keys(manifest.files), 'sdlc/install-manifest.json',
+      'copilot-instructions.md', 'sdlc/runtime/retained-format-fixture.json', 'unowned.txt'];
+    const before = await Promise.all(paths.map(async relative =>
+      [relative, await fs.readFile(path.join(f.home, ...relative.split('/')))]));
+    await assert.rejects(install(f.store), { code: 'INSTALL_CONFLICT' });
+    for (const [relative, bytes] of before) {
+      assert.deepEqual(await fs.readFile(path.join(f.home, ...relative.split('/'))), bytes, relative);
+    }
+  }
 });
 
 test('T-42 README documents cross-platform npm migration and complete maintenance procedures', async () => {
   const readme = await fs.readFile('README.md', 'utf8');
-  const migrationStart = readme.indexOf('### Clean migration from the private or an earlier installation');
+  assert.match(readme, /\[installation\]\(docs\/installation\/README\.md\)/u);
+  const installation = await fs.readFile('docs/installation/README.md', 'utf8');
+  const migrationStart = installation.indexOf('### Clean migration from the private or an earlier installation');
   assert.ok(migrationStart >= 0);
-  const migrationEnd = readme.indexOf('For a repository on a UNC share', migrationStart);
-  const migration = readme.slice(migrationStart, migrationEnd);
-  assert.equal((migration.match(/sdlc install --purge-existing/gu) ?? []).length, 1);
+  const migrationEnd = installation.indexOf('For a repository on a UNC share', migrationStart);
+  assert.ok(migrationEnd > migrationStart);
+  const migration = installation.slice(migrationStart, migrationEnd);
+  const commands = section => [...section.matchAll(
+    /^```(?:sh|powershell|bat)\r?\n([\s\S]*?)^```/gmu)]
+    .map(match => match[1]).join('\n');
+  assert.equal((commands(migration).match(/sdlc install --purge-existing/gu) ?? []).length, 1);
   assert.match(migration, /single cross-platform command/iu);
   assert.match(migration, /Close every Copilot CLI process first/iu);
   assert.match(migration, /preserves unrelated[\s\S]*Copilot files/iu);
-  const updateStart = readme.indexOf('## Update the framework');
-  const uninstallStart = readme.indexOf('## Uninstall the framework');
-  const nextStart = readme.indexOf('## What gets installed');
+  const updateStart = installation.indexOf('## Update the framework');
+  const uninstallStart = installation.indexOf('## Uninstall the framework');
+  const nextStart = installation.indexOf('## What gets installed');
   assert.ok(updateStart >= 0 && uninstallStart > updateStart && nextStart > uninstallStart);
-  const update = readme.slice(updateStart, uninstallStart);
-  const uninstall = readme.slice(uninstallStart, nextStart);
+  const update = installation.slice(updateStart, uninstallStart);
+  const uninstall = installation.slice(uninstallStart, nextStart);
+  const updateCommands = commands(update);
+  const uninstallCommands = commands(uninstall);
   for (const platform of ['macOS or Linux', 'Windows PowerShell', 'Windows Command Prompt']) {
     assert.ok(update.includes(`### Update on ${platform}`), platform);
     assert.ok(uninstall.includes(`### Uninstall on ${platform}`), platform);
   }
-  assert.equal((update.match(/\bupdate --home\b/gu) ?? []).length, 3);
-  assert.equal((update.match(/\bdoctor --home\b/gu) ?? []).length, 3);
-  assert.equal((update.match(/--clobber/gu) ?? []).length, 3);
-  assert.ok(update.includes('node "$COPILOT_HOME/sdlc/bin/sdlc.mjs"'));
-  assert.ok(update.includes('Join-Path $CopilotHome "sdlc\\bin\\sdlc.mjs"'));
-  assert.ok(update.includes('node "%FRAMEWORK_HOME%\\sdlc\\bin\\sdlc.mjs" update'));
-  assert.doesNotMatch(update, /\buninstall --home\b/u);
-  assert.equal((uninstall.match(/\buninstall --home\b/gu) ?? []).length, 3);
-  assert.doesNotMatch(uninstall, /\bupdate --home\b/u);
+  assert.equal((updateCommands.match(/\bupdate --home\b/gu) ?? []).length, 3);
+  assert.equal((updateCommands.match(/\bdoctor --home\b/gu) ?? []).length, 3);
+  assert.equal((updateCommands.match(/--clobber/gu) ?? []).length, 3);
+  assert.ok(updateCommands.includes('SOURCE_ROOT="$PACKAGE_ROOT/node_modules/ai-sdlc-framework"'));
+  assert.ok(updateCommands.includes('$SourceRoot = Join-Path $PackageRoot "node_modules\\ai-sdlc-framework"'));
+  assert.ok(updateCommands.includes('set "SOURCE_ROOT=%PACKAGE_ROOT%\\node_modules\\ai-sdlc-framework"'));
+  assert.ok(updateCommands.includes('node "$SOURCE_ROOT/bin/sdlc.mjs"'));
+  assert.ok(updateCommands.includes('node (Join-Path $SourceRoot "bin\\sdlc.mjs")'));
+  assert.ok(updateCommands.includes('node "%SOURCE_ROOT%\\bin\\sdlc.mjs" update'));
+  assert.doesNotMatch(updateCommands, /\buninstall --home\b/u);
+  assert.equal((uninstallCommands.match(/\buninstall --home\b/gu) ?? []).length, 3);
+  assert.doesNotMatch(uninstallCommands, /\bupdate --home\b/u);
   assert.match(uninstall, /always retains[\s\S]*sdlc\/runtime/iu);
 });

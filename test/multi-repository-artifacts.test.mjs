@@ -1,3 +1,17 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "direct", "paths": ["src/artifacts.mjs"]}],
+  "groups": [
+    {"root": "T-45 managed status synchronization preserves escaped definitions and specification identity", "minimumSlots": 1, "dependsOn": [], "exclusiveResources": []},
+    {"root": "T-45 multiple Test Plans combine and synchronize without changing legacy identity", "minimumSlots": 1, "dependsOn": [], "exclusiveResources": []}
+  ],
+  "plannedCases": [
+    {"id": "T-45", "selectors": [
+      {"name": "T-45 managed status synchronization preserves escaped definitions and specification identity", "parents": []},
+      {"name": "T-45 multiple Test Plans combine and synchronize without changing legacy identity", "parents": []}
+    ]}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
@@ -11,6 +25,7 @@ import {
   registerArtifact,
   resolveTestSpecification,
   snapshots,
+  synchronizeTestPlan,
   testSpecificationDigest,
 } from '../src/artifacts.mjs';
 import { check } from '../src/checks.mjs';
@@ -19,10 +34,110 @@ import { currentCycle } from '../src/authority.mjs';
 import { resume, status } from '../src/recovery.mjs';
 import { recordTest, startCycle } from '../src/validation.mjs';
 import { validateManifest } from '../src/schemas.mjs';
-import { byteSize, digest } from '../src/core.mjs';
+import { byteSize, digest, LIMITS } from '../src/core.mjs';
 import { formatEvents, parseEvents } from '../src/audit.mjs';
+import { pathToFileURL } from 'node:url';
+import { retainTestEvidence, readTestEvidence } from '../src/validation-evidence.mjs';
+import { readValidationObject } from '../src/validation-catalog.mjs';
 
 const execute = promisify(execFile);
+
+test('T-PRD045 canonical relocation preserves IDs, snapshot bytes and original approval locators', async t => {
+  const f = await fixture(t);
+  const migrated = [];
+  for (const [artifactId, prefix, requirementId, testId] of [
+    ['core-framework', 'docs', 'FR-901', 'T-core'],
+    ['github-integration', 'docs/github-integration', 'FR-902', 'T-feature'],
+  ]) for (const [role, contents] of [
+    ['requirements', requirement(requirementId, `${artifactId} preserves history`)],
+    ['test-plan', plan(testId, requirementId, 'actual unit assertion preserves state')],
+    ['technical-design', '# Design\nUse [Requirements](requirements.md) and [Test Plan](test-plan.md).\n'],
+  ]) {
+    const original = await document(f.repo, `${prefix}/${role}.md`, contents);
+    await registerArtifact(f.store, { workItemId: f.workItemId, role,
+      repositoryId: 'primary', artifactId, path: original });
+    migrated.push({ role, artifactId, original,
+      current: `docs/sdlc/${artifactId}/${role}.md` });
+  }
+  const approvals = [];
+  const phases = ['requirements', 'test-design', 'technical-design', 'coding'];
+  for (let index = 0; index < 3; index++) approvals.push(await grant(f, 'approval', {
+    transition: { from: phases[index], to: phases[index + 1] },
+  }, { prepared: true }));
+  const originalDecisions = new Map(await Promise.all(approvals.map(async approval =>
+    [approval.event.id, await fs.readFile(f.store.recordPath(f.workItemId, approval.event.id))])));
+  const approvedSnapshots = approvals.flatMap(approval => structuredClone(approval.event.snapshots));
+  assert.deepEqual(new Set(approvedSnapshots.map(item => item.role)),
+    new Set(['requirements', 'test-plan', 'technical-design']));
+  const originalSnapshotBytes = new Map(await Promise.all(approvedSnapshots.map(async snapshot =>
+    [snapshot.digest, await fs.readFile(path.join(f.store.workPath(f.workItemId), 'snapshots', snapshot.digest))])));
+
+  const selector = await document(f.repo, 'test/T-core.mjs',
+    'import assert from "node:assert/strict"; assert.equal(2+2,4); console.log(JSON.stringify({case:"T-core",result:"actual child assertion passed"}));\n');
+  const execution = await execute(process.execPath, [path.join(f.repo, selector)], { cwd: f.repo });
+  const report = path.join(f.root, 'original-execution.json');
+  await fs.writeFile(report, execution.stdout);
+  const retained = await retainTestEvidence(f.store, {
+    workItemId: f.workItemId, evidenceRef: pathToFileURL(report).href,
+  });
+  const retainedPath = path.join(f.store.workPath(f.workItemId),
+    'validation', 'objects', `${retained.ref.sha256}.json`);
+  const retainedBytes = await fs.readFile(retainedPath);
+  const { cycle } = await startCycle(f.store, { workItemId: f.workItemId,
+    configDigest: 'migration-configuration', cause: 'before relocation' });
+  const recorded = await recordTest(f.store, { workItemId: f.workItemId,
+    cycleId: cycle.id, testId: 'T-core', status: 'Passed', expectedMet: true,
+    evidenceRef: retained.evidenceRef, owner: 'agent', host: 'local' });
+  assert.equal((await readTestEvidence(f.store, {
+    workItemId: f.workItemId, cycleId: cycle.id, testId: 'T-core',
+  })).status, 'Passed');
+  const oldSpecification = (await resolveTestSpecification(f.store, f.workItemId)).digest;
+  const oldLocators = structuredClone((await f.store.manifest(f.workItemId)).manifest.artifacts);
+  for (const item of migrated) {
+    const oldPath = path.join(f.repo, item.original);
+    const newPath = path.join(f.repo, item.current);
+    const bytes = await fs.readFile(oldPath);
+    await fs.mkdir(path.dirname(newPath), { recursive: true });
+    await fs.rename(oldPath, newPath);
+    assert.deepEqual(await fs.readFile(newPath), bytes);
+    await registerArtifact(f.store, { workItemId: f.workItemId, role: item.role,
+      repositoryId: 'primary', artifactId: item.artifactId, path: item.current });
+    await assert.rejects(fs.stat(oldPath), { code: 'ENOENT' });
+  }
+  for (const locator of oldLocators) {
+    await assert.rejects(artifactPath(f.store, f.workItemId, locator,
+      (await f.store.manifest(f.workItemId)).metadata).then(file => fs.readFile(file)), { code: 'ENOENT' });
+  }
+  const changedPlan = path.join(f.repo, 'docs/sdlc/core-framework/test-plan.md');
+  const priorPlan = await fs.readFile(changedPlan, 'utf8');
+  await fs.writeFile(changedPlan, priorPlan.replace('actual unit assertion preserves state',
+    'actual unit assertion preserves state [guide](../../usage/README.md)'));
+  await document(f.repo, 'docs/usage/README.md', '# Canonical migration guide\n');
+  assert.notEqual((await resolveTestSpecification(f.store, f.workItemId)).digest, oldSpecification);
+  const replacement = await startCycle(f.store, { workItemId: f.workItemId,
+    configDigest: 'migration-configuration', cause: 'link/specification relocation' });
+  assert.equal(replacement.reset, true);
+  assert.notEqual(replacement.cycle.id, cycle.id);
+  assert.equal((await readTestEvidence(f.store, { workItemId: f.workItemId,
+    cycleId: replacement.cycle.id, testId: 'T-core' })).status, 'NotRun');
+  const historical = await readTestEvidence(f.store, {
+    workItemId: f.workItemId, cycleId: cycle.id, testId: 'T-core',
+  });
+  assert.equal(historical.historicalOnly, true);
+  assert.equal(historical.status, 'NotRun');
+  assert.ok(historical.observations.some(item => item.id === recorded.id && item.status === 'Passed'));
+  assert.deepEqual(await fs.readFile(retainedPath), retainedBytes);
+  assert.ok(await readValidationObject(f.store, f.workItemId, retained.ref));
+  for (const [id, bytes] of originalDecisions) {
+    assert.deepEqual(await fs.readFile(f.store.recordPath(f.workItemId, id)), bytes);
+  }
+  for (const [hash, bytes] of originalSnapshotBytes) {
+    const current = await fs.readFile(path.join(f.store.workPath(f.workItemId), 'snapshots', hash));
+    assert.deepEqual(current, bytes);
+    assert.equal(digest(current), hash);
+  }
+  assert.equal((await f.store.manifest(f.workItemId)).manifest.artifacts.length, 6);
+});
 
 async function member(f, repositoryId) {
   const root = path.join(f.root, `repository ${repositoryId}`);
@@ -55,6 +170,68 @@ function plan(testId, requirementId, expected) {
 | ${testId} | ${requirementId} | AC-${requirementId.slice(3)}.1 | local | unit | pre-review | Automated | agent | local | ${expected} | test/${testId}.mjs | NotRun |
 `;
 }
+
+test('T-45 managed status synchronization preserves escaped definitions and specification identity', async t => {
+  const f = await coding(await fixture(t));
+  const original = plan('T-escaped', 'FR-001',
+    String.raw`Original \| replacement bytes at C:\fixture remain unchanged`)
+    .replace('test/T-escaped.mjs', String.raw`test/owned.mjs#before\|after\\suffix`)
+    .replace('| T-escaped |', '| `T-escaped` |') +
+    '| T-ordinary | FR-001 | AC-001.1 | local | unit | pre-review | Automated | agent | local | Ordinary definitions remain unchanged | test/ordinary.mjs | NotRun |\n';
+  const alternate = [
+    '# Another table layout',
+    '| Property | Status |',
+    '| --- | --- |',
+    '| build | unchanged |',
+    '',
+    '  | `ID` | Environment | Level | Checkpoint | Mode | Owner | Location | Requirements | Implementation | `Status` | Observe or assert | Evidence |',
+    '  | :--- | ---: | :---: | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    String.raw`  | T-alternate | local | unit | pre-review | Automated | agent | local | FR-001; AC-001.1 | test/alternate.mjs#left\|right | NotRun | Preserve \| and \\\| with \\ and \q | authored\|evidence |`,
+    '',
+  ].join('\r\n');
+  await artifact(f, 'test-plan', original);
+  await document(f.repo, 'docs/test-plan-alternate.md', alternate);
+  await registerArtifact(f.store, { workItemId: f.workItemId, role: 'test-plan',
+    repositoryId: 'primary', artifactId: 'alternate', path: 'docs/test-plan-alternate.md' });
+  const before = await resolveTestSpecification(f.store, f.workItemId);
+  assert.deepEqual(before.tests.find(test => test.id === 'T-escaped'), {
+    id: 'T-escaped', environment: 'local', level: 'unit', checkpoint: 'pre-review',
+    mode: 'automated', owner: 'agent', location: 'local',
+    expected: String.raw`Original | replacement bytes at C:\fixture remain unchanged`,
+    implementation: String.raw`test/owned.mjs#before|after\\suffix`,
+  });
+  assert.deepEqual((await resolveTestSpecification(f.store, f.workItemId, before.tests)).tests,
+    before.tests);
+  const { cycle } = await startCycle(f.store, { workItemId: f.workItemId,
+    configDigest: 'escaped-definitions-v1', cause: 'RUN-02 regression' });
+  assert.deepEqual(cycle.tests, before.tests);
+  assert.equal(cycle.testSpecDigest, before.digest);
+  for (const [testId, status] of [['T-escaped', 'Passed'], ['T-alternate', 'Failed']]) {
+    await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id,
+      testId, status, expectedMet: status === 'Passed',
+      evidenceRef: `fixture:${testId}`, owner: 'agent', host: 'local' });
+  }
+  const projected = original.replace(
+    String.raw`test/owned.mjs#before\|after\\suffix | NotRun |`,
+    String.raw`test/owned.mjs#before\|after\\suffix | Passed |`);
+  const alternateProjected = alternate.replace(
+    String.raw`test/alternate.mjs#left\|right | NotRun |`,
+    String.raw`test/alternate.mjs#left\|right | Failed |`);
+  assert.equal(await fs.readFile(path.join(f.repo, 'docs/test-plan.md'), 'utf8'), projected);
+  assert.equal(await fs.readFile(path.join(f.repo, 'docs/test-plan-alternate.md'), 'utf8'),
+    alternateProjected);
+  assert.equal(testSpecificationDigest(projected), testSpecificationDigest(original));
+  assert.equal(testSpecificationDigest(alternateProjected), testSpecificationDigest(alternate));
+  const after = await resolveTestSpecification(f.store, f.workItemId, before.tests);
+  assert.deepEqual(after.tests, before.tests);
+  assert.equal(after.digest, before.digest);
+  assert.deepEqual(await synchronizeTestPlan(f.store, f.workItemId),
+    { synchronized: true, changed: false });
+  assert.deepEqual((await readTestEvidence(f.store, { workItemId: f.workItemId,
+    cycleId: cycle.id, testId: 'T-escaped' })).status, 'Passed');
+  assert.equal((await readTestEvidence(f.store, { workItemId: f.workItemId,
+    cycleId: cycle.id, testId: 'T-alternate' })).status, 'Failed');
+});
 
 test('T-45 same-role artifacts are retained and replaced per repository', async t => {
   assert.doesNotThrow(() => validateManifest({
@@ -561,7 +738,39 @@ test('T-45 multiple Test Plans combine and synchronize without changing legacy i
     sessionId: f.sessionId,
     workItemId: f.workItemId,
   });
-  assert.equal(multiResume.artifacts.length, 8);
+  const listedArtifacts = [];
+  for (let offset = 0; offset !== null;) {
+    const page = await status(f.store, f.workItemId, { offset, limit: 100 });
+    listedArtifacts.push(...page.items.filter(item => item.kind === 'artifacts'));
+    offset = page.nextOffset;
+  }
+  assert.equal(listedArtifacts.length, 8);
+  assert.deepEqual(listedArtifacts.map(({ role, repositoryId, artifactId, locator }) =>
+    [role, repositoryId, artifactId, locator]), [
+    ['requirements', 'beta', 'default', 'beta:docs/requirements.md'],
+    ['requirements', 'primary', 'default', 'primary:docs/requirements.md'],
+    ['test-plan', 'beta', 'default', 'beta:docs/test-plan.md'],
+    ['test-plan', 'primary', 'default', 'primary:docs/test-plan.md'],
+    ['test-plan', 'primary', 'integration', 'primary:integration:docs/test-plan-integration.md'],
+    ['technical-design', 'beta', 'default', 'beta:docs/technical-design.md'],
+    ['technical-design', 'primary', 'default', 'primary:docs/technical-design.md'],
+    ['technical-design', 'primary', 'security', 'primary:security:docs/technical-design-security.md'],
+  ]);
+  assert.ok(byteSize(multiResume) + 1 <= LIMITS.context);
+  if (Array.isArray(multiResume.artifacts)) {
+    assert.equal(multiResume.artifacts.length, 8);
+    assert.deepEqual(multiResume.artifacts.map(({ role, repositoryId, artifactId }) =>
+      [role, repositoryId, artifactId]),
+    listedArtifacts.map(({ role, repositoryId, artifactId }) =>
+      [role, repositoryId, artifactId]));
+  } else {
+    assert.equal(multiResume.artifacts, undefined);
+    assert.deepEqual(multiResume.artifactSummary, {
+      count: 8, pending: 0,
+      byRole: { requirements: 2, 'test-plan': 3, 'technical-design': 3 },
+      inventoryDigest: digest(listedArtifacts.map(({ kind, ...artifact }) => artifact)),
+    });
+  }
 });
 
 test('T-45 external Test Plan status refresh keeps specification identity and bounded mappings', async t => {
