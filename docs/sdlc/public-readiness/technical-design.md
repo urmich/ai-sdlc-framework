@@ -1355,9 +1355,32 @@ Captured native definitions are **typed source**, not execution-log strings.
 inventory/Go/stages/specification and scheduling/worker request digests.
 Preserve BOM and exact source bytes. Its separate bounded literal UTF-8/path/
 count codec (64 MiB combined source ceiling) rejects credential-shaped real
-PAT/private-PEM/literal-JWT/non-reserved credential URL data while preserving
-declared credential-negative and reserved fixture source. Never feed source
-through a generic log sanitizer or relabel modified code as the same definition.
+PAT/private-PEM/literal-JWT and unapproved literal URL credentials. The frozen
+`scripts/native-source-dummy-values.mjs` policy permits only exact reviewed
+dummy values, independently for each password and sensitive query value.
+It grants no file, URL, host, prefix or fixture-wide exception; recognizing one
+dummy value never clears another field. The policy cannot be extended by source
+records, reports, CLI options or environment variables. Token/key/JWT checks
+remain unconditional. Source templates are parsed as code, with their literal
+credential fields still checked; expressions are never executed. Select the actual
+innermost string/template owner through the existing `sourceLiteralAt` lexer,
+respecting strings nested inside interpolation
+expressions; text that merely resembles interpolation remains a literal value.
+Use only its genuine interpolation spans. Track expression
+provenance by raw field spans, not decoded marker equality. Inspect credential
+fields independently of hostname/port parsing, so an interpolated port cannot
+skip a literal credential. A partially literal value is not a dummy-value match.
+Scan decoded URL userinfo, passwords and query values for credential-shaped
+material too; an encoded token in a username is not an ordinary account name.
+Also inspect a percent-decoded, read-only view of the complete source: secret
+material cannot hide in ordinary query names, paths or fragments. The original
+source is never rewritten or archived from that inspection view.
+Internal quotes, angle brackets and whitespace never truncate a known literal's
+unapproved value to an approved prefix.
+Never feed
+source through a generic log sanitizer or relabel modified code as the same
+definition. The required CI source job runs the same complete committed-source
+capture and safety validation before native bootstrap.
 
 Keep CI/interrupted-run artifacts for 90 days in the public repository. For each
 released version, publish sanitized, cryptographically verifiable prepublication

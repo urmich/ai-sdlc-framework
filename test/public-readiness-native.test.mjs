@@ -1,7 +1,7 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [
-    {"coverage": "direct", "paths": ["scripts/native-validation.mjs", "scripts/native-toolchain.mjs", "scripts/native-homebrew-prefix.mjs", "scripts/validation-tools.mjs", "scripts/accept-release.mjs", "scripts/homebrew-lifecycle.mjs", "scripts/homebrew-switch.mjs", "packaging/homebrew/switch-state.mjs", "scripts/toolchain-baseline.mjs", "scripts/native-bootstrap-capability.mjs", "scripts/pr-capabilities.mjs", "scripts/pr-calculator.mjs", "scripts/pr-calculator-reporter.mjs", "scripts/native-components.mjs"]}
+    {"coverage": "direct", "paths": ["scripts/native-validation.mjs", "scripts/native-source-dummy-values.mjs", "scripts/native-toolchain.mjs", "scripts/native-homebrew-prefix.mjs", "scripts/validation-tools.mjs", "scripts/accept-release.mjs", "scripts/homebrew-lifecycle.mjs", "scripts/homebrew-switch.mjs", "packaging/homebrew/switch-state.mjs", "scripts/toolchain-baseline.mjs", "scripts/native-bootstrap-capability.mjs", "scripts/pr-capabilities.mjs", "scripts/pr-calculator.mjs", "scripts/pr-calculator-reporter.mjs", "scripts/native-components.mjs"]}
   ],
   "groups": [
     {"root": "TOOL03 native failure retains exact ambient workspace and lease for unsettled writers without replacing the primary failure",
@@ -52,6 +52,7 @@ import { aggregateNativeReadiness, nativeArtifacts, nativeSpecification, nativeG
   nativePlatformUnitFrameworkShardProtocol, nativeFourBodyFrameworkShardProtocol,
   nativeFrameworkUnitShardNames, nativeStageSelections, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
 import { runNativeValidation } from '../scripts/native-validation.mjs';
+import { nativeSourceDummyValues } from '../scripts/native-source-dummy-values.mjs';
 import { observerApiFixture } from './readiness-observer-fixture.mjs';
 import * as nativePass from '../scripts/native-validation.mjs';
 import { sourceValidationSchedulingPolicy, validationSchedulingPolicy } from '../scripts/test-scheduling.mjs';
@@ -2317,9 +2318,13 @@ test('T-PRD016 private Linux library fixtures preserve frozen published bytes wi
 });
 
 test('T-PRD074 exact typed native source retains code and credential-negative fixtures without becoming sanitized log text', () => {
+  const reserved = new URL('https://example.test/path');
+  reserved.username = 'owner';
+  reserved.password = nativeSourceDummyValues[0];
+  reserved.searchParams.set('sig', 'fixture-only-signature-value');
   const files = [{ file: 'test/controlled-source.test.mjs',
     contents: '\uFEFFconst fixture = {token:"fixture-value", headers:{Authorization:"Bearer fixture-token"}};\n' +
-      'const reserved = "https://owner:dummy@example.test/path?sig=fixture-only-signature-value";\n' }];
+      `const reserved = ${JSON.stringify(reserved.href)};\n` }];
   const original = Buffer.from(files[0].contents);
   assert.equal(validateNativeSourceDefinitions(files), files);
   assert.deepEqual(Buffer.from(files[0].contents), original);
@@ -2327,13 +2332,130 @@ test('T-PRD074 exact typed native source retains code and credential-negative fi
     `"${'ghp_' + 'a'.repeat(36)}"`,
     `"${Buffer.from('{"alg":"HS256"}').toString('base64url')}.` +
       `${Buffer.from('{"fixture":true}').toString('base64url')}.fixtureSignature"`,
-    `"https://github.com/fixture/repo?token=${'a'.repeat(40)}"`,
+    JSON.stringify('https://github.com/fixture/repo?token=' + 'a'.repeat(40)),
     `"-----BEGIN PRIVATE KEY-----\n${'A'.repeat(64)}\n-----END PRIVATE KEY-----"`,
   ]) {
     assert.throws(() => validateNativeSourceDefinitions([{ file: 'src/unsafe-source.mjs', contents: text }]),
       error => error.code === 'UNSAFE' && !error.message.includes(text));
   }
 });
+
+function credentialSource(password, token, hostname = 'github.com') {
+  const url = new URL(`https://${hostname}/fixture-owner/fixture-repo`);
+  url.username = 'fixture-user';
+  url.password = password;
+  if (token !== undefined) url.searchParams.set('token', token);
+  return { file: 'src/credential-observation.mjs', contents: `const reference = ${JSON.stringify(url.href)};\n` };
+}
+
+test('T-PRD074 source safety accepts exact dummy values without file or host exemptions', () => {
+  for (const password of nativeSourceDummyValues) {
+    const source = credentialSource(password, 'fixture-value');
+    const bytes = Buffer.from(source.contents);
+    const files = [source];
+    assert.equal(validateNativeSourceDefinitions(files), files);
+    assert.deepEqual(Buffer.from(source.contents), bytes);
+  }
+});
+
+test('T-PRD074 source safety rejects changed dummy values even in fixture files and reserved hosts', () => {
+  for (const password of ['secret-suffix', 'Secret', 'unapproved-short']) {
+    const source = credentialSource(password, undefined, 'example.test');
+    source.file = 'test/controlled-source.test.mjs';
+    assert.throws(() => validateNativeSourceDefinitions([source]),
+      error => error.code === 'UNSAFE' &&
+        error.message === `Exact source ${source.file} contains a credential-bearing URL; no source bytes were redacted or archived`);
+    assert.throws(() => validateNativeSourceDefinitions([{ ...source,
+      contents: source.contents.replace('https://', 'HTTPS://') }]), { code: 'UNSAFE' });
+  }
+});
+
+test('T-PRD074 source safety checks every credential after recognizing a dummy value', () => {
+  const unsafe = 'unapproved-' + 'credential-value';
+  const source = credentialSource('dummy', unsafe, 'example.test');
+  assert.throws(() => validateNativeSourceDefinitions([source]),
+    error => error.code === 'UNSAFE' && !error.message.includes(unsafe));
+  const approved = credentialSource('dummy', 'fixture-value');
+  const other = credentialSource(unsafe);
+  other.file = 'test/controlled-source.test.mjs';
+  assert.throws(() => validateNativeSourceDefinitions([approved, other]), { code: 'UNSAFE' });
+  const token = 'ghp_' + 'a'.repeat(36);
+  assert.throws(() => validateNativeSourceDefinitions([{ ...approved,
+    contents: approved.contents + `const token = ${JSON.stringify(token)};\n` }]), { code: 'UNSAFE' });
+  assert.throws(() => validateNativeSourceDefinitions([credentialSource('${value}')]), { code: 'UNSAFE' });
+  for (const tokenValue of [unsafe, 'native-source-expression-0']) {
+    const url = new URL('https://github.com/fixture-owner/fixture-repo/');
+    url.password = 'dummy';
+    url.username = 'fixture-user';
+    url.searchParams.set('token', tokenValue);
+    const contents = 'const reference = `' + url.href.replace('/fixture-repo/',
+      '/fixture-repo/${reference}/') + '`;\n';
+    assert.throws(() => validateNativeSourceDefinitions([{ file: approved.file, contents }]), { code: 'UNSAFE' });
+  }
+  const link = new URL('https://github.com/fixture-owner/fixture-repo');
+  for (const tokenValue of ['secret', unsafe]) {
+    link.searchParams.set('token', tokenValue);
+    const contents = `const link = ${JSON.stringify(`<${link.href}>; rel="next"`)};\n`;
+    const files = [{ file: approved.file, contents }];
+    if (tokenValue === 'secret') assert.equal(validateNativeSourceDefinitions(files), files);
+    else assert.throws(() => validateNativeSourceDefinitions(files), { code: 'UNSAFE' });
+  }
+});
+
+test('T-PRD074 source safety rejects unapproved literals beside interpolated ports', () => {
+  const value = ['unapproved', 'value'].join('-');
+  const contents = 'const reference = `http://127.0.0.1:${port}/?token=' + value + '`;\n';
+  assert.throws(() => validateNativeSourceDefinitions([{ file: 'src/port.mjs', contents }]), { code: 'UNSAFE' });
+});
+
+test('T-PRD074 source safety rejects percent-encoded expression marker impersonation', () => {
+  for (const literal of ['native-source-expression-0', '0']) {
+    const value = '%' + literal.charCodeAt(0).toString(16) + literal.slice(1);
+    const contents = 'const reference = `https://github.com/${path}?token=' + value + '`;\n';
+    assert.throws(() => validateNativeSourceDefinitions([{ file: 'src/path.mjs', contents }]), { code: 'UNSAFE' });
+  }
+});
+
+test('T-PRD074 source safety rejects encoded credentials in username-only userinfo', () => {
+  const token = 'ghp_' + 'a'.repeat(36);
+  const encoded = [...token].map(character => '%' + character.charCodeAt(0).toString(16)).join('');
+  const url = new URL('https://github.com/fixture-owner/fixture-repo');
+  url.username = encoded;
+  const source = { file: 'src/encoded-user.mjs', contents: `const reference = ${JSON.stringify(url.href)};\n` };
+  assert.throws(() => validateNativeSourceDefinitions([source]), { code: 'UNSAFE' });
+});
+
+test('T-PRD074 source safety never truncates quoted credentials to approved prefixes', () => {
+  const value = "secret'suffix";
+  const contents = 'const reference = "Read https://github.com/?token=' + value + '";\n';
+  assert.throws(() => validateNativeSourceDefinitions([{ file: 'src/quoted-value.mjs', contents }]), { code: 'UNSAFE' });
+  for (const suffix of [' suffix', '<suffix', '>suffix', '\u00a0']) {
+    const url = 'https://github.com/?token=' + 'secret' + suffix;
+    const source = { file: 'src/complete-value.mjs', contents: `const reference = ${JSON.stringify(url)};\n` };
+    assert.throws(() => validateNativeSourceDefinitions([source]), { code: 'UNSAFE' });
+  }
+});
+
+test('T-PRD074 source safety does not interpret nested quoted values as template expressions', () => {
+  const value = '${unapprovedCredentialValue}';
+  const contents = 'const out = `prefix ${consume("https://github.com/?token=' + value + '")}`;\n';
+  assert.throws(() => validateNativeSourceDefinitions([{ file: 'src/nested-value.mjs', contents }]), { code: 'UNSAFE' });
+});
+
+test('T-PRD074 source safety rejects encoded secret material outside sensitive query fields', () => {
+  const token = 'ghp_' + 'a'.repeat(36);
+  const encoded = [...token].map(character => '%' + character.charCodeAt(0).toString(16)).join('');
+  for (const component of ['view', 'path', 'fragment', 'name']) {
+    const url = new URL('https://github.com/fixture-owner/fixture-repo');
+    if (component === 'view') url.search = '?view=' + encoded;
+    if (component === 'path') url.pathname = '/' + encoded;
+    if (component === 'fragment') url.hash = encoded;
+    if (component === 'name') url.search = '?' + encoded + '=summary';
+    const source = { file: 'src/encoded-material.mjs', contents: `const reference = ${JSON.stringify(url.href)};\n` };
+    assert.throws(() => validateNativeSourceDefinitions([source]), { code: 'UNSAFE' });
+  }
+});
+
 function fixture(profile = 'pr', frozenCandidate = candidate, components = false) {
   const artifacts = nativeArtifacts(frozenCandidate);
   const parts = components ? nativeLegacyPrParts : targets.map(target => ({ target, component: 'full', role: target }));

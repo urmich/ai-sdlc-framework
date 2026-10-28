@@ -174,7 +174,7 @@ test('T-PRD037 repeated summary text is sanitized once per traversal without reu
     String.prototype.matchAll = matchAll;
   }
   const texts = Array.from({ length: 512 }, (_, index) =>
-    `https://example.invalid/run/${index}?token=fixture-${index}&view=summary`);
+    `https://example.invalid/run/${index}?token=fixture-value&view=summary`);
   const large = `${'ordinary diagnostic '.repeat(5000)}${text}`;
   assert.deepEqual(safeSummary({ texts, large, tail: [text, text] }), {
     texts: texts.map(safeSummary),

@@ -3,6 +3,7 @@ import { frozenDistributionContext } from './frozen-distribution-fixture.mjs';
 import { needsSyntheticReleaseFixture, prepareObservedSyntheticReleaseFixture,
   syntheticReleaseContextVariable } from './synthetic-release-fixture.mjs';
 import { assertCommittedSourceInputs } from './committed-source-inputs.mjs';
+import { nativeSourceDummyValues } from './native-source-dummy-values.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
@@ -18,7 +19,7 @@ import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
   validateExecutionContext, sanitizeExecutionPayload } from 'ai-sdlc-framework/evidence';
 import { compileValidationInventory, compileValidationSourceInventory, reconcileNodeExecution,
   validationPlatforms, validationSourcePaths, isValidationTestPath,
-  partitionValidationInventory } from './validation-inventory.mjs';
+  partitionValidationInventory, declarationTokens, sourceLiteralAt } from './validation-inventory.mjs';
 import { discoverGoDeclarations, executeValidationCommand, reconcileGoExecution, processDiagnostic,
   createOwnedCommandRunner } from './validation-tools.mjs';
 import { repositoryRoot, unitFiles, validationSelectionDescriptor, validationSelectionProtocol,
@@ -1345,6 +1346,99 @@ export async function captureNativeDefinitionInputs({ target, profile, component
   return definition;
 }
 
+function nativeSourceCredentialValues(contents, file) {
+  const credentials = [];
+  if (!/https?:\/\//iu.test(contents)) return credentials;
+  const tokens = /\.[cm]?js$/u.test(file) ? declarationTokens(contents) : null;
+  for (const match of contents.matchAll(/https?:\/\//giu)) {
+    const literal = tokens ? sourceLiteralAt(contents, match.index, tokens) : null;
+    let text = contents.slice(match.index, literal ? literal.end - 1 : undefined);
+    const expressions = [];
+    if (literal?.kind === 'template') {
+      // Expressions are source code, not literal values; surrounding fields still undergo the same checks.
+      let interpreted = '';
+      let offset = 0;
+      for (const span of literal.interpolations) {
+        if (span.start < match.index) continue;
+        const start = span.start - match.index;
+        interpreted += text.slice(offset, start);
+        expressions.push({ start: interpreted.length, end: interpreted.length + 1 });
+        interpreted += '0';
+        offset = span.end - match.index;
+      }
+      text = interpreted + text.slice(offset);
+    }
+    const reference = literal?.kind === 'string' ?
+      /^<([^<>\s]+)>(?:\s*;\s*[A-Za-z][A-Za-z0-9-]*=(?:"[^"]*"|[^\s,;]+))*$/u.exec(literal.value) : null;
+    if (reference && match.index === literal.start + 2) text = reference[1];
+    else if (literal) text = text.replace(/[\u0000-\u0020]+$/u, '');
+    else text = /^[^\s<>]*/u.exec(text)[0];
+    const overlapping = (start, end) => expressions.filter(expression =>
+      expression.start < end && expression.end > start);
+    const retain = (value, start, end, identity = false) => {
+      const selected = overlapping(start, end);
+      credentials.push({ value, expression: selected.length === 1 &&
+        selected[0].start === start && selected[0].end === end, composite: selected.length > 0 &&
+        !(selected.length === 1 && selected[0].start === start && selected[0].end === end), identity });
+    };
+    const authorityStart = text.indexOf('//') + 2;
+    const authorityEnd = text.slice(authorityStart).search(/[/?#]/u);
+    const authority = text.slice(authorityStart, authorityEnd < 0 ? text.length : authorityStart + authorityEnd);
+    const userinfoEnd = authority.lastIndexOf('@');
+    const separator = authority.slice(0, userinfoEnd < 0 ? 0 : userinfoEnd).indexOf(':');
+    if (userinfoEnd >= 0) {
+      const end = authorityStart + (separator < 0 ? userinfoEnd : separator);
+      let username;
+      try { username = decodeURIComponent(text.slice(authorityStart, end)); }
+      catch (error) {
+        if (!(error instanceof URIError)) throw error;
+        requireThat(false, 'UNSAFE', `Exact source ${file} contains an invalid credential value`);
+      }
+      retain(username, authorityStart, end, true);
+    }
+    if (separator >= 0) {
+      const start = authorityStart + separator + 1;
+      const end = authorityStart + userinfoEnd;
+      let password;
+      try { password = decodeURIComponent(text.slice(start, end)); }
+      catch (error) {
+        if (!(error instanceof URIError)) throw error;
+        requireThat(false, 'UNSAFE', `Exact source ${file} contains an invalid credential value`);
+      }
+      retain(password, start, end);
+    }
+    const fragment = text.indexOf('#');
+    const query = text.indexOf('?');
+    if (query < 0 || fragment >= 0 && query > fragment) continue;
+    let offset = query + 1;
+    for (const parameter of text.slice(offset, fragment < 0 ? text.length : fragment).split('&')) {
+      const equals = parameter.indexOf('=');
+      const keyEnd = offset + (equals < 0 ? parameter.length : equals);
+      const [[name, value] = ['', '']] = new URLSearchParams(parameter);
+      if (/^(?:sig|signature|token|access_token|client_secret|api_key|password|x-amz-signature)$/iu.test(name) ||
+          overlapping(offset, keyEnd).length > 0) {
+        retain(value, equals < 0 ? offset + parameter.length : keyEnd + 1, offset + parameter.length);
+      }
+      offset += parameter.length + 1;
+    }
+  }
+  return credentials;
+}
+
+function validateNativeSourceSecretMaterial(contents, file) {
+  const credential = /(?:gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{40,255})(?![A-Za-z0-9_])/u;
+  const privateKey = /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----\s*(?:[A-Za-z0-9+/=]{32,}\s*)+-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/u;
+  requireThat(!credential.test(contents) && !privateKey.test(contents), 'UNSAFE',
+    `Exact source ${file} contains credential-shaped material; no source bytes were redacted or archived`);
+  for (const match of contents.matchAll(/(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{8,})\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)(?![A-Za-z0-9_-])/gu)) {
+    let header;
+    try { header = JSON.parse(Buffer.from(match[1], 'base64url').toString('utf8')); }
+    catch (error) { if (!(error instanceof SyntaxError)) throw error; }
+    requireThat(!header || typeof header !== 'object' || typeof header.alg !== 'string', 'UNSAFE',
+      `Exact source ${file} contains a literal credential-shaped JWT; no source bytes were redacted or archived`);
+  }
+}
+
 export function validateNativeSourceDefinitions(sourceFiles) {
   requireThat(Array.isArray(sourceFiles) && sourceFiles.length > 0 && sourceFiles.length <= 10000 &&
     sourceFiles.every(source => source && Object.getPrototypeOf(source) === Object.prototype &&
@@ -1357,27 +1451,15 @@ export function validateNativeSourceDefinitions(sourceFiles) {
     sourceFiles.reduce((total, source) => total + Buffer.byteLength(source.contents), 0) <= 64 * 1024 * 1024,
   'EVIDENCE', 'Native source definitions must retain bounded distinct literal UTF-8 source bytes');
   for (const { file, contents } of sourceFiles) {
-    const credential = /(?:gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{40,255})(?![A-Za-z0-9_])/u;
-    const privateKey = /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----\s*(?:[A-Za-z0-9+/=]{32,}\s*)+-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/u;
-    requireThat(!credential.test(contents) && !privateKey.test(contents), 'UNSAFE',
-      `Exact source ${file} contains credential-shaped material; no source bytes were redacted or archived`);
-    for (const match of contents.matchAll(/(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{8,})\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)(?![A-Za-z0-9_-])/gu)) {
-      let header;
-      try { header = JSON.parse(Buffer.from(match[1], 'base64url').toString('utf8')); }
-      catch (error) { if (!(error instanceof SyntaxError)) throw error; }
-      requireThat(!header || typeof header !== 'object' || typeof header.alg !== 'string', 'UNSAFE',
-        `Exact source ${file} contains a literal credential-shaped JWT; no source bytes were redacted or archived`);
+    validateNativeSourceSecretMaterial(contents, file);
+    if (contents.includes('%')) {
+      const decoded = new URLSearchParams('material=' + contents.replaceAll('&', '%26').replaceAll('+', '%2B'))
+        .get('material');
+      validateNativeSourceSecretMaterial(decoded, file);
     }
-    for (const match of contents.matchAll(/https?:\/\/[^\s"'`<>]+/gu)) {
-      let selected;
-      try { selected = new URL(match[0]); }
-      catch (error) { if (error.code !== 'ERR_INVALID_URL') throw error; continue; }
-      const fixtureHost = /(?:^|\.)(?:test|invalid|example)$/iu.test(selected.hostname) ||
-        /^(?:example\.(?:com|net|org)|localhost|127\.0\.0\.1|\[::1\])$/iu.test(selected.hostname);
-      const sensitive = [...selected.searchParams].some(([name, value]) =>
-        /^(?:sig|signature|token|access_token|client_secret|api_key|password|x-amz-signature)$/iu.test(name) &&
-        value.length >= 20 && !/^(?:fixture|controlled|example|dummy|not-a-real|redacted)[-_]/iu.test(value));
-      requireThat(fixtureHost || !selected.password && !sensitive, 'UNSAFE',
+    for (const { value, expression, composite, identity } of nativeSourceCredentialValues(contents, file)) {
+      validateNativeSourceSecretMaterial(value, file);
+      requireThat(identity || !composite && (!value || expression || nativeSourceDummyValues.includes(value)), 'UNSAFE',
         `Exact source ${file} contains a credential-bearing URL; no source bytes were redacted or archived`);
     }
   }

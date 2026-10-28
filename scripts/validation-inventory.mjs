@@ -12,31 +12,16 @@ function stringEnd(source, from, quote) {
   }
   throw new Error('Unterminated JavaScript string in validation declarations');
 }
-function templateEnd(source, from) {
+function templateEnd(source, from, nesting = 0, interpolations = []) {
+  requireThat(nesting < 64, 'INVENTORY', 'JavaScript template nesting exceeds 64 levels');
   let index = from + 1;
   while (index < source.length) {
     if (source[index] === '\\') index += 2;
     else if (source[index] === '`') return index + 1;
     else if (source.startsWith('${', index)) {
-      let depth = 1;
-      index += 2;
-      while (index < source.length && depth) {
-        if (source[index] === "'" || source[index] === '"') index = stringEnd(source, index, source[index]);
-        else if (source[index] === '`') index = templateEnd(source, index);
-        else if (source.startsWith('//', index)) {
-          const end = source.indexOf('\n', index);
-          index = end < 0 ? source.length : end;
-        } else if (source.startsWith('/*', index)) {
-          const end = source.indexOf('*/', index + 2);
-          requireThat(end >= 0, 'INVENTORY', 'Unterminated JavaScript comment');
-          index = end + 2;
-        } else {
-          if (source[index] === '{') depth++;
-          else if (source[index] === '}') depth--;
-          index++;
-        }
-      }
-      requireThat(depth === 0, 'INVENTORY', 'Unterminated JavaScript interpolation');
+      const start = index;
+      index = declarationTokensIn(source, index + 2, source.length, nesting + 1, true).end;
+      interpolations.push({ start, end: index });
     } else index++;
   }
   throw new Error('Unterminated JavaScript template in validation declarations');
@@ -51,12 +36,16 @@ function decodeString(source) {
     });
 }
 export function declarationTokens(source) {
+  return declarationTokensIn(source, 0, source.length).tokens;
+}
+function declarationTokensIn(source, from, to, nesting = 0, interpolation = false) {
   const tokens = [];
-  let index = 0;
+  let index = from;
+  let depth = 1;
   let located = 0;
   let line = 1;
   let column = 1;
-  while (index < source.length) {
+  while (index < to) {
     const start = index;
     const character = source[index];
     if (/\s/u.test(character)) { index++; continue; }
@@ -73,13 +62,16 @@ export function declarationTokens(source) {
     }
     let kind = 'punctuation';
     let value = character;
+    let interpolations;
     if (character === "'" || character === '"') {
       kind = 'string';
+      interpolations = [];
       index = stringEnd(source, index, character);
       value = decodeString(source.slice(start, index));
     } else if (character === '`') {
       kind = 'template';
-      index = templateEnd(source, index);
+      interpolations = [];
+      index = templateEnd(source, index, nesting, interpolations);
       value = source.slice(start, index);
     } else if (/[A-Za-z_$]/u.test(character)) {
       kind = 'identifier';
@@ -99,15 +91,39 @@ export function declarationTokens(source) {
       while (index < source.length && /[a-z]/iu.test(source[index])) index++;
       value = source.slice(start, index);
     } else index++;
+    requireThat(index <= to, 'INVENTORY', 'JavaScript token crosses its interpolation boundary');
+    if (interpolation && kind === 'punctuation') {
+      if (character === '{') depth++;
+      else if (character === '}' && --depth === 0) return { tokens, end: index };
+    }
     const gap = source.slice(located, start);
     const newline = gap.lastIndexOf('\n');
     line += gap.split('\n').length - 1;
     column = newline < 0 ? column + gap.length : gap.length - newline;
     located = start;
     tokens.push({ kind, value, start, end: index, line,
-      column });
+      column, ...(interpolations ? { interpolations } : {}) });
   }
-  return tokens;
+  requireThat(!interpolation, 'INVENTORY', 'Unterminated JavaScript interpolation');
+  return { tokens, end: index };
+}
+/**
+ * Locate the innermost source literal without evaluating expressions. Offsets and
+ * immediate template interpolation spans are absolute and end-exclusive.
+ * Malformed layouts and template nesting beyond 64 levels throw.
+ */
+export function sourceLiteralAt(source, position, tokens = declarationTokens(source)) {
+  if (!Number.isInteger(position) || position < 0 || position >= source.length) return null;
+  for (let nesting = 0; nesting <= 64; nesting++) {
+    const token = tokens.find(candidate => candidate.start <= position && position < candidate.end);
+    if (!token || !['string', 'template'].includes(token.kind)) return null;
+    if (token.kind === 'string') return token;
+    const interpolation = token.interpolations.find(span => span.start <= position && position < span.end);
+    if (!interpolation) return token;
+    if (position < interpolation.start + 2 || position >= interpolation.end - 1) return null;
+    tokens = declarationTokensIn(source, interpolation.start + 2, interpolation.end - 1, nesting + 1).tokens;
+  }
+  throw new Error('JavaScript template nesting exceeds 64 levels');
 }
 function matching(tokens, from) {
   const close = { '(': ')', '[': ']', '{': '}' }[tokens[from]?.value];

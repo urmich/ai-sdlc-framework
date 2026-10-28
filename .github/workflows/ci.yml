@@ -146,6 +146,10 @@ jobs:
           node-version: '24.20.0'
           architecture: x64
           check-latest: false
+      - name: Validate exact committed source safety
+        env:
+          EXPECTED_SOURCE_COMMIT: ${{ github.sha }}
+        run: node scripts/validate-native-source.mjs
       - name: Read source-declared bootstrap protocol
         id: bootstrap-protocol
         run: |

@@ -1236,6 +1236,32 @@ Write each owned marker's complete JSON to its unique pending file before
 renaming it to the published name. A visible final marker must never expose a
 partial write; do not catch or retry invalid JSON, relax a barrier or extend its
 deadline to conceal incomplete publication.
+The PR-only `T-PRD074 source safety` roots in
+`test/public-readiness-native.test.mjs` cover exact approved dummy values,
+unchanged retained bytes, changed values on reserved hosts/in fixture files,
+mixed safe/unsafe fields and files, unconditional token rejection, and literal
+credentials surrounding source-template expressions, interpolated ports and
+percent-encoded literals impersonating expression placeholders, encoded tokens
+in username-only userinfo, internal quotes after approved prefixes and quoted
+interpolation-lookalikes nested inside actual expressions. Every field remains
+independently checked. Encoded secret material is rejected in ordinary
+query values, query names, paths and fragments, and spaces/angle brackets cannot
+truncate a known literal value to an approved prefix. No file, URL, host or
+prefix is exempted. `T-PRD020 required source safety scans complete committed
+definitions before native bootstrap` in `test/public-readiness-ci.test.mjs`
+checks the required source-job command against an isolated committed checkout,
+wrong candidate, dirty captured documentation and committed unsafe
+documentation, including encoded credential-shaped username-only userinfo.
+The three `T-PRD074 source literal ownership` roots in
+`test/public-readiness-inventory.test.mjs` independently cover actual enclosing
+quotes, nested ordinary strings versus genuine interpolation and bounded
+malformed/over-depth layouts without executing code.
+All these families remain PR-only and do not expand L's 27 assertions.
+The existing T-PRD037 distinct-summary fixture retains all 512 distinct URL
+paths while using the single approved `fixture-value` token literal instead of
+generating 512 credential values outside the fixed policy. These additions are
+NotRun for the new native candidate until fresh candidate-bound execution.
+
 The PR-only `T-PRD074 archived scheduling reconstructs only its authenticated
 captured literal policy without current-credit fallback` root in
 `test/public-readiness-observer.test.mjs` checks current v9 and exact historical

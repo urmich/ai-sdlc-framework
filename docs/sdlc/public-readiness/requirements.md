@@ -571,6 +571,12 @@ or manually edited status is not evidence of successful test execution.
   release gates and postpublication acceptance to the supported framework
   evidence interfaces and readiness rules. Retain provider execution evidence
   as required by AC-213.7; a session-local handcrafted aggregate is insufficient.
+  Exact-source retention permits only maintainer-controlled, explicitly listed
+  dummy credential values, never a fixture/file/URL/host-wide exemption.
+  Evaluate every credential-bearing field independently; changing a dummy value
+  or mixing it with an unapproved value must fail source safety. Preserve
+  unconditional real token/private-key checks and run source safety in required
+  PR CI before native execution.
   Produce its generated readiness report from its actual Test Plan
   and retained execution records. Its PR and publisher controls enforce the
   configured required results without repository-specific shortcuts that other

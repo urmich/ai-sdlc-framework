@@ -1,8 +1,11 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [
-    {"coverage": "process", "paths": ["scripts/validation-tools.mjs", "scripts/check.mjs", "scripts/validate-winget-schema.py", "scripts/read-validation-artifact.py", "cmd/sdlc-launcher/main_test.go", "cmd/sdlc-launcher/integrity_test.go"]},
+    {"coverage": "process", "paths": ["scripts/validation-tools.mjs", "scripts/check.mjs", "scripts/validate-native-source.mjs", "scripts/validate-winget-schema.py", "scripts/read-validation-artifact.py", "cmd/sdlc-launcher/main_test.go", "cmd/sdlc-launcher/integrity_test.go"]},
     {"coverage": "direct", "paths": ["scripts/pr-readiness.mjs", "scripts/github-readiness-host.mjs", "scripts/pr-observer.mjs", "scripts/workflow-policy.mjs", "scripts/native-toolchain.mjs", "scripts/native-homebrew-prefix.mjs"]}
+  ],
+  "groups": [
+    {"root": "T-PRD020 required source safety scans complete committed definitions before native bootstrap", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}
   ]
 };
 import test from 'node:test';
@@ -1571,6 +1574,139 @@ function contextProof() {
   return { job, body, logs, expected: { repositoryId: 17, runId: 101, attempt: 1,
     expectedMerge: body.mergeSha, prNumber: 1 } };
 }
+
+test('T-PRD020 required source safety scans complete committed definitions before native bootstrap', async t => {
+  const workflows = await readWorkflowPolicySources(repositoryRoot);
+  const inspected = inspectWorkflowTrust(workflows);
+  assert.equal(inspected.complete, true, JSON.stringify(inspected.blockers));
+  const ci = inspected.workflows.find(item => item.file === '.github/workflows/ci.yml').document;
+  const steps = ci.jobs.source.steps;
+  const checks = steps.filter(step => step.run === 'node scripts/validate-native-source.mjs');
+  assert.equal(checks.length, 1, 'Required source freeze must run the committed source-safety guard');
+  const check = checks[0];
+  assert.equal(check.if, undefined);
+  assert.equal(check['continue-on-error'], undefined);
+  assert.equal(check.env.EXPECTED_SOURCE_COMMIT, '${{ github.sha }}');
+  const index = steps.indexOf(check);
+  for (const name of ['Check out exact candidate', 'Materialize committed source bytes', 'Select pinned native Node']) {
+    assert.ok(steps.findIndex(step => step.name === name) < index);
+  }
+  for (const name of ['Read source-declared bootstrap protocol', 'Select pinned native Go',
+    'Select pinned native CPython', 'Provision isolated native toolchain', 'Freeze exact source candidate']) {
+    assert.ok(index < steps.findIndex(step => step.name === name));
+  }
+  assert.equal(Object.values(ci.jobs).flatMap(job => job.steps ?? [])
+    .filter(step => step.run === check.run).length, 1, 'Do not repeat the scan in native parts');
+  assert.ok(ci.jobs['producer-summary'].needs.includes('source'));
+  const checkout = steps.find(step => step.name === 'Check out exact candidate');
+  assert.equal(checkout.with.ref, '${{ github.sha }}');
+  assert.equal(checkout.with['persist-credentials'], false);
+
+  const f = await fixture(t);
+  const sourceRoot = path.join(f.root, 'source');
+  const hooks = path.join(f.root, 'hooks');
+  await fs.mkdir(sourceRoot);
+  await fs.mkdir(hooks);
+  const environment = { ...f.environment, GIT_AUTHOR_NAME: 'Owned CI source fixture',
+    GIT_AUTHOR_EMAIL: 'fixture@example.invalid', GIT_COMMITTER_NAME: 'Owned CI source fixture',
+    GIT_COMMITTER_EMAIL: 'fixture@example.invalid' };
+  for (const key of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE',
+    'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES']) delete environment[key];
+  const git = (args, { cwd = sourceRoot, input } = {}) => childProcess.execFileSync('git',
+    ['-c', `core.hooksPath=${hooks}`, ...args],
+    { cwd, env: environment, input, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }).trimEnd();
+  const tracked = git(['ls-files', '--stage', '-z'], { cwd: repositoryRoot }).split('\0').filter(Boolean);
+  const modes = new Map(tracked.map(row => {
+    const match = /^(100644|100755) [a-f0-9]+ 0\t([\s\S]+)$/u.exec(row);
+    assert.ok(match, 'Source fixture requires literal merged files');
+    return [match[2], match[1]];
+  }));
+  for (const file of git(['ls-files', '--others', '--exclude-standard', '-z'],
+    { cwd: repositoryRoot }).split('\0').filter(Boolean)) {
+    if (/^(?:scripts|src)\//u.test(file)) modes.set(file, '100644');
+  }
+  for (const file of modes.keys()) {
+    const original = path.join(repositoryRoot, ...file.split('/'));
+    const info = await fs.lstat(original);
+    assert.ok(info.isFile() && !info.isSymbolicLink());
+    const selected = path.join(sourceRoot, ...file.split('/'));
+    await fs.mkdir(path.dirname(selected), { recursive: true });
+    await fs.copyFile(original, selected);
+  }
+  const archived = 'docs/ci-source-safety-fixture.md';
+  const archivedContents = '\ufeffLiteral committed source\r\n';
+  await fs.writeFile(path.join(sourceRoot, ...archived.split('/')), archivedContents);
+  modes.set(archived, '100644');
+  git(['init', '--quiet']);
+  const commit = () => {
+    const files = [...modes.keys()].sort();
+    const hashes = git(['hash-object', '-w', '--no-filters', '--stdin-paths'],
+      { input: files.map(file => JSON.stringify(file)).join('\n') + '\n' }).split('\n');
+    assert.equal(hashes.length, files.length);
+    git(['update-index', '-z', '--index-info'],
+      { input: files.map((file, i) => `${modes.get(file)} ${hashes[i]}\t${file}\0`).join('') });
+    const revision = git(['commit-tree', git(['write-tree']), '-m', 'Owned exact source fixture']);
+    git(['update-ref', 'HEAD', revision]);
+    return revision;
+  };
+  const revision = commit();
+  const sourceFiles = [];
+  for (const file of [...modes.keys()].sort()) {
+    if (!/^(?:test|src|scripts|cmd|packaging|assets|docs|bin|\.github\/(?:workflows|actions))\//u.test(file) &&
+      !['package.json', '.github/release-requirements.txt'].includes(file)) continue;
+    const bytes = await fs.readFile(path.join(sourceRoot, ...file.split('/')));
+    try { sourceFiles.push({ file, contents: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) }); }
+    catch (error) { if (error.code !== 'ERR_ENCODING_INVALID_ENCODED_DATA') throw error; }
+  }
+  const scan = (name, expected = git(['rev-parse', 'HEAD'])) => f.run(name, process.execPath,
+    [path.join(sourceRoot, 'scripts', 'validate-native-source.mjs')], {
+      cwd: sourceRoot, environment: { ...environment, EXPECTED_SOURCE_COMMIT: expected,
+        GITHUB_REPOSITORY_ID: '17' },
+    });
+  const positive = await scan('source-safety-positive');
+  assert.equal(positive.exitCode, 0, positive.stdout + positive.stderr);
+  const summary = JSON.parse(positive.stdout);
+  assert.equal(summary.status, 'Passed');
+  assert.equal(summary.source.revision, revision);
+  assert.equal(summary.sourceFileCount, sourceFiles.length);
+  assert.equal(summary.sourceDigest, digest(sourceFiles), 'Scan exact complete archive bytes, including BOM and CRLF');
+  const mismatch = await scan('source-safety-wrong-candidate', 'f'.repeat(40));
+  assert.notEqual(mismatch.exitCode, 0);
+  assert.match(mismatch.stderr, /selected source commit/u);
+  const token = 'gh' + 'p_' + 'Z'.repeat(36);
+  await fs.appendFile(path.join(sourceRoot, ...archived.split('/')), token);
+  const dirty = await scan('source-safety-dirty');
+  assert.notEqual(dirty.exitCode, 0);
+  assert.match(dirty.stderr, /committed byte/u);
+  commit();
+  const unsafe = await scan('source-safety-unsafe-archive');
+  assert.notEqual(unsafe.exitCode, 0);
+  assert.match(unsafe.stderr, /credential-shaped material/u);
+  assert.equal((unsafe.stdout + unsafe.stderr).includes(token), false, 'Unsafe source bytes must not leak into diagnostics');
+  const usernameToken = 'gh' + 'p_' + 'a'.repeat(36);
+  const encodedUsername = [...usernameToken].map(character =>
+    `%${character.charCodeAt(0).toString(16).padStart(2, '0')}`).join('');
+  await fs.writeFile(path.join(sourceRoot, ...archived.split('/')), archivedContents);
+  await fs.appendFile(path.join(sourceRoot, ...archived.split('/')),
+    `https://${encodedUsername}@downloads.example.net/public-input\n`);
+  commit();
+  const unsafeUsername = await scan('source-safety-unsafe-encoded-username');
+  assert.notEqual(unsafeUsername.exitCode, 0);
+  assert.match(unsafeUsername.stderr, /credential-(?:shaped material|bearing URL)/u);
+  const diagnostic = unsafeUsername.stdout + unsafeUsername.stderr;
+  assert.equal(diagnostic.includes(usernameToken), false, 'Decoded username credentials must not leak into diagnostics');
+  assert.equal(diagnostic.includes(encodedUsername), false, 'Encoded username credentials must not leak into diagnostics');
+  await fs.writeFile(path.join(sourceRoot, ...archived.split('/')), archivedContents);
+  await fs.appendFile(path.join(sourceRoot, ...archived.split('/')),
+    `https://downloads.example.net/public-input?view=${encodedUsername}\n`);
+  commit();
+  const unsafeView = await scan('source-safety-unsafe-encoded-view');
+  assert.notEqual(unsafeView.exitCode, 0);
+  assert.match(unsafeView.stderr, /credential-(?:shaped material|bearing URL)/u);
+  const viewDiagnostic = unsafeView.stdout + unsafeView.stderr;
+  assert.equal(viewDiagnostic.includes(usernameToken), false, 'Decoded query credentials must not leak into diagnostics');
+  assert.equal(viewDiagnostic.includes(encodedUsername), false, 'Encoded query credentials must not leak into diagnostics');
+});
 
 test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel unit jobs and distinguishes edited base retargets', async t => {
   const workflows = await readWorkflowPolicySources(repositoryRoot);

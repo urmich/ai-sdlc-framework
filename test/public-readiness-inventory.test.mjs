@@ -17,6 +17,16 @@ export const validationDeclarations = {
     "minimumSlots": 3
   }],
   "applicability": [{
+    "names": [
+      "T-PRD074 source literal ownership uses enclosing quotes instead of URL prefixes",
+      "T-PRD074 source literal ownership isolates genuine interpolation from nested ordinary strings",
+      "T-PRD074 source literal ownership rejects malformed and over-depth template layouts"
+    ],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "native-source-safety-contract",
+    "reason": "PR-only pure lexer regressions for literal ownership and genuine expression spans; no critical promotion, external resources or source execution.",
+    "prerequisites": ["Node; independent process-isolated roots with no shared mutable state"]
+  }, {
     "names": ["T-PRD018 Windows termination observations durably distinguish dispatch and original handle settlement without exposing caller data"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "runner-termination-evidence-contract",
@@ -76,7 +86,8 @@ import { fixture } from './helpers.mjs';
 import { discoverDeclarations, compileValidationInventory,
   compileValidationSourceInventory, validationSourcePaths,
   compareValidationInventory, partitionValidationInventory,
-  reconcileNodeExecution, nodeStartDefinition, cancelledNodeStarts, declarationTokens } from '../scripts/validation-inventory.mjs';
+  reconcileNodeExecution, nodeStartDefinition, cancelledNodeStarts, declarationTokens,
+  sourceLiteralAt } from '../scripts/validation-inventory.mjs';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -762,6 +773,84 @@ await new Promise(resolve=>process.stdout.write(bytes,resolve));
     assert.ok(events.some(event => event.kind === 'output-rejected' && event.original?.sha256));
     assert.equal(events.at(-1).complete, false);
   }
+});
+
+test('T-PRD074 source literal ownership uses enclosing quotes instead of URL prefixes', () => {
+  const url = ['https:', '', 'github.com', '?view=fixture-value'].join('/');
+  for (const literal of [
+    "'ordinary prefix " + url + "'",
+    "'ordinary prefix \"" + url + "\" suffix'",
+    '"ordinary prefix \\"' + url + '\\" suffix"',
+    '`ordinary prefix "' + url + '" suffix`',
+  ]) {
+    const source = `/* "not a literal" */ const value = ${literal}; // https://comment.invalid/`;
+    const tokens = declarationTokens(source);
+    const owner = sourceLiteralAt(source, source.indexOf(url), tokens);
+    assert.equal(source.slice(owner.start, owner.end), literal);
+    assert.equal(owner.kind, literal.startsWith('`') ? 'template' : 'string');
+    assert.deepEqual(owner.interpolations, []);
+    assert.equal(sourceLiteralAt(source, source.indexOf('https://comment.invalid/'), tokens), null);
+    assert.equal(sourceLiteralAt(source, source.indexOf('value ='), tokens), null);
+  }
+});
+
+test('T-PRD074 source literal ownership isolates genuine interpolation from nested ordinary strings', () => {
+  const origin = ['https:', '', 'github.com'].join('/');
+  const source = [
+    'throw new Error("Source discovery must not execute");',
+    'const out = `prefix ' + origin + ':${port}/${path}?view=fixture-value',
+    '${consume("' + origin + '/?view=${literalValue}")}',
+    '${consume(`nested ' + origin + ':${nestedPort}/${({ value: "}" /* } */ }).value}?view=fixture-value`)}',
+    '${/[}"`]/.test("}") /* } */ ? "safe" : // }\n "also safe"}',
+    '\\${notAnExpression}`;',
+  ].join('\n');
+  const tokens = declarationTokens(source);
+  const ownerAt = text => sourceLiteralAt(source, source.indexOf(text), tokens);
+  const outer = ownerAt(origin + ':${port}');
+  assert.equal(outer.kind, 'template');
+  assert.deepEqual(outer.interpolations.map(span => source.slice(span.start, span.end)), [
+    '${port}', '${path}',
+    '${consume("' + origin + '/?view=${literalValue}")}',
+    '${consume(`nested ' + origin + ':${nestedPort}/${({ value: "}" /* } */ }).value}?view=fixture-value`)}',
+    '${/[}"`]/.test("}") /* } */ ? "safe" : // }\n "also safe"}',
+  ]);
+  const inner = ownerAt(origin + '/?view=${literalValue}');
+  assert.equal(inner.kind, 'string');
+  assert.equal(source.slice(inner.start, inner.end), '"' + origin + '/?view=${literalValue}"');
+  assert.deepEqual(inner.interpolations, []);
+  assert.deepEqual(ownerAt('literalValue'), inner);
+  const nested = ownerAt(origin + ':${nestedPort}');
+  assert.equal(nested.kind, 'template');
+  assert.deepEqual(nested.interpolations.map(span => source.slice(span.start, span.end)), [
+    '${nestedPort}', '${({ value: "}" /* } */ }).value}',
+  ]);
+  const brace = sourceLiteralAt(source, source.indexOf('"}"') + 1, tokens);
+  assert.equal(brace.kind, 'string');
+  assert.equal(source.slice(brace.start, brace.end), '"}"');
+  assert.deepEqual(brace.interpolations, []);
+  assert.equal(ownerAt('notAnExpression').start, outer.start);
+  assert.equal(ownerAt('nestedPort'), null);
+  assert.equal(sourceLiteralAt(source, source.indexOf('/[}"`]/') + 2, tokens), null);
+  assert.equal(sourceLiteralAt(source, source.indexOf('/* } */') + 3, tokens), null);
+});
+
+test('T-PRD074 source literal ownership rejects malformed and over-depth template layouts', () => {
+  const url = ['https:', '', 'github.com', '?view=fixture-value'].join('/');
+  for (const source of [
+    'const value = "' + url,
+    'const value = `prefix ' + url,
+    'const value = `prefix ${consume("' + url + '")',
+    'const value = `prefix ${/* ' + url,
+    'const value = `prefix ${consume(`nested ' + url + ')}`;',
+  ]) assert.throws(() => sourceLiteralAt(source, source.indexOf(url)), /Unterminated/u);
+  let source = JSON.stringify(url);
+  for (let nesting = 0; nesting < 64; nesting++) source = '`prefix ${consume(' + source + ')}`';
+  const tokens = declarationTokens(source);
+  const owner = sourceLiteralAt(source, source.indexOf(url), tokens);
+  assert.equal(owner.kind, 'string');
+  assert.equal(source.slice(owner.start, owner.end), JSON.stringify(url));
+  source = '`prefix ${consume(' + source + ')}`';
+  assert.throws(() => sourceLiteralAt(source, source.indexOf(url)), /nesting exceeds 64 levels/u);
 });
 
 test('T-PRD002 literal and finite declarations identify exact selectors without executing candidate JavaScript', () => {
