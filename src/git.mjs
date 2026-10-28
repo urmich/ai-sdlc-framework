@@ -183,8 +183,8 @@ export async function contentSnapshot(member, relative) {
   return { repositoryId: member.repositoryId, path: relative, digest: digest(bytes), bytes };
 }
 export async function history(member, boundary = null) {
-  await validateBinding(member);
-  if (!member.head && !(await identity(member.root, member.repositoryId)).head) return [];
+  const current = await validateBinding(member);
+  if (!member.head && !current.head) return [];
   if (boundary) text(boundary, 'history boundary', 128);
   const range = boundary ? `${boundary}..HEAD` : 'HEAD';
   requireThat(!range.startsWith('-'), 'INPUT', 'Invalid revision');

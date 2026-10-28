@@ -1497,6 +1497,13 @@ the original subset. A new legitimate test must not erase preservation checks.
    preserve all URLs and native rewrite rules, and observe subsequent mutations.
    Retain exact configured/requested conflicts, missing/empty-remote errors and
    the same-SHA branch rejection; no cached identity supplies currentness.
+   The PR-only `T-PRD010 Git history uses one fresh binding without hiding
+   commits or branch changes` root in `test/storage.test.mjs` observes one
+   repository-path probe per history call, including an unborn repository and
+   subsequent commits under the unchanged original binding. A same-commit
+   branch switch must fail before history is read. Reserve two process slots
+   for the test and its serial Git child; do not expand the finite critical
+   profile or treat local process-count evidence as a native timing pass.
    The FR-063 immutable-fixture Git regression must reject the removed old
    remote name using the fixture's native Git failure contract, then observe
    the renamed destination's real URL query and unchanged URL. Do not require

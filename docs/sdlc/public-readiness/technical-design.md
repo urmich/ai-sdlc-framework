@@ -309,6 +309,12 @@ failure falls back to the original fresh name enumeration and selection error;
 other native errors propagate. Implicit selection still enumerates names.
 Repeat binding and URL reads on every call; do not cache identity or currentness.
 Revision-bearing consumers retain their full identity checks.
+History reads use the identity returned by their own fresh binding validation
+when determining whether an originally unborn binding now has a HEAD. Do not
+repeat repository-path, branch and revision probes for that presence check.
+Each history invocation still validates the current binding independently;
+stored HEAD values never supply a current revision. Preserve the existing
+history range, Git errors and rejection of a same-commit branch switch.
 The concurrent-revision test oracle coordinates eight real durable updates by
 observed peer completion, rather than treating elapsed host I/O as a lost update.
 Each contender has at most eight contention retries, and each no-progress
