@@ -1,14 +1,55 @@
 # AI SDLC Framework
 
-A user-governed Software Development Life Cycle for GitHub Copilot CLI:
-understand requirements, define their evidence, design, implement, validate and
-review the exact candidate before separately authorized delivery.
+A repeatable engineering workflow for GitHub Copilot CLI, from a request to
+a reviewed, evidence-backed change.
 
-![AI SDLC Framework lifecycle](docs/images/ai-sdlc-framework-overview.svg)
+AI SDLC Framework helps Copilot clarify what to build, plan how to verify it,
+recover project context across sessions and keep delivery decisions in your
+hands. It adds installable instructions, skills and hooks backed by an offline
+CLI; it is not a separate coding model or a replacement for your test runners
+and CI/CD.
 
 This is [urmich](https://github.com/urmich)'s personal, community-maintained third-party OSS
 project, licensed under [MIT](LICENSE). It is not a Microsoft product,
 sponsorship, approval or corporate support commitment.
+
+## Why use it?
+
+- **Reduce solution-first coding.** Clarify requirements and observable
+  acceptance conditions, then plan tests and design before implementation.
+- **Make readiness explainable.** Connect requirements, actual test outcomes
+  and the reviewed candidate instead of relying on an agent's "done" claim.
+- **Continue without starting over.** Resume from canonical project documents,
+  retained decisions and original execution results rather than chat memory alone.
+- **Keep consequential choices yours.** Record approvals and scoped exceptions;
+  keep PR publication, merge and environment delivery separately authorized.
+  Stages remain advisory, and you can explicitly skip or reorder them.
+
+## Capabilities
+
+| Capability | What it helps you do | Learn more |
+| --- | --- | --- |
+| Requirements-to-review workflow | Turn a request into requirements, one living Test Plan, Technical Design, Coding, unit-first validation and built-in Copilot `/review`. | [Workflow](docs/usage/README.md) |
+| Session recovery | Recover authoritative documents, current work, pending execution handles and historical results after a restart or context loss. | [Resume and recovery](docs/usage/README.md#resume-from-authoritative-records) |
+| Explicit user decisions | Record approvals, scoped overrides and receipt-backed decisions without treating tool success or document labels as consent. | [Decisions and receipts](docs/reference/cli.md#decisions-and-receipts) |
+| Multi-repository and multi-document work | Bind each repository/branch and track separate requirements, plans and designs under one coordinator. Local-only work needs no remote. | [Identity and artifacts](docs/reference/cli.md#identity-artifacts-and-recovery) |
+| Execution evidence and readiness | Normalize real producer results, retain individual outcomes and evaluate source/specification/configuration-bound readiness. Missing or stale evidence is not a pass. | [Evidence integration](docs/usage/evidence.md) |
+| Requirements-to-tests traceability | Connect acceptance conditions to declared tests, expose coverage gaps and generate a PR-description coverage section. A mapping is not proof of execution. | [Coverage guide](docs/usage/evidence.md#1-author-canonical-definitions-and-compile-coverage-in-memory) |
+| Delivery tracking | Track exact operations, PRs, artifacts and DEV/STAGING handoffs with separate authority and explicit execution owner/location. No automatic PROD. | [Operations](docs/reference/cli.md#exact-external-operations) and [PR records](docs/reference/cli.md#pr-records) |
+| Pipeline monitoring | Follow reported runs with 60-second polling when a running host provides a scheduler and authorized provider-read tools. | [Monitoring prerequisites](docs/getting-started/README.md#monitoring-is-a-host-capability) |
+| Provider integration | Connect authorized host tools through provider contracts and GitHub adapters; keep external access and credentials at the host boundary. | [Integrations](docs/integrations/README.md) |
+| Owned installation and updates | Choose a Copilot home, check installation integrity and preserve runtime state and unrelated files during ordinary updates. | [Installation](docs/installation/README.md) |
+
+**Availability:** The new reusable evidence/readiness and coverage interfaces
+above are included in the **0.5.0 release candidate**, not the published
+**0.4.0** package. See [runtime and installation](#runtime-and-installation)
+before choosing a version.
+
+The framework guides work and records decisions/evidence. It does not replace
+Copilot permissions, OS/sandbox controls, provider access controls or repository
+rules, and installing it does not impose this repository's CI policy on yours.
+
+![AI SDLC Framework lifecycle](docs/images/ai-sdlc-framework-overview.svg)
 
 ## Start here
 
