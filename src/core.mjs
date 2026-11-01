@@ -111,7 +111,7 @@ function decodeCredentialText(value) {
       (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)));
   }
 }
-function isCredentialQueryKey(key) {
+export function isCredentialQueryKey(key) {
   let current = key;
   for (let attempt = 0; attempt < 3; attempt++) {
     if (credentialQueryKey.test(current) || sensitiveKey.test(current)) return true;
@@ -126,7 +126,7 @@ function hasCredentialClue(value) {
   for (let attempt = 0; attempt < 3; attempt++) {
     if ([...current.matchAll(credentialAssignments)].some(match =>
       !redactedValue.test(current.slice(match.index + match[0].length).trim())) ||
-      /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|(?:ghp|github_pat)_[a-zA-Z0-9_]{20,}/iu.test(current) ||
+      /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|(?:gh[pousr]|github_pat)_[a-zA-Z0-9_]{20,}/iu.test(current) ||
       hasJwt(current)) return true;
     const decoded = decodeCredentialText(current);
     if (decoded === current) break;
@@ -176,7 +176,7 @@ function redactPlainText(value) {
   return redactJwtText(redactCredentialQueries(value)
     .replace(/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|$)/giu,
       match => `[redacted:${digest(match)}]`)
-    .replace(/(?:ghp|github_pat)_[A-Za-z0-9_]{20,}/giu,
+    .replace(/(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{20,}/giu,
       match => `[redacted:${digest(match)}]`));
 }
 function redactTextUrls(value) {
@@ -398,7 +398,7 @@ export function budget(value, limit, label) {
 }
 export function safeRecord(value, limit = LIMITS.record) {
   const serialized = canonical(value);
-  requireThat(!/(?:-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|(?:ghp|github_pat)_[a-zA-Z0-9_]{20,}|(?:password|accessToken|clientSecret|authorization)["']?\s*[:=]\s*["']?[^"\s,}]{4,})/iu.test(serialized),
+  requireThat(!/(?:-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|(?:gh[pousr]|github_pat)_[a-zA-Z0-9_]{20,}|(?:password|accessToken|clientSecret|authorization)["']?\s*[:=]\s*["']?[^"\s,}]{4,})/iu.test(serialized),
     'UNSAFE', 'Record appears to contain credentials; use a sanitized reference');
   budget(value, limit, 'Record');
   return value;

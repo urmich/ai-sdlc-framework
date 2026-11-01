@@ -86,7 +86,9 @@ is separate and current validation remains `NotRun` until matching execution.
 
 Pass this object to
 `node "<installed-entry>" maintenance select`. The selection validates package
-identity and exact receipt content and records only the canonical root. An
+identity, supported capture provenance and exact receipt content, and records
+only the canonical root. Existing selected roots remain readable; an old
+receipt without capture provenance cannot select a new root. An
 unrelated receipt or self-declared package is not trusted maintenance.
 `uninstall` removes unchanged owned files and the exact instructions block only.
 Modified/unowned files are preserved and reported. Runtime state is **always
@@ -141,7 +143,7 @@ a host scheduler.
 
 ## Generic coverage and readiness
 
-The candidate source exposes `coverage prepare|inspect` and
+The 0.5.0 source/package candidate exposes `coverage prepare|inspect` and
 `readiness evaluate|report`, plus `ai-sdlc-framework/evidence`.
 These are offline data operations: PR-description coverage is generated in
 memory from existing canonical definitions, not an extra coverage/index/policy
@@ -151,8 +153,9 @@ trusted origin. Detached CI does not fabricate phase receipts or managed credit.
 See the [consumer integration guide](../usage/evidence.md) for exact inputs,
 retention/replay and the separate provider/lifecycle authority boundaries.
 
-The current source candidate is not a claim these interfaces are present in the
-immutable published 0.4.0 package or that its native/public acceptance passed.
+The candidate is not yet published. These interfaces are absent from the
+immutable published 0.4.0 package; candidate packaging is not native/public
+acceptance.
 
 Offline `pr description-prepare` additionally prepares the in-memory
 description/coverage handoff from registered committed canonical definitions.
@@ -369,12 +372,18 @@ or scoped user workflow override.
 The installed `userPromptSubmitted` and supported `ask_user` post-tool adapter
 capture metadata and hashes of actual input. They do not store the conversation.
 Use `receipt latest` to retrieve this session's latest captured receipt ID.
-`receipt capture` is the source-adapter interface:
+`receipt capture` retains direct, uncredited capture metadata:
 `{sessionId,source,input,timestamp?}` with source `userPromptSubmitted` or
 `ask_user`. It is **not** permission for an agent to manufacture a user message.
 The managed evaluator denies credit to agent-authored receipt-capture shell
 commands, while the public advisory hook falls through without vetoing the
-tool; input hooks call the capture adapter directly. Initialization requires a captured
+tool. Only supported input hooks persist managed capture provenance; a caller's
+source label or timestamp cannot supply it. Input captured during a known
+uncredited shell invocation remains uncredited until its matching supported host
+completion. A known public callback dispatch cannot retire capture guards by
+supplying matching request fields. Missing or ambiguous callbacks retain that
+provenance gap. Receipts without provenance remain
+usable for exact replay of existing decisions, not new authority. Initialization requires a captured
 request in the current session (latest by default, or explicit `receiptId`).
 Free-form `evidence:"approved"`, document approval labels, arbitrary transcript
 imports and mismatched input are rejected.

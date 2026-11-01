@@ -2,7 +2,7 @@
 
 ## Choose a channel and home
 
-This table describes the **unvalidated source candidate**, not the asset
+This table describes the **0.5.0 source candidate**, not the asset
 inventory of immutable published 0.4.0. The future shared Mac filename must not
 be presented as an already published 0.4.0 download.
 
@@ -20,9 +20,18 @@ Node >=22 remains an external prerequisite for every channel. npm is primary
 and supports Windows/macOS/Linux; standalone supports Windows x64 and macOS
 Apple Silicon/Intel, not Linux. See [release state](../releases/README.md)
 before assuming candidate packaging has been published or accepted.
+0.5.0 is not yet published. For source-candidate validation, run the checkout's
+entry against a newly owned isolated home:
 
 ```sh
-npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@0.4.0 sdlc install --home "<owned-copilot-home>"
+node bin/sdlc.mjs install --home "<owned-copilot-home>"
+```
+
+The following npm command is for use only after exact 0.5.0 publication and
+public-consumer verification:
+
+```sh
+npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@0.5.0 sdlc install --home "<owned-copilot-home>"
 ```
 
 Replace the home placeholder with a deliberate absolute path; contributor tests
@@ -46,11 +55,11 @@ passed. Record the actual Copilot/Node/OS versions for an observed walkthrough.
 ### Clean migration from the private or an earlier installation
 
 Close every Copilot CLI process first. After backing up and reconciling any
-required history, this single cross-platform command performs an **explicit,
+required history, this postpublication cross-platform command performs an **explicit,
 irreversible clean migration** into your deliberately selected home:
 
 ```sh
-npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@0.4.0 sdlc install --purge-existing --home "<owned-copilot-home>"
+npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@0.5.0 sdlc install --purge-existing --home "<owned-copilot-home>"
 ```
 
 It removes modified framework-owned files and owned runtime work items,
@@ -77,8 +86,11 @@ owned files are preserved and reported as conflicts. Unknown owner/schema or
 malformed/unprovable ownership stops ordinary update without destructive
 fallback; `--purge-existing` remains a separate explicit irreversible choice.
 
-The following examples select the actual published **0.4.0** npm archive, not
-unreleased source or a future shared Mac asset. Use version-specific download
+The following examples target the **0.5.0** npm archive after publication;
+they do not work before that version and its release assets are available.
+The release-specific acceptance must include an ordinary upgrade from the
+currently published 0.4.0, not just the representative 0.3.1 CI fixture.
+Use version-specific download
 and package directories outside the selected Copilot home. `--clobber` replaces
 the named downloaded assets only; it is not permission to purge an installation.
 Before proceeding from download to installation, verify the archive's SHA-256
@@ -98,7 +110,7 @@ subsequent same-version maintenance; see the
 ### Update on macOS or Linux
 
 ```sh
-VERSION="0.4.0"
+VERSION="0.5.0"
 DOWNLOAD_DIR="$HOME/Downloads/ai-sdlc-framework-$VERSION"
 PACKAGE_ROOT="$HOME/.local/share/ai-sdlc-framework/$VERSION"
 COPILOT_HOME="${COPILOT_HOME:-$HOME/.copilot}"
@@ -128,7 +140,7 @@ node "$COPILOT_HOME/sdlc/bin/sdlc.mjs" \
 ### Update on Windows PowerShell
 
 ```powershell
-$Version = "0.4.0"
+$Version = "0.5.0"
 $DownloadDir = Join-Path $HOME "Downloads\ai-sdlc-framework-$Version"
 $PackageRoot = Join-Path $env:LOCALAPPDATA "ai-sdlc-framework\$Version"
 $CopilotHome = if ($env:COPILOT_HOME) {
@@ -162,7 +174,7 @@ node (Join-Path $CopilotHome "sdlc\bin\sdlc.mjs") `
 ### Update on Windows Command Prompt
 
 ```bat
-set "VERSION=0.4.0"
+set "VERSION=0.5.0"
 set "DOWNLOAD_DIR=%USERPROFILE%\Downloads\ai-sdlc-framework-%VERSION%"
 set "PACKAGE_ROOT=%LOCALAPPDATA%\ai-sdlc-framework\%VERSION%"
 if defined COPILOT_HOME (set "FRAMEWORK_HOME=%COPILOT_HOME%") else (set "FRAMEWORK_HOME=%USERPROFILE%\.copilot")
@@ -245,6 +257,17 @@ The published 0.4.0 artifacts cannot be repacked or replaced.
 
 - Check the selected Node version, executable, architecture, source/version and
   home before retrying. A native capability cannot be proven by cross-build.
+- Keep the exact Node executable referenced by installed hooks available.
+  Doctor does not detect every obsolete hook-bound runtime; after a runtime
+  change, use an ownership-safe update from the selected new package and
+  independently exercise the installed hooks.
+- Windows PowerShell 5.1 wrappers can lose empty arguments, embedded quotes
+  and space-containing paths ending in a backslash. Avoid those forwarded
+  forms; direct `node` plus the installed entry is the documented primary route.
+- If installation is abruptly interrupted, ordinary retry can report an
+  ownership conflict. Preserve runtime state and user files and restore the
+  exact owned files/manifest from a verified backup before retrying.
+  Never use `--purge-existing` as automatic recovery.
 - Inspect doctor findings and sanitized command diagnostics; preserve original
   failures. An uncertain update/publication needs reconciliation, not blind retry.
 - A blocked registry, GitHub download, OS execution policy or corporate CFS

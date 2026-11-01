@@ -4,6 +4,40 @@ export const validationDeclarations = {
     {"coverage": "direct", "paths": ["scripts/native-validation.mjs", "scripts/native-source-dummy-values.mjs", "scripts/native-toolchain.mjs", "scripts/native-homebrew-prefix.mjs", "scripts/validation-tools.mjs", "scripts/accept-release.mjs", "scripts/homebrew-lifecycle.mjs", "scripts/homebrew-switch.mjs", "packaging/homebrew/switch-state.mjs", "scripts/toolchain-baseline.mjs", "scripts/native-bootstrap-capability.mjs", "scripts/pr-capabilities.mjs", "scripts/pr-calculator.mjs", "scripts/pr-calculator-reporter.mjs", "scripts/native-components.mjs"]}
   ],
   "groups": [
+    {"root": "T-PRD074 exact typed native source retains code and credential-negative fixtures without becoming sanitized log text",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety rejects unapproved query aliases and credential fragments independently",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety rejects multiply encoded token and key material in every URL component",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety admits each exact canonical dummy field without changing archived bytes",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety rejects malformed and over-nested URL encoding without evaluating source",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety keeps complete literal fragment values and genuine expression provenance",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety classifies decoded JavaScript literal keys and preserves exact dummy fields",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety preserves genuine template provenance across literal escape decoding",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety decodes case-sensitive escapes and every valid line continuation",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety honors raw tagged template values without trusting custom tags",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety rejects standalone escaped token key and JWT material without URL discovery",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety decodes legacy CommonJS octal with exact ECMAScript widths",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety normalizes WHATWG URL structure while retaining complete credential values",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety normalizes URL material without losing genuine expression provenance",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety recognizes Unicode and contextual identifier tags without executing them",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety ends line comments at every ECMAScript line terminator",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety inspects every HTTP special-scheme spelling without canonicalizing credential values",
+      "minimumSlots": 1, "exclusiveResources": []},
     {"root": "TOOL03 native failure retains exact ambient workspace and lease for unsettled writers without replacing the primary failure",
       "minimumSlots": 1, "exclusiveResources": []},
     {"root": "TOOL03 prefix cleanup requires bootstrap and native settlement with owned source and role proof",
@@ -26,14 +60,14 @@ import * as fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createContext, runInContext } from 'node:vm';
+import { createContext, runInContext, Script } from 'node:vm';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { finished } from 'node:stream/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { isDeepStrictEqual } from 'node:util';
-import { spawn } from 'node:child_process';
+import { isDeepStrictEqual, promisify } from 'node:util';
+import { execFile, spawn } from 'node:child_process';
 import fsSync from 'node:fs';
 import { atomicWrite } from '../src/files.mjs';
 import { canonical, digest, requireThat, SdlcError } from '../src/core.mjs';
@@ -62,8 +96,10 @@ import { validateBootstrapRequest, bootstrapNativeToolchain, nativeBootstrapEnvi
 import { cleanupNativeToolchain } from '../scripts/native-toolchain.mjs';
 import { reconcileGoExecution, executeValidationCommand, validationCommandArguments } from '../scripts/validation-tools.mjs';
 import { repositoryRoot, createPlan, parseOptions, run as runTests } from '../scripts/test-runner.mjs';
-import { discoverDeclarations, compileValidationInventory, compileValidationSourceInventory, validationSourcePaths } from '../scripts/validation-inventory.mjs';
-import { runCalculator, calculatorFiles, calculatorSelection, calculatorArguments,
+import { discoverDeclarations, compileValidationInventory, compileValidationSourceInventory,
+  validationSourcePaths, validationPlatforms, declarationTokens } from '../scripts/validation-inventory.mjs';
+import { testSpecificationDigest } from '../src/artifacts.mjs';
+import { runCalculator, calculatorFiles, calculatorProjectFiles, calculatorSelection, calculatorArguments,
   calculatorCommandArguments, reconcileCalculator } from '../scripts/pr-calculator.mjs';
 import { fetchPinnedFixture, provisionPrCryptoFixture, prCryptoFixture } from '../scripts/pr-capabilities.mjs';
 import { nativeToolchain } from '../scripts/toolchain-baseline.mjs';
@@ -2317,7 +2353,73 @@ test('T-PRD016 private Linux library fixtures preserve frozen published bytes wi
   } }), { code: 'EVIDENCE' });
 });
 
-test('T-PRD074 exact typed native source retains code and credential-negative fixtures without becoming sanitized log text', () => {
+async function captureFrozenNativeSourceFixture() {
+  const git = promisify(execFile);
+  const tree = (await git('git', ['ls-tree', '-r', '-z', 'HEAD'], {
+    cwd: repositoryRoot, maxBuffer: 8 * 1024 * 1024, encoding: 'utf8',
+  })).stdout;
+  const revision = (await git('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot })).stdout.trim();
+  const snapshots = new Map();
+  const rows = [];
+  const expected = [];
+  for (const row of tree.split('\0').filter(Boolean)) {
+    const match = /^(\d+) blob [a-f0-9]+\t([\s\S]+)$/u.exec(row);
+    assert.ok(match, 'The frozen source fixture requires literal Git blobs');
+    const file = match[2];
+    const selected = path.join(repositoryRoot, ...file.split('/'));
+    const bytes = await fs.readFile(selected);
+    snapshots.set(selected, bytes);
+    const blob = createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+    rows.push(`${match[1]} blob ${blob}\t${file}`);
+    const parts = file.split('/');
+    if (!(parts.length > 1 && ['test', 'src', 'scripts', 'cmd', 'packaging', 'assets', 'docs', 'bin'].includes(parts[0]) ||
+        parts[0] === '.github' && ['workflows', 'actions'].includes(parts[1]) ||
+        ['package.json', '.github/release-requirements.txt'].includes(file))) continue;
+    try {
+      expected.push({ file, contents: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) });
+    } catch (error) {
+      if (error.code !== 'ERR_ENCODING_INVALID_ENCODED_DATA') throw error;
+    }
+  }
+  const frozenTree = rows.join('\0') + '\0';
+  const implementation = snapshots.get(path.join(repositoryRoot, 'scripts', 'native-validation.mjs')).toString('utf8');
+  const from = implementation.indexOf('function compileNativeDefinition(');
+  const to = implementation.indexOf('\nexport async function replayNativeEvidence(', from);
+  assert.ok(from >= 0 && to > from, 'Use the actual capture compilation boundary');
+  // Only host Git/filesystem inputs are fixtures; capture and source compilation use the actual implementation.
+  const context = createContext({ Buffer, TextDecoder, path, createHash,
+    canonical: value => canonical(JSON.parse(JSON.stringify(value))), digest, requireThat,
+    repositoryRoot, nativeFrameworkShardProtocol, validationPlatforms, validationSchedulingPolicy,
+    sourceValidationSchedulingPolicy, sourceNativeBootstrapProtocol, validationSourcePaths,
+    compileValidationSourceInventory, nativeSpecification, nativeFrameworkShardPlan,
+    calculatorProjectFiles, calculatorSelection, nativeStageSelections, nativeConfigurationDigest,
+    testSpecificationDigest, validationInventoryDigest, validateNativeSourceDefinitions,
+    process: { env: { GITHUB_REPOSITORY_ID: '1' } },
+    fs: { lstat: selected => fs.lstat(selected), readFile: async selected => Buffer.from(snapshots.get(selected)) },
+    assertCommittedNativeInputs: async () => {},
+    execute: async (command, args) => {
+      assert.equal(command, 'git');
+      if (args.join(' ') === 'rev-parse HEAD') return { stdout: revision };
+      if (args.join(' ') === 'rev-parse HEAD^{tree}') return { stdout: createHash('sha1').update(frozenTree).digest('hex') };
+      assert.deepEqual(Array.from(args), ['ls-tree', '-r', '-z', 'HEAD']);
+      return { stdout: frozenTree };
+    } });
+  const compile = runInContext(`${implementation.slice(from, to)}\ncompileNativeDefinition;`, context);
+  context.compileNativeDefinition = input => compile(JSON.parse(JSON.stringify(input)));
+  const capture = runInContext(`(${nativePass.captureNativeDefinitionInputs.toString()})`, context);
+  const captured = JSON.parse(JSON.stringify(await capture({ target: 'windows-x64', profile: 'pr' })));
+  expected.sort((left, right) => left.file < right.file ? -1 : left.file > right.file ? 1 : 0);
+  assert.deepEqual(captured.sourceFiles, expected, 'Capture must select all native definition input sources, not changed files');
+  assert.equal(captured.inventory.complete, true);
+  const files = captured.sourceFiles;
+  assert.equal(validateNativeSourceDefinitions(files), files);
+  snapshots.set(path.join(repositoryRoot, 'src', 'core.mjs'), Buffer.from('changed after the source fixture froze'));
+  await assert.rejects(capture({ target: 'windows-x64', profile: 'pr' }),
+    error => error.code === 'EVIDENCE' && error.message.includes('differs from its exact committed byte identity'));
+  return files.length;
+}
+
+test('T-PRD074 exact typed native source retains code and credential-negative fixtures without becoming sanitized log text', async t => {
   const reserved = new URL('https://example.test/path');
   reserved.username = 'owner';
   reserved.password = nativeSourceDummyValues[0];
@@ -2338,6 +2440,8 @@ test('T-PRD074 exact typed native source retains code and credential-negative fi
     assert.throws(() => validateNativeSourceDefinitions([{ file: 'src/unsafe-source.mjs', contents: text }]),
       error => error.code === 'UNSAFE' && !error.message.includes(text));
   }
+  const captured = await captureFrozenNativeSourceFixture();
+  t.diagnostic(`Actual capture/compilation fixture admitted ${captured} frozen text source definitions; no checkout commit or input mutation`);
 });
 
 function credentialSource(password, token, hostname = 'github.com') {
@@ -2453,6 +2557,536 @@ test('T-PRD074 source safety rejects encoded secret material outside sensitive q
     if (component === 'name') url.search = '?' + encoded + '=summary';
     const source = { file: 'src/encoded-material.mjs', contents: `const reference = ${JSON.stringify(url.href)};\n` };
     assert.throws(() => validateNativeSourceDefinitions([source]), { code: 'UNSAFE' });
+  }
+});
+
+function percentEncodedSourceValue(value, rounds) {
+  for (let round = 0; round < rounds; round++) {
+    value = [...value].map(character => '%' + character.charCodeAt(0).toString(16)).join('');
+  }
+  return value;
+}
+
+function literalUrlSource(reference, file = 'src/literal-observation.mjs') {
+  return { file, contents: `const reference = ${JSON.stringify(reference)};\n` };
+}
+
+function requireUnsafeSource(source) {
+  const original = Buffer.from(source.contents);
+  assert.throws(() => validateNativeSourceDefinitions([source]),
+    error => error.code === 'UNSAFE' && !error.message.includes(source.contents) &&
+      /^Exact source [^:]+ contains /u.test(error.message));
+  assert.ok(Buffer.from(source.contents).equals(original), 'Rejected source bytes must remain unchanged');
+}
+
+const sourceCredentialQueryAliases = ['apikey', 'api_key', 'access_token', 'token', 'client_secret', 'password',
+  'sig', 'signature', 'x-amz-signature', 'accessToken', 'access-token', 'clientSecret', 'client-secret',
+  'apiKey', 'api-key', 'authorization', 'jwt', 'key', 'x-amz-credential', 'x-amz-security-token',
+  'secret', 'credentials', 'rawPrompt', 'fullPrompt', 'prompt', 'rawProviderResponse', 'providerPayload', 'headers'];
+
+const sourceEscapedUrlSchemes = [String.raw`http\u0073://`, String.raw`https\x3a//`,
+  String.raw`https:\x2f\x2f`, String.raw`\u0068ttps://`];
+
+test('T-PRD074 source safety rejects unapproved query aliases and credential fragments independently', () => {
+  for (const alias of sourceCredentialQueryAliases) {
+    for (const name of [alias, alias.toUpperCase(), percentEncodedSourceValue(alias, 2)]) {
+      for (const location of ['?', '#', '?token=dummy#']) {
+        requireUnsafeSource(literalUrlSource('https://example.test/path' + location + name + '=unapproved'));
+        requireUnsafeSource(literalUrlSource('https://example.test/path' + location +
+          name + '=dummy&' + name + '=unapproved', 'test/controlled-source.test.mjs'));
+        requireUnsafeSource(literalUrlSource('https://example.test/path' + location +
+          name + '=unapproved&' + name + '=dummy'));
+      }
+    }
+  }
+  requireUnsafeSource(literalUrlSource('https://fixture-user:dummy@example.test/?token=fixture-value#apikey=' + 'unapproved'));
+  requireUnsafeSource(literalUrlSource('https://example.test/?accessToken=dummy#clientSecret=' + 'unapproved'));
+  requireUnsafeSource(literalUrlSource('https://example.test/?authorization=dummy#accessToken=' + 'unapproved'));
+});
+
+test('T-PRD074 source safety rejects multiply encoded token and key material in every URL component', () => {
+  const materials = ['p', 'o', 'u', 's', 'r'].map(family => 'gh' + family + '_' + 'a'.repeat(36));
+  materials.push('github_' + 'pat_' + 'a'.repeat(50),
+    '-----BEGIN PRIVATE KEY-----\n' + 'A'.repeat(64) + '\n-----END PRIVATE KEY-----',
+    Buffer.from('{"alg":"HS256"}').toString('base64url') + '.fixturePayload.fixtureSignature');
+  for (const material of materials) {
+    for (const component of ['path', 'query', 'fragment', 'name', 'userinfo']) {
+      const encoded = percentEncodedSourceValue(material, 2);
+      const url = new URL('https://example.test/path');
+      if (component === 'path') url.pathname = '/' + encoded;
+      if (component === 'query') url.search = '?view=' + encoded;
+      if (component === 'fragment') url.hash = encoded;
+      if (component === 'name') url.search = '?' + encoded + '=summary';
+      if (component === 'userinfo') url.username = encoded;
+      requireUnsafeSource(literalUrlSource(url.href));
+    }
+  }
+});
+
+test('T-PRD074 source safety admits each exact canonical dummy field without changing archived bytes', () => {
+  const benign = literalUrlSource('https://example.test/?view=summary&monkey=ordinary#format=readable');
+  assert.ok(validateNativeSourceDefinitions([benign])[0] === benign);
+  for (const dummy of nativeSourceDummyValues) {
+    for (const rounds of [0, 1, 2]) {
+      const value = rounds ? percentEncodedSourceValue(dummy, rounds) : encodeURIComponent(dummy);
+      const fields = sourceCredentialQueryAliases.map(name =>
+        percentEncodedSourceValue(name, rounds) + '=' + value).join('&');
+      const source = literalUrlSource('https://fixture-user:' + value + '@github.com/path?' + fields + '#' + fields);
+      source.contents = '\uFEFF' + source.contents;
+      const original = Buffer.from(source.contents);
+      const files = [source];
+      assert.ok(validateNativeSourceDefinitions(files) === files, 'Exact approved fields must be admitted');
+      assert.ok(Buffer.from(source.contents).equals(original), 'Source admission must preserve original bytes');
+    }
+  }
+});
+
+test('T-PRD074 source safety rejects malformed and over-nested URL encoding without evaluating source', () => {
+  for (const value of ['%', '%2', '%GG', '%FF', '%C0%AF', 'dummy%ZZ', '%25FF']) {
+    for (const component of ['/?apikey=', '/#access_token=', '/']) {
+      requireUnsafeSource(literalUrlSource('https://example.test' + component + value));
+    }
+  }
+  let nested = '%64ummy';
+  for (let round = 0; round < 12; round++) nested = nested.replaceAll('%', '%25');
+  for (const component of ['/?apikey=', '/#access_token=', '/']) {
+    requireUnsafeSource(literalUrlSource('https://example.test' + component + nested));
+  }
+  const source = { file: 'src/unevaluated-source.mjs',
+    contents: 'throw new Error("Source must never execute"); const remainder = 7 % 2;\n' };
+  assert.ok(validateNativeSourceDefinitions([source])[0] === source);
+});
+
+test('T-PRD074 source safety keeps complete literal fragment values and genuine expression provenance', () => {
+  for (const suffix of ["'suffix", '"suffix', ' suffix', '<suffix', '>suffix', '\u00a0', ')', '`']) {
+    requireUnsafeSource(literalUrlSource('https://example.test/#access_token=' + 'dummy' + suffix));
+  }
+  for (const value of ['%30', 'dummy${suffix}']) {
+    const contents = 'const reference = `https://example.test/${path}#access_token=' + value + '`;\n';
+    requireUnsafeSource({ file: 'src/template-fragment.mjs', contents });
+  }
+  requireUnsafeSource({ file: 'src/nested-fragment.mjs',
+    contents: 'const out = `prefix ${consume("https://example.test/#access_token=' + '${unapprovedCredentialValue}' + '")}`;\n' });
+  const source = { file: 'src/expression-fragment.mjs',
+    contents: 'const reference = `https://example.test/${path}?apikey=' + '${value}#access_token=dummy`;\n' };
+  assert.ok(validateNativeSourceDefinitions([source])[0] === source);
+});
+
+test('T-PRD074 source safety classifies decoded JavaScript literal keys and preserves exact dummy fields', () => {
+  for (const scheme of sourceEscapedUrlSchemes) {
+    for (const quote of ['"', "'", '`']) {
+      for (const delimiter of ['?', '#']) {
+        const prefix = 'const reference = ' + quote + 'Read ' + scheme + 'example.test/path' + delimiter;
+        requireUnsafeSource({ file: 'src/escaped-scheme.mjs',
+          contents: prefix + 'credentials=unapproved&token=dummy' + quote + ';\n' });
+        const source = { file: 'src/escaped-scheme.mjs',
+          contents: prefix + 'credentials=dummy&view=ordinary&token=dummy' + quote + ';\n' };
+        const original = Buffer.from(source.contents);
+        assert.equal(validateNativeSourceDefinitions([source])[0], source);
+        assert.deepEqual(Buffer.from(source.contents), original);
+        requireUnsafeSource({ file: 'src/escaped-scheme.mjs',
+          contents: prefix + String.raw`cred\u0065ntials` + '=unapproved&token=dummy' + quote + ';\n' });
+      }
+    }
+  }
+  const keys = sourceCredentialQueryAliases.flatMap(alias => [
+    '\\u' + alias.charCodeAt(0).toString(16).padStart(4, '0') + alias.slice(1),
+    '\\x' + alias.charCodeAt(0).toString(16).padStart(2, '0') + alias.slice(1),
+  ]);
+  keys.push(String.raw`cred\u0065ntials`, String.raw`cred\x65ntials`, String.raw`se\u{63}ret`,
+    String.raw`raw\u0050rompt`, String.raw`provider\u0050ayload`, String.raw`h\u0065aders`,
+    String.raw`\u002563redentials`, String.raw`\x2563lient_secret`, String.raw`cred\entials`, 'cred\\\nentials');
+  for (const key of keys) {
+    for (const quote of ['"', "'", '`']) {
+      for (const delimiter of ['?', '#']) {
+        const reference = 'https://example.test/path' + delimiter + key + '=unapproved&token=dummy';
+        requireUnsafeSource({ file: 'src/escaped-key.mjs',
+          contents: 'throw new Error("Source must never execute"); const reference = ' + quote + reference + quote + ';\n' });
+        const approved = { file: 'src/escaped-key.mjs',
+          contents: 'const reference = ' + quote + reference.replace('=unapproved', '=dummy') + quote + ';\n' };
+        const original = Buffer.from(approved.contents);
+        const files = [approved];
+        assert.equal(validateNativeSourceDefinitions(files), files);
+        assert.deepEqual(Buffer.from(approved.contents), original);
+      }
+    }
+  }
+  for (const quote of ['"', "'", '`']) {
+    for (const value of [String.raw`d\u0075mmy`, String.raw`d\x75mmy`, String.raw`%64\u0075mmy`]) {
+      const source = { file: 'src/escaped-value.mjs',
+        contents: 'const reference = ' + quote + 'https://example.test/?' +
+          String.raw`cred\u0065ntials` + '=' + value + quote + ';\n' };
+      assert.equal(validateNativeSourceDefinitions([source])[0], source);
+    }
+    const benign = { file: 'src/escaped-benign.mjs',
+      contents: 'const reference = ' + quote + 'https://example.test/?' +
+        String.raw`v\u0069ew` + '=ordinary&token=dummy' + quote + ';\n' };
+    assert.equal(validateNativeSourceDefinitions([benign])[0], benign);
+    for (const value of [String.raw`\u0025GG`, String.raw`\x25FF`, String.raw`dummy\u0025ZZ`]) {
+      requireUnsafeSource({ file: 'src/escaped-malformed.mjs',
+        contents: 'const reference = ' + quote + 'https://example.test/?view=' + value + quote + ';\n' });
+    }
+  }
+});
+
+test('T-PRD074 source safety preserves genuine template provenance across literal escape decoding', () => {
+  for (const scheme of sourceEscapedUrlSchemes) {
+    const prefix = 'const reference = `prefix ' + String.raw`\u0070ath ` +
+      scheme + 'example.test/${path}?credentials=';
+    for (const value of ['unapproved', String.raw`\u0030`, String.raw`\${value}`, 'dummy${suffix}']) {
+      requireUnsafeSource({ file: 'src/escaped-template-scheme.mjs',
+        contents: prefix + value + '&token=dummy`;\n' });
+    }
+    const source = { file: 'src/escaped-template-scheme.mjs',
+      contents: prefix + '${value}&token=' + String.raw`d\u0075mmy` + '`;\n' };
+    assert.equal(validateNativeSourceDefinitions([source])[0], source);
+    requireUnsafeSource({ file: 'src/escaped-nested-scheme.mjs',
+      contents: 'const out = `prefix ${consume("' + scheme + 'example.test/?credentials=' +
+        String.raw`\u0024{unapprovedCredentialValue}` + '")}`;\n' });
+  }
+  const prefix = 'const reference = `https://example.test/' + String.raw`\u0070ath` + '/${path}?';
+  const key = String.raw`cred\u0065ntials`;
+  for (const value of [String.raw`\u0030`, String.raw`\x30`, String.raw`\${value}`,
+    String.raw`\u0024{value}`, String.raw`dummy\u0024{suffix}`, 'dummy${suffix}']) {
+    requireUnsafeSource({ file: 'src/escaped-expression.mjs', contents: prefix + key + '=' + value + '`;\n' });
+  }
+  for (const value of ['${value}', String.raw`d\u0075mmy`]) {
+    const source = { file: 'src/escaped-expression.mjs',
+      contents: prefix + key + '=' + value + '&token=' + '${token}`;\n' };
+    const original = Buffer.from(source.contents);
+    assert.equal(validateNativeSourceDefinitions([source])[0], source);
+    assert.deepEqual(Buffer.from(source.contents), original);
+  }
+  requireUnsafeSource({ file: 'src/escaped-nested-expression.mjs',
+    contents: 'const out = `prefix ${consume("https://example.test/?' + key + '=' +
+      String.raw`\u0024{unapprovedCredentialValue}` + '")}`;\n' });
+});
+
+test('T-PRD074 source safety decodes case-sensitive escapes and every valid line continuation', () => {
+  for (const quote of ['"', "'", '`']) {
+    const prefix = 'const reference = ' + quote + 'https://example.test/?token=';
+    for (const value of [String.raw`du\X6dmy`, String.raw`du\U006dmy`]) {
+      requireUnsafeSource({ file: 'src/case-sensitive-escape.mjs', contents: prefix + value + quote + ';\n' });
+    }
+    for (const value of [String.raw`du\x6Dmy`, String.raw`du\u006Dmy`, String.raw`du\u{6D}my`]) {
+      const source = { file: 'src/case-sensitive-escape.mjs', contents: prefix + value + quote + ';\n' };
+      const bytes = Buffer.from(source.contents);
+      assert.equal(validateNativeSourceDefinitions([source])[0], source);
+      assert.deepEqual(Buffer.from(source.contents), bytes);
+    }
+    const benign = { file: 'src/case-sensitive-escape.mjs',
+      contents: 'const reference = ' + quote + 'https://example.test/?' +
+        String.raw`tok\U0065n` + '=ordinary&token=dummy' + quote + ';\n' };
+    assert.equal(validateNativeSourceDefinitions([benign])[0], benign);
+    for (const continuation of ['\n', '\r\n', '\r', '\u2028', '\u2029']) {
+      requireUnsafeSource({ file: 'src/continued-key.mjs',
+        contents: 'const reference = ' + quote + 'https://example.test/?cred\\' +
+          continuation + 'entials=unapproved&token=dummy' + quote + ';\n' });
+      const source = { file: 'src/continued-value.mjs',
+        contents: prefix + 'du\\' + continuation + 'mmy' + quote + ';\n' };
+      const bytes = Buffer.from(source.contents);
+      assert.equal(validateNativeSourceDefinitions([source])[0], source);
+      assert.deepEqual(Buffer.from(source.contents), bytes);
+    }
+  }
+});
+
+test('T-PRD074 source safety honors raw tagged template values without trusting custom tags', () => {
+  for (const tag of ['String.raw', 'String["raw"]', 'unknownTag', 'object.tag', 'tag()', '(unknownTag)']) {
+    const prefix = 'throw new Error("Tags must never execute"); const reference = ' + tag +
+      '`https://example.test/${path}?token=';
+    for (const value of [String.raw`du\x6dmy`, String.raw`du\u006dmy`, String.raw`\${value}`, 'dummy${suffix}']) {
+      requireUnsafeSource({ file: 'src/raw-template.mjs', contents: prefix + value + '`;\n' });
+    }
+    for (const value of ['dummy', '%64ummy', '${value}']) {
+      const source = { file: 'src/raw-template.mjs',
+        contents: prefix + value + '&view=' + String.raw`ordinary\label` + '`;\n' };
+      const bytes = Buffer.from(source.contents);
+      assert.equal(validateNativeSourceDefinitions([source])[0], source);
+      assert.deepEqual(Buffer.from(source.contents), bytes);
+    }
+    requireUnsafeSource({ file: 'src/raw-template.mjs',
+      contents: 'const reference = ' + tag + '`' + sourceEscapedUrlSchemes[0] +
+        'example.test/?credentials=unapproved&token=dummy`;\n' });
+  }
+  const cooked = { file: 'src/cooked-template.mjs',
+    contents: 'const reference = `https://example.test/?token=' + String.raw`du\x6dmy` + '`;\n' };
+  assert.equal(validateNativeSourceDefinitions([cooked])[0], cooked);
+});
+
+test('T-PRD074 source safety rejects standalone escaped token key and JWT material without URL discovery', () => {
+  const tokens = ['p', 'o', 'u', 's', 'r'].map(family => 'gh' + family + '_' + 'a'.repeat(36));
+  tokens.push('github_' + 'pat_' + 'a'.repeat(50));
+  for (const token of tokens) {
+    requireUnsafeSource(literalUrlSource(token));
+    for (const underscore of [String.raw`\u005f`, String.raw`\x5f`]) {
+      const escaped = token.replaceAll('_', underscore);
+      for (const wrapper of ['"', '`', 'String.raw`', 'unknownTag`']) {
+        const close = wrapper.endsWith('`') ? '`' : '"';
+        requireUnsafeSource({ file: 'src/standalone-material.mjs',
+          contents: 'const material = ' + wrapper + escaped + close + ';\n' });
+      }
+      requireUnsafeSource({ file: 'src/nested-material.mjs',
+        contents: 'const out = `prefix ${consume("' + escaped + '")}`;\n' });
+    }
+  }
+  const key = '-----BEGIN PRIVATE KEY-----\n' + 'A'.repeat(64) + '\n-----END PRIVATE KEY-----';
+  const escapedKey = JSON.stringify(key).replaceAll('PRIVATE', String.raw`\u0050RIVATE`);
+  requireUnsafeSource({ file: 'src/standalone-key.mjs', contents: 'const material = ' + escapedKey + ';\n' });
+  const jwt = Buffer.from('{"alg":"HS256"}').toString('base64url') + '.fixturePayload.fixtureSignature';
+  const escapedJwt = '\\u' + jwt.charCodeAt(0).toString(16).padStart(4, '0') + jwt.slice(1);
+  requireUnsafeSource({ file: 'src/standalone-jwt.mjs', contents: 'const material = "' + escapedJwt + '";\n' });
+  for (const source of [
+    { file: 'src/benign-material.mjs', contents: 'const label = "' + String.raw`ordinary\u005flabel` + '";\n' },
+    { file: 'src/benign-material.mjs', contents: 'const label = String.raw`' + String.raw`ordinary\label` + '`;\n' },
+  ]) {
+    const bytes = Buffer.from(source.contents);
+    assert.equal(validateNativeSourceDefinitions([source])[0], source);
+    assert.deepEqual(Buffer.from(source.contents), bytes);
+  }
+});
+
+test('T-PRD074 source safety decodes legacy CommonJS octal with exact ECMAScript widths', () => {
+  for (const quote of ['"', "'"]) {
+    for (const key of [String.raw`t\157ken`, String.raw`\164oken`,
+      String.raw`\164\157\153\145\156`]) {
+      const reference = 'https://example.test/?' + key + '=unapproved&token=dummy';
+      const actual = runInContext(quote + reference + quote, createContext({}), { timeout: 1000 });
+      assert.equal(new URL(actual).searchParams.get('token'), 'unapproved');
+      requireUnsafeSource({ file: 'src/legacy-string.cjs',
+        contents: 'const reference = ' + quote + reference + quote + ';\n' });
+      const source = { file: 'src/legacy-string.cjs',
+        contents: 'const reference = ' + quote + reference.replace('=unapproved', '=dummy') + quote + ';\n' };
+      const bytes = Buffer.from(source.contents);
+      assert.equal(validateNativeSourceDefinitions([source])[0], source);
+      assert.deepEqual(Buffer.from(source.contents), bytes);
+    }
+    const source = { file: 'src/legacy-dummy.cjs',
+      contents: 'const reference = ' + quote + 'https://example.test/?token=' +
+        String.raw`\144\165\155\155\171` + '&view=ordinary' + quote + ';\n' };
+    const bytes = Buffer.from(source.contents);
+    assert.equal(validateNativeSourceDefinitions([source])[0], source);
+    assert.deepEqual(Buffer.from(source.contents), bytes);
+    for (const value of [String.raw`du\8mmy`, String.raw`du\9mmy`, String.raw`dummy\0`,
+      String.raw`dummy\00`, String.raw`dummy\000`, String.raw`dummy\011`,
+      String.raw`dummy\012`, String.raw`dummy\015`, String.raw`dummy\040`, String.raw`dummy\ `]) {
+      requireUnsafeSource({ file: 'src/legacy-dummy.cjs',
+        contents: 'const reference = ' + quote + 'https://example.test/?token=' + value + quote + ';\n' });
+    }
+    for (const padding of [' ', '\t', '\\\n', '\\\r\n', '\\\r', '\\\u2028', '\\\u2029']) {
+      const source = { file: 'src/legacy-padding.cjs',
+        contents: 'const reference = ' + quote + 'https://example.test/?token=dummy' + padding + quote + ';\n' };
+      const bytes = Buffer.from(source.contents);
+      assert.equal(validateNativeSourceDefinitions([source])[0], source);
+      assert.deepEqual(Buffer.from(source.contents), bytes);
+    }
+    for (const spelling of [String.raw`\0`, String.raw`\00`, String.raw`\000`, String.raw`\08`, String.raw`\09`,
+      String.raw`\1`, String.raw`\7`, String.raw`\17`, String.raw`\40`, String.raw`\70`, String.raw`\100`,
+      String.raw`\141`, String.raw`\157`, String.raw`\377`, String.raw`\400`, String.raw`\777`,
+      String.raw`\78`, String.raw`\1234`, String.raw`\3777`, String.raw`\4000`, String.raw`\7777`,
+      String.raw`\8`, String.raw`\9`, String.raw`\\157`]) {
+      const literal = quote + spelling + quote;
+      const actual = runInContext(literal, createContext({}), { timeout: 1000 });
+      const source = { file: 'src/legacy-boundary.cjs', contents: 'const label = ' + literal + ';\n' };
+      assert.equal(declarationTokens(source.contents).find(token => token.kind === 'string').value, actual);
+      const bytes = Buffer.from(source.contents);
+      assert.equal(validateNativeSourceDefinitions([source])[0], source);
+      assert.deepEqual(Buffer.from(source.contents), bytes);
+    }
+    const benign = { file: 'src/legacy-benign.cjs',
+      contents: 'const reference = ' + quote + 'https://example.test/?' +
+        String.raw`\040token` + '=ordinary&token=dummy' + quote + ';\n' };
+    assert.equal(validateNativeSourceDefinitions([benign])[0], benign);
+  }
+  const tokens = ['p', 'o', 'u', 's', 'r'].map(family => 'gh' + family + '_' + 'a'.repeat(36));
+  tokens.push('github_' + 'pat_' + 'a'.repeat(50));
+  for (const token of tokens) {
+    requireUnsafeSource({ file: 'src/legacy-material.cjs',
+      contents: 'const material = "' + token.replaceAll('_', String.raw`\137`) + '";\n' });
+  }
+});
+
+test('T-PRD074 source safety normalizes WHATWG URL structure while retaining complete credential values', () => {
+  for (const control of [String.raw`\t`, String.raw`\n`, String.raw`\r`]) {
+    for (const scheme of ['https://', 'ht' + control + 'tps://']) {
+      for (const key of ['to' + control + 'ken', '%74o' + control + 'ken']) {
+        const reference = scheme + 'h.example/?' + key + '=unapproved&token=dummy';
+        const actual = runInContext('"' + reference + '"', createContext({}), { timeout: 1000 });
+        assert.deepEqual(new URL(actual).searchParams.getAll('token'), ['unapproved', 'dummy']);
+        requireUnsafeSource({ file: 'src/control-url.mjs', contents: 'const reference = "' + reference + '";\n' });
+        const source = { file: 'src/control-url.mjs',
+          contents: 'const reference = "' + reference.replace('=unapproved', '=dummy') + '";\n' };
+        const bytes = Buffer.from(source.contents);
+        assert.equal(validateNativeSourceDefinitions([source])[0], source);
+        assert.deepEqual(Buffer.from(source.contents), bytes);
+        requireUnsafeSource({ file: 'src/control-fragment.mjs',
+          contents: 'const reference = "' + scheme + 'h.example/?token=dummy#' + key + '=unapproved";\n' });
+      }
+    }
+    for (const value of ['dummy' + control, 'dummy' + control + 'unapproved']) {
+      requireUnsafeSource({ file: 'src/complete-control-value.mjs',
+        contents: 'const reference = "https://h.example/?token=' + value + '";\n' });
+    }
+    const benign = { file: 'src/control-benign.mjs',
+      contents: 'const reference = "https://h.example/?v' + control + 'iew=ordinary&token=dummy";\n' };
+    assert.equal(validateNativeSourceDefinitions([benign])[0], benign);
+  }
+});
+
+test('T-PRD074 source safety normalizes URL material without losing genuine expression provenance', () => {
+  const tokens = ['p', 'o', 'u', 's', 'r'].map(family => 'gh' + family + '_' + 'a'.repeat(36));
+  tokens.push('github_' + 'pat_' + 'a'.repeat(50));
+  const key = '-----BEGIN PRIVATE KEY-----\n' + 'A'.repeat(64) + '\n-----END PRIVATE KEY-----';
+  const jwt = Buffer.from('{"alg":"HS256"}').toString('base64url') + '.fixturePayload.fixtureSignature';
+  for (const control of [String.raw`\t`, String.raw`\n`, String.raw`\r`]) {
+    const materials = tokens.map(token => token.slice(0, token.indexOf('_') + 1) + control +
+      token.slice(token.indexOf('_') + 1));
+    materials.push(encodeURIComponent(key).replaceAll('PRIVATE', 'PRI' + control + 'VATE'),
+      jwt.slice(0, 2) + control + jwt.slice(2));
+    for (const material of materials) {
+      requireUnsafeSource({ file: 'src/control-material.mjs',
+        contents: 'const reference = "https://h.example/?view=' + material + '";\n' });
+    }
+    const prefix = 'const reference = `prefix\\t ht' + control +
+      'tps://h.example/${path}?to' + control + 'ken=';
+    const source = { file: 'src/control-expression.mjs', contents: prefix + '${value}&headers=dummy`;\n' };
+    const bytes = Buffer.from(source.contents);
+    assert.equal(validateNativeSourceDefinitions([source])[0], source);
+    assert.deepEqual(Buffer.from(source.contents), bytes);
+    for (const value of ['dummy${suffix}', String.raw`\${value}`, '%30']) {
+      requireUnsafeSource({ file: source.file, contents: prefix + value + '&headers=dummy`;\n' });
+    }
+  }
+});
+
+test('T-PRD074 source safety recognizes Unicode and contextual identifier tags without executing them', () => {
+  const names = ['τ', '变换', '𝒕', 't\u200cag', String.raw`\u03c4`, String.raw`\u{3c4}`,
+    String.raw`t\u0061g`, 'await', 'yield', String.raw`\u0061wait`, String.raw`yi\u0065ld`, 'asciiTag'];
+  for (const name of names) {
+    const prefix = 'const ' + name + '=String.raw; const reference = ' + name + '`https://h.example/?token=';
+    const unsafe = prefix + String.raw`du\x6dmy` + '`;\n';
+    const actual = runInContext(unsafe + '\nreference;', createContext({}), { timeout: 1000 });
+    assert.equal(new URL(actual).searchParams.get('token'), String.raw`du\x6dmy`);
+    requireUnsafeSource({ file: 'src/contextual-tag.cjs', contents: unsafe });
+    const source = { file: 'src/contextual-tag.cjs', contents: prefix + 'dummy`;\n' };
+    const bytes = Buffer.from(source.contents);
+    assert.equal(validateNativeSourceDefinitions([source])[0], source);
+    assert.deepEqual(Buffer.from(source.contents), bytes);
+    const declared = discoverDeclarations('const test=require("node:test"); const ' + name + '=test; ' +
+      name + '("owned Unicode registration",()=>{});', 'test/owned-unicode.test.cjs');
+    assert.deepEqual(declared.cases.map(candidate => candidate.name), ['owned Unicode registration']);
+  }
+  for (const tag of ['对象.τ', 'object.await', 'object.yield', 'object.return']) {
+    requireUnsafeSource({ file: 'src/property-tag.mjs',
+      contents: 'const reference = ' + tag + '`https://h.example/?token=' + String.raw`du\x6dmy` + '`;\n' });
+  }
+  requireUnsafeSource({ file: 'src/unevaluated-unicode-tag.mjs',
+    contents: 'const τ=()=>{throw new Error("Tags must never execute");}; const reference=τ`' +
+      'https://h.example/?token=' + String.raw`du\x6dmy` + '`;\n' });
+  for (const prefix of ['const reference = ', 'const reference = await ', 'function* f(){ yield ']) {
+    const source = { file: 'src/ordinary-keyword.mjs',
+      contents: prefix + '`https://h.example/?token=' + String.raw`du\x6dmy` + '`;' +
+        (prefix.startsWith('function') ? '}' : '') + '\n' };
+    assert.equal(validateNativeSourceDefinitions([source])[0], source);
+  }
+});
+
+test('T-PRD074 source safety ends line comments at every ECMAScript line terminator', () => {
+  const escapedUrl = String.raw`h\u0074tps:` + '//example.test/?token=unapproved-fixture&token=dummy';
+  const materials = ['p', 'o', 'u', 's', 'r'].map(family => 'gh' + family + String.raw`\u005f` + 'a'.repeat(36));
+  materials.push('github' + String.raw`\u005fpat\u005f` + 'a'.repeat(50));
+  for (const ending of ['\r', '\u2028', '\u2029', '\n', '\r\n']) {
+    for (const quote of ['"', "'", '`']) {
+      for (const value of [escapedUrl, ...materials]) {
+        const source = { file: 'src/comment-terminated.cjs',
+          contents: '// owned comment' + ending + 'const endpoint = ' + quote + value + quote + ';\n' };
+        assert.doesNotThrow(() => new Script(source.contents), 'Owned regression must be valid unexecuted JavaScript');
+        requireUnsafeSource(source);
+      }
+      const nested = { file: 'src/comment-expression.cjs',
+        contents: 'const outer = `prefix ${ // owned comment' + ending +
+          'consume(' + quote + escapedUrl + quote + ') }`;\n' };
+      assert.doesNotThrow(() => new Script(nested.contents));
+      requireUnsafeSource(nested);
+    }
+    for (const suffix of ['?token=dummy&view=ordinary', '?view=ordinary']) {
+      const source = { file: 'src/comment-approved.cjs',
+        contents: '// owned comment' + ending + 'const endpoint = "' +
+          String.raw`h\u0074tps:` + '//example.test/' + suffix + '";\n' };
+      const bytes = Buffer.from(source.contents);
+      assert.doesNotThrow(() => new Script(source.contents));
+      assert.equal(validateNativeSourceDefinitions([source])[0], source);
+      assert.deepEqual(Buffer.from(source.contents), bytes);
+    }
+    const registration = '// owned comment' + ending + 'test("owned registration", () => {});';
+    const tokens = declarationTokens(registration);
+    assert.equal(tokens[0].value, 'test');
+    assert.equal(tokens[0].line, 2);
+    assert.equal(tokens[0].column, 1);
+    const declarations = discoverDeclarations(registration, 'test/owned-comment.test.cjs');
+    assert.deepEqual(declarations.cases.map(entry => entry.name), ['owned registration']);
+  }
+  for (const contents of ['// const endpoint = "' + escapedUrl + '";',
+    '/* const endpoint = "' + escapedUrl + '"; */',
+    '// const material = "' + materials[0] + '";']) {
+    const source = { file: 'src/comment-only.cjs', contents };
+    const bytes = Buffer.from(contents);
+    assert.doesNotThrow(() => new Script(contents));
+    assert.equal(validateNativeSourceDefinitions([source])[0], source);
+    assert.deepEqual(Buffer.from(source.contents), bytes);
+  }
+});
+
+test('T-PRD074 source safety inspects every HTTP special-scheme spelling without canonicalizing credential values', () => {
+  for (const scheme of ['http:', 'https:']) {
+    for (const separators of ['/', '', '\\', '\\\\', '/\\', '\\/', '////', '\\\\/']) {
+      const prefix = scheme + separators;
+      const reference = prefix + 'example.test/p?token=unapproved-fixture&token=dummy';
+      const request = new Request(reference);
+      assert.deepEqual(new URL(request.url).searchParams.getAll('token'), ['unapproved-fixture', 'dummy']);
+      assert.equal(new URL(request.url).hostname, 'example.test');
+      requireUnsafeSource(literalUrlSource(reference));
+      requireUnsafeSource({ file: 'src/special-scheme.mjs',
+        contents: 'const endpoint = `' + reference.replaceAll('\\', '\\\\') + '`;\n' });
+      for (const component of [
+        'example.test/p?token=dummy&credentials=unapproved-fixture',
+        'example.test/p?token=dummy#credentials=unapproved-fixture',
+        'fixture-user:unapproved-fixture@example.test/p?token=dummy',
+        'example.test/p?to\tken=unapproved-fixture&token=dummy',
+      ]) requireUnsafeSource(literalUrlSource(prefix + component));
+      for (const component of ['example.test/p?view=ordinary', 'example.test/p?token=dummy&credentials=dummy',
+        'fixture-user:dummy@example.test/p?token=dummy#credentials=dummy']) {
+        const source = literalUrlSource(prefix + component);
+        const bytes = Buffer.from(source.contents);
+        assert.equal(validateNativeSourceDefinitions([source])[0], source);
+        assert.deepEqual(Buffer.from(source.contents), bytes);
+      }
+      for (const value of ['dummy\\suffix', 'dummy\t', 'dummy\r', 'dummy\n', 'dummy%20',
+        '${value}', 'unapproved-fixture']) {
+        requireUnsafeSource(literalUrlSource(prefix + 'example.test/p?token=' + value));
+      }
+      for (const value of ['${value}', 'dummy']) {
+        const source = { file: 'src/special-expression.mjs',
+          contents: 'const endpoint = `' + prefix.replaceAll('\\', '\\\\') +
+            'example.test/${path}?credentials=' + value + '&token=dummy`;\n' };
+        const bytes = Buffer.from(source.contents);
+        assert.doesNotThrow(() => new Script(source.contents));
+        assert.equal(validateNativeSourceDefinitions([source])[0], source);
+        assert.deepEqual(Buffer.from(source.contents), bytes);
+      }
+      for (const value of [String.raw`\${value}`, String.raw`\u0030`, 'dummy${suffix}', 'unapproved-fixture']) {
+        requireUnsafeSource({ file: 'src/special-expression.mjs',
+          contents: 'const endpoint = `' + prefix.replaceAll('\\', '\\\\') +
+            'example.test/${path}?credentials=' + value + '&token=dummy`;\n' });
+      }
+      requireUnsafeSource({ file: 'src/special-nested.mjs',
+        contents: 'const outer = `prefix ${consume(' + JSON.stringify(reference) + ')}`;\n' });
+      requireUnsafeSource({ file: 'src/special-raw.mjs',
+        contents: 'const endpoint = String.raw`' + scheme + separators +
+          'example.test/?token=' + String.raw`du\x6dmy` + '`;\n' });
+      requireUnsafeSource({ file: 'scripts/special-source.sh',
+        contents: 'ENDPOINT=' + reference + '\n' });
+    }
   }
 });
 

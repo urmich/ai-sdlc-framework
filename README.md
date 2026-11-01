@@ -21,17 +21,29 @@ sponsorship, approval or corporate support commitment.
 
 ## Runtime and installation
 
-The current published version is **0.4.0**. Node.js **22 or later**, Git, npm and
+The release candidate is **0.5.0**, not yet published. The current npm `latest`
+is **0.4.0**; it does not include the new evidence/coverage interfaces.
+Node.js **22 or later**, Git, npm and
 GitHub Copilot CLI's documented instruction/skill/hook extension points are
 required. The offline CLI has no runtime package dependencies or built-in
 cloud-provider network client; authorized host tools own external operations.
 
 The primary npm channel works on Windows, macOS and Linux with a supported Node
-runtime. For a deliberate installation into your chosen Copilot home:
+runtime. After 0.5.0 publication and public-consumer verification, use this exact
+version for a deliberate installation into your chosen Copilot home:
 
+```sh
+npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@0.5.0 sdlc install
+```
+
+Until then, use the [source-candidate installation](docs/installation/README.md#choose-a-channel-and-home)
+in an isolated home, or install the existing release with its older capabilities:
+
+<!-- historical:start -->
 ```sh
 npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@0.4.0 sdlc install
 ```
+<!-- historical:end -->
 
 Next, run doctor through the **installed entry**, restart Copilot, and try a
 local-only request in a disposable repository:
@@ -66,10 +78,10 @@ user's completion confirmation. Effective enforcement belongs to real host and
 provider controls, not a framework hook.
 
 Candidate-bound observations, immutable evidence and approvals remain distinct.
-The source candidate's [generic evidence guide](docs/usage/evidence.md) describes
+The 0.5.0 candidate's [generic evidence guide](docs/usage/evidence.md) describes
 the new reusable producer normalization, readiness and PR-description coverage
-interfaces. Those additions are unreleased, not an assertion that the published
-0.4.0 package contains them.
+interfaces. Those additions are included in the 0.5.0 source/package candidate but remain
+unreleased; the published 0.4.0 package does not contain them.
 Installing the framework never imposes this repository's CI policy on consumers.
 
 ## Contributor validation
@@ -101,11 +113,16 @@ See [testing and CI reproduction](docs/contributing/README.md).
 
 ## Released versus unreleased
 
-The installation command above selects immutable published 0.4.0. This source
-branch also contains **unreleased** public-readiness work: reusable evidence and
+The 0.5.0 installation command above is a postpublication command, not a claim
+that the version is already available. This source
+branch contains **unreleased** public-readiness work: reusable evidence and
 coverage interfaces, a bounded test scheduler, native CI/release changes and the
 shared Mac packaging design. Source presence is not publication, native
 acceptance or proof of effective repository enforcement.
+
+The [release guide](docs/releases/README.md#deferred-launch-limitations) lists
+known deferred contributor/platform defects and the remaining publication gates.
+Local validation and candidate review do not make this branch announcement-ready.
 
 Reader guides live under `docs/`; canonical internal specifications live only
 under `docs/sdlc/<feature>/`. Start with the [documentation map](docs/README.md)

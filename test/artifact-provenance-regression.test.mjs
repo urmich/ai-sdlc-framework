@@ -22,12 +22,13 @@ import { currentArtifact, currentDeployment } from '../src/current-evidence.mjs'
 import { evaluatePolicy } from '../src/policy.mjs';
 import { evaluateGate } from '../src/gate.mjs';
 import { markDispatching, prepareOperation, pruneWork, recordOperation } from '../src/operations.mjs';
-import { recordArtifact, recordTest, startCycle } from '../src/validation.mjs';
+import { recordArtifact, startCycle } from '../src/validation.mjs';
+import { recordFixtureTest as recordTest } from './helpers.mjs';
 
 async function candidate(t, { toolAdapters } = {}) {
   const f = await coding(await fixture(t, { compactPath: true }));
   const configuration = { defaultBranch: 'refs/heads/main', environments: {
-    DEV: { target: 'dev-target', configDigest: 'configuration-1',
+    DEV: { target: 'dev-target', configDigest: digest('configuration-1'),
       allowedStages: ['DEV'] },
   }, ...(toolAdapters ? { toolAdapters } : {}) };
   await writeJson(path.join(f.repo, '.sdlc/config.json'), configuration);
@@ -36,7 +37,7 @@ async function candidate(t, { toolAdapters } = {}) {
   const repository = await observeFixtureRepository(f);
   const { cycle } = await startCycle(f.store, {
     workItemId: f.workItemId, tests: testDefinitions(),
-    configDigest: 'configuration-1', cause: 'artifact provenance regression',
+    configDigest: digest('configuration-1'), cause: 'artifact provenance regression',
   });
   for (const testId of ['T-unit', 'T-integration']) {
     await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id,
@@ -343,7 +344,7 @@ for (const [field, value] of [
   const { f, cycle, repository } = await candidate(t, { toolAdapters: [{
     toolName: 'fixture_deploy', match: toolArgs,
     action: { class: 'deploy', environment: 'DEV', target: 'dev-target',
-      configDigest: 'configuration-1', monitorCapability: true,
+      configDigest: digest('configuration-1'), monitorCapability: true,
       artifactId: 'scoped-package', artifactRef: 'fixture:artifact:scoped',
       artifactImmutableVersion: field === 'artifactImmutableVersion' ?
         value : 'fixed-version-7',
@@ -385,7 +386,7 @@ test('gate binds the exact provider-verified immutable version and retrieval con
   const { f, cycle, repository } = await candidate(t, { toolAdapters: [{
     toolName: 'fixture_deploy', match: toolArgs,
     action: { class: 'deploy', environment: 'DEV', target: 'dev-target',
-      configDigest: 'configuration-1', monitorCapability: true,
+      configDigest: digest('configuration-1'), monitorCapability: true,
       artifactId: 'scoped-package', artifactRef: 'fixture:artifact:scoped',
       artifactImmutableVersion: 'fixed-version-7',
       artifactRetrievalContext: 'provider:fixture/project:fixture/repository:primary' },
@@ -640,7 +641,7 @@ test('STAGING provider test proof retains full identity and rejects reuse across
     remoteRepositoryURL: 'https://example.invalid/repository.git',
     localRepositoryPath: path.resolve('fixture', 'checkout'),
     environment: 'STAGING', target: 'staging-target',
-    sourceRevision: 'a'.repeat(40), configDigest: 'config-1',
+    sourceRevision: 'a'.repeat(40), configDigest: digest('config-1'),
     testId: 'T-staging', artifactId: 'artifact-1',
     deploymentId: 'deployment-1', owner: 'user', host: 'authorized-machine',
   };

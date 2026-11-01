@@ -248,7 +248,7 @@ test('T-PRD064 managed normalized admission retains original bytes and passes on
   const result = await input.admit(evaluation);
   assert.deepEqual(result.evidence.map(item => item.status), ['Passed', 'Passed']);
   assert.deepEqual(result.blocked, []);
-  const records = await input.f.store.records(input.f.workItemId);
+  const records = (await input.f.store.load(input.f.workItemId)).records;
   const cycle = records.find(record => record.id === input.cycle.id);
   assert.equal(stagePassed(cycle, records, 'local', input.f.clock), true);
   const action = { class: 'test', repositoryId: 'primary', environment: 'local',
@@ -292,7 +292,7 @@ test('T-PRD064 importing unit results first cannot manufacture unit-first execut
   assert.equal(result.evidence.find(item => item.testId === 'T-unit').status, 'Passed');
   assert.equal(result.evidence.find(item => item.testId === 'T-integration').status, 'NotRun');
   assert.equal(result.blocked[0].code, 'UNIT_FIRST');
-  const records = await input.f.store.records(input.f.workItemId);
+  const records = (await input.f.store.load(input.f.workItemId)).records;
   assert.equal(stagePassed(records.find(record => record.id === input.cycle.id),
     records, 'local', input.f.clock), false);
 });
@@ -305,7 +305,7 @@ test('T-PRD067 managed import reevaluates freshness and resets without freshenin
   const failed = input.captures({ sequence: 2, timeOffset: 5000, outcomes: { 'T-unit': 'Failed' } });
   await input.admit(input.evaluate(failed));
   await input.admit(before);
-  let records = await input.f.store.records(input.f.workItemId);
+  let records = (await input.f.store.load(input.f.workItemId)).records;
   const test = input.tests[0];
   assert.equal(currentTestEvidence(records.find(record => record.id === input.cycle.id),
     records, test, input.f.clock).status, 'Failed');
@@ -319,20 +319,20 @@ test('T-PRD067 managed import reevaluates freshness and resets without freshenin
   assert.equal(reset.evaluation.status, 'NotRun');
   assert.equal(reset.evidence[0].status, 'NotRun');
   assert.equal(reset.evidence[0].sourceObservedAt, undefined);
-  records = await input.f.store.records(input.f.workItemId);
+  records = (await input.f.store.load(input.f.workItemId)).records;
   assert.equal(stagePassed(records.find(record => record.id === input.cycle.id),
     records, 'local', input.f.clock), false);
   const recovery = input.captures({ sequence: 3, timeOffset: 62000 });
   input.f.clock.advance(10000);
   assert.equal((await input.admit(input.evaluate(recovery))).evidence[0].status, 'Passed');
   input.f.clock.advance(3600001);
-  records = await input.f.store.records(input.f.workItemId);
+  records = (await input.f.store.load(input.f.workItemId)).records;
   assert.equal(currentTestEvidence(records.find(record => record.id === input.cycle.id),
     records, test, input.f.clock), null);
   assert.ok(records.some(record => record.type === 'test-evidence' && record.status === 'Passed'));
   const expired = await input.admit(input.evaluate(recovery));
   assert.equal(expired.evidence[0].status, 'NotRun');
-  records = await input.f.store.records(input.f.workItemId);
+  records = (await input.f.store.load(input.f.workItemId)).records;
   assert.equal(stagePassed(records.find(record => record.id === input.cycle.id),
     records, 'local', input.f.clock), false);
   assert.ok(records.some(record => record.type === 'test-evidence' && record.status === 'Failed'));

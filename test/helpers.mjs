@@ -5,16 +5,158 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import assert from 'node:assert/strict';
 import { Store } from '../src/store.mjs';
-import { registerArtifact } from '../src/artifacts.mjs';
-import { captureReceipt, prepareDecision, applyDecision } from '../src/decisions.mjs';
+import { registerArtifact, resolveTestSpecification } from '../src/artifacts.mjs';
+import { prepareDecision, applyDecision } from '../src/decisions.mjs';
+import { handleHook } from '../src/hooks.mjs';
 import { resume, acknowledgeContext } from '../src/recovery.mjs';
 import { classifyTool } from '../src/gate.mjs';
 import { loadConfig } from '../src/artifacts.mjs';
-import { digest } from '../src/core.mjs';
-import { recordArtifact } from '../src/validation.mjs';
+import { canonical, digest } from '../src/core.mjs';
+import { recordArtifact, recordReadiness, recordTest } from '../src/validation.mjs';
+import { currentCycle, testCheckpoint } from '../src/authority.mjs';
+import { cycleTests, readValidationObject } from '../src/validation-catalog.mjs';
+import { lookupOperation } from '../src/validation-evidence.mjs';
+import { evaluateReadiness, normalizeExecutionReport, validationInventoryDigest } from '../src/validation-readiness.mjs';
 import { prepareOperation, markDispatching, recordOperation } from '../src/operations.mjs';
 import { validateCurrentExecutionIdentity } from '../src/provider-adapters.mjs';
 const execute = promisify(execFile);
+export async function executeFixtureReadiness(store, cycle, tests, statuses = {}, { operation } = {}) {
+  const state = await store.load(cycle.workItemId);
+  const specification = await resolveTestSpecification(store, cycle.workItemId);
+  const groups = new Map();
+  for (const definition of tests) {
+    const key = digest([definition.level === 'unit', definition.owner, definition.location,
+      definition.mode, testCheckpoint(definition)]);
+    const group = groups.get(key) ?? { id: `fixture-${key.slice(0, 16)}`, tests: [] };
+    group.tests.push(definition); groups.set(key, group);
+  }
+  const program = `import assert from 'node:assert/strict';
+import { performance } from 'node:perf_hooks';
+import { readFileSync } from 'node:fs';
+const rows = JSON.parse(readFileSync(0, 'utf8')).map(row => {
+  const start = performance.now();
+  let passed = true;
+  try { assert.equal(2 + 2, row.fail ? 5 : 4); } catch { passed = false; }
+  return { testId: row.testId, passed, durationMs: performance.now() - start };
+});
+console.log(JSON.stringify({ rows, node: process.version, platform: process.platform, architecture: process.arch }));
+process.exitCode = rows.every(row => row.passed) ? 0 : 1;`;
+  const spec = { schemaVersion: 1, profile: 'owned-execution-fixture',
+    cases: [...groups.values()].flatMap(group => group.tests.map(definition => ({
+      id: definition.id, conditions: specification.traceability?.find(row =>
+        row.testId === definition.id)?.conditions ?? [],
+      expectedDigest: digest(definition.expected), executionId: group.id,
+      mode: definition.mode, owner: definition.owner, location: definition.location,
+      checkpoint: testCheckpoint(definition), assertions: [{
+        id: 'fixture-assertion', selector: { implementation: definition.implementation,
+          commandDigest: digest([process.execPath, program]), name: 'controlled arithmetic assertion' },
+      }],
+    }))) };
+  const sources = operation?.executionSourceRef ?
+    (await readValidationObject(store, cycle.workItemId, operation.executionSourceRef)).sources : cycle.sources;
+  const executions = [];
+  const reports = [];
+  for (const group of [...groups.values()].sort((left, right) =>
+    Number(right.tests[0].level === 'unit') - Number(left.tests[0].level === 'unit'))) {
+    const definition = group.tests[0];
+    const context = {
+      candidateDigest: cycle.candidateDigest, testSpecDigest: cycle.testSpecDigest,
+      configDigest: cycle.configDigest, inventoryDigest: validationInventoryDigest(spec),
+      sources, profile: spec.profile, environment: definition.environment,
+      location: definition.location, mode: definition.mode, owner: definition.owner,
+      native: { kind: 'fixture', platform: process.platform, architecture: process.arch,
+        image: 'owned-node-process', toolchain: { node: process.version } },
+      producer: { provider: 'fixture', connection: 'owned-node-host', scopeRef: cycle.workItemId,
+        definitionRef: `node-${digest(program).slice(0, 16)}`,
+        executionRef: operation?.id ?? randomUUID(), attemptKind: 'known', attemptRef: '1' },
+      attemptCapability: 'distinct', jobRef: operation?.requestFingerprint ?? group.id, artifacts: [],
+    };
+    const startedAt = new Date(store.clock.now()).toISOString();
+    const started = performance.now();
+    const args = ['--input-type=module', '-e', program];
+    const input = JSON.stringify(group.tests.map(row =>
+      ({ testId: row.id, fail: statuses[row.id] === 'Failed' })));
+    const cwd = state.metadata.members.find(member =>
+      member.repositoryId === state.metadata.coordinatorId).root;
+    let result;
+    try {
+      const pending = execute(process.execPath, args, { cwd });
+      pending.child.stdin.end(input);
+      result = { ...await pending, code: 0 };
+    }
+    catch (error) {
+      if (!Number.isInteger(error.code) || error.code !== 1) throw error;
+      result = error;
+    }
+    store.clock.advance?.(Math.max(1, Math.ceil(performance.now() - started)));
+    const finishedAt = new Date(store.clock.now()).toISOString();
+    const bytes = Buffer.from(result.stdout);
+    const observed = JSON.parse(result.stdout);
+    assert.equal(observed.node, context.native.toolchain.node);
+    assert.equal(observed.platform, context.native.platform);
+    assert.equal(observed.architecture, context.native.architecture);
+    assert.equal(result.code, observed.rows.every(row => row.passed) ? 0 : 1);
+    const sequence = (cycle.lastEvidenceSequence ?? 0) + 1;
+    const facts = { verifierId: 'owned-node-process-v1', reportDigest: digest(bytes),
+      context: structuredClone(context), sourceTime: finishedAt, sourceSequence: sequence };
+    reports.push(normalizeExecutionReport(bytes, context, {
+      id: 'owned-node-process-v1',
+      normalize: output => ({
+        schemaVersion: 1, kind: 'test-execution', context,
+        startedAt, finishedAt, observedAt: finishedAt, sequence, complete: true, exitCode: result.code,
+        results: output.rows.map(row => {
+          const planned = spec.cases.find(test => test.id === row.testId);
+          return { testId: row.testId, assertionId: 'fixture-assertion',
+            selector: planned.assertions[0].selector, expectedDigest: planned.expectedDigest,
+            checkpoint: planned.checkpoint, status: row.passed ? 'Passed' : 'Failed',
+            expectedMet: row.passed, observedAt: finishedAt, sourceSequence: sequence,
+            durationMs: row.durationMs, exitCode: row.passed ? 0 : 1 };
+        }),
+      }),
+      verify: request => request.reportDigest === facts.reportDigest ? facts : null,
+    }));
+    executions.push({ id: group.id, context });
+  }
+  return evaluateReadiness(spec, reports, { profile: spec.profile, executions,
+    now: new Date(store.clock.now()).toISOString(),
+    policy: { maxAgeMs: null, revisionPolicy: 'content', verifierIds: ['owned-node-process-v1'] },
+    barriers: [] });
+}
+export async function recordFixtureTests(store, cycle, tests, statuses = {}) {
+  const evaluation = await executeFixtureReadiness(store, cycle, tests, statuses);
+  return recordReadiness(store, { workItemId: cycle.workItemId, cycleId: cycle.id, evaluation });
+}
+export async function recordFixtureTest(store, input) {
+  if (input.status === 'NotRun' || input.eventId) return recordTest(store, input);
+  const state = await store.load(input.workItemId);
+  const cycle = currentCycle(state.records, state.checkpoint);
+  const definition = cycleTests(cycle).find(test => test.id === input.testId);
+  const operation = input.operationId ? lookupOperation(state.records, input.operationId) : null;
+  if (!definition || cycle.id !== input.cycleId || definition.environment !== 'local' ||
+      definition.mode !== 'automated' || input.owner !== definition.owner ||
+      input.host !== definition.location || input.expectedMet !== (input.status === 'Passed') ||
+      !input.evidenceRef || /^(?:file:|validation-evidence:)/u.test(input.evidenceRef) ||
+      input.operationId && (!operation || operation.resultProof || operation.cycleId !== cycle.id)) {
+    return recordTest(store, input);
+  }
+  const evaluation = await executeFixtureReadiness(store, cycle, [definition],
+    { [definition.id]: input.status }, { operation });
+  return (await recordReadiness(store, { workItemId: input.workItemId, cycleId: cycle.id,
+    evaluation, ...(operation ? { bindings: [{ testId: definition.id, operationId: operation.id }] } : {}) })).evidence[0];
+}
+
+export async function captureUserInput(store, { sessionId, input,
+  source = 'userPromptSubmitted', timestamp } = {}, { hook = handleHook } = {}) {
+  await hook(store, source === 'ask_user' ? 'postToolUse' : source, {
+    sessionId, timestamp,
+    ...(source === 'ask_user' ?
+      { toolName: 'ask_user', toolResult: { textResultForLlm: input } } :
+      { prompt: input }),
+  });
+  const session = JSON.parse(await fs.readFile(store.sessionPath(sessionId), 'utf8'));
+  return JSON.parse(await fs.readFile(path.join(store.runtime, 'sessions',
+    sessionId, 'receipts', `${session.lastReceiptId}.json`), 'utf8'));
+}
 export async function fixture(t, { initialize = true, compactPath = false } = {}) {
   const root = path.resolve('.test-data', compactPath ?
     randomUUID().slice(0, 16) : randomUUID());
@@ -63,7 +205,7 @@ export async function fixture(t, { initialize = true, compactPath = false } = {}
     },
   }).ready();
   if (initialize) {
-    await captureReceipt(store, { sessionId: 'session-a', source: 'userPromptSubmitted', input: 'Create the isolated component fixture work item.' });
+    await captureUserInput(store, { sessionId: 'session-a', input: 'Create the isolated component fixture work item.' });
     await store.init({ workItemId: 'wi-test', repositoryId: 'primary', cwd: repo, sessionId: 'session-a' });
   }
   return { root, repo, home, store, clock, runGit, repositoryVerifications,
@@ -330,7 +472,7 @@ export async function cli(f, args, input) {
 export async function grant(f, kind, effect, { prepared = false, sessionId = f.sessionId, input = `User explicitly authorizes ${kind}` } = {}) {
   const decision = prepared ? await prepareDecision(f.store, { workItemId: f.workItemId, sessionId, kind, effect }) : null;
   f.clock.advance(1);
-  const receipt = await captureReceipt(f.store, { sessionId, source: 'userPromptSubmitted', input });
+  const receipt = await captureUserInput(f.store, { sessionId, input });
   const request = { workItemId: f.workItemId, sessionId, kind, effect, receiptId: receipt.id, input,
     ...(decision ? { decisionId: decision.id } : {}) };
   return { ...(await applyDecision(f.store, request)), request, receipt, decision };

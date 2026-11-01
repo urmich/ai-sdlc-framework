@@ -12,6 +12,7 @@ import { MAX_BUNDLE_BYTES, MAX_OBJECTS, validateRetainedEvidenceBundle } from '.
 const views = new WeakMap();
 const operationHistories = new WeakMap();
 const recordHistories = new WeakMap();
+const executionProofs = new WeakMap();
 const terminal = new Set(['succeeded', 'failed', 'cancelled', 'not-started']);
 const rank = { Passed: 0, NotRun: 1, Failed: 2 };
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
@@ -382,12 +383,42 @@ export function sameExecutionSources(left, right, { requireRevision = true } = {
 }
 export function executionSourceEligible(cycle, evidence,
   { requireRevision = evidence.environment !== 'local' } = {}) {
-  if (!evidence.executionSources) return cycle.storageVersion !== 2;
-  return evidence.configDigest === cycle.configDigest &&
+  return sourceIdentityEligible(cycle, evidence, { requireRevision });
+}
+export function retainedExecutionProofEligible(evidence) {
+  return executionProofs.get(evidence) === digest(evidence);
+}
+export function verifiedOperationCompletedAt(evidence, records) {
+  if (!evidence?.operationId || !retainedExecutionProofEligible(evidence)) return undefined;
+  const operation = lookupOperation(records, evidence.operationId);
+  return operation && evidence.operationDigest === digest(operation) &&
+    independentOperationResult(operation) && operation.status === 'succeeded' &&
+    operation.expectedMet === true ? operation.updatedAt : undefined;
+}
+function sourceIdentityEligible(cycle, evidence, { requireRevision = evidence.environment !== 'local' } = {}) {
+  return Boolean(evidence.executionSources) && evidence.configDigest === cycle.configDigest &&
     evidence.candidateDigest === cycle.candidateDigest &&
     evidence.testSpecDigest === cycle.testSpecDigest &&
     evidence.executionSourceDigest === digest(evidence.executionSources) &&
     sameExecutionSources(evidence.executionSources, cycle.sources, { requireRevision });
+}
+function validateCaseExecutionReport(cycle, test, evidence, report, { currentReset = false } = {}) {
+  const cases = new Map(Array.isArray(report?.cases) ?
+    report.cases.map(item => [item.testId, item]) : []);
+  const result = cases.get(test.id);
+  requireThat(report && report.cycleId === cycle.id &&
+    report.candidateDigest === evidence.candidateDigest &&
+    report.testSpecDigest === evidence.testSpecDigest && report.configDigest === evidence.configDigest &&
+    sameExecutionSources(report.executionSources, evidence.executionSources) &&
+    cases.size === report.cases?.length && result &&
+    result.status === evidence.status && result.expectedMet === evidence.expectedMet &&
+    /^[a-f0-9]{64}$/u.test(result.resetDigest ?? '') &&
+    (!currentReset || result.resetDigest === testResetDigest(cycle, test.id)) &&
+    result.expectedDigest === digest(test.expected) && Array.isArray(result.assertions) &&
+    result.assertions.length > 0 && result.assertions.every(assertion =>
+      typeof assertion.name === 'string' && assertion.name.trim() && typeof assertion.passed === 'boolean') &&
+    result.assertions.every(assertion => assertion.passed) === (evidence.status === 'Passed'),
+  'EVIDENCE', 'Execution report must contain this exact case, assertion outcomes and source/spec/config identity');
 }
 export function validateExecutionSource(source, operation) {
   object(source, ['schemaVersion', 'kind', 'workItemId', 'operationId', 'cycleId',
@@ -563,13 +594,94 @@ async function prepareRetainedReadinessEvidence(store, cycle, evidence, payload,
   requireThat(admission.status !== 'Passed' || assertions.size === definition.assertions.length,
     'EVIDENCE', 'Passing normalized admission is missing original assertion proof');
 }
+async function originalResultEvent(store, cycle, evidence, context, retainedEvents) {
+  let event = context.get?.(evidence.eventId) ??
+    context.all().find(record => record.id === evidence.eventId) ??
+    retainedEvents?.get(evidence.eventId);
+  if (!event) {
+    id(evidence.eventId);
+    event = await readJson(path.join(store.workPath(cycle.workItemId), 'evidence',
+      `${evidence.eventId}.json`), { limit: LIMITS.decision, optional: true });
+  }
+  if (event) {
+    validateRecord(event); safeRecord(event, recordLimit(event));
+    requireThat(event.type === 'event' && event.id === evidence.eventId &&
+      event.workItemId === cycle.workItemId, 'EVIDENCE',
+    'Original captured result identity differs from its retained locator');
+    const retained = retainedEvents?.get(event.id);
+    requireThat(!retained || digest(retained) === digest(event), 'EVIDENCE',
+      'Active and retained captured result identities conflict');
+  }
+  return event;
+}
+function independentOperationResult(operation) {
+  const proof = operation?.resultProof;
+  return Boolean(proof && proof.status === operation.status &&
+    proof.dispatchId === operation.id && proof.intendedOutcomeDigest === operation.intendedOutcome?.digest &&
+    /^[a-f0-9]{64}$/u.test(proof.resultDigest ?? '') &&
+    typeof proof.causalKey === 'string' && proof.causalKey &&
+    typeof proof.providerResultId === 'string' && proof.providerResultId);
+}
+async function prepareExecutionEvidence(store, cycle, evidence, context, retainedEvents) {
+  if (!evidence.retainedPayloadRef) return;
+  const test = cycleTests(cycle).find(test => test.id === evidence.testId);
+  const payload = await readValidationObject(store, cycle.workItemId, evidence.retainedPayloadRef, context);
+  requireThat(payload.kind === 'execution-payload' && test &&
+    evidence.workItemId === cycle.workItemId && evidence.cycleId === cycle.id &&
+    evidence.candidateDigest === cycle.candidateDigest && evidence.testSpecDigest === cycle.testSpecDigest &&
+    evidence.configDigest === cycle.configDigest &&
+    evidence.executionSourceDigest === digest(evidence.executionSources),
+  'EVIDENCE', 'Retained execution proof differs from its original cycle and case identity');
+  if (payload.content?.kind === 'normalized-case-admission') {
+    requireThat(payload.provenance?.sanitizer === 'sdlc-normalized-v1' &&
+      payload.provenance.sourceDigest === digest(payload.content), 'EVIDENCE',
+    'Normalized admission requires its originally verified managed import');
+    await prepareRetainedReadinessEvidence(store, cycle, evidence, payload, context);
+  } else if (evidence.operationId) {
+    const operation = lookupOperation(context.all(), evidence.operationId);
+    requireThat(operation?.executionSourceRef && operation.class === 'test' &&
+      operation.action.testId === test.id && operation.action.environment === test.environment &&
+      operation.action.owner === evidence.owner && operation.action.host === evidence.host &&
+      ['succeeded', 'failed'].includes(operation.status) &&
+      (evidence.status !== 'Passed' || operation.status === 'succeeded' && operation.expectedMet === true) &&
+      evidence.operationDigest === digest(operation) &&
+      payload.content?.operationId === operation.id &&
+      payload.content.operationDigest === evidence.operationDigest &&
+      digest(payload.content.resultProof) === digest(operation.resultProof ?? null),
+    'EVIDENCE', 'Retained operation result has no matching original terminal execution');
+    const source = validateExecutionSource(await readValidationObject(store, cycle.workItemId,
+      operation.executionSourceRef, context), operation);
+    requireThat(evidence.executionSourceDigest === source.sourceDigest &&
+      sameExecutionSources(evidence.executionSources, source.sources) &&
+      evidence.testSpecDigest === source.testSpecDigest && evidence.configDigest === source.configDigest,
+    'EVIDENCE', 'Retained observation relabeled its producer execution source');
+    if (!independentOperationResult(operation)) return;
+  } else if (evidence.eventId) {
+    const event = await originalResultEvent(store, cycle, evidence, context, retainedEvents);
+    requireThat(event?.kind === 'staging-result' && test.environment === 'STAGING' &&
+      event.effect.cycleId === cycle.id && event.effect.testIds?.includes(test.id) &&
+      event.effect.candidateDigest === evidence.candidateDigest &&
+      event.effect.testSpecDigest === evidence.testSpecDigest &&
+      event.effect.configDigest === evidence.configDigest &&
+      event.effect.outcome === evidence.status && event.effect.owner === evidence.owner &&
+      event.effect.host === evidence.host && event.effect.deploymentId === evidence.deploymentId &&
+      event.effect.artifactId === evidence.artifactId &&
+      payload.content?.eventId === event.id && payload.content.eventDigest === event.digest &&
+      payload.provenance?.reference === `receipt:${event.sourceReceiptId}`,
+    'EVIDENCE', 'Retained result has no matching captured procedure outcome');
+  } else {
+    validateCaseExecutionReport(cycle, test, evidence, payload.content);
+    requireThat(evidence.owner === test.owner && evidence.host === test.location,
+      'EVIDENCE', 'Retained execution owner/location differs from the Test Plan');
+    return;
+  }
+  executionProofs.set(evidence, digest(evidence));
+}
 export async function prepareCycleEvidence(store, cycle, context) {
   if (cycle.storageVersion !== 2) {
     for (const test of cycleTests(cycle)) {
       for (const evidence of testHistory(cycle, context.all(), test.id)) {
-        if (!evidence.retainedPayloadRef) continue;
-        const payload = await readValidationObject(store, cycle.workItemId, evidence.retainedPayloadRef, context);
-        await prepareRetainedReadinessEvidence(store, cycle, evidence, payload, context);
+        await prepareExecutionEvidence(store, cycle, evidence, context);
       }
     }
     return;
@@ -599,7 +711,6 @@ export async function prepareCycleEvidence(store, cycle, context) {
   const prefixes = new Map();
   const ids = new Set();
   const observationIds = new Set();
-  const payloads = new Map();
   for (let index = 0; index < root.pageRefs.length; index++) {
     const page = await readValidationObject(store, cycle.workItemId, root.pageRefs[index], context);
     object(page, ['schemaVersion', 'kind', 'workItemId', 'cycleId', 'index', 'slots'],
@@ -617,6 +728,18 @@ export async function prepareCycleEvidence(store, cycle, context) {
         Array.isArray(slot.history) && Array.isArray(slot.events), 'EVIDENCE', 'Outcome slots are not a catalog bijection');
       ids.add(slot.testId);
       if (slot.barrier !== null) validateResetBarrier(slot.barrier);
+      const retainedEvents = new Map();
+      for (const eventRef of slot.events) {
+        const retained = await readValidationObject(store, cycle.workItemId, eventRef, context);
+        requireThat(retained.kind === 'result-event' && retained.event?.kind === 'staging-result' &&
+          retained.event.effect.testIds?.includes(slot.testId) &&
+          retained.event.effect.cycleId === cycle.id, 'EVIDENCE', 'Retained result event differs from its case');
+        validateRecord(retained.event); safeRecord(retained.event, recordLimit(retained.event));
+        const prior = retainedEvents.get(retained.event.id);
+        requireThat(!prior || digest(prior) === digest(retained.event), 'EVIDENCE',
+          'Retained captured result identities conflict');
+        retainedEvents.set(retained.event.id, retained.event);
+      }
       if (slot.historyRef) {
         const chunks = [];
         let ref = slot.historyRef;
@@ -664,21 +787,10 @@ export async function prepareCycleEvidence(store, cycle, context) {
             item.testSpecDigest === source.testSpecDigest && item.configDigest === source.configDigest,
           'EVIDENCE', 'Retained observation relabeled its producer execution source');
         }
-        if (item.retainedPayloadRef && !payloads.has(item.retainedPayloadRef.sha256)) {
-          const payload = await readValidationObject(store, cycle.workItemId, item.retainedPayloadRef, context);
-          await prepareRetainedReadinessEvidence(store, cycle, item, payload, context);
-          payloads.set(item.retainedPayloadRef.sha256, payload);
-        }
+        await prepareExecutionEvidence(store, cycle, item, context, retainedEvents);
       }
       requireThat(slot.selected === null || slot.history.some(item => item.id === slot.selected),
         'EVIDENCE', 'Selected observation is missing from complete history');
-      for (const eventRef of slot.events) {
-        const retained = await readValidationObject(store, cycle.workItemId, eventRef, context);
-        requireThat(retained.kind === 'result-event' && retained.event?.kind === 'staging-result' &&
-          retained.event.effect.testIds?.includes(slot.testId) &&
-          retained.event.effect.cycleId === cycle.id, 'EVIDENCE', 'Retained result event differs from its case');
-        validateRecord(retained.event);
-      }
     }
     pages.push(page);
   }
@@ -819,7 +931,8 @@ export async function retainExecutionEvidence(store, tx, input) {
   cache.set(input.evidenceRef, result);
   return result;
 }
-export async function bindExecutionEvidence(store, tx, cycle, test, evidence) {
+export async function bindExecutionEvidence(store, tx, cycle, test, evidence,
+  { requireIndependentProof = false, historicalRecovery = false } = {}) {
   let operation;
   if (evidence.operationId) {
     operation = lookupOperation(tx.all(), evidence.operationId);
@@ -833,6 +946,11 @@ export async function bindExecutionEvidence(store, tx, cycle, test, evidence) {
     'EVIDENCE', evidence.status === 'NotRun' ?
       'Nonconclusive evidence requires the exact dispatched test operation' :
       'Terminal operation proof is unavailable');
+    // Published 0.4 inline terminal records may predate dispatch-source retention.
+    // Recover their claimed history only; no new source, proof or current credit.
+    if (historicalRecovery && !requireIndependentProof &&
+        cycle.storageVersion !== 2 && !operation.executionSourceRef &&
+        terminal.has(operation.status)) return;
     if (evidence.status === 'NotRun') evidence.operationState = operation.status;
     if (operation.executionSourceRef) {
       const source = validateExecutionSource(await readValidationObject(store, cycle.workItemId,
@@ -844,18 +962,18 @@ export async function bindExecutionEvidence(store, tx, cycle, test, evidence) {
       evidence.configDigest = source.configDigest;
       evidence.executionSources = structuredClone(source.sources);
       evidence.executionSourceDigest = source.sourceDigest;
-      requireThat(executionSourceEligible(cycle, evidence), 'STALE',
+      requireThat(sourceIdentityEligible(cycle, evidence), 'STALE',
         'Producer execution source is not eligible for the current candidate/spec/config');
-    } else requireThat(cycle.storageVersion !== 2 && terminal.has(operation.status), 'EVIDENCE',
+    } else requireThat(false, 'EVIDENCE',
       'Dispatched test evidence requires the original immutable execution source');
   }
   if (tx.normalizedImports?.has(test.id)) {
-    requireThat(executionSourceEligible(cycle, evidence, { requireRevision: true }),
+    requireThat(sourceIdentityEligible(cycle, evidence, { requireRevision: test.environment !== 'local' }),
       'STALE', 'Normalized execution does not match the current managed source/specification/configuration');
     if (operation) evidence.operationDigest = digest(operation);
+    await prepareExecutionEvidence(store, cycle, evidence, tx);
     return;
   }
-  if (cycle.storageVersion !== 2) return;
   if (!operation) {
     evidence.configDigest = cycle.configDigest;
     evidence.executionSources = structuredClone(cycle.sources);
@@ -878,27 +996,23 @@ export async function bindExecutionEvidence(store, tx, cycle, test, evidence) {
       content: { eventId: event.id, eventDigest: event.digest },
       provenance: { reference: `receipt:${event.sourceReceiptId}`, sanitizer: 'sdlc-proof-v1' },
     });
-  } else {
+  } else if (test.mode === 'automated') {
     const retained = await retainExecutionEvidence(store, tx, evidence);
-    const report = retained.payload.content;
-    const result = retained.cases.get(test.id);
-    requireThat(report && report.cycleId === cycle.id &&
-      report.candidateDigest === cycle.candidateDigest &&
-      report.testSpecDigest === cycle.testSpecDigest && report.configDigest === cycle.configDigest &&
-      digest(report.executionSources) === digest(cycle.sources) && result &&
-      result.status === evidence.status && result.expectedMet === evidence.expectedMet &&
-      result.resetDigest === testResetDigest(cycle, test.id) &&
-      result.expectedDigest === digest(test.expected) && Array.isArray(result.assertions) &&
-      result.assertions.length > 0 && result.assertions.every(assertion =>
-        typeof assertion.name === 'string' && assertion.name.trim() && typeof assertion.passed === 'boolean') &&
-      result.assertions.every(assertion => assertion.passed) === (evidence.status === 'Passed'),
-    'EVIDENCE', 'Execution report must contain this exact case, assertion outcomes and source/spec/config identity');
-    evidence.retainedPayloadRef = retained.ref;
-    evidence.evidenceRef = retainedPayloadReference(retained.ref);
-    evidence.id = `evidence-${digest({ cycleId: cycle.id, testId: test.id,
-      payload: retained.ref.sha256 }).slice(0, 40)}`;
+    const original = testHistory(cycle, tx.all(), test.id).find(item =>
+      item.retainedPayloadRef?.sha256 === retained.ref.sha256 &&
+      item.retainedPayloadRef.bytes === retained.ref.bytes && retainedExecutionProofEligible(item));
+    requireThat(original && retained.payload.content?.kind === 'normalized-case-admission' &&
+      original.status === evidence.status && original.expectedMet === evidence.expectedMet &&
+      original.owner === evidence.owner && original.host === evidence.host &&
+      observationAfterReset(cycle, tx.all(), original), 'EVIDENCE',
+    'Automated credit requires an independently verified producer import or execution result, not caller-authored assertions');
+    Object.assign(evidence, original);
   }
   safeRecord(evidence, LIMITS.record);
+  await prepareExecutionEvidence(store, cycle, evidence, tx);
+  requireThat(!requireIndependentProof || test.mode !== 'automated' || evidence.status === 'NotRun' ||
+    retainedExecutionProofEligible(evidence), 'EVIDENCE',
+  'Automated credit requires the original independently verified execution outcome');
 }
 export async function retainTestEvidence(store, input) {
   object(input, ['workItemId', 'evidenceRef'], ['workItemId', 'evidenceRef']);

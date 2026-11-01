@@ -1,3 +1,4 @@
+import { digest } from '../src/core.mjs';
 import {
   test, assert, path, fs, fixture,
   coding, completeReview, finishFixtureOperation, fixtureArtifact, fixtureBuild,
@@ -13,8 +14,8 @@ import {
 test('T-24/T-26/T-27/T-28 DEV artifact-deployment-test chain and policy-owned STAGING completion', async t => {
   const f = await coding(await fixture(t, { compactPath: true }));
   const configuration = { defaultBranch: 'refs/heads/main', environments: {
-    DEV: { target: 'dev-target', configDigest: 'configuration-1', allowedStages: ['DEV'] },
-    STAGING: { target: 'staging-target', configDigest: 'configuration-1',
+    DEV: { target: 'dev-target', configDigest: digest('configuration-1'), allowedStages: ['DEV'] },
+    STAGING: { target: 'staging-target', configDigest: digest('configuration-1'),
       allowedStages: ['STAGING'],
       execution: { owner: 'user', locations: ['authorized-machine'] } },
   } };
@@ -22,7 +23,7 @@ test('T-24/T-26/T-27/T-28 DEV artifact-deployment-test chain and policy-owned ST
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Fixture deployment candidate');
   await observeFixtureRepository(f);
-  const { cycle } = await startCycle(f.store, { workItemId: f.workItemId, tests: testDefinitions(), configDigest: 'configuration-1', cause: 'new candidate' });
+  const { cycle } = await startCycle(f.store, { workItemId: f.workItemId, tests: testDefinitions(), configDigest: digest('configuration-1'), cause: 'new candidate' });
   const binding = { cycleId: cycle.id, candidateDigest: cycle.candidateDigest, testSpecDigest: cycle.testSpecDigest, configDigest: cycle.configDigest };
   for (const testId of ['T-unit', 'T-integration']) await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id, testId,
     status: 'Passed', owner: 'agent', host: 'local', expectedMet: true, evidenceRef: 'fixture:local-pass' });

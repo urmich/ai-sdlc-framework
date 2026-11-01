@@ -1,3 +1,4 @@
+import { digest } from '../src/core.mjs';
 import {
   test, assert, path, fs, fixture,
   coding, completeReview, finishFixtureOperation, fixtureArtifact, fixtureBuild,
@@ -14,13 +15,13 @@ test('T-16 the same deployable artifact retains separate DEV and STAGING selecti
   const f = await coding(await fixture(t));
   await writeJson(path.join(f.repo, '.sdlc/config.json'), {
     defaultBranch: 'refs/heads/main',
-    environments: { DEV: { target: 'dev-target', configDigest: 'v1' } },
+    environments: { DEV: { target: 'dev-target', configDigest: digest('v1') } },
   });
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Fixture shared artifact candidate');
   await observeFixtureRepository(f);
   const { cycle } = await startCycle(f.store, { workItemId: f.workItemId,
-    tests: testDefinitions(), configDigest: 'v1', cause: 'shared artifact selection' });
+    tests: testDefinitions(), configDigest: digest('v1'), cause: 'shared artifact selection' });
   for (const testId of ['T-unit', 'T-integration']) await recordTest(f.store, {
     workItemId: f.workItemId, cycleId: cycle.id, testId, status: 'Passed',
     owner: 'agent', host: 'local', expectedMet: true, evidenceRef: `fixture:${testId}`,
@@ -49,13 +50,13 @@ test('T-18 archived artifact selections can be reselected without immutable ID c
   const f = await coding(await fixture(t));
   await writeJson(path.join(f.repo, '.sdlc/config.json'), {
     defaultBranch: 'refs/heads/main',
-    environments: { DEV: { target: 'dev-target', configDigest: 'v1' } },
+    environments: { DEV: { target: 'dev-target', configDigest: digest('v1') } },
   });
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Fixture artifact reselection candidate');
   await observeFixtureRepository(f);
   const { cycle } = await startCycle(f.store, { workItemId: f.workItemId,
-    tests: testDefinitions(), configDigest: 'v1', cause: 'artifact reselection' });
+    tests: testDefinitions(), configDigest: digest('v1'), cause: 'artifact reselection' });
   for (const testId of ['T-unit', 'T-integration']) await recordTest(f.store, {
     workItemId: f.workItemId, cycleId: cycle.id, testId, status: 'Passed',
     owner: 'agent', host: 'local', expectedMet: true, evidenceRef: `fixture:${testId}`,

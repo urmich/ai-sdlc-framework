@@ -1,6 +1,6 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
-  "surfaces": [{"coverage": "direct", "paths": ["scripts/check-docs.mjs", "scripts/check.mjs", "src/documentation-links.mjs"]}],
+  "surfaces": [{"coverage": "direct", "paths": ["scripts/check-docs.mjs", "scripts/check.mjs", "src/documentation-links.mjs", "src/cli.mjs"]}],
   "applicability": [{
     "names": ["T-PRD088 RC66 DOC01 rendered Windows workspace preserves existing content and refuses collisions"],
     "options": "{skip:process.platform!=='win32'}",
@@ -129,8 +129,10 @@ test('T-PRD044 malformed slugs, duplicate roles and reader specifications fail c
 
 test('T-PRD046 migrated package sources preserve installed compatibility and usable local links', async t => {
   const root = await fixture(t);
+  const pkg = JSON.parse(await fs.readFile(path.join(source, 'package.json'), 'utf8'));
   const help = await runCli(['help']);
   assert.equal(help.exitCode, 0);
+  assert.equal(help.result.help.split('\n')[0], `AI SDLC Framework ${pkg.version}`);
   assert.match(help.result.help, /docs\/reference\/cli\.md/u);
   assert.match(help.result.help, /<COPILOT_HOME>\/sdlc\/cli\.md/u);
   assert.doesNotMatch(help.result.help, /See docs\/cli\.md/u);
@@ -138,7 +140,6 @@ test('T-PRD046 migrated package sources preserve installed compatibility and usa
     await assert.rejects(fs.stat(path.join(source, old)), { code: 'ENOENT' });
     assert.ok((await fs.stat(path.join(source, current))).isFile(), current);
   }
-  const pkg = JSON.parse(await fs.readFile(path.join(source, 'package.json'), 'utf8'));
   assert.ok(pkg.files.includes('docs'));
   assert.ok(!pkg.files.includes('docs/cli.md'));
   const home = path.join(root, 'owned fixture home [literal brackets]');
@@ -164,6 +165,10 @@ test('T-PRD046 migrated package sources preserve installed compatibility and usa
   await assert.rejects(fs.stat(home), { code: 'ENOENT' });
   const store = new Store(home);
   await install(store, { sourceRoot: root });
+  const installedHelp = await execute(process.execPath,
+    [path.join(home, 'sdlc', 'bin', 'sdlc.mjs'), 'help'], { cwd: root });
+  assert.equal(installedHelp.stdout.split('\n')[0], `AI SDLC Framework ${pkg.version}`);
+  assert.equal((await doctor(store)).frameworkVersion, pkg.version);
   await fs.writeFile(path.join(home, 'unowned.txt'), 'unrelated home sentinel');
   await fs.writeFile(path.join(home, 'unrelated-notes.md'), '[user-owned private link](missing-user-document.md)\n');
   const runtime = path.join(home, 'sdlc/runtime/doc-migration.json');
@@ -203,6 +208,16 @@ test('T-PRD046 migrated package sources preserve installed compatibility and usa
     'sdlc/docs/reference/cli.md', 'sdlc/cli.md');
   assert.match(rebased, /\[own\]\(docs\/reference\/cli\.md#same\)/u);
   assert.match(rebased, /\[guide\]: docs\/usage\/evidence\.md#/u);
+  const metadataFile = path.join(root, 'package.json');
+  const originalMetadata = await fs.readFile(metadataFile);
+  try {
+    const nextVersion = '9.8.7-fixture.1';
+    await fs.writeFile(metadataFile, JSON.stringify({ ...pkg, version: nextVersion }));
+    const nextHelp = await execute(process.execPath,
+      [path.join(root, 'bin', 'sdlc.mjs'), 'help'], { cwd: root });
+    assert.equal(nextHelp.stdout.split('\n')[0], `AI SDLC Framework ${nextVersion}`,
+      'A later package version must not require another hardcoded help edit');
+  } finally { await fs.writeFile(metadataFile, originalMetadata); }
 });
 
 test('T-PRD047 reader topics reject raw operational evidence instead of publishing session state', async t => {

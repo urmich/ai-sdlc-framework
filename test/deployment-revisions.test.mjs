@@ -1,3 +1,4 @@
+import { digest } from '../src/core.mjs';
 import {
   test, assert, path, fs, fixture,
   coding, completeReview, finishFixtureOperation, fixtureArtifact, fixtureBuild,
@@ -15,9 +16,9 @@ test('an empty commit cannot reuse a prior deployment for environment admissions
   await writeJson(path.join(f.repo, '.sdlc/config.json'), {
     defaultBranch: 'refs/heads/main',
     environments: {
-      DEV: { target: 'dev-target', configDigest: 'configuration-1',
+      DEV: { target: 'dev-target', configDigest: digest('configuration-1'),
         allowedStages: ['DEV'] },
-      STAGING: { target: 'staging-target', configDigest: 'configuration-1',
+      STAGING: { target: 'staging-target', configDigest: digest('configuration-1'),
         allowedStages: ['STAGING'],
         execution: { owner: 'user', locations: ['authorized-machine'] } },
     },
@@ -27,7 +28,7 @@ test('an empty commit cannot reuse a prior deployment for environment admissions
   await observeFixtureRepository(f);
   const { cycle } = await startCycle(f.store, {
     workItemId: f.workItemId, tests: testDefinitions(),
-    configDigest: 'configuration-1', cause: 'candidate A',
+    configDigest: digest('configuration-1'), cause: 'candidate A',
   });
   const binding = { cycleId: cycle.id, candidateDigest: cycle.candidateDigest,
     testSpecDigest: cycle.testSpecDigest, configDigest: cycle.configDigest };
@@ -149,7 +150,7 @@ test('T-106 a delayed test result from commit A cannot displace proven DEV resul
   const f = await coding(await fixture(t, { compactPath: true }));
   await writeJson(path.join(f.repo, '.sdlc/config.json'), {
     defaultBranch: 'refs/heads/main', environments: {
-      DEV: { target: 'dev-target', configDigest: 'configuration-1',
+      DEV: { target: 'dev-target', configDigest: digest('configuration-1'),
         allowedStages: ['DEV'] },
     },
   });
@@ -158,7 +159,7 @@ test('T-106 a delayed test result from commit A cannot displace proven DEV resul
   await observeFixtureRepository(f);
   const { cycle } = await startCycle(f.store, {
     workItemId: f.workItemId, tests: testDefinitions(),
-    configDigest: 'configuration-1', cause: 'candidate A',
+    configDigest: digest('configuration-1'), cause: 'candidate A',
   });
   for (const testId of ['T-unit', 'T-integration']) {
     await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id,
@@ -201,7 +202,7 @@ test('T-106 a delayed test result from commit A cannot displace proven DEV resul
   await f.runGit('commit', '--allow-empty', '-qm', 'Candidate B with identical files');
   const updated = await startCycle(f.store, {
     workItemId: f.workItemId, tests: testDefinitions(),
-    configDigest: 'configuration-1', cause: 'new full commit',
+    configDigest: digest('configuration-1'), cause: 'new full commit',
   });
   assert.equal(updated.reset, false);
   assert.equal(updated.cycle.id, cycle.id);
@@ -246,9 +247,9 @@ test('T-27/T-29 failed replacements invalidate current DEV and STAGING evidence'
   const f = await coding(await fixture(t, { compactPath: true }));
   await writeJson(path.join(f.repo, '.sdlc/config.json'), {
     defaultBranch: 'refs/heads/main', environments: {
-      DEV: { target: 'dev-target', configDigest: 'configuration-1',
+      DEV: { target: 'dev-target', configDigest: digest('configuration-1'),
         allowedStages: ['DEV'] },
-      STAGING: { target: 'staging-target', configDigest: 'configuration-1',
+      STAGING: { target: 'staging-target', configDigest: digest('configuration-1'),
         allowedStages: ['STAGING'],
         execution: { owner: 'user', locations: ['authorized-machine'] } },
     },
@@ -257,7 +258,7 @@ test('T-27/T-29 failed replacements invalidate current DEV and STAGING evidence'
   await f.runGit('commit', '-qm', 'Fixture candidate for failed replacements');
   await observeFixtureRepository(f);
   const { cycle } = await startCycle(f.store, { workItemId: f.workItemId,
-    tests: testDefinitions(), configDigest: 'configuration-1',
+    tests: testDefinitions(), configDigest: digest('configuration-1'),
     cause: 'replacement validation' });
   const binding = { cycleId: cycle.id, candidateDigest: cycle.candidateDigest,
     testSpecDigest: cycle.testSpecDigest, configDigest: cycle.configDigest };
@@ -369,7 +370,7 @@ test('T-27/T-29 failed replacements invalidate current DEV and STAGING evidence'
 test('T-29 status-only synchronization does not reset cycle or session orientation; test definition changes do', async t => {
   const f = await coding(await fixture(t));
   await writeJson(path.join(f.repo, '.sdlc/config.json'), { defaultBranch: 'refs/heads/main' });
-  const initial = await startCycle(f.store, { workItemId: f.workItemId, tests: testDefinitions(), configDigest: 'v1', cause: 'first' });
+  const initial = await startCycle(f.store, { workItemId: f.workItemId, tests: testDefinitions(), configDigest: digest('v1'), cause: 'first' });
   await orient(f);
   const plan = path.join(f.repo, 'docs/test-plan.md');
   const old = await fs.readFile(plan, 'utf8');
@@ -380,11 +381,11 @@ test('T-29 status-only synchronization does not reset cycle or session orientati
   assert.equal(testSpecificationDigest(old), testSpecificationDigest(updated));
   assert.equal(testSpecificationDigest(JSON.stringify({ tests: [{ id: 'T-json', expected: 'same outcome', status: 'NotRun' }] })),
     testSpecificationDigest(JSON.stringify({ tests: [{ id: 'T-json', expected: 'same outcome', status: 'Passed' }] })));
-  const same = await startCycle(f.store, { workItemId: f.workItemId, tests: testDefinitions(), configDigest: 'v1', cause: 'status update' });
+  const same = await startCycle(f.store, { workItemId: f.workItemId, tests: testDefinitions(), configDigest: digest('v1'), cause: 'status update' });
   assert.equal(same.reset, false);
   assert.equal((await gate(f.store, { sessionId: f.sessionId, cwd: f.repo, toolName: 'create', toolArgs: { path: 'source.mjs', file_text: 'code' } })).permissionDecision, undefined);
   await fs.writeFile(plan, updated.replace('All assertions pass', 'All assertions and a new outcome pass'));
-  const next = await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'v1', cause: 'test requirement changed' });
+  const next = await startCycle(f.store, { workItemId: f.workItemId, configDigest: digest('v1'), cause: 'test requirement changed' });
   assert.equal(next.reset, true);
   assert.ok(!(await fs.readFile(plan, 'utf8')).includes('Passed'));
 });

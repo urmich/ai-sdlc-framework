@@ -36,7 +36,8 @@ async function stdinJson(stream) {
   const input = Buffer.concat(chunks).toString('utf8').trim();
   return input ? parseJson(input) : {};
 }
-export const HELP = `AI SDLC Framework 1.0
+const packageMetadata = await readJson(new URL('../package.json', import.meta.url));
+export const HELP = `AI SDLC Framework ${packageMetadata.version}
 Usage: sdlc <command> [subcommand] [--work-item ID] [--session ID] [--json|--human]
 Commands:
   doctor | install [--purge-existing] | update | uninstall [--purge] | maintenance select

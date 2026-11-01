@@ -1,7 +1,8 @@
 # Generic evidence and PR-description coverage
 
-**Candidate-source integration guide.** These interfaces describe the current
-unvalidated source, not new functionality claimed in immutable published 0.4.0.
+**0.5.0 candidate integration guide.** These interfaces are included in the
+0.5.0 source/package candidate, not yet published. Immutable published 0.4.0
+does not include the public evidence facade.
 Candidate integration tests use an isolated installation, never the live home.
 
 This is a reusable framework capability, not a GitHub-only test ledger.
@@ -141,10 +142,32 @@ Detached CI requires no invented Copilot receipt, work-item approval, ACK or
 validation cycle. A detached evaluation is not managed lifecycle credit.
 Managed `recordTests` / `recordReadiness` additionally require legitimate
 registered artifacts/current cycle and the host's supported verifiers.
+New automated managed credit requires retained original execution proof,
+including plans of 100 or fewer tests. Inline storage is not weaker proof.
+Fresh automated results use a protected, independently verified
+`recordReadiness` import or a verified original operation outcome.
+`recordTests` cannot authenticate handwritten assertion reports; it may replay
+an intact already admitted producer result without creating a new execution.
+Historical unsupported proof remains readable but unverified; declared manual
+and semi-automated procedures retain their separate owner/receipt contracts.
 Managed reload verifies the complete retained dependency graph: admission,
 import, object-map/assertion pages and original payload objects. A missing or
 corrupt dependency removes current credit without deleting or recreating the
 original history. Serialized status or origin flags do not repair lost proof.
+Audited superseded procedure events remain verifiable from their original
+retained/archive bytes after pruning; historical reads never renew current credit.
+Published 0.4 inline terminal operations without retained dispatch sources remain
+readable when a result projection is absent or pruned. Recovery preserves their
+claimed original outcomes as unverified history; it supplies neither execution
+proof nor current credit. New automated admissions still require original proof.
+Normalized unit-first admission uses the existing scoped override rules,
+including current cycle, lifetime and bound-operation reservations; an exception
+never supplies missing execution proof. Otherwise current units must complete
+before the original integration execution starts. Verified operation-backed
+units use the immutable operation's original terminal observation time, never
+the later projection recovery or import time. Automated units require their
+verified completion time; supported manual/semi-automated units use the original
+procedure completion or observation time, not a later import time.
 Readiness never authorizes push, merge, provider changes, release or deployment.
 
 ## 5. Adopt only the policy you choose
@@ -168,7 +191,7 @@ they are test implementation, not evidence the latest repository candidate passe
 
 ## 6. Authorized PR description handoff
 
-The candidate source extends the existing `ai-sdlc-framework/pr` export.
+The 0.5.0 candidate extends the existing `ai-sdlc-framework/pr` export.
 `preparePrDescription(store, input)` and offline `sdlc pr description-prepare`
 are pure preparation: select registered committed canonical documents and
 exact source, supply `class: pr-create` or `pr-update` and current body prose;

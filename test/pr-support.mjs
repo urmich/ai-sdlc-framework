@@ -10,7 +10,8 @@ import { evaluatePolicy } from '../src/policy.mjs';
 import { associateMonitor, attachMonitor, beginPoll, claimMonitor, monitorAssociationKey, monitorNotice, observeMonitor,
   pruneMonitor, readActiveMonitor, readMonitor, refreshMonitorCapabilities,
   verifyMonitorLink } from '../src/monitors.mjs';
-import { recordTest, startCycle } from '../src/validation.mjs';
+import { startCycle } from '../src/validation.mjs';
+import { recordFixtureTest as recordTest } from './helpers.mjs';
 import { azureDevOpsScopeRef } from '../src/provider-adapters.mjs';
 import { withLock, writeJson } from '../src/files.mjs';
 import { digest } from '../src/core.mjs';
@@ -149,7 +150,7 @@ async function reviewedCoding(f) {
   await f.runGit('commit', '-qm', 'Commit the candidate before PR publication tests');
   await publicationFixture(f);
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'reviewed PR fixture' })).cycle;
+    configDigest: digest('v1'), cause: 'reviewed PR fixture' })).cycle;
   for (const testId of ['T-unit', 'T-integration']) {
     await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id, testId,
       status: 'Passed', expectedMet: true, evidenceRef: `fixture:${testId}`, owner: 'agent', host: 'local' });

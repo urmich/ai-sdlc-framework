@@ -3,7 +3,7 @@ export const validationDeclarations = {
   "surfaces": [{"coverage": "direct", "paths": ["src/current-evidence.mjs"]}]
 };
 import test from 'node:test';
-import { lookupOperation } from '../src/validation-evidence.mjs';
+import { executionSourceEligible, lookupOperation } from '../src/validation-evidence.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { digest } from '../src/core.mjs';
@@ -16,11 +16,43 @@ import { currentCycle, currentTestEvidence, permissionMatches, stagePassed,
 import { evaluatePolicy, validateAction } from '../src/policy.mjs';
 import { evaluateReadiness, publicationAuthority } from '../src/pr.mjs';
 import { resume } from '../src/recovery.mjs';
-import { recordArtifact, recordTest, stagingHandoff, startCycle } from '../src/validation.mjs';
+import { recordArtifact, stagingHandoff, startCycle } from '../src/validation.mjs';
+import { recordFixtureTest as recordTest } from './helpers.mjs';
 import { markDispatching, prepareOperation, pruneWork, recordOperation } from '../src/operations.mjs';
 import { coding, completeReview, fixture, fixtureArtifact, fixtureBuild, fixtureDeployment, grant,
   observeFixtureRepository, registerFixtureProviderRequest, registerFixtureProviderResult,
   testDefinitions } from './helpers.mjs';
+
+test('automated inline history without original execution proof cannot satisfy local readiness', () => {
+  const tests = testDefinitions().filter(definition => definition.environment === 'local' &&
+    definition.checkpoint === 'pre-review');
+  const cycle = { id: 'cycle-inline', workItemId: 'wi-inline', tests, results: {},
+    candidateDigest: digest('candidate'), testSpecDigest: digest('spec'),
+    configDigest: digest('config'), sources: [
+      { repositoryId: 'primary', revision: 'a'.repeat(40), contentDigest: digest('source') },
+    ] };
+  const records = tests.map((definition, index) => ({
+    type: 'test-evidence', id: `evidence-inline-${index}`, workItemId: cycle.workItemId,
+    cycleId: cycle.id, testId: definition.id, environment: 'local',
+    candidateDigest: cycle.candidateDigest, testSpecDigest: cycle.testSpecDigest,
+    status: 'Passed', expectedMet: true, owner: definition.owner,
+    host: definition.location, evidenceRef: 'x', observedAt: '2026-09-08T00:00:00Z',
+    sequence: index + 1,
+  }));
+  for (const evidence of records) {
+    assert.equal(executionSourceEligible(cycle, evidence), false);
+    assert.equal(currentTestEvidence(cycle, records,
+      tests.find(definition => definition.id === evidence.testId)), null);
+  }
+  assert.equal(stagePassed(cycle, records, 'local'), false);
+  for (const evidence of records) Object.assign(evidence, {
+    configDigest: cycle.configDigest, executionSources: cycle.sources,
+    executionSourceDigest: digest(cycle.sources),
+    retainedPayloadRef: { sha256: digest('unretrieved proof'), bytes: 100 },
+  });
+  assert.equal(stagePassed(cycle, records, 'local'), false);
+  assert.deepEqual(records.map(evidence => evidence.status), ['Passed', 'Passed']);
+});
 
 async function cycleFixture(t, configuration) {
   const f = await coding(await fixture(t));
@@ -30,7 +62,7 @@ async function cycleFixture(t, configuration) {
   await observeFixtureRepository(f);
   const { cycle } = await startCycle(f.store, {
     workItemId: f.workItemId, tests: testDefinitions(),
-    configDigest: 'config-1', cause: 'current evidence',
+    configDigest: digest('config-1'), cause: 'current evidence',
   });
   return { f, cycle };
 }
@@ -71,7 +103,7 @@ async function producer(f, cycle) {
 
 test('first local tests pass and a verified producer artifact is admitted before any deployment', async t => {
   const { f, cycle } = await cycleFixture(t, {
-    environments: { DEV: { target: 'dev-target', configDigest: 'config-1' } },
+    environments: { DEV: { target: 'dev-target', configDigest: digest('config-1') } },
   });
   await localTests(f, cycle);
   let state = await f.store.load(f.workItemId);
@@ -123,7 +155,7 @@ test('first local tests pass and a verified producer artifact is admitted before
 
 test('a selected artifact and deployment lose readiness when stored producer attempt proof differs or disappears', async t => {
   const { f, cycle } = await cycleFixture(t, {
-    environments: { DEV: { target: 'dev-target', configDigest: 'config-1' } },
+    environments: { DEV: { target: 'dev-target', configDigest: digest('config-1') } },
   });
   await localTests(f, cycle);
   await completeReview(f, cycle);
@@ -250,7 +282,7 @@ test('a selected artifact and deployment lose readiness when stored producer att
 test('a proven build archived before first artifact admission can be selected and retained', async t => {
   const { f, cycle } = await cycleFixture(t, {
     defaultBranch: 'refs/heads/main',
-    environments: { DEV: { target: 'dev-target', configDigest: 'config-1' } },
+    environments: { DEV: { target: 'dev-target', configDigest: digest('config-1') } },
   });
   await localTests(f, cycle);
   await completeReview(f, cycle);

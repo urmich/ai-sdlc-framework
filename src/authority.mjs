@@ -2,7 +2,7 @@ import { PHASES, choice, digest, id, object, requireThat, strings, text, timesta
 import { currentDeployment, hasCurrentExecutionProof, operationMatchesCurrentSource,
   publicationDestination } from './current-evidence.mjs';
 import { cycleTests } from './validation-catalog.mjs';
-import { executionSourceEligible, lookupOperation, observationAfterReset,
+import { executionSourceEligible, retainedExecutionProofEligible, lookupOperation, observationAfterReset,
   reduceTestHistory, testHistory } from './validation-evidence.mjs';
 
 export const KINDS = ['approval', 'stage-completion', 'override', 'out-of-scope-execution',
@@ -326,12 +326,14 @@ export function currentTestEvidence(cycle, records, test, clock = Date) {
   const normalizedCompanions = new Set(history.filter(normalized).map(provenance).filter(Boolean));
   const currentProvenance = result => normalized(result) ||
     !normalizedCompanions.has(provenance(result));
+  const retainedProof = result => test.mode !== 'automated' || result.status === 'NotRun' ||
+    retainedExecutionProofEligible(result);
   const evidence = reduceTestHistory(history, {
     sourceTime: result => result.sourceObservedAt ?? (result.operationId ?
       lookupOperation(records, result.operationId)?.updatedAt ?? result.observedAt :
       result.eventId ? records.find(record => record.id === result.eventId)?.occurredAt ?? result.observedAt :
         result.observedAt),
-    eligible: result => currentProvenance(result) && result.cycleId === cycle.id &&
+    eligible: result => currentProvenance(result) && retainedProof(result) && result.cycleId === cycle.id &&
       result.candidateDigest === cycle.candidateDigest &&
       result.testSpecDigest === cycle.testSpecDigest &&
       !(result.status === 'NotRun' && ['dispatching', 'submitted', 'running'].includes(result.operationState) &&
@@ -358,7 +360,7 @@ export function currentTestEvidence(cycle, records, test, clock = Date) {
     if (!currentDeployment(cycle, records, deployment, 'STAGING')) return null;
     const observations = [];
     for (const candidate of history.filter(record =>
-      currentProvenance(record) && record.type === 'test-evidence' &&
+      currentProvenance(record) && retainedProof(record) && record.type === 'test-evidence' &&
       record.testId === test.id &&
       record.cycleId === cycle.id &&
       record.candidateDigest === cycle.candidateDigest &&

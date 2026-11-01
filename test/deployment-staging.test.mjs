@@ -1,3 +1,4 @@
+import { digest } from '../src/core.mjs';
 import {
   test, assert, path, fs, fixture,
   coding, completeReview, finishFixtureOperation, fixtureArtifact, fixtureBuild,
@@ -11,7 +12,7 @@ import {
 } from './deployment-support.mjs';
 
 test('T-27 legacy STAGING confirmations without current deployment proof do not complete the stage', () => {
-  const cycle = { id: 'cycle-1', candidateDigest: 'candidate', testSpecDigest: 'spec', configDigest: 'config',
+  const cycle = { id: 'cycle-1', candidateDigest: 'candidate', testSpecDigest: 'spec', configDigest: digest('config'),
     pendingPlanSync: false, deployments: { STAGING: 'deploy-1' },
     tests: [{ id: 'staging-a', environment: 'STAGING' }, { id: 'staging-b', environment: 'STAGING' }],
     results: { 'staging-a': 'evidence-a', 'staging-b': 'evidence-b' } };
@@ -69,7 +70,7 @@ test('T-50 STAGING execution policy and legacy unproven deployment cannot grant 
   const f = await coding(await fixture(t));
   const cycle = (await startCycle(f.store, {
     workItemId: f.workItemId,
-    configDigest: 'policy-v1',
+    configDigest: digest('policy-v1'),
     cause: 'STAGING execution policy',
   })).cycle;
   const state = await f.store.load(f.workItemId);
@@ -99,7 +100,7 @@ test('T-50 STAGING execution policy and legacy unproven deployment cannot grant 
       environments: {
         STAGING: {
           target: 'staging-target',
-          configDigest: 'agent-policy-v1',
+          configDigest: digest('agent-policy-v1'),
           allowedStages: ['STAGING'],
           execution: { owner: 'agent', locations: ['staging-runner'] },
         },
@@ -107,7 +108,7 @@ test('T-50 STAGING execution policy and legacy unproven deployment cannot grant 
     });
     const cycle = (await startCycle(f.store, {
       workItemId: f.workItemId,
-      configDigest: 'agent-policy-v1',
+      configDigest: digest('agent-policy-v1'),
       cause: 'agent-owned STAGING evidence',
     })).cycle;
     await f.store.transaction(f.workItemId, tx => {
@@ -153,7 +154,7 @@ test('T-50 STAGING execution policy and legacy unproven deployment cannot grant 
           repositoryId: 'primary',
           environment: 'STAGING',
           target: 'staging-target',
-          configDigest: 'agent-policy-v1',
+          configDigest: digest('agent-policy-v1'),
           testId: 'T-staging',
           owner: 'agent',
           host: 'staging-runner',
@@ -461,9 +462,9 @@ test('T-50 host-contract admission is checked against a genuinely proven STAGING
   await writeJson(path.join(f.repo, '.sdlc/config.json'), {
     defaultBranch: 'refs/heads/main',
     environments: {
-      DEV: { target: 'dev-target', configDigest: 'host-contract-v1',
+      DEV: { target: 'dev-target', configDigest: digest('host-contract-v1'),
         allowedStages: ['DEV'] },
-      STAGING: { target: 'staging-target', configDigest: 'host-contract-v1',
+      STAGING: { target: 'staging-target', configDigest: digest('host-contract-v1'),
         allowedStages: ['STAGING'],
         execution: { owner: 'agent', locations: ['staging-runner'] } },
     },
@@ -472,7 +473,7 @@ test('T-50 host-contract admission is checked against a genuinely proven STAGING
   await f.runGit('commit', '-qm', 'Disposable proven host-contract candidate');
   await observeFixtureRepository(f);
   const { cycle } = await startCycle(f.store, {
-    workItemId: f.workItemId, configDigest: 'host-contract-v1',
+    workItemId: f.workItemId, configDigest: digest('host-contract-v1'),
     cause: 'host-contract evidence with a complete deployment chain',
   });
   for (const testId of ['T-unit', 'T-integration']) {

@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { coding, fixture, grant, orient } from '../helpers.mjs';
+import { coding, fixture, grant, orient, recordFixtureTest as recordTest } from '../helpers.mjs';
 import { Store } from '../../src/store.mjs';
 import { digest, requireThat } from '../../src/core.mjs';
-import { candidateContentDigest, candidateSnapshot, recordArtifact, recordTest, startCycle } from '../../src/validation.mjs';
+import { candidateContentDigest, candidateSnapshot, recordArtifact, startCycle } from '../../src/validation.mjs';
 import { loadConfig, resolveTestSpecification } from '../../src/artifacts.mjs';
 import { createGitHubConnection } from '../../src/github/connection.mjs';
 import { createGitHubTransport, requireGitHubCapture } from '../../src/github/transport.mjs';
@@ -20,7 +20,7 @@ export const families = Object.freeze([
 export const remote = 'https://github.com/bridge-owner/bridge-repo.git';
 export const connectionId = 'bridge-fixture';
 export const repositoryRef = 'repository:101';
-export const configurationDigest = 'bridge-config-v1';
+export const configurationDigest = digest('bridge-config-v1');
 export const bytesDigest = createHash('sha256').update('immutable fixture artifact').digest('hex');
 
 function frozen(value) {

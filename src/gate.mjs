@@ -14,6 +14,7 @@ import { isNonRepositoryWorkspace } from './store.mjs';
 import { classifyToolArguments, MAPPABLE_FIELDS } from './tool-arguments.mjs';
 import { matchHostInvocation } from './host-invocations.mjs';
 import { resolveRepositoryDefaultBranch } from './repository-observations.mjs';
+import { parseArguments } from './cli-arguments.mjs';
 import {
   SHELL_FAMILIES,
   commandWords,
@@ -51,6 +52,7 @@ const SOFT_STAGE_RULES = new Set([
   'staging-completion',
 ]);
 const PASS_THROUGH = Object.freeze({});
+const INPUT_HOOK_EVENTS = ['userPromptSubmitted', 'postToolUse', 'postToolUseFailure'];
 const CLASSIFIED_SECURITY_FIELDS = [...new Set(['class', 'repositoryId', 'environment', 'target', 'configDigest', 'stages',
   'sourceRef', 'targetRef', 'draft', 'sourceRevision', 'targetRevision', 'policyVersion', 'prRecordId',
   'artifactId', 'testId', 'owner', 'host', 'implicitEnvironments', 'externalPermission',
@@ -61,6 +63,41 @@ const CLASSIFIED_SECURITY_FIELDS = [...new Set(['class', 'repositoryId', 'enviro
   'artifactImmutableVersion', 'artifactRetrievalContext', 'artifactName',
   'producingExecutionRef', 'producingAttemptRef',
   'contentDigest', 'recipient', 'toolOptions', ...MAPPABLE_FIELDS])];
+async function inputHookInvocationEvent(hook, words) {
+  let commandIndex;
+  if (words?.[0] === 'sdlc') commandIndex = 1;
+  else if (words?.length >= 4 && ['node', process.execPath].includes(words[0]) &&
+      sameNativePath(await canonicalPath(path.resolve(hook.cwd, words[1])),
+        await canonicalPath(FRAMEWORK_ENTRY))) commandIndex = 2;
+  if (commandIndex === undefined) return undefined;
+  try {
+    const { words: [command, event], flags } = parseArguments(words.slice(commandIndex));
+    return !flags.help && command === 'hook' && INPUT_HOOK_EVENTS.includes(event) ? event : null;
+  } catch {
+    return undefined;
+  }
+}
+export async function publicHookInvocationEvents(hook) {
+  if (!SHELL_TOOLS.has(hook.toolName)) return [];
+  const command = hook.toolArgs?.command;
+  const words = commandWords(hook.toolName, command);
+  if (words) {
+    const event = await inputHookInvocationEvent(hook, words);
+    if (event !== undefined) return event ? [event] : [];
+  }
+  if (typeof command !== 'string') return [];
+  const events = [];
+  // Literal fragments identify callbacks, never authorize an opaque shell command.
+  for (const fragment of command.split(/[;|&<>\r\n]/u)) {
+    if (!/(?:^|[^A-Za-z0-9_.-])hook(?=[^A-Za-z0-9_.-]|$)/u.test(fragment)) continue;
+    const fragmentWords = commandWords(hook.toolName, `sdlc ${fragment.trim()}`)?.slice(1);
+    const event = await inputHookInvocationEvent(hook, fragmentWords);
+    // Unknown wrappers cannot establish which completion event is genuine.
+    if (event === undefined) events.push(...INPUT_HOOK_EVENTS);
+    else if (event) events.push(event);
+  }
+  return [...new Set(events)];
+}
 export function normalizeHook(payload) {
   requireThat(payload && typeof payload === 'object', 'HOOK', 'Expected a hook input object');
   const rawName = payload.toolName ?? payload.tool_name ?? payload.ToolName;
@@ -610,6 +647,9 @@ export async function evaluateGate(store, payload, { allowStageOverride = false 
         await canonicalPath(FRAMEWORK_ENTRY))) {
       return { permissionDecision: 'deny', permissionDecisionReason: 'Receipt capture belongs to the runtime input adapter, not an agent-authored shell approval. Use receipt latest and the actual captured user input.' };
     }
+    if (await inputHookInvocationEvent(hook, words)) {
+      return { permissionDecision: 'deny', permissionDecisionReason: 'An agent-authored input-hook invocation cannot grant managed capture provenance. Use the actual supported user input event.' };
+    }
     if (words?.length >= 3 && ['node', process.execPath].includes(words[0]) &&
       sameNativePath(await canonicalPath(path.resolve(hook.cwd, words[1])),
         await canonicalPath(FRAMEWORK_ENTRY)) &&
@@ -822,6 +862,7 @@ async function recordUnmanagedInvocation(store, payload) {
     if (!hook.sessionId || !hook.cwd || !hook.toolName) return;
     const requestFingerprint = fingerprint(hook.toolName, hook.toolArgs,
       await canonicalPath(hook.cwd));
+    const publicHookEvents = await publicHookInvocationEvents(hook);
     let workItemId;
     await updateJson(store.sessionPath(hook.sessionId),
       { schemaVersion: 1, revision: 0, sessionId: hook.sessionId },
@@ -832,6 +873,13 @@ async function recordUnmanagedInvocation(store, payload) {
         }
         session.unmanagedRequestFingerprints =
           [...new Set([...fingerprints, requestFingerprint])].slice(-32);
+        if (SHELL_TOOLS.has(hook.toolName)) {
+          const requests = session.unmanagedInputHookRequests ?? [];
+          if (requests.length >= 32) session.unmanagedInputHookOverflow = true;
+          session.unmanagedInputHookRequests = [...requests,
+            { requestFingerprint,
+              ...(publicHookEvents.length ? { publicHookEvents } : {}) }].slice(-32);
+        }
         workItemId = session.workItemId;
         return session;
       });

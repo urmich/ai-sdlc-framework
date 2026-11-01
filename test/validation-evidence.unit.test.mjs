@@ -1,19 +1,309 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
-  "surfaces": [{"coverage": "direct", "paths": ["src/validation-evidence.mjs", "src/validation-readiness.mjs", "src/core.mjs"]}],
+  "surfaces": [{"coverage": "direct", "paths": ["src/validation-evidence.mjs", "src/validation-readiness.mjs", "src/core.mjs", "src/store.mjs"]}],
   "applicability": [{
     "names": ["T-PRD037 fresh readiness validation reuses only its own canonical input and retains every data guard"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "evidence-validation",
     "reason": "PR-only pure Node regression for invocation-local serialization reuse, fresh mutable-input rejection and unchanged JSON/redaction bounds; no critical promotion or shared process concurrency.",
     "prerequisites": ["Node"]
+  }, {
+    "names": [
+      "T-PRD037 GitHub token families are redacted in free text and rejected before readiness admission",
+      "T-PRD037 GitHub token families cannot survive retained execution evidence or readable diagnostics",
+      "T-PRD037 GitHub token redaction preserves bounded work and rejects unsafe assertion proof"
+    ],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "evidence-validation",
+    "reason": "PR-only F01 regressions for AC-207.5 and AC-213.7: all GitHub token families, unchanged benign diagnostics and bounded sanitizer behavior, with isolated retained-byte/readable-report proof. Independent process-isolated roots; the retention root owns and cleans its unique repository-local directory. No shared resources, extra tools, network or critical budget change.",
+    "prerequisites": ["Node"]
+  }, {
+    "names": ["T-PRD076 legacy terminal operations recover missing projections without upgrading unsupported history"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "evidence-validation",
+    "reason": "PR-only F02 compatibility regression for AC-213.13: schema-valid 0.4 inline terminal operations retain original bytes across active, archived and pruned projection recovery without current proof or credit. The independent root owns and cleans its repository-local home; causal retention steps stay ordered within the root. No shared resources, critical promotion or network.",
+    "prerequisites": ["Node", "Git"]
+  }, {
+    "names": ["T-PRD076 multi-test captured results retain their event budget across evidence reload"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "evidence-validation",
+    "reason": "PR-only F02 compatibility regression for AC-213.1 and AC-213.13: valid multi-test captured events retain the existing 64 KiB event budget, immutable active/archived bytes and NotRun outcomes. The independent root owns its repository-local home; receipt capture, event retention and fresh-reader checks stay causal. No shared resources, network or critical promotion.",
+    "prerequisites": ["Node", "Git"]
   }]
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LIMITS, createSummarySanitizer, digest, safeSummary } from '../src/core.mjs';
-import { reduceTestHistory, sanitizeExecutionPayload, validateRetainedPayload } from '../src/validation-evidence.mjs';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { LIMITS, createSummarySanitizer, digest, recordLimit, safeRecord, safeSummary,
+  unsafeSummaryContent } from '../src/core.mjs';
+import { captureCycleResultEvents, readTestEvidence, reduceTestHistory, retainExecutionEvidence, sanitizeExecutionPayload,
+  validateRetainedPayload } from '../src/validation-evidence.mjs';
 import { validateReadinessData } from '../src/validation-readiness.mjs';
+import { flushValidationObjects, readValidationObject,
+  validationObjectPath } from '../src/validation-catalog.mjs';
+import { boundedCheck } from '../src/checks.mjs';
+import { humanOutput } from '../src/cli.mjs';
+import { Store } from 'ai-sdlc-framework/store';
+import { currentCycle, currentTestEvidence, stagePassed } from '../src/authority.mjs';
+import { recordTest, startCycle } from '../src/validation.mjs';
+import { registerArtifact } from '../src/artifacts.mjs';
+import { artifact, captureUserInput, coding, fixture, testDefinitions } from './helpers.mjs';
+import { validateRecord } from '../src/schemas.mjs';
+
+test('T-PRD076 legacy terminal operations recover missing projections without upgrading unsupported history', async t => {
+  const f = await coding(await fixture(t));
+  const { cycle } = await startCycle(f.store, {
+    workItemId: f.workItemId, tests: testDefinitions(), configDigest: 'legacy-config',
+    cause: 'Preserve supported 0.4 inline operation history',
+  });
+  const unit = testDefinitions()[0];
+  const operation = {
+    type: 'operation', id: 'op-legacy-unit', workItemId: f.workItemId,
+    sessionId: f.sessionId, repositoryId: 'primary', class: 'test',
+    action: { class: 'test', repositoryId: 'primary', environment: 'local',
+      testId: unit.id, owner: unit.owner, host: unit.location },
+    target: 'local', status: 'succeeded', correlationKey: 'legacy-unit',
+    requestFingerprint: digest('legacy-unit-request'), effectFingerprint: digest('legacy-unit-effect'),
+    intent: 'Original unsupported unit execution', createdAt: cycle.createdAt,
+    dispatchBound: true, cycleId: cycle.id, candidateDigest: cycle.candidateDigest,
+    dispatchStartedAt: cycle.createdAt, updatedAt: cycle.createdAt, terminalSequence: 1,
+    expectedMet: true, evidenceRef: 'legacy:original-result',
+  };
+  validateRecord(operation);
+  const original = Buffer.from(JSON.stringify(operation));
+  const active = f.store.recordPath(f.workItemId, operation.id);
+  await writeFile(active, original, { flag: 'wx' });
+  const reopen = () => new Store(f.home, { clock: f.clock }).ready();
+  const check = async () => {
+    const store = await reopen();
+    const state = await store.load(f.workItemId);
+    const selected = currentCycle(state.records, state.checkpoint);
+    assert.equal(currentTestEvidence(selected, state.records, unit, f.clock), null);
+    assert.equal(stagePassed(selected, state.records, 'local', f.clock), false);
+    const history = await readTestEvidence(store, {
+      workItemId: f.workItemId, cycleId: cycle.id, testId: unit.id,
+    });
+    assert.equal(history.status, 'NotRun');
+    assert.equal(history.observations.length, 1);
+    const recovered = history.observations[0];
+    assert.equal(recovered.operationId, operation.id);
+    assert.equal(recovered.status, 'Passed', 'Preserve the original claimed outcome, not current credit');
+    assert.equal(recovered.evidenceRef, operation.evidenceRef);
+    assert.equal(recovered.observedAt, operation.updatedAt);
+    for (const field of ['executionSources', 'executionSourceDigest', 'retainedPayloadRef',
+      'operationDigest', 'sourceStartedAt', 'sourceCompletedAt']) {
+      assert.equal(recovered[field], undefined, `Do not invent ${field} for unsupported history`);
+    }
+    return { store, recovered };
+  };
+  const initial = await check();
+  await assert.rejects(recordTest(initial.store, {
+    workItemId: f.workItemId, cycleId: cycle.id, testId: unit.id,
+    status: 'Passed', expectedMet: true, owner: unit.owner, host: unit.location,
+    operationId: operation.id, evidenceRef: operation.evidenceRef,
+  }), { code: 'EVIDENCE' }, 'Historical recovery cannot bypass new automated proof admission');
+  assert.deepEqual(await readFile(active), original, 'Read recovery cannot rewrite the original operation');
+  await initial.store.transaction(f.workItemId, () => {}, { skipUnchanged: true });
+  assert.deepEqual(await readFile(active), original);
+  const projection = initial.store.recordPath(f.workItemId, initial.recovered.id);
+  const projectionBytes = await readFile(projection);
+  const archived = path.join(initial.store.workPath(f.workItemId), 'evidence', `${operation.id}.json`);
+  await mkdir(path.dirname(archived), { recursive: true });
+  await writeFile(archived, original, { flag: 'wx' });
+  await rm(active);
+  await check();
+  assert.deepEqual(await readFile(archived), original);
+  assert.deepEqual(await readFile(projection), projectionBytes);
+  await rm(projection);
+  await check();
+  assert.deepEqual(await readFile(archived), original, 'Pruned projections still recover from immutable history');
+  await assert.rejects(stat(projection), { code: 'ENOENT' }, 'Read-only recovery must not persist projections');
+});
+
+test('T-PRD076 multi-test captured results retain their event budget across evidence reload', async t => {
+  const f = await coding(await fixture(t));
+  const staging = Array.from({ length: 99 }, (_, index) => ({
+    ...testDefinitions()[3], id: `T-staging-${index}-${'x'.repeat(75)}`, mode: 'manual',
+  }));
+  const relative = await artifact(f, 'test-plan', JSON.stringify({
+    tests: [...testDefinitions().slice(0, 2), ...staging].map(definition => ({
+      ...definition, requirements: ['FR-001'], conditions: ['AC-001.1'], status: 'NotRun',
+    })),
+  }));
+  await registerArtifact(f.store, {
+    workItemId: f.workItemId, role: 'test-plan', repositoryId: 'primary', path: relative,
+  });
+  const { cycle } = await startCycle(f.store, {
+    workItemId: f.workItemId,
+    configDigest: digest('multi-test receipt'), cause: 'Retain multi-test procedure outcomes',
+  });
+  assert.equal(cycle.storageVersion, 2);
+  for (const testIds of [staging.map(test => test.id), [staging[0].id]]) {
+    const receipt = await captureUserInput(f.store, {
+      sessionId: f.sessionId, input: `STAGING tests were not run: ${testIds.join(', ')}`,
+    });
+    const event = await f.store.transaction(f.workItemId, tx => {
+      const event = {
+        type: 'event', schemaVersion: 1, id: `event-${randomUUID()}`,
+        workItemId: f.workItemId,
+        sequence: Math.max(tx.checkpoint.policyGeneration ?? 0,
+          ...tx.all().filter(record => record.type === 'event').map(record => record.sequence)) + 1,
+        kind: 'staging-result',
+        effect: {
+          cycleId: cycle.id, candidateDigest: cycle.candidateDigest,
+          testSpecDigest: cycle.testSpecDigest, configDigest: cycle.configDigest,
+          target: 'staging-target', deploymentId: 'fixture-deployment',
+          artifactId: 'fixture-artifact', testIds, outcome: 'NotRun',
+          owner: 'user', host: staging[0].location, evidenceRef: 'fixture:not-executed',
+        },
+        sourceReceiptId: receipt.id, sourceReceiptDigest: digest(receipt),
+        inputDigest: receipt.inputDigest, sessionId: f.sessionId,
+        repositoryIds: ['primary'], snapshots: [], occurredAt: receipt.capturedAt,
+      };
+      event.digest = digest(event);
+      tx.put(event);
+      captureCycleResultEvents(tx, tx.get(cycle.id), [event]);
+      return event;
+    });
+    const active = f.store.recordPath(f.workItemId, event.id);
+    const original = await readFile(active);
+    if (testIds.length > 1) assert.ok(original.length > LIMITS.record);
+    const reopen = () => new Store(f.home, { clock: f.clock }).ready();
+    const fresh = await reopen();
+    await fresh.load(f.workItemId);
+    assert.deepEqual(await readFile(active), original);
+    const history = await readTestEvidence(fresh, {
+      workItemId: f.workItemId, cycleId: cycle.id, testId: staging[0].id,
+    });
+    assert.equal(history.status, 'NotRun');
+    const oversized = structuredClone(event);
+    oversized.effect.evidenceRef = 'x'.repeat(LIMITS.decision);
+    delete oversized.digest;
+    oversized.digest = digest(oversized);
+    assert.throws(() => safeRecord(oversized, recordLimit(oversized)),
+      { code: 'CAPACITY' }, 'The existing event budget must still reject oversized capture');
+    assert.deepEqual(await readFile(active), original);
+    const archived = path.join(fresh.workPath(f.workItemId), 'evidence', `${event.id}.json`);
+    await mkdir(path.dirname(archived), { recursive: true });
+    await writeFile(archived, original, { flag: 'wx' });
+    await rm(active);
+    await (await reopen()).load(f.workItemId);
+    assert.deepEqual(await readFile(archived), original);
+    await assert.rejects(stat(active), { code: 'ENOENT' });
+  }
+});
+
+const githubTokenPrefixes = ['ghp_', 'ghs_', 'gho_', 'ghu_', 'ghr_', 'github_pat_'];
+const syntheticGithubToken = prefix => prefix + 'A'.repeat(36);
+
+test('T-PRD037 GitHub token families are redacted in free text and rejected before readiness admission', () => {
+  const missed = githubTokenPrefixes.filter(prefix => {
+    const token = syntheticGithubToken(prefix);
+    const diagnostic = `Producer failed using ${token}; inspect run 42`;
+    const expected = `Producer failed using [redacted:${digest(token)}]; inspect run 42`;
+    const summarized = safeSummary(diagnostic);
+    return summarized !== expected ||
+      sanitizeExecutionPayload(Buffer.from(diagnostic)) !== expected ||
+      !unsafeSummaryContent(diagnostic);
+  });
+  assert.equal(missed.length, 0, `Unredacted families: ${missed.join(', ')}`);
+  for (const prefix of githubTokenPrefixes) {
+    const token = syntheticGithubToken(prefix);
+    const source = { detail: `Producer failed using ${token}`, nested: [token] };
+    assert.throws(() => validateRetainedPayload(source), { code: 'UNSAFE' }, prefix);
+    assert.throws(() => validateReadinessData(source), { code: 'UNSAFE' }, prefix);
+    assert.throws(() => safeRecord(source), { code: 'UNSAFE' }, prefix);
+    for (const url of [
+      `https://example.invalid/runs/${token}?view=public`,
+      `https://example.invalid/runs?trace=${token}&view=public`,
+      `https://example.invalid/runs#${token}`,
+      `https://example.invalid/runs?trace=${token.replaceAll('_', '%5F')}&view=public`,
+    ]) {
+      const safe = safeSummary(url);
+      assert.equal(safe.includes(token), false, prefix);
+      assert.equal(safe.includes(token.replaceAll('_', '%5F')), false, prefix);
+      assert.equal(unsafeSummaryContent(safe), false, prefix);
+      assert.equal(safeSummary(safe), safe, prefix);
+    }
+    const safe = safeSummary(source);
+    assert.equal(safeSummary(safe).detail, safe.detail, prefix);
+    assert.equal(validateReadinessData(safe), safe, prefix);
+    assert.equal(safeRecord(safe), safe, prefix);
+  }
+  const benign = { detail: 'Producer failed with HTTP 403; inspect run 42',
+    nested: ['ghs_ diagnostic label', 'github_pat_ documentation label'],
+    url: 'https://example.invalid/runs/42?view=public' };
+  assert.deepEqual(safeSummary(benign), benign);
+  assert.deepEqual(sanitizeExecutionPayload(Buffer.from(JSON.stringify(benign))), benign);
+  assert.equal(validateReadinessData(benign), benign);
+});
+
+test('T-PRD037 GitHub token families cannot survive retained execution evidence or readable diagnostics', async t => {
+  const root = path.resolve('.test-data', `f01-${randomUUID()}`);
+  await mkdir(root, { recursive: true });
+  t.after(async () => {
+    assert.equal(path.dirname(root), path.resolve('.test-data'));
+    await rm(root, { recursive: true });
+    await assert.rejects(stat(root), { code: 'ENOENT' });
+  });
+  const source = { detail: githubTokenPrefixes.map(prefix =>
+    `Producer failed using ${syntheticGithubToken(prefix)}`).join('; '),
+  cases: [{ testId: 'T-owned-fixture', status: 'Failed',
+    assertions: [{ name: 'Expected producer failure remains observable', passed: false }] }] };
+  const bytes = Buffer.from(JSON.stringify(source));
+  const file = path.join(root, 'producer.json');
+  await writeFile(file, bytes);
+  const store = { workPath: () => root, fault: async () => {} };
+  const tx = { validationObjects: new Map() };
+  const retained = await retainExecutionEvidence(store, tx, {
+    workItemId: 'f01-owned-fixture', evidenceRef: pathToFileURL(file).href,
+  });
+  await flushValidationObjects(store, 'f01-owned-fixture', tx);
+  const fresh = await readValidationObject(store, 'f01-owned-fixture', retained.ref);
+  const persistedBytes = await readFile(validationObjectPath(store, 'f01-owned-fixture', retained.ref));
+  assert.equal(digest(persistedBytes), retained.ref.sha256);
+  assert.equal(fresh.provenance.sourceDigest, digest(bytes));
+  assert.notEqual(retained.ref.sha256, digest(bytes));
+  assert.deepEqual(fresh.content.cases, source.cases);
+  const finding = [{ rule: 'producer', verdict: 'violation', reason: fresh.content.detail }];
+  const reports = [humanOutput(boundedCheck(finding, 'all', 'f01-owned-fixture')),
+    humanOutput(boundedCheck(finding, 'all', 'f01-owned-fixture', { finding: 0 }))];
+  const missed = githubTokenPrefixes.filter(prefix => {
+    const token = syntheticGithubToken(prefix);
+    return persistedBytes.includes(token) || reports.some(report => report.includes(token));
+  });
+  assert.equal(missed.length, 0, `Unredacted retained families: ${missed.join(', ')}`);
+  assert.equal(fresh.content.detail.includes('[redacted:'), true);
+  assert.equal(reports.every(report => report.includes('Producer failed using')), true);
+});
+
+test('T-PRD037 GitHub token redaction preserves bounded work and rejects unsafe assertion proof', () => {
+  for (const prefix of githubTokenPrefixes) {
+    const token = syntheticGithubToken(prefix);
+    const source = { cases: [{ testId: 'T-owned-fixture', status: 'Passed',
+      assertions: [{ name: `Verify ${token}`, passed: true }] }] };
+    assert.throws(() => sanitizeExecutionPayload(Buffer.from(JSON.stringify(source))),
+      { code: 'UNSAFE' }, prefix);
+    assert.equal(source.cases[0].status, 'Passed');
+    assert.equal(source.cases[0].assertions[0].name === `Verify ${token}`, true);
+    const shorter = prefix + 'A'.repeat(19);
+    assert.equal(safeSummary(shorter) === shorter, true, 'Preserve the existing token-body threshold');
+  }
+  const token = syntheticGithubToken('ghs_');
+  const nearLimit = ' '.repeat(LIMITS.artifact - 128) + token;
+  const sanitized = sanitizeExecutionPayload(Buffer.from(nearLimit));
+  assert.equal(sanitized.includes(token), false);
+  assert.equal(Buffer.byteLength(sanitized) <= LIMITS.artifact, true);
+  assert.throws(() => sanitizeExecutionPayload(Buffer.alloc(LIMITS.artifact + 1, 0x61)),
+    { code: 'CAPACITY' });
+  assert.throws(() => validateRetainedPayload(Array(65537).fill('visible')), { code: 'CAPACITY' });
+  let deep = 'visible';
+  for (let index = 0; index < 34; index++) deep = { detail: deep };
+  assert.throws(() => validateReadinessData(deep), { code: 'CAPACITY' });
+});
 
 test('T-PRD037 fresh readiness validation reuses only its own canonical input and retains every data guard', t => {
   const initial = 'owned-canonical-input-fixture';

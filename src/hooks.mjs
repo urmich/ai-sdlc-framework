@@ -1,8 +1,8 @@
-import { fingerprint, now, requireThat } from './core.mjs';
-import { canonicalPath, readJson } from './files.mjs';
-import { captureReceipt } from './decisions.mjs';
+import path from 'node:path';
+import { LIMITS, digest, fingerprint, id, now, object, requireThat, safeRecord, text } from './core.mjs';
+import { canonicalPath, immutableJson, readJson, updateJson } from './files.mjs';
 import { classifyTool, isReadOnlyHook, normalizeCommandHook,
-  normalizeHook } from './gate.mjs';
+  normalizeHook, publicHookInvocationEvents } from './gate.mjs';
 import { pruneWork, recordOperation } from './operations.mjs';
 import { currentCycle } from './authority.mjs';
 import { invalidateCycleAssurance, invalidateEnvironmentAssurance, startCycle } from './validation.mjs';
@@ -10,15 +10,70 @@ import { loadConfig } from './artifacts.mjs';
 import { resolveActionEnvironment } from './policy.mjs';
 import { matchHostInvocation } from './host-invocations.mjs';
 
+async function persistReceipt(store, input, captureProvenance) {
+  object(input, ['sessionId', 'source', 'input', 'timestamp', 'pendingDecisionId', 'sourceRef'],
+    ['sessionId', 'source', 'input']);
+  requireThat(['userPromptSubmitted', 'ask_user'].includes(input.source), 'PROVENANCE', 'Unsupported input source; documents and agent-authored text cannot authorize work');
+  id(input.sessionId);
+  text(input.input, 'complete user input', LIMITS.input);
+  const sessionFile = store.sessionPath(input.sessionId);
+  let receipt;
+  await updateJson(sessionFile, { schemaVersion: 1, revision: 0, sessionId: input.sessionId, orientationGeneration: 1, acknowledgedToken: null }, async session => {
+    const pendingDecisionId = input.pendingDecisionId ?? session.pendingDecisionId ?? null;
+    requireThat(!input.pendingDecisionId || input.pendingDecisionId === session.pendingDecisionId, 'PROVENANCE', 'Receipt pending decision differs from session');
+    const capturedAt = input.timestamp ?? now(store.clock);
+    requireThat(Number.isFinite(Date.parse(capturedAt)), 'INPUT', 'Invalid input capture timestamp');
+    if (session.unmanagedInputHookRequests?.length ||
+        session.unmanagedInputHookOverflow) {
+      captureProvenance = 'direct-uncredited';
+    }
+    receipt = { type: 'receipt', schemaVersion: 1, id: `receipt-${digest({ sessionId: input.sessionId, source: input.source, capturedAt, inputDigest: digest(input.input), pendingDecisionId, captureProvenance }).slice(0, 40)}`,
+      sessionId: input.sessionId, source: input.source, capturedAt, inputDigest: digest(input.input), pendingDecisionId, captureProvenance };
+    if (input.sourceRef) receipt.sourceRef = text(input.sourceRef, 'source reference');
+    safeRecord(receipt);
+    await immutableJson(path.join(store.runtime, 'sessions', input.sessionId, 'receipts', `${receipt.id}.json`), receipt);
+    session.lastReceiptId = receipt.id;
+    return session;
+  });
+  return receipt;
+}
+
+export async function captureReceipt(store, input) {
+  return persistReceipt(store, input, 'direct-uncredited');
+}
+
+async function completeInputHookInvocation(store, event, hook) {
+  const file = store.sessionPath(hook.sessionId);
+  const session = await readJson(file, { optional: true });
+  if (!session?.unmanagedInputHookRequests?.length || !hook.cwd || !hook.toolName) return session;
+  const requestFingerprint = fingerprint(hook.toolName, hook.toolArgs,
+    await canonicalPath(hook.cwd));
+  const publicHookEvents = await publicHookInvocationEvents(hook);
+  return updateJson(file, {}, current => {
+    // Caller-supplied completion fields cannot credit an active public callback.
+    if (current.unmanagedInputHookRequests?.some(request =>
+      request.publicHookEvents?.includes(event))) return current;
+    const index = current.unmanagedInputHookRequests?.findIndex(request =>
+      request.requestFingerprint === requestFingerprint) ?? -1;
+    if (index >= 0 && !publicHookEvents.includes(event)) {
+      current.unmanagedInputHookRequests.splice(index, 1);
+    }
+    return current;
+  });
+}
+
 export async function handleHook(store, event, payload) {
   const rawNormalized = normalizeHook(payload);
   const sessionId = rawNormalized.sessionId;
   requireThat(sessionId, 'HOOK', 'Hook payload needs a session ID');
   let preloadedSession;
   let assuranceToken;
+  if (['postToolUse', 'postToolUseFailure'].includes(event)) {
+    preloadedSession = await completeInputHookInvocation(store, event, rawNormalized);
+  }
   if (['postToolUse', 'postToolUseFailure'].includes(event) &&
       rawNormalized.toolName !== 'ask_user') {
-    preloadedSession = await readJson(store.sessionPath(sessionId), { optional: true });
+    preloadedSession ??= await readJson(store.sessionPath(sessionId), { optional: true });
     if (preloadedSession?.workItemId) {
       assuranceToken = await store.markAssurancePending(preloadedSession.workItemId,
         `Recheck candidate after ${event}:${rawNormalized.toolName ?? 'unknown-tool'}`);
@@ -52,13 +107,15 @@ export async function handleHook(store, event, payload) {
     const timestamp = typeof normalized.timestamp === 'number' ?
       new Date(normalized.timestamp).toISOString() :
       normalized.timestamp ?? now(store.clock);
-    await captureReceipt(store, { sessionId, source: 'userPromptSubmitted', input: prompt, timestamp });
+    await persistReceipt(store, { sessionId, source: 'userPromptSubmitted', input: prompt, timestamp },
+      'supported-input-hook');
     return {};
   }
   if (event === 'postToolUse' && normalized.toolName === 'ask_user') {
     const result = normalized.toolResult?.textResultForLlm ?? normalized.toolResult?.text_result_for_llm;
     requireThat(typeof result === 'string', 'HOOK', 'Unsupported ask_user response payload; use a plain user prompt instead');
-    await captureReceipt(store, { sessionId, source: 'ask_user', input: result });
+    await persistReceipt(store, { sessionId, source: 'ask_user', input: result },
+      'supported-input-hook');
     return {};
   }
   if (!['postToolUse', 'postToolUseFailure', 'agentStop'].includes(event)) return {};

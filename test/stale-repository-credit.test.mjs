@@ -8,7 +8,8 @@ import { currentCycle, currentTestEvidence, stagePassed } from '../src/authority
 import { currentArtifact, currentDeployment,
   selectedRepositoryIdentity } from '../src/current-evidence.mjs';
 import { markDispatching, prepareOperation, recordOperation } from '../src/operations.mjs';
-import { recordTest, startCycle } from '../src/validation.mjs';
+import { startCycle } from '../src/validation.mjs';
+import { recordFixtureTest as recordTest } from './helpers.mjs';
 import { status } from '../src/recovery.mjs';
 import { coding, completeReview, fixture, fixtureArtifact, fixtureBuild,
   fixtureDeployment, grant, observeFixtureRepository,
@@ -28,7 +29,7 @@ test('local-only admission does not require or snapshot an external repository p
   });
   await f.runGit('remote', 'remove', 'origin');
   const { cycle } = await startCycle(f.store, {
-    workItemId: f.workItemId, configDigest: 'local-only-configuration',
+    workItemId: f.workItemId, configDigest: digest('local-only-configuration'),
     cause: 'local tests have no hosted repository dependency',
   });
   assert.ok(cycle.tests.every(item => item.environment === 'local'));
@@ -53,7 +54,7 @@ async function provenCandidate(t, { secondary = false,
   const configuration = {
     defaultBranch: 'refs/heads/main',
     environments: { DEV: { target: 'dev-target',
-      configDigest: 'configuration-1', allowedStages: ['DEV'] } },
+      configDigest: digest('configuration-1'), allowedStages: ['DEV'] } },
   };
   await writeJson(path.join(f.repo, '.sdlc', 'config.json'), configuration);
   await f.runGit('add', '.');
@@ -69,7 +70,7 @@ async function provenCandidate(t, { secondary = false,
   }
   const repository = await observeFixtureRepository(f);
   const { cycle } = await startCycle(f.store, {
-    workItemId: f.workItemId, configDigest: 'configuration-1',
+    workItemId: f.workItemId, configDigest: digest('configuration-1'),
     cause: 'prove the original checkout and fetch URL',
   });
   for (const testId of ['T-unit', 'T-integration']) {

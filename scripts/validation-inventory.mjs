@@ -26,14 +26,27 @@ function templateEnd(source, from, nesting = 0, interpolations = []) {
   }
   throw new Error('Unterminated JavaScript template in validation declarations');
 }
-function decodeString(source) {
+/** Decode a quoted source span with the inventory lexer's nonexecuting escape grammar. */
+export function decodeString(source) {
   const value = source.slice(1, -1);
-  return value.replace(/\\(?:u\{([a-f0-9]+)\}|u([a-f0-9]{4})|x([a-f0-9]{2})|(\r?\n)|(.))/giu,
-    (_, point, unicode, hex, continuation, escaped) => {
+  // Legacy octal consumes up to three digits after 0-3, but only two after 4-7.
+  return value.replace(/\\(?:u\{([A-Fa-f0-9]+)\}|u([A-Fa-f0-9]{4})|x([A-Fa-f0-9]{2})|([0-3][0-7]{0,2}|[4-7][0-7]?)|(\r\n|[\n\r\u2028\u2029])|(.))/gu,
+    (_, point, unicode, hex, octal, continuation, escaped) => {
       if (point || unicode || hex) return String.fromCodePoint(parseInt(point ?? unicode ?? hex, 16));
+      if (octal) return String.fromCharCode(parseInt(octal, 8));
       if (continuation) return '';
       return ({ n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', v: '\v', 0: '\0' })[escaped] ?? escaped;
     });
+}
+const identifierStart = /^[$_\p{ID_Start}]$/u;
+const identifierContinue = /^[$_\u200c\u200d\p{ID_Continue}]$/u;
+function identifierCharacter(source, index, first) {
+  const escape = source[index] === '\\' ?
+    /^\\u(?:\{[A-Fa-f0-9]+\}|[A-Fa-f0-9]{4})/u.exec(source.slice(index)) : null;
+  if (source[index] === '\\' && !escape) return null;
+  const value = escape ? decodeString('"' + escape[0] + '"') : String.fromCodePoint(source.codePointAt(index));
+  const allowed = first ? identifierStart : identifierContinue;
+  return allowed.test(value) ? { value, end: index + (escape ? escape[0].length : value.length) } : null;
 }
 export function declarationTokens(source) {
   return declarationTokensIn(source, 0, source.length).tokens;
@@ -50,8 +63,10 @@ function declarationTokensIn(source, from, to, nesting = 0, interpolation = fals
     const character = source[index];
     if (/\s/u.test(character)) { index++; continue; }
     if (source.startsWith('//', index)) {
-      const end = source.indexOf('\n', index);
-      index = end < 0 ? source.length : end;
+      const end = /[\n\r\u2028\u2029]/gu;
+      end.lastIndex = index + 2;
+      const terminator = end.exec(source);
+      index = terminator ? terminator.index : source.length;
       continue;
     }
     if (source.startsWith('/*', index)) {
@@ -63,6 +78,7 @@ function declarationTokensIn(source, from, to, nesting = 0, interpolation = fals
     let kind = 'punctuation';
     let value = character;
     let interpolations;
+    const identifier = identifierCharacter(source, index, true);
     if (character === "'" || character === '"') {
       kind = 'string';
       interpolations = [];
@@ -73,11 +89,16 @@ function declarationTokensIn(source, from, to, nesting = 0, interpolation = fals
       interpolations = [];
       index = templateEnd(source, index, nesting, interpolations);
       value = source.slice(start, index);
-    } else if (/[A-Za-z_$]/u.test(character)) {
+    } else if (identifier) {
       kind = 'identifier';
-      index++;
-      while (index < source.length && /[\w$]/u.test(source[index])) index++;
-      value = source.slice(start, index);
+      value = identifier.value;
+      index = identifier.end;
+      while (index < to) {
+        const next = identifierCharacter(source, index, false);
+        if (!next) break;
+        value += next.value;
+        index = next.end;
+      }
     } else if (character === '/' && (!tokens.length ||
         ['(', '[', '{', ',', '=', ':', 'return', '>', '!', '&', '|', '?', ';'].includes(tokens.at(-1).value))) {
       kind = 'regex';
@@ -97,9 +118,9 @@ function declarationTokensIn(source, from, to, nesting = 0, interpolation = fals
       else if (character === '}' && --depth === 0) return { tokens, end: index };
     }
     const gap = source.slice(located, start);
-    const newline = gap.lastIndexOf('\n');
-    line += gap.split('\n').length - 1;
-    column = newline < 0 ? column + gap.length : gap.length - newline;
+    const lines = gap.split(/\r\n|[\n\r\u2028\u2029]/u);
+    line += lines.length - 1;
+    column = lines.length === 1 ? column + gap.length : lines.at(-1).length + 1;
     located = start;
     tokens.push({ kind, value, start, end: index, line,
       column, ...(interpolations ? { interpolations } : {}) });

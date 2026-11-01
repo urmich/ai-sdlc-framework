@@ -11,7 +11,7 @@ import { execFile } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { promisify, types } from 'node:util';
 import { pathToFileURL } from 'node:url';
-import { canonical, digest, id, requireThat, SdlcError } from '../src/core.mjs';
+import { canonical, digest, id, isCredentialQueryKey, requireThat, SdlcError } from '../src/core.mjs';
 import { atomicWrite } from '../src/files.mjs';
 import { parseTestPlan, testSpecificationDigest } from '../src/artifacts.mjs';
 import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
@@ -19,7 +19,7 @@ import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
   validateExecutionContext, sanitizeExecutionPayload } from 'ai-sdlc-framework/evidence';
 import { compileValidationInventory, compileValidationSourceInventory, reconcileNodeExecution,
   validationPlatforms, validationSourcePaths, isValidationTestPath,
-  partitionValidationInventory, declarationTokens, sourceLiteralAt } from './validation-inventory.mjs';
+  partitionValidationInventory, declarationTokens, sourceLiteralAt, decodeString } from './validation-inventory.mjs';
 import { discoverGoDeclarations, executeValidationCommand, reconcileGoExecution, processDiagnostic,
   createOwnedCommandRunner } from './validation-tools.mjs';
 import { repositoryRoot, unitFiles, validationSelectionDescriptor, validationSelectionProtocol,
@@ -1346,33 +1346,103 @@ export async function captureNativeDefinitionInputs({ target, profile, component
   return definition;
 }
 
+function* nativeSourceLiteralViews(contents, file, tokens = declarationTokens(contents)) {
+  for (const [index, literal] of tokens.entries()) {
+    if (literal.kind === 'string') {
+      nativeSourceCanonicalValue(literal.value, file, { strict: false });
+      const span = contents.slice(literal.start + 1, literal.end - 1);
+      const trimmed = span.replace(/(?<!\\)[\t\n\r ]+$/u, '');
+      const text = trimmed === span ? literal.value :
+        decodeString(contents[literal.start] + trimmed + contents[literal.start]);
+      yield { text, referenceText: literal.value, kind: literal.kind, expressions: [] };
+      continue;
+    }
+    if (literal.kind !== 'template') continue;
+    const previous = tokens[index - 1];
+    // Await/yield can be CommonJS bindings; only unescaped module operators are excluded here.
+    const keyword = previous?.kind === 'identifier' && tokens[index - 2]?.value !== '.' &&
+      contents.slice(previous.start, previous.end) === previous.value &&
+      (['return', 'throw', 'case', 'typeof', 'void', 'delete', 'new', 'in', 'instanceof'].includes(previous.value) ||
+        file.endsWith('.mjs') && ['await', 'yield'].includes(previous.value));
+    const tagged = previous && (['string', 'template', 'regex'].includes(previous.kind) ||
+      previous.kind === 'identifier' && !keyword ||
+      [')', ']', '}'].includes(previous.value));
+    // Tags can consume raw or cooked spans; even a familiar tag name is not an authority exception.
+    for (const raw of tagged ? [false, true] : [false]) {
+      let text = '';
+      let offset = literal.start + 1;
+      const expressions = [];
+      const inspect = (start, end, terminal = false) => {
+        const span = contents.slice(start, end).replace(/\r\n?/gu, '\n');
+        const value = raw ? span : decodeString('`' + span + '`');
+        nativeSourceCanonicalValue(value, file, { strict: false });
+        // Preserve existing source padding boundaries, never discard whitespace produced by an escape.
+        const trimmed = terminal ? span.replace(/(?<!\\)[\t\n\r ]+$/u, '') : span;
+        return trimmed === span ? value : raw ? trimmed : decodeString('`' + trimmed + '`');
+      };
+      for (const span of literal.interpolations) {
+        text += inspect(offset, span.start);
+        expressions.push({ start: text.length, end: text.length + 1 });
+        text += '0';
+        offset = span.end;
+      }
+      text += inspect(offset, literal.end - 1, true);
+      yield { text, kind: literal.kind, expressions };
+    }
+    for (const span of literal.interpolations) {
+      yield* nativeSourceLiteralViews(contents.slice(span.start + 2, span.end - 1), file);
+    }
+  }
+}
+
+// Map surviving URL characters back to literal spans instead of dropping credential value bytes.
+function nativeSourceUrlView(value) {
+  const removed = [];
+  for (const match of value.matchAll(/[\t\n\r]/gu)) removed.push(match.index - removed.length);
+  const text = value.replace(/[\t\n\r]/gu, '');
+  const originalOffset = offset => {
+    let low = 0;
+    let high = removed.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (removed[middle] <= offset) low = middle + 1;
+      else high = middle;
+    }
+    return offset + low;
+  };
+  return { text, originalOffset };
+}
+
+function* nativeSourceUrlReferences(contents, file, tokens) {
+  // Alternate JavaScript spellings belong to lexer-owned literals, not regex source or arbitrary code.
+  for (const match of contents.matchAll(tokens ? /https?:\/\//giu : /https?:/giu)) {
+    if (tokens && sourceLiteralAt(contents, match.index, tokens)) continue;
+    const text = /^[^\s<>]*/u.exec(contents.slice(match.index))[0];
+    yield { text, sourceText: text, originalOffset: offset => offset, expressions: [] };
+  }
+  if (!tokens) return;
+  for (const view of nativeSourceLiteralViews(contents, file, tokens)) {
+    const inspected = nativeSourceUrlView(view.text);
+    for (const match of inspected.text.matchAll(/https?:/giu)) {
+      const start = inspected.originalOffset(match.index);
+      const reference = view.kind === 'string' ?
+        /^<([^<>\s]+)>(?:\s*;\s*[A-Za-z][A-Za-z0-9-]*=(?:"[^"]*"|[^\s,;]+))*$/u.exec(view.referenceText) : null;
+      const text = reference && start === 1 ? reference[1] : inspected.text.slice(match.index);
+      const sourceText = reference && start === 1 ? reference[1] : view.text.slice(start);
+      const expressions = view.expressions.filter(span => span.start >= start)
+        .map(span => ({ start: span.start - start, end: span.end - start }));
+      yield { text, sourceText, expressions,
+        originalOffset: offset => inspected.originalOffset(match.index + offset) - start };
+    }
+  }
+}
+
 function nativeSourceCredentialValues(contents, file) {
   const credentials = [];
-  if (!/https?:\/\//iu.test(contents)) return credentials;
   const tokens = /\.[cm]?js$/u.test(file) ? declarationTokens(contents) : null;
-  for (const match of contents.matchAll(/https?:\/\//giu)) {
-    const literal = tokens ? sourceLiteralAt(contents, match.index, tokens) : null;
-    let text = contents.slice(match.index, literal ? literal.end - 1 : undefined);
-    const expressions = [];
-    if (literal?.kind === 'template') {
-      // Expressions are source code, not literal values; surrounding fields still undergo the same checks.
-      let interpreted = '';
-      let offset = 0;
-      for (const span of literal.interpolations) {
-        if (span.start < match.index) continue;
-        const start = span.start - match.index;
-        interpreted += text.slice(offset, start);
-        expressions.push({ start: interpreted.length, end: interpreted.length + 1 });
-        interpreted += '0';
-        offset = span.end - match.index;
-      }
-      text = interpreted + text.slice(offset);
-    }
-    const reference = literal?.kind === 'string' ?
-      /^<([^<>\s]+)>(?:\s*;\s*[A-Za-z][A-Za-z0-9-]*=(?:"[^"]*"|[^\s,;]+))*$/u.exec(literal.value) : null;
-    if (reference && match.index === literal.start + 2) text = reference[1];
-    else if (literal) text = text.replace(/[\u0000-\u0020]+$/u, '');
-    else text = /^[^\s<>]*/u.exec(text)[0];
+  for (const { text, sourceText, expressions, originalOffset } of nativeSourceUrlReferences(contents, file, tokens)) {
+    nativeSourceCanonicalValue(text, file);
+    if (sourceText !== text) nativeSourceCanonicalValue(sourceText, file);
     const overlapping = (start, end) => expressions.filter(expression =>
       expression.start < end && expression.end > start);
     const retain = (value, start, end, identity = false) => {
@@ -1381,45 +1451,47 @@ function nativeSourceCredentialValues(contents, file) {
         selected[0].start === start && selected[0].end === end, composite: selected.length > 0 &&
         !(selected.length === 1 && selected[0].start === start && selected[0].end === end), identity });
     };
-    const authorityStart = text.indexOf('//') + 2;
-    const authorityEnd = text.slice(authorityStart).search(/[/?#]/u);
+    // HTTP special schemes accept zero or more slash/backslash separators without a base URL.
+    const authorityStart = /^https?:[/\\]*/iu.exec(text)[0].length;
+    const authorityEnd = text.slice(authorityStart).search(/[/\\?#]/u);
     const authority = text.slice(authorityStart, authorityEnd < 0 ? text.length : authorityStart + authorityEnd);
     const userinfoEnd = authority.lastIndexOf('@');
     const separator = authority.slice(0, userinfoEnd < 0 ? 0 : userinfoEnd).indexOf(':');
     if (userinfoEnd >= 0) {
-      const end = authorityStart + (separator < 0 ? userinfoEnd : separator);
-      let username;
-      try { username = decodeURIComponent(text.slice(authorityStart, end)); }
-      catch (error) {
-        if (!(error instanceof URIError)) throw error;
-        requireThat(false, 'UNSAFE', `Exact source ${file} contains an invalid credential value`);
-      }
-      retain(username, authorityStart, end, true);
+      const start = originalOffset(authorityStart - 1) + 1;
+      const end = originalOffset(authorityStart + (separator < 0 ? userinfoEnd : separator));
+      const username = nativeSourceCanonicalValue(sourceText.slice(start, end), file);
+      retain(username, start, end, true);
     }
     if (separator >= 0) {
-      const start = authorityStart + separator + 1;
-      const end = authorityStart + userinfoEnd;
-      let password;
-      try { password = decodeURIComponent(text.slice(start, end)); }
-      catch (error) {
-        if (!(error instanceof URIError)) throw error;
-        requireThat(false, 'UNSAFE', `Exact source ${file} contains an invalid credential value`);
-      }
+      const start = originalOffset(authorityStart + separator) + 1;
+      const end = originalOffset(authorityStart + userinfoEnd);
+      const password = nativeSourceCanonicalValue(sourceText.slice(start, end), file);
       retain(password, start, end);
     }
     const fragment = text.indexOf('#');
     const query = text.indexOf('?');
-    if (query < 0 || fragment >= 0 && query > fragment) continue;
-    let offset = query + 1;
-    for (const parameter of text.slice(offset, fragment < 0 ? text.length : fragment).split('&')) {
-      const equals = parameter.indexOf('=');
-      const keyEnd = offset + (equals < 0 ? parameter.length : equals);
-      const [[name, value] = ['', '']] = new URLSearchParams(parameter);
-      if (/^(?:sig|signature|token|access_token|client_secret|api_key|password|x-amz-signature)$/iu.test(name) ||
-          overlapping(offset, keyEnd).length > 0) {
-        retain(value, equals < 0 ? offset + parameter.length : keyEnd + 1, offset + parameter.length);
+    const fields = [];
+    if (query >= 0 && (fragment < 0 || query < fragment)) {
+      fields.push({ start: query + 1, end: fragment < 0 ? text.length : fragment });
+    }
+    if (fragment >= 0) fields.push({ start: fragment + 1, end: text.length });
+    for (const field of fields) {
+      let offset = field.start;
+      for (const parameter of text.slice(offset, field.end).split('&')) {
+        const equals = parameter.indexOf('=');
+        const keyEnd = offset + (equals < 0 ? parameter.length : equals);
+        const name = nativeSourceCanonicalValue(parameter.slice(0, keyEnd - offset), file, { form: true });
+        const valueEnd = originalOffset(offset + parameter.length);
+        // Structural normalization cannot shorten a credential or impersonate a genuine expression span.
+        const valueStart = equals < 0 ? valueEnd : originalOffset(keyEnd) + 1;
+        const value = nativeSourceCanonicalValue(sourceText.slice(valueStart, valueEnd), file, { form: true });
+        if (isCredentialQueryKey(name) ||
+            overlapping(originalOffset(offset), originalOffset(keyEnd)).length > 0) {
+          retain(value, valueStart, valueEnd);
+        }
+        offset += parameter.length + 1;
       }
-      offset += parameter.length + 1;
     }
   }
   return credentials;
@@ -1439,6 +1511,28 @@ function validateNativeSourceSecretMaterial(contents, file) {
   }
 }
 
+function nativeSourceCanonicalValue(value, file, { form = false, strict = true } = {}) {
+  let current = form ? value.replaceAll('+', ' ') : value;
+  validateNativeSourceSecretMaterial(current, file);
+  // Inspection views only shrink; cap decoding independently of the existing source byte budgets.
+  for (let depth = 0; current.includes('%'); depth++) {
+    requireThat(depth < 8, 'UNSAFE', `Exact source ${file} contains over-nested credential encoding`);
+    let decoded;
+    try {
+      decoded = strict ? decodeURIComponent(current) :
+        new URLSearchParams('material=' + current.replaceAll('&', '%26').replaceAll('+', '%2B')).get('material');
+    }
+    catch (error) {
+      if (!(error instanceof URIError)) throw error;
+      requireThat(false, 'UNSAFE', `Exact source ${file} contains an invalid credential value`);
+    }
+    validateNativeSourceSecretMaterial(decoded, file);
+    if (decoded === current || !/%[A-Fa-f0-9]{2}/u.test(decoded)) return decoded;
+    current = decoded;
+  }
+  return current;
+}
+
 export function validateNativeSourceDefinitions(sourceFiles) {
   requireThat(Array.isArray(sourceFiles) && sourceFiles.length > 0 && sourceFiles.length <= 10000 &&
     sourceFiles.every(source => source && Object.getPrototypeOf(source) === Object.prototype &&
@@ -1451,12 +1545,7 @@ export function validateNativeSourceDefinitions(sourceFiles) {
     sourceFiles.reduce((total, source) => total + Buffer.byteLength(source.contents), 0) <= 64 * 1024 * 1024,
   'EVIDENCE', 'Native source definitions must retain bounded distinct literal UTF-8 source bytes');
   for (const { file, contents } of sourceFiles) {
-    validateNativeSourceSecretMaterial(contents, file);
-    if (contents.includes('%')) {
-      const decoded = new URLSearchParams('material=' + contents.replaceAll('&', '%26').replaceAll('+', '%2B'))
-        .get('material');
-      validateNativeSourceSecretMaterial(decoded, file);
-    }
+    nativeSourceCanonicalValue(contents, file, { strict: false });
     for (const { value, expression, composite, identity } of nativeSourceCredentialValues(contents, file)) {
       validateNativeSourceSecretMaterial(value, file);
       requireThat(identity || !composite && (!value || expression || nativeSourceDummyValues.includes(value)), 'UNSAFE',

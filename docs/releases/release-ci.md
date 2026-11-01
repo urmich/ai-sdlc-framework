@@ -3,8 +3,9 @@
 **Source-configured future flow; not executed or live-ready.** This guide
 describes the current workflow/helper source, not verified repository settings,
 native execution, npm trust, public-client availability or a completed release.
-All public-readiness case results remain NotRun. The package version remains
-0.4.0; published 0.4.0 bytes, assets, tags and historical evidence are immutable.
+The required hosted release cases remain NotRun for this candidate.
+The package candidate is 0.5.0, not yet published;
+published 0.4.0 bytes, assets, tags and historical evidence are immutable.
 This document never authorizes dispatch, settings changes or publication.
 
 ## One explicit maintainer start
@@ -58,6 +59,21 @@ Do not copy synthetic test hashes, invent a previous version's metadata or
 substitute collaborator-authenticated private downloads for public legacy pins.
 Unavailable authentic prior-release inputs block the real upgrade prerequisite;
 they are not permission to replace an upgrade with reinstall or repack history.
+For the 0.5.0 launch, select the currently published 0.4.0 as
+`SUPPORTED_PREVIOUS_VERSION` and verify its actual public descriptor/checksum
+pins. The representative 0.3.1 PR baseline is not this release's upgrade proof.
+The immutable GitHub 0.4.0 inputs retrieved for launch preparation have these
+SHA-256 identities:
+
+| Input | SHA-256 |
+| --- | --- |
+| `release-descriptor.json` | `25d1b83836d514a52b641c075b37ba6775559d8352bbc8196b328de2aa99e0cc` |
+| `SHA256SUMS` | `477a2a4134ce28be9d41e10db6b20dffeeea81470320f18ba622c97ef22ce8d48` |
+| `ai-sdlc-framework-0.4.0.tgz` | `050984b7574f9ad08c427ca5f62ef4a3a2afcf3222daf4052d5a54fa6205fe73` |
+
+The payload and descriptor match their records in `SHA256SUMS`. These are
+previous-release byte identities, not 0.5.0 R-PRE/R-POST results or a claim that
+the repository variables have been configured.
 
 The dispatch destination becomes `RELEASE_REPOSITORY`; the exact source and
 logical intent become `EXPECTED_SOURCE_COMMIT` and `RELEASE_INTENT_ID`.

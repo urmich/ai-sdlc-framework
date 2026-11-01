@@ -30,7 +30,7 @@ import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { canonical, digest, newId } from '../src/core.mjs';
 import { registerArtifact, parseTestPlan, synchronizeTestPlan } from '../src/artifacts.mjs';
-import { captureReceipt, prepareDecision, applyDecision } from '../src/decisions.mjs';
+import { prepareDecision, applyDecision } from '../src/decisions.mjs';
 import { currentCycle, currentTestEvidence, stagePassed, hasStageCompletion } from '../src/authority.mjs';
 import { startCycle } from '../src/validation.mjs';
 import { prepareOperation, markDispatching } from '../src/operations.mjs';
@@ -42,7 +42,7 @@ import { validateRecord } from '../src/schemas.mjs';
 import { formatAudit, recordAudit } from '../src/audit.mjs';
 import { fixture, artifact, grant, completeReview, observeFixtureRepository,
   fixtureBuild, fixtureArtifact, fixtureDeployment, registerFixtureProviderRequest,
-  finishFixtureOperation } from './helpers.mjs';
+  finishFixtureOperation, captureUserInput } from './helpers.mjs';
 import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
   recordReadiness, requireReadinessEvaluation, readTestEvidence,
   readValidationObject } from 'ai-sdlc-framework/evidence';
@@ -636,7 +636,7 @@ test('T-PRD076 supported legacy adoption preserves original records and grants o
     })));
   const reopened = await new Store(input.f.home, { clock: input.f.clock }).ready();
   input.f.clock.advance(1);
-  await captureReceipt(reopened, { sessionId: input.f.sessionId, source: 'userPromptSubmitted',
+  await captureUserInput(reopened, { sessionId: input.f.sessionId, source: 'userPromptSubmitted',
     input: 'Adopt the supported older account records without changing their original history or granting new validation credit.' });
   const adopted = await reopened.init({ workItemId: input.f.workItemId, repositoryId: 'primary',
     cwd: input.f.repo, sessionId: input.f.sessionId, adopt: true, historyStartsAt: commit });
@@ -708,7 +708,7 @@ function configuredPublisher(candidateDigest, api = { requireReadinessEvaluation
   };
 }
 
-async function rejectIncompleteCompletion(input, api = { prepareDecision, captureReceipt, applyDecision }) {
+async function rejectIncompleteCompletion(input, api = { prepareDecision, handleHook, applyDecision }) {
   const effect = {
     cycleId: input.cycle.id, candidateDigest: input.cycle.candidateDigest,
     testSpecDigest: input.cycle.testSpecDigest, configDigest: input.cycle.configDigest,
@@ -718,9 +718,9 @@ async function rejectIncompleteCompletion(input, api = { prepareDecision, captur
     workItemId: input.f.workItemId, sessionId: input.f.sessionId, kind: 'stage-completion', effect,
   });
   const completionInput = 'I confirm local completion of this independent consumer checkpoint.';
-  const receipt = await api.captureReceipt(input.f.store, {
+  const receipt = await captureUserInput(input.f.store, {
     sessionId: input.f.sessionId, source: 'userPromptSubmitted', input: completionInput,
-  });
+  }, { hook: api.handleHook });
   await assert.rejects(api.applyDecision(input.f.store, {
     workItemId: input.f.workItemId, sessionId: input.f.sessionId, kind: 'stage-completion',
     effect, decisionId: pending.id, receiptId: receipt.id, input: completionInput,
@@ -881,8 +881,8 @@ async function installedConsumer(t) {
       'authority', 'hooks', 'gate', 'recovery'].map(load));
   f.store = await new storage.Store(f.home, { clock: f.clock }).ready();
   const request = 'Adopt this independent account service and its own complete local checkpoint.';
-  await decisions.captureReceipt(f.store, { sessionId: f.sessionId,
-    source: 'userPromptSubmitted', input: request });
+  await captureUserInput(f.store, { sessionId: f.sessionId,
+    source: 'userPromptSubmitted', input: request }, { hook: hooks.handleHook });
   const adopted = await f.store.init({ workItemId: f.workItemId, repositoryId: 'primary',
     cwd: f.repo, sessionId: f.sessionId, adopt: true });
   assert.equal(adopted.adopted, true);
@@ -902,9 +902,9 @@ async function installedConsumer(t) {
     });
     f.clock.advance(1);
     const input = `Approve this consumer's ${phases[index]} and proceed to ${phases[index + 1]}.`;
-    const receipt = await decisions.captureReceipt(f.store, {
+    const receipt = await captureUserInput(f.store, {
       sessionId: f.sessionId, source: 'userPromptSubmitted', input,
-    });
+    }, { hook: hooks.handleHook });
     await decisions.applyDecision(f.store, {
       workItemId: f.workItemId, sessionId: f.sessionId, kind: 'approval', effect,
       decisionId: pending.id, receiptId: receipt.id, input,

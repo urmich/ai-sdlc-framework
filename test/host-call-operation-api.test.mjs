@@ -1,17 +1,24 @@
 import test from 'node:test';
+import { digest } from '../src/core.mjs';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { prepareHostInvocation } from '../src/host-invocations.mjs';
+import { deriveIntendedOutcome } from '../src/external-results.mjs';
+import { currentCycle, currentTestEvidence } from '../src/authority.mjs';
+import { requireReadinessEvaluation, verifiedExecutionReport } from '../src/validation-readiness.mjs';
 import { Store } from 'ai-sdlc-framework/store';
+import { readTestEvidence, recordReadiness } from 'ai-sdlc-framework/evidence';
 import {
   prepareOperation, markDispatching, recordOperation,
 } from 'ai-sdlc-framework/operations';
 import {
   fixture, coding, completeReview, grant, observeFixtureRepository,
-  testDefinitions,
+  testDefinitions, executeFixtureReadiness,
 } from './helpers.mjs';
-import { startCycle, recordTest } from '../src/validation.mjs';
+import { startCycle } from '../src/validation.mjs';
+import { recordFixtureTest as recordTest } from './helpers.mjs';
 
 const contract = Object.freeze({
   adapterId: 'fixture-host-call-result',
@@ -31,6 +38,171 @@ const canonical = value => Array.isArray(value) ?
     `{${Object.keys(value).sort().map(key =>
       `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}` :
     JSON.stringify(value);
+
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "direct", "paths": ["src/operations.mjs", "src/host-invocations.mjs",
+    "src/external-results.mjs", "src/validation.mjs", "src/validation-evidence.mjs", "src/store.mjs"]}],
+  "applicability": [{
+    "names": [
+      "T-PRD067 verified operation units use original terminal time across late recovery and normalized integration import",
+      "T-PRD071 late failed pending and mismatched unit operations cannot satisfy unit-first"
+    ],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "evidence-validation",
+    "reason": "PR-only F02 regressions for AC-213.1/4/8: actual isolated Node producer output, independently checked host-call result and public operation/readiness APIs bind unit-first to the original immutable observation, not import time. Each root owns and cleans private repository/home/source fixtures; causal dispatch, producer, observation and import steps are ordered within the root. Four outer workers, no nested runner, shared resources, network or critical promotion.",
+    "prerequisites": ["Node", "Git"]
+  }]
+};
+
+async function operationUnitFixture(t) {
+  const f = await coding(await fixture(t));
+  await fs.writeFile(path.join(f.repo, 'candidate.mjs'), 'export const value = 4;\n');
+  await f.runGit('add', '.');
+  await f.runGit('commit', '-qm', 'Owned operation timing fixture');
+  const { cycle } = await startCycle(f.store, {
+    workItemId: f.workItemId, tests: testDefinitions(), configDigest: digest('unit-operation-config'),
+    cause: 'Original operation observation chronology',
+  });
+  const [unit, integration] = testDefinitions();
+  const hostCallId = 'owned-unit-host-call';
+  const action = { class: 'test', repositoryId: 'primary', environment: 'local',
+    testId: unit.id, owner: unit.owner, host: unit.location };
+  const request = { toolName: 'owned_node_test', toolArgs: { testId: unit.id }, cwd: f.repo };
+  const { operation: prepared } = await prepareOperation(f.store, {
+    workItemId: f.workItemId, sessionId: f.sessionId, action, request,
+    correlationKey: 'owned-unit-execution', intent: 'Execute the owned unit producer',
+  });
+  // Seed the supported source-bound host intent, not an execution/result assertion.
+  const intendedOutcome = deriveIntendedOutcome({
+    ...action, localRepositoryPath: f.repo,
+    remoteRepositoryURL: await f.runGit('remote', 'get-url', 'origin'), provider: 'fixture',
+    target: 'local', sourceRevision: cycle.sources[0].revision,
+    candidateDigest: cycle.candidateDigest, testSpecDigest: cycle.testSpecDigest,
+    configDigest: cycle.configDigest, artifactId: 'owned-local-artifact', deploymentId: 'owned-local-context',
+  });
+  const hostInvocation = await prepareHostInvocation({
+    sessionId: f.sessionId, ...request, hostCallId,
+  }, { adapterContract: contract });
+  assert.ok(intendedOutcome?.digest);
+  await f.store.transaction(f.workItemId, tx =>
+    tx.put({ ...prepared, intendedOutcome, hostInvocation }));
+  f.clock.advance(1);
+  const dispatched = await markDispatching(f.store, f.workItemId, prepared.id);
+  const finish = async ({ status = 'Passed', wrongHost = false } = {}) => {
+    const producer = await executeFixtureReadiness(f.store, cycle, [unit],
+      { [unit.id]: status }, { operation: dispatched });
+    const report = requireReadinessEvaluation(producer).reports[0];
+    const captured = verifiedExecutionReport(report);
+    const bytes = Buffer.from(captured.sourceObject.content, 'base64');
+    const output = JSON.parse(bytes);
+    assert.equal(digest(bytes), captured.proof.reportDigest);
+    assert.equal(output.rows.length, 1);
+    assert.equal(output.rows[0].testId, unit.id);
+    const passed = output.rows[0].passed;
+    assert.equal(passed, status === 'Passed');
+    const providerResultId = `${report.context.producer.executionRef}:1`;
+    const observation = {
+      status: passed ? 'succeeded' : 'failed', family: intendedOutcome.family,
+      target: intendedOutcome.target, intendedOutcomeDigest: intendedOutcome.digest,
+      providerStatus: passed ? 'succeeded' : 'failed', providerVerified: true, providerResultId,
+      causalProof: { kind: 'host-call', dispatchId: dispatched.id, resultId: providerResultId,
+        supported: true, hostCallId: wrongHost ? 'another-host-call' : hostCallId },
+      result: { executionRef: report.context.producer.executionRef,
+        attemptCapability: 'distinct', attemptRef: '1', executionIdentity: report.context.producer,
+        terminalStatus: passed ? 'succeeded' : 'failed',
+        sourceRevision: cycle.sources[0].revision, configDigest: cycle.configDigest,
+        candidateDigest: cycle.candidateDigest, testSpecDigest: cycle.testSpecDigest,
+        testId: unit.id, expectedMet: passed },
+      evidence: { ref: `owned-node:${captured.proof.reportDigest}`, verified: true,
+        sha256: captured.proof.reportDigest },
+      ...(passed ? {} : { failure: { terminal: true, providerVerified: true } }),
+    };
+    f.store.verifyOperationResult = ({ operation, observedResult }) => {
+      assert.equal(operation.id, dispatched.id);
+      assert.deepEqual(observedResult, { reportDigest: digest(bytes) });
+      assert.equal(JSON.parse(bytes).rows[0].passed, observation.result.expectedMet);
+      return {
+        dispatch: { id: operation.id, hostCallId, hostCallSupported: true }, observation,
+        executionContext: { provider: report.context.producer.provider,
+          connection: report.context.producer.connection, scopeRef: report.context.producer.scopeRef,
+          definitionRef: report.context.producer.definitionRef, attemptCapability: 'distinct' },
+      };
+    };
+    const operation = await recordOperation(f.store, {
+      workItemId: f.workItemId, operationId: dispatched.id, status: observation.status,
+      observedResult: { reportDigest: digest(bytes) },
+    });
+    assert.equal(operation.status, wrongHost ? 'uncertain' : observation.status);
+    return { operation, producer };
+  };
+  return { f, cycle, unit, integration, dispatched, finish };
+}
+
+test('T-PRD067 verified operation units use original terminal time across late recovery and normalized integration import', async t => {
+  const { f, cycle, unit, integration, finish } = await operationUnitFixture(t);
+  const { operation } = await finish();
+  const original = await fs.readFile(f.store.recordPath(f.workItemId, operation.id));
+  let state = await f.store.load(f.workItemId);
+  let selected = currentCycle(state.records, state.checkpoint);
+  const current = currentTestEvidence(selected, state.records, unit, f.clock);
+  assert.equal(current.status, 'Passed');
+  assert.equal(current.sourceCompletedAt, undefined, 'Do not fabricate normalized report times for operations');
+  const evaluation = await executeFixtureReadiness(f.store, cycle, [integration]);
+  const report = requireReadinessEvaluation(evaluation).reports[0];
+  assert.equal(report.startedAt, operation.updatedAt, 'Exact original completion/start boundary is eligible');
+  f.clock.advance(1000);
+  await fs.rm(f.store.recordPath(f.workItemId, current.id));
+  f.store = await new Store(f.home, { clock: f.clock }).ready();
+  state = await f.store.load(f.workItemId);
+  selected = currentCycle(state.records, state.checkpoint);
+  assert.equal(currentTestEvidence(selected, state.records, unit, f.clock).status, 'Passed');
+  const result = await recordReadiness(f.store, {
+    workItemId: f.workItemId, cycleId: cycle.id, evaluation,
+  });
+  assert.equal(result.blocked.length, 0, 'Original verified unit completion precedes integration execution');
+  assert.equal(result.evidence[0].status, 'Passed');
+  state = await f.store.load(f.workItemId);
+  selected = currentCycle(state.records, state.checkpoint);
+  assert.equal(currentTestEvidence(selected, state.records, integration, f.clock).status, 'Passed');
+  assert.deepEqual(await fs.readFile(f.store.recordPath(f.workItemId, operation.id)), original);
+});
+
+test('T-PRD071 late failed pending and mismatched unit operations cannot satisfy unit-first', async t => {
+  for (const variant of ['late', 'failed', 'pending', 'mismatched']) {
+    const { f, cycle, unit, integration, finish } = await operationUnitFixture(t);
+    const evaluation = variant === 'late' ?
+      await executeFixtureReadiness(f.store, cycle, [integration]) : null;
+    if (variant === 'late') f.clock.advance(1);
+    if (variant !== 'pending') {
+      if (variant === 'mismatched') {
+        const { operation } = await finish({ wrongHost: true });
+        assert.equal(operation.status, 'uncertain');
+        assert.equal(operation.resultProof, undefined);
+      }
+      else await finish({ status: variant === 'failed' ? 'Failed' : 'Passed' });
+    }
+    const result = await recordReadiness(f.store, {
+      workItemId: f.workItemId, cycleId: cycle.id,
+      evaluation: evaluation ?? await executeFixtureReadiness(f.store, cycle, [integration]),
+    });
+    assert.equal(result.evidence[0].status, 'NotRun', variant);
+    assert.equal(result.blocked[0].code, 'UNIT_FIRST', variant);
+    const state = await f.store.load(f.workItemId);
+    const selected = currentCycle(state.records, state.checkpoint);
+    assert.notEqual(currentTestEvidence(selected, state.records, integration, f.clock)?.status, 'Passed', variant);
+    const unitStatus = currentTestEvidence(selected, state.records, unit, f.clock)?.status ?? 'NotRun';
+    if (variant === 'late') assert.equal(unitStatus, 'Passed', variant);
+    else assert.equal(unitStatus, variant === 'failed' ? 'Failed' : 'NotRun', variant);
+    if (variant === 'failed') {
+      const history = await readTestEvidence(f.store, {
+        workItemId: f.workItemId, cycleId: cycle.id, testId: unit.id,
+      });
+      assert.equal(history.observations.some(row => row.status === 'Failed'), true,
+        'The original failed execution remains historical even without current credit');
+    }
+  }
+});
 
 async function hostFixture(t) {
   const f = await coding(await fixture(t));
@@ -61,7 +233,7 @@ async function hostFixture(t) {
     defaultBranch: 'refs/heads/main',
     environments: {
       DEV: {
-        target: 'dev-resource', configDigest: 'config-v1',
+        target: 'dev-resource', configDigest: digest('config-v1'),
         allowedStages: ['DEV'],
       },
     },
@@ -73,7 +245,7 @@ async function hostFixture(t) {
   await observeFixtureRepository(f);
   const { cycle } = await startCycle(f.store, {
     workItemId: f.workItemId, tests: testDefinitions(),
-    configDigest: 'config-v1', cause: 'host-call result regression',
+    configDigest: digest('config-v1'), cause: 'host-call result regression',
   });
   for (const testId of ['T-unit', 'T-integration']) {
     await recordTest(f.store, {

@@ -1,6 +1,13 @@
 # Change history
 
-## Unreleased candidate
+## 0.5.0 - unreleased candidate
+
+The launch correction scope is token-family sanitization, automated execution
+proof independent of inline plan size, exact literal credential-URL admission
+and receipt-capture provenance. CLI help now derives its identity from package
+metadata. The package and active reader examples target 0.5.0 without claiming
+that npm publication, hosted/native acceptance or default-branch promotion has
+occurred. Published 0.4.0 remains immutable.
 
 Safety, evidence and validation fixes preserve unowned installation content,
 bound request/process cleanup, retain uncertain workspaces, authenticate original
@@ -32,4 +39,4 @@ Historical publication/repair/acceptance observations are retained in the
 [public-readiness discovery record](docs/sdlc/public-readiness/requirements.md#observed-starting-point);
 they do not validate this branch.
 The future shared Mac artifact does not replace 0.4.0's published separate Mac
-assets. No release or version change is made by this documentation migration.
+assets. The 0.5.0 source version does not republish or replace this release.

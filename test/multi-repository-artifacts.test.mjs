@@ -18,7 +18,8 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { artifact, coding, fixture, grant } from './helpers.mjs';
+import { artifact, coding, fixture, grant, captureUserInput,
+  recordFixtureTest as recordTest } from './helpers.mjs';
 import {
   artifactPath,
   currentTestSpecification,
@@ -29,10 +30,12 @@ import {
   testSpecificationDigest,
 } from '../src/artifacts.mjs';
 import { check } from '../src/checks.mjs';
-import { captureReceipt, applyDecision, prepareDecision } from '../src/decisions.mjs';
+import { applyDecision, prepareDecision } from '../src/decisions.mjs';
 import { currentCycle } from '../src/authority.mjs';
 import { resume, status } from '../src/recovery.mjs';
-import { recordTest, startCycle } from '../src/validation.mjs';
+import { recordReadiness, startCycle } from '../src/validation.mjs';
+import { evaluateReadiness, normalizeExecutionReport,
+  validationInventoryDigest } from '../src/validation-readiness.mjs';
 import { validateManifest } from '../src/schemas.mjs';
 import { byteSize, digest, LIMITS } from '../src/core.mjs';
 import { formatEvents, parseEvents } from '../src/audit.mjs';
@@ -74,7 +77,60 @@ test('T-PRD045 canonical relocation preserves IDs, snapshot bytes and original a
 
   const selector = await document(f.repo, 'test/T-core.mjs',
     'import assert from "node:assert/strict"; assert.equal(2+2,4); console.log(JSON.stringify({case:"T-core",result:"actual child assertion passed"}));\n');
+  const { cycle } = await startCycle(f.store, { workItemId: f.workItemId,
+    configDigest: digest('migration-configuration'), cause: 'before relocation' });
+  const definition = cycle.tests.find(item => item.id === 'T-core');
+  const specification = { schemaVersion: 1, profile: 'canonical-relocation',
+    cases: [{
+      id: definition.id, conditions: ['AC-901.1'], expectedDigest: digest(definition.expected),
+      executionId: 'original-child', mode: definition.mode, owner: definition.owner,
+      location: definition.location, checkpoint: definition.checkpoint,
+      assertions: [{ id: 'preserved-state', selector: {
+        implementation: selector, commandDigest: digest([process.execPath, path.join(f.repo, selector)]),
+      } }],
+    }] };
+  const context = {
+    candidateDigest: cycle.candidateDigest, testSpecDigest: cycle.testSpecDigest,
+    configDigest: cycle.configDigest, inventoryDigest: validationInventoryDigest(specification),
+    sources: cycle.sources, profile: specification.profile,
+    environment: definition.environment, location: definition.location,
+    mode: definition.mode, owner: definition.owner,
+    native: { kind: 'fixture', platform: process.platform, architecture: process.arch,
+      image: 'owned-node-process', toolchain: { node: process.version } },
+    producer: { provider: 'fixture', connection: 'owned-node-host', scopeRef: f.workItemId,
+      definitionRef: selector, executionRef: cycle.id, attemptKind: 'known', attemptRef: '1' },
+    attemptCapability: 'distinct', jobRef: 'original-child', artifacts: [],
+  };
+  const startedAt = new Date(f.clock.now()).toISOString();
+  const started = performance.now();
   const execution = await execute(process.execPath, [path.join(f.repo, selector)], { cwd: f.repo });
+  const durationMs = performance.now() - started;
+  f.clock.advance(Math.max(1, Math.ceil(durationMs)));
+  const finishedAt = new Date(f.clock.now()).toISOString();
+  assert.deepEqual(JSON.parse(execution.stdout),
+    { case: definition.id, result: 'actual child assertion passed' });
+  const facts = { verifierId: 'owned-node-process-v1', reportDigest: digest(Buffer.from(execution.stdout)),
+    context: structuredClone(context), sourceTime: finishedAt, sourceSequence: 1 };
+  const normalized = normalizeExecutionReport(execution.stdout, context, {
+    id: facts.verifierId,
+    normalize: output => ({
+      schemaVersion: 1, kind: 'test-execution', context,
+      startedAt, finishedAt, observedAt: finishedAt, sequence: 1, complete: true, exitCode: 0,
+      results: [{
+        testId: output.case, assertionId: 'preserved-state',
+        selector: specification.cases[0].assertions[0].selector,
+        status: 'Passed', expectedMet: true, expectedDigest: digest(definition.expected),
+        checkpoint: definition.checkpoint, observedAt: finishedAt, sourceSequence: 1,
+        durationMs, exitCode: 0,
+      }],
+    }),
+    verify: input => input.reportDigest === facts.reportDigest ? facts : null,
+  });
+  const evaluation = evaluateReadiness(specification, [normalized], {
+    profile: specification.profile, executions: [{ id: 'original-child', context }],
+    now: finishedAt, policy: { maxAgeMs: null, revisionPolicy: 'content',
+      verifierIds: [facts.verifierId] }, barriers: [],
+  });
   const report = path.join(f.root, 'original-execution.json');
   await fs.writeFile(report, execution.stdout);
   const retained = await retainTestEvidence(f.store, {
@@ -83,11 +139,8 @@ test('T-PRD045 canonical relocation preserves IDs, snapshot bytes and original a
   const retainedPath = path.join(f.store.workPath(f.workItemId),
     'validation', 'objects', `${retained.ref.sha256}.json`);
   const retainedBytes = await fs.readFile(retainedPath);
-  const { cycle } = await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'migration-configuration', cause: 'before relocation' });
-  const recorded = await recordTest(f.store, { workItemId: f.workItemId,
-    cycleId: cycle.id, testId: 'T-core', status: 'Passed', expectedMet: true,
-    evidenceRef: retained.evidenceRef, owner: 'agent', host: 'local' });
+  const recorded = (await recordReadiness(f.store, { workItemId: f.workItemId,
+    cycleId: cycle.id, evaluation })).evidence[0];
   assert.equal((await readTestEvidence(f.store, {
     workItemId: f.workItemId, cycleId: cycle.id, testId: 'T-core',
   })).status, 'Passed');
@@ -115,7 +168,7 @@ test('T-PRD045 canonical relocation preserves IDs, snapshot bytes and original a
   await document(f.repo, 'docs/usage/README.md', '# Canonical migration guide\n');
   assert.notEqual((await resolveTestSpecification(f.store, f.workItemId)).digest, oldSpecification);
   const replacement = await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'migration-configuration', cause: 'link/specification relocation' });
+    configDigest: digest('migration-configuration'), cause: 'link/specification relocation' });
   assert.equal(replacement.reset, true);
   assert.notEqual(replacement.cycle.id, cycle.id);
   assert.equal((await readTestEvidence(f.store, { workItemId: f.workItemId,
@@ -203,7 +256,7 @@ test('T-45 managed status synchronization preserves escaped definitions and spec
   assert.deepEqual((await resolveTestSpecification(f.store, f.workItemId, before.tests)).tests,
     before.tests);
   const { cycle } = await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'escaped-definitions-v1', cause: 'RUN-02 regression' });
+    configDigest: digest('escaped-definitions-v1'), cause: 'RUN-02 regression' });
   assert.deepEqual(cycle.tests, before.tests);
   assert.equal(cycle.testSpecDigest, before.digest);
   for (const [testId, status] of [['T-escaped', 'Passed'], ['T-alternate', 'Failed']]) {
@@ -408,7 +461,7 @@ test('T-45 approvals snapshot every repository artifact and external rebinding',
 
   await fs.writeFile(path.join(beta, 'docs/requirements.md'),
     requirement('FR-202', 'changed beta approval'));
-  const receipt = await captureReceipt(f.store, {
+  const receipt = await captureUserInput(f.store, {
     sessionId: f.sessionId,
     source: 'userPromptSubmitted',
     input: 'Approve the multi-repository Requirements.',
@@ -496,7 +549,7 @@ test('T-45 approvals snapshot every repository artifact and external rebinding',
   });
   assert.equal((await f.store.records(f.workItemId))
     .filter(record => record.type === 'locator').length, 1);
-  const externalReceipt = await captureReceipt(f.store, {
+  const externalReceipt = await captureUserInput(f.store, {
     sessionId: f.sessionId,
     source: 'userPromptSubmitted',
     input: 'Approve the external Requirements binding.',
@@ -553,7 +606,7 @@ test('T-45 multiple Test Plans combine and synchronize without changing legacy i
   const legacy = await coding(await fixture(t));
   const first = await startCycle(legacy.store, {
     workItemId: legacy.workItemId,
-    configDigest: 'legacy-v1',
+    configDigest: digest('legacy-v1'),
     cause: 'single-plan compatibility',
   });
   const legacyContents = await fs.readFile(path.join(legacy.repo,
@@ -711,7 +764,7 @@ test('T-45 multiple Test Plans combine and synchronize without changing legacy i
   assert.equal((await check(f.store, f.workItemId, 'artifacts')).exitCode, 0);
   const { cycle } = await startCycle(f.store, {
     workItemId: f.workItemId,
-    configDigest: 'combined-v1',
+    configDigest: digest('combined-v1'),
     cause: 'combined member plans',
   });
   assert.deepEqual(cycle.tests.map(item => item.id).sort(),

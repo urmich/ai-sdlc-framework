@@ -116,6 +116,8 @@ test('T-36 package is reproducible, integrity-bound and installable in isolation
   const verified = await verifyPackage({ artifact: built.artifact, environment });
   assert.equal(verified.verified, true);
   assert.equal(verified.sha256, built.sha256);
+  assert.equal(verified.evidence.coverage, 'Passed');
+  assert.ok(verified.evidence.publicExports > 0);
   const previousUmask = process.umask(0o077);
   try {
     assert.equal((await verifyPackage({ artifact: built.artifact, environment })).verified, true);
