@@ -10,7 +10,7 @@ import { appendTestObservation, bindExecutionEvidence, initializeReferencedCycle
   lookupOperation, lookupTestEvidence, observationAfterReset, resetCycleResults, retainedPayloadReference,
   sameExecutionSources, selectTestObservation, testResetBarrier,
   verifiedOperationCompletedAt } from './validation-evidence.mjs';
-import { createEvidenceBundle, readinessCaseProof, refreshReadinessEvaluation,
+import { createEvidenceBundle, readinessCaseProofs, refreshReadinessEvaluation,
   requireReadinessEvaluation } from './validation-readiness.mjs';
 import { effectiveStagingExecution, stagingExecutionGuidance,
   stagingExecutionMatches } from './staging.mjs';
@@ -635,7 +635,7 @@ export async function recordReadiness(store, input) {
     const evaluation = refreshReadinessEvaluation(input.evaluation, {
       now: now(store.clock), barriers,
     });
-    const proofs = evaluation.cases.map(result => readinessCaseProof(evaluation, result.testId));
+    const proofs = readinessCaseProofs(evaluation);
     for (const proof of proofs) {
       const test = tests.find(test => test.id === proof.definition.id);
       const trace = specification.traceability?.find(row => row.testId === test.id);

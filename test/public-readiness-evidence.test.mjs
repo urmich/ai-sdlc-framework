@@ -16,6 +16,7 @@ import { startCycle, recordTests } from '../src/validation.mjs';
 import { currentCycle, currentTestEvidence, stagePassed } from '../src/authority.mjs';
 import { evaluatePolicy } from '../src/policy.mjs';
 import { resetCycleResults } from '../src/validation-evidence.mjs';
+import { readinessCaseProof, readinessCaseProofs } from '../src/validation-readiness.mjs';
 import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
   createEvidenceBundle, readEvidenceBundle, renderReadinessReport,
   sanitizeExecutionPayload, recordReadiness, readValidationObject,
@@ -426,6 +427,41 @@ test('T-PRD064 normalized automated and observed procedures retain their actual 
     assert.equal(raw.results[0].status, 'Passed');
     assert.ok(Object.isFrozen(normalized));
     assert.ok(!Object.isFrozen(raw));
+  }
+});
+
+test('T-PRD064 batched managed case proofs preserve exact producer outcomes without detached credit', () => {
+  const input = fixture({ count: 2, assertions: 2 });
+  input.specification.cases[1].executionId = 'consumer-second';
+  const context = { ...input.context,
+    inventoryDigest: validationInventoryDigest(input.specification) };
+  const secondContext = { ...context, jobRef: 'consumer-second-job' };
+  const first = input.report();
+  first.context = context;
+  first.results = first.results.filter(row => row.testId === input.specification.cases[0].id);
+  const second = input.report({ sequence: 2, status: 'Failed' });
+  second.context = secondContext;
+  second.results = second.results.filter(row => row.testId === input.specification.cases[1].id);
+  const reports = [input.capture(first), input.capture(second)];
+  const selection = { ...input.selection, executions: [
+    { id: 'consumer-ci', context }, { id: 'consumer-second', context: secondContext },
+  ] };
+  const evaluation = evaluateReadiness(input.specification, reports, selection);
+  const proofs = readinessCaseProofs(evaluation);
+  assert.deepEqual(proofs, evaluation.cases.map(result =>
+    readinessCaseProof(evaluation, result.testId)));
+  assert.deepEqual(proofs.map(proof => proof.status), ['Passed', 'Failed']);
+  assert.deepEqual(proofs.map(proof => proof.source.sourceCompletedAt),
+    [first.finishedAt, second.finishedAt]);
+  assert.deepEqual(readinessCaseProofs(evaluation), proofs);
+  assert.throws(() => readinessCaseProofs(structuredClone(evaluation)), { code: 'EVIDENCE' });
+
+  for (const detached of [[], structuredClone(reports)]) {
+    const unverified = evaluateReadiness(input.specification, detached, selection);
+    const blocked = readinessCaseProofs(unverified);
+    assert.deepEqual(blocked, unverified.cases.map(result =>
+      readinessCaseProof(unverified, result.testId)));
+    assert.ok(blocked.every(proof => proof.status === 'NotRun' && proof.selected.length === 0));
   }
 });
 
