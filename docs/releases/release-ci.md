@@ -68,7 +68,7 @@ SHA-256 identities:
 | Input | SHA-256 |
 | --- | --- |
 | `release-descriptor.json` | `25d1b83836d514a52b641c075b37ba6775559d8352bbc8196b328de2aa99e0cc` |
-| `SHA256SUMS` | `477a2a4134ce28be9d41e10db6b20dffeeea81470320f18ba622c97ef22ce8d48` |
+| `SHA256SUMS` | `477a2a4134ce28be9d41e10db6b20dfeeea81470320f18ba622c97ef22ce8d48` |
 | `ai-sdlc-framework-0.4.0.tgz` | `050984b7574f9ad08c427ca5f62ef4a3a2afcf3222daf4052d5a54fa6205fe73` |
 
 The payload and descriptor match their records in `SHA256SUMS`. These are
