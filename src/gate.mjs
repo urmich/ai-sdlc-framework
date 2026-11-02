@@ -32,6 +32,12 @@ import {
 const READ_TOOLS = new Set(['view', 'rg', 'grep', 'glob', 'web_fetch', 'web_search', 'ask_user', 'update_todo']);
 const EDIT_TOOLS = new Set(['edit', 'create', 'apply_patch', 'str_replace_editor']);
 const SHELL_TOOLS = new Set(SHELL_FAMILIES);
+const INERT_LITERAL_SHELL_COMMANDS = {
+  bash: new Set(['echo', 'printf', 'cat', 'grep']),
+  powershell: new Set(['write-output', 'write-host', 'get-content', 'select-string',
+    'echo', 'write', 'cat', 'gc', 'type', 'sls']),
+  cmd: new Set(['echo', 'type', 'find', 'find.exe', 'findstr', 'findstr.exe']),
+};
 const FRAMEWORK_ENTRY = fileURLToPath(new URL('../bin/sdlc.mjs', import.meta.url));
 const FRAMEWORK_COMMANDS = new Set(['status', 'resume', 'context', 'decision',
   'op', 'conflict', 'pr', 'monitor', 'audit', 'check', 'artifact', 'cycle',
@@ -77,6 +83,44 @@ async function inputHookInvocationEvent(hook, words) {
     return undefined;
   }
 }
+function inertLiteralShellCommand(shell, fragment, quoted) {
+  if (/[(){}]/u.test(fragment.replace(quoted, ''))) return false;
+  // Project quoted separators only to parse literal argv, never shell authority.
+  const literal = fragment.replace(quoted, value => value.replace(/[;|&<>\r\n]/gu, ' '));
+  const words = commandWords(shell, literal);
+  if (!words?.length) return false;
+  const executable = shell === 'bash' ? words[0] : words[0].toLowerCase();
+  if (INERT_LITERAL_SHELL_COMMANDS[shell].has(executable)) return true;
+  try {
+    const invocation = gitInvocation(words);
+    if (invocation?.operation === 'commit') {
+      requireIndexOnlyCommit(invocation.args);
+      return true;
+    }
+    return Boolean(invocation?.operation && unboundReadOnlyShell(words));
+  } catch {
+    return false;
+  }
+}
+function onlyInertLiteralShellCommands(shell, command) {
+  const quoted = shell === 'cmd' ? /"[^"]*"/gu :
+    shell === 'powershell' ? /"(?:`[\s\S]|""|[^"`])*"|'(?:''|[^'])*'/gu :
+      /"(?:\\[\s\S]|[^"\\])*"|'[^']*'/gu;
+  const separators = shell === 'cmd' ? /[|&<>\r\n]/u : /[;|&<>\r\n]/u;
+  const tokens = command.match(new RegExp(
+    `${quoted.source}|[^"'${shell === 'cmd' ? '' : ';'}|&<>\\r\\n]+|[${shell === 'cmd' ? '' : ';'}|&<>\\r\\n]`,
+    'gu'));
+  if (!tokens || tokens.join('') !== command) return false;
+  let fragment = '';
+  for (const token of tokens) {
+    if (token.length === 1 && separators.test(token)) {
+      if (/[<>]/u.test(token) || !inertLiteralShellCommand(shell, fragment, quoted)) return false;
+      fragment = '';
+    } else fragment += token;
+  }
+  // An opaque pipeline consumer may evaluate upstream literal output as code.
+  return inertLiteralShellCommand(shell, fragment, quoted);
+}
 export async function publicHookInvocationEvents(hook) {
   if (!SHELL_TOOLS.has(hook.toolName)) return [];
   const command = hook.toolArgs?.command;
@@ -86,7 +130,8 @@ export async function publicHookInvocationEvents(hook) {
     if (event !== undefined) return event ? [event] : [];
   }
   if (typeof command !== 'string' ||
-      !/(?:^|[^A-Za-z0-9_.-])sdlc(?:\.(?:mjs|exe|cmd|ps1))?(?=[^A-Za-z0-9_.-]|$)/iu.test(command)) return [];
+      !/(?:^|[^A-Za-z0-9_.-])sdlc(?:\.(?:mjs|exe|cmd|ps1))?(?=[^A-Za-z0-9_.-]|$)/iu
+        .test(command) || onlyInertLiteralShellCommands(hook.toolName, command)) return [];
   const events = [];
   // Literal fragments identify callbacks, never authorize an opaque shell command.
   for (const fragment of command.split(/[;|&<>\r\n]/u)) {

@@ -792,6 +792,7 @@ export async function recordOperation(store, input, { reconcile = false } = {}) 
     }
     operation.status = status;
     if (checked && status !== 'uncertain' && TERMINAL.includes(status)) {
+      delete operation.resultGap;
       operation.resultProof = checked;
       operation.evidenceRef = verifiedObservation.evidence.ref;
       if (checked.providerResultId) operation.handle = checked.providerResultId;

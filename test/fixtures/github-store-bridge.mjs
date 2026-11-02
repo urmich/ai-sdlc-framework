@@ -314,7 +314,8 @@ export async function bridgeFixture(t) {
     const preparation = await bridge.legacyOperations.prepare({
       workItemId: f.workItemId, sessionId: f.sessionId, operationId: `op-${family}${suffix}`, action,
       request: { toolName: 'github-existing-consumer', toolArgs: { family, suffix }, cwd: f.repo },
-      correlationKey: `family-${family}${suffix}`, intent: `Exercise ${family} existing consumer`,
+      // Compact fixture labels leave room for full digests and proofs within 4 KiB.
+      correlationKey: `${family}${suffix}`, intent: family,
     }, f.store);
     assert.equal(preparation.operation.intendedOutcome.family, family);
     if (family === 'notification') notificationContent.set(preparation.operation.id,
@@ -502,7 +503,7 @@ export async function bridgeFixture(t) {
           supported: true, hostCallId: prepared.claim.hostCallId },
         ...(status === 'running' ? {} : { result }),
         ...(status === 'failed' ? { failure: { terminal: true, providerVerified: true } } : {}),
-        evidence: { ref: `fixture:provider:${family}:${resultStatus}`, verified: true, sha256: digest(result) },
+        evidence: { ref: `fixture:${family}:${resultStatus}`, verified: true, sha256: digest(result) },
       },
       ...(['execution', 'test', 'artifact'].includes(family) ? {
         executionContext: { provider: 'github', connection: connectionId, scopeRef: repositoryRef,

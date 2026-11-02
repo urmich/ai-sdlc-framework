@@ -36,6 +36,14 @@ export const validationDeclarations = {
       "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD074 source safety ends line comments at every ECMAScript line terminator",
       "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety preserves regex statement boundaries and ordinary division literals",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety rejects ambiguous slash goals rather than trusting a partial literal inventory",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety honors hashbang and legacy comment lexical boundaries",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD074 source safety distinguishes literal values from punctuation and keyword roles",
+      "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD074 source safety inspects every HTTP special-scheme spelling without canonicalizing credential values",
       "minimumSlots": 1, "exclusiveResources": []},
     {"root": "TOOL03 native failure retains exact ambient workspace and lease for unsettled writers without replacing the primary failure",
@@ -3034,6 +3042,165 @@ test('T-PRD074 source safety ends line comments at every ECMAScript line termina
     assert.doesNotThrow(() => new Script(contents));
     assert.equal(validateNativeSourceDefinitions([source])[0], source);
     assert.deepEqual(Buffer.from(source.contents), bytes);
+  }
+});
+
+test('T-PRD074 source safety preserves regex statement boundaries and ordinary division literals', () => {
+  const endpoint = String.raw`h\u0074tps:` + '//example.test/?token=';
+  const contexts = [
+    ['if (true)', ''],
+    ['if ((true))', ''],
+    ['while (false)', ''],
+    ['for (;false;)', ''],
+    ['with ({})', ''],
+    ['try {} catch (error) { if (true)', '}'],
+    ['if (false) {} else', ''],
+    ['do', '; while (false)'],
+    ['const result = typeof', ''],
+    ['const result = 1 +', ''],
+    ['const result = + +', ''],
+    ['const result = [...', ']'],
+  ];
+  for (const [prefix, suffix] of contexts) {
+    for (const quote of ['"', "'", '`']) {
+      for (const value of ['unapproved-fixture', 'gh' + String.raw`o\u005f` + 'a'.repeat(36), 'dummy']) {
+        const source = { file: 'src/regex-statement.cjs',
+          contents: prefix + ' /' + quote + '/.test(' + quote + endpoint + value + quote + ')' + suffix + ';' };
+        assert.doesNotThrow(() => new Script(source.contents));
+        if (value !== 'dummy') requireUnsafeSource(source);
+        else {
+          const bytes = Buffer.from(source.contents);
+          assert.equal(validateNativeSourceDefinitions([source])[0], source);
+          assert.deepEqual(Buffer.from(source.contents), bytes);
+        }
+      }
+    }
+  }
+  for (const operand of ['call()', 'object.return', 'object.if(true)', 'counter++', 'counter--',
+    '"return"', '"("']) {
+    for (const value of ['unapproved-fixture', 'dummy']) {
+      const source = { file: 'src/division-literal.cjs',
+        contents: 'const result = ' + operand + ' / "' + endpoint + value + '" / 2;' };
+      assert.doesNotThrow(() => new Script(source.contents));
+      if (value !== 'dummy') requireUnsafeSource(source);
+      else assert.equal(validateNativeSourceDefinitions([source])[0], source);
+    }
+  }
+  const escapedToken = 'gh' + String.raw`o\u005f` + 'a'.repeat(36);
+  const encodedEndpoint = endpoint.replaceAll('/', String.raw`\x2f`);
+  for (const name of ['return', 'if', 'await', 'yield', 'of', String.raw`ret\u0075rn`]) {
+    for (const quote of ['"', "'", '`']) {
+      for (const value of [encodedEndpoint + 'unapproved-fixture', escapedToken, encodedEndpoint + 'dummy']) {
+        const source = { file: 'src/private-keyword.cjs',
+          contents: 'class Owned { #' + name + ' = () => 1; probe() { return this.#' + name +
+            (name === 'if' ? '(true)' : '') + ' / ' + quote + value + quote + ' / 2; } }' };
+        assert.doesNotThrow(() => new Script(source.contents));
+        if (!value.endsWith('dummy')) requireUnsafeSource(source);
+        else assert.equal(validateNativeSourceDefinitions([source])[0], source);
+      }
+    }
+  }
+  const privateTag = { file: 'src/private-tag.cjs',
+    contents: 'class Owned { #return(strings) { return strings.raw[0]; } probe() { return this.#return`' +
+      'https:' + '//example.test/?token=' + String.raw`du\x6dmy` + '`; } }' };
+  assert.doesNotThrow(() => new Script(privateTag.contents));
+  requireUnsafeSource(privateTag);
+  for (const keyword of ['break', 'continue']) {
+    for (const ending of ['\n', '\r', '\r\n', '\u2028', '\u2029']) {
+      for (const quote of ['"', "'", '`']) {
+        for (const value of ['unapproved-fixture', escapedToken, 'dummy']) {
+          const source = { file: 'src/labelled-regex.cjs',
+            contents: 'outer: while (true) { ' + keyword + ' outer' + ending +
+              '/' + quote + '/.test(' + quote + endpoint + value + quote + ');\n}' };
+          assert.doesNotThrow(() => new Script(source.contents));
+          if (value !== 'dummy') requireUnsafeSource(source);
+          else assert.equal(validateNativeSourceDefinitions([source])[0], source);
+        }
+      }
+      for (const value of ['unapproved-fixture', 'dummy']) {
+        const source = { file: 'src/unlabelled-division.cjs',
+          contents: 'outer: while (true) { ' + keyword + ending +
+            'ordinary / "' + encodedEndpoint + value + '" / 2;\n}' };
+        assert.doesNotThrow(() => new Script(source.contents));
+        if (value !== 'dummy') requireUnsafeSource(source);
+        else assert.equal(validateNativeSourceDefinitions([source])[0], source);
+      }
+    }
+  }
+  const nested = { file: 'src/regex-interpolation.cjs',
+    contents: 'const outer = `prefix ${(() => { if (true) /"/.test("' +
+      endpoint + 'unapproved-fixture"); })()}`;' };
+  assert.doesNotThrow(() => new Script(nested.contents));
+  requireUnsafeSource(nested);
+});
+
+test('T-PRD074 source safety distinguishes literal values from punctuation and keyword roles', () => {
+  const endpoint = String.raw`h\u0074tps:` + '//example.test/?token=';
+  const verify = (contents, unsafe) => {
+    const source = { file: 'src/literal-token-roles.cjs', contents };
+    const bytes = Buffer.from(contents);
+    assert.doesNotThrow(() => new Script(contents));
+    if (unsafe) requireUnsafeSource(source);
+    else assert.equal(validateNativeSourceDefinitions([source])[0], source);
+    assert.deepEqual(Buffer.from(source.contents), bytes);
+  };
+  for (const [prefix, suffix] of [
+    ['function owned() { "."\nreturn', '}'],
+    ['"."\nif (true)', ''],
+    ['outer: while (true) { "."\nbreak outer\n', '}'],
+    ['outer: while (true) { "."\ncontinue outer\n', '}'],
+    ['const result = "+"+', ''],
+    ['const result = "-"-', ''],
+  ]) {
+    for (const value of ['unapproved-fixture', 'dummy']) {
+      verify(prefix + ' /"/.test("' + endpoint + value + '");' + suffix, value !== 'dummy');
+    }
+  }
+  const encodedEndpoint = endpoint.replaceAll('/', String.raw`\x2f`);
+  for (const value of ['unapproved-fixture', 'dummy']) {
+    verify('const await = () => 1; "for"\nawait(true) / "' + encodedEndpoint + value + '" / 2;',
+      value !== 'dummy');
+    for (const name of ['await', 'yield', 'of']) {
+      verify('var ' + name + ' = 1; "."\n' + name + ' / "' + encodedEndpoint + value + '" / 2;', true);
+    }
+  }
+  verify('function owned() { "."\nreturn `https:' + '//example.test/?token=' +
+    String.raw`du\x6dmy` + '`; }', false);
+});
+
+test('T-PRD074 source safety rejects ambiguous slash goals rather than trusting a partial literal inventory', () => {
+  const endpoint = String.raw`h\u0074tps:` + '//example.test/?token=';
+  for (const prefix of ['const result = {}', 'var await = 1; await', 'var yield = 1; yield', 'var of = 1; of']) {
+    for (const value of ['unapproved-fixture', 'dummy']) {
+      const source = { file: 'src/ambiguous-slash.cjs',
+        contents: prefix + ' / "' + endpoint + value + '" / 2;' };
+      assert.doesNotThrow(() => new Script(source.contents));
+      requireUnsafeSource(source);
+    }
+  }
+});
+
+test('T-PRD074 source safety honors hashbang and legacy comment lexical boundaries', () => {
+  const endpoint = String.raw`h\u0074tps:` + '//example.test/?token=';
+  for (const prefix of ['#!/usr/bin/env ', '<!-- ', '--> ', ' \t --> ', '/* owned */ --> ',
+    'const completed = true; /*\nowned */ --> ']) {
+    for (const ending of ['\n', '\r', '\r\n', '\u2028', '\u2029']) {
+      for (const quote of ['"', "'", '`']) {
+        for (const value of ['unapproved-fixture', 'dummy']) {
+          const source = { file: 'src/legacy-comment.cjs',
+            contents: prefix + quote + ending + 'const endpoint = ' + quote + endpoint + value + quote + ';' };
+          assert.doesNotThrow(() => new Script(source.contents));
+          if (value !== 'dummy') requireUnsafeSource(source);
+          else assert.equal(validateNativeSourceDefinitions([source])[0], source);
+        }
+      }
+    }
+  }
+  for (const prefix of ['const result = count-->', 'const result = count /* owned */ -->']) {
+    const source = { file: 'src/inline-decrement.cjs',
+      contents: prefix + ' /"/.test("' + endpoint + 'unapproved-fixture");' };
+    assert.doesNotThrow(() => new Script(source.contents));
+    requireUnsafeSource(source);
   }
 });
 

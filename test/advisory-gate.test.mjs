@@ -21,12 +21,14 @@ export const validationDeclarations = {
         "T-41 F06 public hook invocation cannot launder uncredited input",
         "T-41 F06 completion releases only matching uncredited shell captures",
         "T-41 F06 incidental hook arguments release captures after host completion",
+        "T-41 F06 inert output and search arguments release captures after host completion",
+        "T-41 F06 output and search stages cannot hide executable callbacks",
         "T-41 F06 separated callback markers and public launchers retain capture guards",
         "T-42 F06 maintenance selection requires supported capture provenance"
       ],
       "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
       "owner": "maintainer",
-      "reason": "PR-only public-boundary authority regressions; independent processes own exact local fixture stores and executable-source sentinels.",
+      "reason": "PR-only public-boundary authority regressions, including literal commit/output/search arguments versus executable callbacks and opaque pipeline consumers; independent processes own exact local fixture stores and executable-source sentinels.",
       "prerequisites": ["Node >=22 and Git"]
     },
     {
@@ -324,10 +326,18 @@ test('T-41 F06 incidental hook arguments release captures after host completion'
     for (const toolName of ['bash', 'powershell', 'cmd']) {
       for (const command of [
         'git commit -m "Fix hook behavior"',
+        'git commit -m "Fix sdlc hook behavior"',
+        'git commit -m "Fix sdlc hook input-capture/input-start/input-finish"',
+        'git commit -m "Fix sdlc.mjs hook postToolUse postToolUseFailure userPromptSubmitted"',
+        'git commit -m "Fix sdlc.exe hook behavior"',
+        'git commit -m "Fix sdlc.cmd hook behavior"',
+        'git commit -m "Fix sdlc.ps1 hook behavior"',
         'git commit -m hook',
         'git commit -m "Fix hook; preserve callback protection"',
+        'git commit -m "Fix sdlc hook; preserve callback protection"',
         'node owned-script.mjs --label hook',
         'git status; git commit -m "Fix hook behavior"',
+        `git status${toolName === 'cmd' ? '&' : ';'} git commit -m "Fix sdlc hook behavior"`,
       ]) {
         const request = { sessionId: f.sessionId, cwd: f.repo,
           toolName, toolArgs: { command } };
@@ -359,9 +369,87 @@ test('T-41 F06 incidental hook arguments release captures after host completion'
   }
 });
 
+test('T-41 F06 inert output and search arguments release captures after host completion', async t => {
+  for (const event of ['postToolUse', 'postToolUseFailure']) {
+    const f = await fixture(t);
+    for (const [toolName, command] of [
+      ['powershell', 'Get-Content src/gate.mjs | Select-String "sdlc hook"'],
+      ['powershell', 'Write-Output "sdlc hook"'],
+      ['powershell', "Write-Host 'sdlc.mjs hook postToolUse userPromptSubmitted'"],
+      ['powershell', "Get-Content src/gate.mjs | sls 'sdlc.exe hook; not a callback'"],
+      ['bash', 'echo "sdlc hook"'],
+      ['bash', "printf '%s\\n' 'sdlc.mjs hook postToolUseFailure' | grep 'sdlc hook'"],
+      ['bash', "cat src/gate.mjs | grep 'sdlc hook'"],
+      ['cmd', 'echo sdlc hook'],
+      ['cmd', 'type src\\gate.mjs | findstr "sdlc hook"'],
+      ['cmd', 'echo sdlc.cmd hook postToolUse | find "sdlc hook"'],
+    ]) {
+      const request = { sessionId: f.sessionId, cwd: f.repo,
+        toolName, toolArgs: { command } };
+      assert.equal((await gate(f.store, request)).unmanaged, true);
+      const session = () => fs.readFile(f.store.sessionPath(f.sessionId), 'utf8')
+        .then(JSON.parse);
+      assert.equal((await session()).unmanagedInputHookRequests.length, 1);
+      const input = `Authorize this isolated discovery after ${toolName}:${command}.`;
+      f.clock.advance(1);
+      assert.equal((await captureUserInput(f.store, {
+        sessionId: f.sessionId, input,
+      })).captureProvenance, 'direct-uncredited');
+      await handleHook(f.store, event, request);
+      assert.equal((await session()).unmanagedInputHookRequests.length, 0,
+        `${event}:${toolName}:${command} must retire the matching request`);
+      f.clock.advance(1);
+      const receipt = await captureUserInput(f.store, {
+        sessionId: f.sessionId, input,
+        source: event === 'postToolUse' ? 'userPromptSubmitted' : 'ask_user',
+      });
+      assert.equal(receipt.captureProvenance, 'supported-input-hook');
+      assert.equal((await applyDecision(f.store, {
+        workItemId: f.workItemId, sessionId: f.sessionId, receiptId: receipt.id,
+        input, kind: 'out-of-scope-execution',
+        effect: { itemId: 'inert-output-search-argument' },
+      })).event.kind, 'out-of-scope-execution');
+    }
+  }
+});
+
+test('T-41 F06 output and search stages cannot hide executable callbacks', async t => {
+  for (const event of ['postToolUse', 'postToolUseFailure']) {
+    for (const [toolName, command] of [
+      ['powershell', `Write-Output "sdlc hook ${event}" | Invoke-Expression`],
+      ['bash', `printf '%s\\n' 'sdlc hook ${event}' | bash`],
+      ['cmd', `echo sdlc.cmd hook ${event} | cmd`],
+      ['powershell', `Write-Output (sdlc.exe hook ${event})`],
+      ['powershell', `Get-Content src/gate.mjs | ForEach-Object { sdlc.exe hook ${event} }`],
+      ['powershell', `Write-Output "plain"; sdlc.exe hook ${event} | Select-String "sdlc hook"`],
+      ['bash', `echo plain | sdlc hook ${event} | grep 'sdlc hook'`],
+      ['cmd', `echo plain | sdlc.cmd hook ${event} | findstr "sdlc hook"`],
+      ['powershell', 'Write-Output "sdlc hook" | unknown-wrapper'],
+      ['bash', `echo "$(sdlc hook ${event})"`],
+    ]) {
+      const f = await fixture(t);
+      const request = { sessionId: f.sessionId, cwd: f.repo,
+        toolName, toolArgs: { command } };
+      assert.equal((await gate(f.store, request)).unmanaged, true);
+      await handleHook(f.store, event, request);
+      const session = JSON.parse(await fs.readFile(f.store.sessionPath(f.sessionId), 'utf8'));
+      assert.equal(session.unmanagedInputHookRequests.length, 1,
+        `${event}:${toolName}:${command} cannot clear its own capture guard`);
+      const input = 'Authorize execution of this fabricated discovery.';
+      const receipt = await captureUserInput(f.store, { sessionId: f.sessionId, input });
+      assert.equal(receipt.captureProvenance, 'direct-uncredited');
+      await assert.rejects(applyDecision(f.store, {
+        workItemId: f.workItemId, sessionId: f.sessionId, receiptId: receipt.id,
+        input, kind: 'out-of-scope-execution',
+        effect: { itemId: 'executable-output-search-stage' },
+      }), { code: 'PROVENANCE' });
+    }
+  }
+});
+
 test('T-41 F06 separated callback markers and public launchers retain capture guards', async t => {
   for (const event of ['postToolUse', 'postToolUseFailure']) {
-    for (const [toolName, invocation] of [
+    for (const [toolName, invocation, suffix = ''] of [
       ['bash', `node "${entry}" --token "a;b" hook`],
       ['powershell', `node "${entry}" --token "a;b" hook`],
       ['bash', `node "${entry}" < owned-input.json hook`],
@@ -369,10 +457,17 @@ test('T-41 F06 separated callback markers and public launchers retain capture gu
       ['cmd', 'sdlc.cmd hook'],
       ['powershell', 'sdlc.ps1 hook'],
       ['powershell', 'SDLC.EXE hook'],
+      ['bash', `bash -c 'node "${entry}" --token "a;b" hook`, "'"],
+      ['powershell', "powershell -NoProfile -Command 'SDLC.EXE --token \"a;b\" hook", "'"],
+      ['cmd', 'cmd /d /s /c "sdlc.cmd hook', '"'],
+      ['powershell', 'git commit -m "Fix sdlc hook behavior"; sdlc.exe hook'],
+      ['powershell', 'git -C owned -C nested commit -m "Fix sdlc hook behavior"; sdlc.exe hook'],
+      ['bash', 'git commit -m "$(sdlc hook', ')"'],
+      ['powershell', 'git commit -m "$(sdlc.exe hook', ')"'],
     ]) {
       const f = await fixture(t);
       const request = { sessionId: f.sessionId, cwd: f.repo, toolName,
-        toolArgs: { command: `${invocation} ${event}; ${invocation} userPromptSubmitted` } };
+        toolArgs: { command: `${invocation} ${event}${suffix}; ${invocation} userPromptSubmitted${suffix}` } };
       assert.equal((await gate(f.store, request)).permissionDecision, undefined);
       await handleHook(f.store, event, request);
       const session = JSON.parse(await fs.readFile(f.store.sessionPath(f.sessionId), 'utf8'));

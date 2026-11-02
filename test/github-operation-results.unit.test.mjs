@@ -260,6 +260,7 @@ test('GH-37 exact mandatory family quartets and non-success outcomes', async t =
     await t.test(`T-GH-37-${family}-P`, async () => {
       const operation = await f.record(prepared, acquisition, { reconcile: true });
       assert.equal(operation.status, 'succeeded');
+      assert.equal(operation.resultGap, undefined);
       assert.equal(operation.resultProof.providerResultId, f.verified(acquisition).observation.providerResultId);
       assert.equal(operation.resultProof.resultDigest, digest(f.verified(acquisition).observation));
       assert.equal(operation.resultProof.dispatchId, prepared.claim.operation.id);

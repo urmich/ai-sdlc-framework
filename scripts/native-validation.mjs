@@ -1348,6 +1348,16 @@ export async function captureNativeDefinitionInputs({ target, profile, component
 
 function* nativeSourceLiteralViews(contents, file, tokens = declarationTokens(contents)) {
   for (const [index, literal] of tokens.entries()) {
+    const previous = tokens[index - 1];
+    const before = tokens[index - 2];
+    const propertyAccess = before?.kind === 'punctuation' && before.value === '.';
+    // Block/expression braces and contextual bindings need parser state beyond this declaration lexer.
+    const ambiguousSlash = literal.kind === 'punctuation' && literal.value === '/' &&
+      (previous?.kind === 'punctuation' && previous.value === '}' ||
+        previous?.kind === 'identifier' && ['await', 'yield', 'of'].includes(previous.value) &&
+          !propertyAccess);
+    requireThat(!ambiguousSlash, 'UNSAFE',
+      `Exact source ${file} contains an ambiguous JavaScript slash context; no source bytes were archived`);
     if (literal.kind === 'string') {
       nativeSourceCanonicalValue(literal.value, file, { strict: false });
       const span = contents.slice(literal.start + 1, literal.end - 1);
@@ -1358,9 +1368,8 @@ function* nativeSourceLiteralViews(contents, file, tokens = declarationTokens(co
       continue;
     }
     if (literal.kind !== 'template') continue;
-    const previous = tokens[index - 1];
     // Await/yield can be CommonJS bindings; only unescaped module operators are excluded here.
-    const keyword = previous?.kind === 'identifier' && tokens[index - 2]?.value !== '.' &&
+    const keyword = previous?.kind === 'identifier' && !propertyAccess &&
       contents.slice(previous.start, previous.end) === previous.value &&
       (['return', 'throw', 'case', 'typeof', 'void', 'delete', 'new', 'in', 'instanceof'].includes(previous.value) ||
         file.endsWith('.mjs') && ['await', 'yield'].includes(previous.value));
