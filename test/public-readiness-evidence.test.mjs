@@ -13,11 +13,13 @@ import { canonical, digest, LIMITS } from '../src/core.mjs';
 import { runCli } from '../src/cli.mjs';
 import { Store } from '../src/store.mjs';
 import { objectReference, stageValidationObject, validationObjectPath } from '../src/validation-catalog.mjs';
+import * as validationCatalog from '../src/validation-catalog.mjs';
 import { fixture as managedFixture, artifact, coding, testDefinitions } from './helpers.mjs';
 import { startCycle, recordTests } from '../src/validation.mjs';
 import { currentCycle, currentTestEvidence, stagePassed } from '../src/authority.mjs';
 import { evaluatePolicy } from '../src/policy.mjs';
-import { prepareCycleEvidence, resetCycleResults } from '../src/validation-evidence.mjs';
+import { prepareCycleEvidence, resetCycleResults,
+  retainedExecutionProofEligible } from '../src/validation-evidence.mjs';
 import { readinessCaseProof, readinessCaseProofs } from '../src/validation-readiness.mjs';
 import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
   createEvidenceBundle, readEvidenceBundle, renderReadinessReport,
@@ -452,6 +454,292 @@ test('normalized import object-map reads overlap within four slots and drain ord
       syncBuiltinESMExports();
       assert.equal(active, 0, 'Every dispatched real handle must settle before restoring instrumentation');
     }
+  }
+  assert.equal(canonical(await input.f.store.records(input.f.workItemId)), originalRecords);
+});
+
+test('referenced case payload preparation overlaps four reads without publishing or reordering proof failures', async t => {
+  const definitions = Array.from({ length: 101 }, (_, index) => ({
+    ...testDefinitions()[0], id: `T-prepared-${String(index).padStart(3, '0')}`,
+    expected: `Prepared case ${index} retains its original proof`,
+  }));
+  const input = await managedReports(t, { definitions });
+  const admitted = await input.admit(input.evaluate(input.captures()));
+  const state = await input.f.store.load(input.f.workItemId);
+  const originalRecords = canonical(await input.f.store.records(input.f.workItemId));
+  const originalCycle = state.records.find(record => record.id === input.cycle.id);
+  assert.equal(originalCycle.storageVersion, 2);
+  const originalRoot = await readValidationObject(input.f.store, input.f.workItemId,
+    originalCycle.testOutcomeRef);
+  const originalPage = await readValidationObject(input.f.store, input.f.workItemId,
+    originalRoot.pageRefs[0]);
+  const imported = await readValidationObject(input.f.store, input.f.workItemId, admitted.importRef);
+  const firstAdmission = await readValidationObject(input.f.store, input.f.workItemId,
+    originalPage.slots[0].history[0].retainedPayloadRef);
+  for (const mode of ['overlap', 'payload', 'undefined', 'assertion-payload',
+    'assertion-metadata', 'metadata', 'assertion-budget', 'budget',
+    'alias-success', 'alias-failure', 'alias-length']) {
+    const records = structuredClone(state.records);
+    const cycle = records.find(record => record.id === input.cycle.id);
+    const context = { all: () => records, validationObjects: new Map() };
+    const page = structuredClone(originalPage);
+    const retain = content => stageValidationObject(context, {
+      schemaVersion: 1, kind: 'execution-payload', workItemId: input.f.workItemId,
+      content, provenance: { sourceDigest: digest(content), sanitizer: 'sdlc-normalized-v1' },
+    });
+    if (mode.endsWith('metadata')) page.slots[1].history[0].testId = 'T-other-case';
+    if (mode.startsWith('alias-')) {
+      page.slots[1].history[0].retainedPayloadRef = {
+        ...firstAdmission.content.assertionPageRefs[0],
+        ...(mode === 'alias-length' ?
+          { bytes: firstAdmission.content.assertionPageRefs[0].bytes + 1 } : {}),
+      };
+    }
+    if (mode.endsWith('budget')) {
+      const objects = Array.from({ length: 24 }, (_, index) => {
+        const content = { kind: 'prepared-budget-probe', index };
+        return { originalRef: { sha256: digest(content),
+          bytes: index < 2 ? LIMITS.artifact / 2 : LIMITS.artifact },
+        retainedRef: retain(content) };
+      });
+      const changed = structuredClone(imported.content);
+      changed.objectMapRefs = [retain({ kind: 'normalized-object-map', index: 0, objects })];
+      changed.manifest.objectRefs = objects.map(entry => entry.originalRef);
+      changed.manifestRef = objectReference(changed.manifest);
+      const previous = await readValidationObject(input.f.store, input.f.workItemId,
+        page.slots[1].history[0].retainedPayloadRef);
+      const ref = retain({ ...previous.content, importRef: retain(changed) });
+      await writeFile(validationObjectPath(input.f.store, input.f.workItemId, ref),
+        context.validationObjects.get(ref.sha256));
+      context.validationObjects.delete(ref.sha256);
+      page.slots[1].history[0].retainedPayloadRef = ref;
+    }
+    if (mode.endsWith('metadata') || mode.endsWith('budget') || mode.startsWith('alias-')) {
+      const root = structuredClone(originalRoot);
+      root.pageRefs[0] = stageValidationObject(context, page);
+      cycle.testOutcomeRef = stageValidationObject(context, root);
+    }
+    const payloadFiles = page.slots.flatMap(slot => slot.history.slice(0, 1))
+      .map(item => validationObjectPath(input.f.store, input.f.workItemId, item.retainedPayloadRef));
+    const assertionFile = validationObjectPath(input.f.store, input.f.workItemId,
+      firstAdmission.content.assertionPageRefs[0]);
+    const ready = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const releaseEarlier = Promise.withResolvers();
+    const releaseLater = Promise.withResolvers();
+    const earlierClosed = Promise.withResolvers();
+    const laterClosed = Promise.withResolvers();
+    const early = mode === 'undefined' ? undefined :
+      Object.assign(new Error('Earlier owned payload failed'), { code: 'EIO' });
+    const later = Object.assign(new Error('Later owned payload failed'), { code: 'EACCES' });
+    const assertionError = Object.assign(new Error('Earlier original assertion failed'), { code: 'EIO' });
+    const opened = [];
+    let active = 0;
+    let maximum = 0;
+    let settled = false;
+    let aliasFailed = false;
+    const wait = async promise => {
+      let timeout;
+      try {
+        await Promise.race([promise, new Promise((resolve, reject) => {
+          timeout = setTimeout(() => reject(new Error(
+            `Payload barrier not reached: ${mode}, ${opened.length} opened, ${active} live`)), 5000);
+        })]);
+      } finally { clearTimeout(timeout); }
+    };
+    const open = fsPromises.open;
+    const mocked = t.mock.method(fsPromises, 'open', async (file, ...options) => {
+      const handle = await open(file, ...options);
+      const index = payloadFiles.indexOf(file);
+      const read = handle.read.bind(handle);
+      const close = handle.close.bind(handle);
+      active++;
+      maximum = Math.max(maximum, active);
+      if (index >= 0) {
+        opened.push(index);
+        if (opened.length === 4) ready.resolve();
+      }
+      handle.read = async (...args) => {
+        if (index >= 0 && index < 4) {
+          if (['payload', 'undefined'].includes(mode) && index === 0) {
+            await releaseEarlier.promise;
+            throw early;
+          }
+          if (['payload', 'undefined'].includes(mode) && index === 3) {
+            await releaseLater.promise;
+            throw later;
+          }
+          await release.promise;
+          if (mode === 'assertion-payload' && index === 1) throw later;
+          if (mode === 'alias-failure' && index === 1 && !aliasFailed) {
+            aliasFailed = true;
+            throw later;
+          }
+        }
+        if (mode.startsWith('assertion-') && file === assertionFile) throw assertionError;
+        return read(...args);
+      };
+      handle.close = async () => {
+        try { return await close(); }
+        finally {
+          active--;
+          if (index === 0) earlierClosed.resolve();
+          if (index === 3) laterClosed.resolve();
+        }
+      };
+      return handle;
+    });
+    syncBuiltinESMExports();
+    const replay = prepareCycleEvidence(input.f.store, cycle, context).then(
+      () => { settled = true; return { status: 'fulfilled' }; },
+      reason => { settled = true; return { status: 'rejected', reason }; });
+    try {
+      await wait(ready.promise);
+      assert.deepEqual([...opened].sort((a, b) => a - b), [0, 1, 2, 3], mode);
+      assert.equal(active, 4, mode);
+      assert.equal(context.normalizedReadinessImports, undefined,
+        'Prepared bytes cannot publish an import before ordered replay');
+      assert.equal(context.validationReadObjects.has(page.slots[0].history[0].retainedPayloadRef.sha256),
+        false, 'An unfinished preparation cannot populate the shared decoded cache');
+      if (['payload', 'undefined'].includes(mode)) {
+        releaseLater.resolve();
+        await wait(laterClosed.promise);
+        assert.equal(settled, false);
+        releaseEarlier.resolve();
+        await wait(earlierClosed.promise);
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(settled, false, 'Earlier failure cannot escape before sibling handles settle');
+        assert.equal(active, 2);
+      }
+      release.resolve();
+      const outcome = await replay;
+      if (mode === 'overlap') {
+        assert.equal(outcome.status, 'fulfilled');
+        assert.equal(stagePassed(cycle, records, 'local', input.f.clock), true);
+      } else {
+        assert.equal(outcome.status, 'rejected');
+        if (['payload', 'undefined'].includes(mode)) assert.equal(outcome.reason, early);
+        else if (mode.startsWith('assertion-')) assert.equal(outcome.reason, assertionError);
+        else assert.equal(outcome.reason?.code,
+          mode === 'budget' ? 'CAPACITY' : mode === 'alias-length' ? 'DIGEST' : 'EVIDENCE');
+        if (mode.startsWith('alias-')) {
+          assert.equal(opened.filter(index => index === 1).length, 2,
+            'Earlier assertion replay must read its alias independently of unpublished preparation');
+          if (mode === 'alias-length') assert.equal(outcome.reason.message,
+            'Reference length differs from checked object bytes');
+        } else assert.equal(opened.length, 4);
+        assert.ok(opened.every(index => index < 4),
+          'Failed replay cannot dispatch the next preparation batch');
+        assert.equal(retainedExecutionProofEligible(page.slots[1].history[0]), false,
+          'A later prepared case cannot receive speculative execution credit');
+      }
+      assert.equal(active, 0);
+      assert.equal(maximum, 4, 'All owned handles, including import reads, share the four-handle ceiling');
+      t.diagnostic(`Payload preparation barrier case passed: ${mode}`);
+    } finally {
+      release.resolve();
+      releaseEarlier.resolve();
+      releaseLater.resolve();
+      await replay;
+      mocked.mock.restore();
+      syncBuiltinESMExports();
+      assert.equal(active, 0);
+    }
+  }
+  const value = { kind: 'prepared-owned-value', workItemId: input.f.workItemId,
+    content: { statement: 'Only this invocation owns these checked bytes' } };
+  const ref = objectReference(value);
+  const file = validationObjectPath(input.f.store, input.f.workItemId, ref);
+  const bytes = Buffer.from(canonical(value));
+  await writeFile(file, bytes);
+  const prepare = context => validationCatalog.prepareValidationObjectRead(
+    input.f.store, input.f.workItemId, ref, context);
+  for (const fails of [false, true]) {
+    const context = { validationObjects: new Map() };
+    const open = fsPromises.open;
+    const mocked = t.mock.method(fsPromises, 'open', async (selected, ...options) => {
+      const handle = await open(selected, ...options);
+      if (fails && selected === file) handle.read = async () => {
+        throw Object.assign(new Error('Speculative owned read failed'), { code: 'EIO' });
+      };
+      return handle;
+    });
+    syncBuiltinESMExports();
+    let consume;
+    try { consume = await prepare(context); }
+    finally { mocked.mock.restore(); syncBuiltinESMExports(); }
+    assert.equal(context.validationReadObjects, undefined);
+    await readValidationObject(input.f.store, input.f.workItemId, ref, context);
+    const authoritative = context.validationReadObjects.get(ref.sha256);
+    const restored = await consume(ref, context);
+    assert.deepEqual(restored, value);
+    assert.notEqual(restored, authoritative.value);
+    assert.equal(context.validationReadObjects.get(ref.sha256), authoritative,
+      'Original authoritative cache overrides both prepared success and failure without republication');
+    await assert.rejects(consume(ref, context), { code: 'RECOVERY' });
+  }
+  {
+    const context = { validationObjects: new Map() };
+    const wrongLength = { ...ref, bytes: ref.bytes + 1 };
+    const consume = await validationCatalog.prepareValidationObjectRead(
+      input.f.store, input.f.workItemId, wrongLength, context);
+    await readValidationObject(input.f.store, input.f.workItemId, ref, context);
+    await assert.rejects(consume(wrongLength, context), {
+      code: 'DIGEST', message: 'Reference length differs from checked object bytes',
+    });
+    const first = await prepare(context);
+    const second = await prepare(context);
+    assert.deepEqual(await first(ref, context), value);
+    assert.deepEqual(await second(ref, context), value);
+    const foreign = await prepare(context);
+    await assert.rejects(foreign(ref, { ...context }), { code: 'BINDING' });
+    const relabeled = await prepare(context);
+    await assert.rejects(relabeled({ ...ref, sha256: 'a'.repeat(64) }, context), { code: 'BINDING' });
+  }
+  {
+    const context = { validationObjects: new Map() };
+    const [first, second] = await Promise.all([prepare(context), prepare(context)]);
+    assert.equal(context.validationReadObjects, undefined);
+    const left = await first(ref, context);
+    const authoritative = context.validationReadObjects.get(ref.sha256);
+    const right = await second(ref, context);
+    assert.deepEqual(left, right);
+    assert.notEqual(left, right);
+    assert.equal(context.validationReadObjects.get(ref.sha256), authoritative);
+  }
+  {
+    const context = { validationObjects: new Map() };
+    const consume = await prepare(context);
+    context.validationObjects.set(ref.sha256, Buffer.from('{}'));
+    await assert.rejects(consume(ref, context), { code: 'DIGEST' });
+    assert.equal(context.validationReadObjects, undefined);
+    const guarded = { validationObjects: new Map() };
+    const read = await prepare(guarded);
+    guarded.validationObjects.set(ref.sha256, bytes);
+    const target = path.join(input.f.root, 'owned-prepared-target.json');
+    await writeFile(target, bytes);
+    await unlink(file);
+    await symlink(target, file, 'file');
+    try { await assert.rejects(read(ref, guarded), { code: 'PATH' }); }
+    finally { await unlink(file); await writeFile(file, bytes); }
+    await unlink(file);
+    const staged = { validationObjects: new Map([[ref.sha256, bytes]]) };
+    try {
+      const readStaged = await prepare(staged);
+      assert.equal(staged.validationReadObjects, undefined);
+      assert.deepEqual(await readStaged(ref, staged), value);
+    } finally { await writeFile(file, bytes); }
+  }
+  const originalFile = validationObjectPath(input.f.store, input.f.workItemId,
+    originalPage.slots[0].history[0].retainedPayloadRef);
+  const originalBytes = await readFile(originalFile);
+  for (const missing of [true, false]) {
+    if (missing) await unlink(originalFile);
+    else await writeFile(originalFile, '{}\n');
+    try {
+      const fresh = await new Store(input.f.home, { clock: input.f.clock }).ready();
+      await assert.rejects(fresh.load(input.f.workItemId), { code: missing ? 'ENOENT' : 'DIGEST' });
+    } finally { await writeFile(originalFile, originalBytes); }
   }
   assert.equal(canonical(await input.f.store.records(input.f.workItemId)), originalRecords);
 });

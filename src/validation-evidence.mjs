@@ -6,7 +6,8 @@ import { LIMITS, canonical, choice, createSummarySanitizer, digest, id, object, 
 import { readBytes, readJson, readJsonEntries, safePath } from './files.mjs';
 import { validateRecord } from './schemas.mjs';
 import { bindCycleCatalog, buildTestCatalog, cycleTests, OUTCOME_PAGE_SIZE,
-  readValidationObject, stageValidationObject, validateObjectReference } from './validation-catalog.mjs';
+  prepareValidationObjectRead, readValidationObject, stageValidationObject,
+  validateObjectReference } from './validation-catalog.mjs';
 import { MAX_BUNDLE_BYTES, MAX_OBJECTS, validateRetainedEvidenceBundle } from './validation-readiness.mjs';
 
 const views = new WeakMap();
@@ -631,10 +632,15 @@ function independentOperationResult(operation) {
     typeof proof.causalKey === 'string' && proof.causalKey &&
     typeof proof.providerResultId === 'string' && proof.providerResultId);
 }
-async function prepareExecutionEvidence(store, cycle, evidence, context, retainedEvents) {
+async function readExecutionPayload(store, cycle, evidence, context) {
+  const payload = await readValidationObject(store, cycle.workItemId, evidence.retainedPayloadRef, context);
+  return payload;
+}
+async function prepareExecutionEvidence(store, cycle, evidence, context, retainedEvents, readPayload) {
   if (!evidence.retainedPayloadRef) return;
   const test = cycleTests(cycle).find(test => test.id === evidence.testId);
-  const payload = await readValidationObject(store, cycle.workItemId, evidence.retainedPayloadRef, context);
+  const payload = readPayload ? await readPayload(evidence.retainedPayloadRef, context) :
+    await readExecutionPayload(store, cycle, evidence, context);
   requireThat(payload.kind === 'execution-payload' && test &&
     evidence.workItemId === cycle.workItemId && evidence.cycleId === cycle.id &&
     evidence.candidateDigest === cycle.candidateDigest && evidence.testSpecDigest === cycle.testSpecDigest &&
@@ -729,7 +735,18 @@ export async function prepareCycleEvidence(store, cycle, context) {
       page.cycleId === cycle.id && page.index === index &&
       Array.isArray(page.slots) && page.slots.length === tests.length,
     'EVIDENCE', 'Outcome page does not cover its exact catalog slots');
+    let items;
+    let prepared;
     for (let offset = 0; offset < tests.length; offset++) {
+      const position = offset % 4;
+      if (position === 0) {
+        items = page.slots.slice(offset, offset + 4)
+          .map(slot => Array.isArray(slot?.history) ? slot.history[0] : undefined);
+        // Finish and close every prepared read before ordered replay can start an import.
+        prepared = await Promise.allSettled(items.map(item => item?.retainedPayloadRef ?
+          prepareValidationObjectRead(store, cycle.workItemId, item.retainedPayloadRef, context) :
+          undefined));
+      }
       const slot = page.slots[offset];
       object(slot, ['testId', 'history', 'historyRef', 'events', 'selected', 'barrier'],
         ['testId', 'history', 'historyRef', 'events', 'selected', 'barrier']);
@@ -796,7 +813,10 @@ export async function prepareCycleEvidence(store, cycle, context) {
             item.testSpecDigest === source.testSpecDigest && item.configDigest === source.configDigest,
           'EVIDENCE', 'Retained observation relabeled its producer execution source');
         }
-        await prepareExecutionEvidence(store, cycle, item, context, retainedEvents);
+        const preparation = items[position] === item ? prepared[position] : undefined;
+        const readPayload = preparation?.status === 'rejected' ?
+          () => Promise.reject(preparation.reason) : preparation?.value;
+        await prepareExecutionEvidence(store, cycle, item, context, retainedEvents, readPayload);
       }
       requireThat(slot.selected === null || slot.history.some(item => item.id === slot.selected),
         'EVIDENCE', 'Selected observation is missing from complete history');
