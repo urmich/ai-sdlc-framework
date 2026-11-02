@@ -41,10 +41,12 @@ export async function readValidationObject(store, workItemId, ref, context) {
     return structuredClone(cached.value);
   }
   const file = validationObjectPath(store, workItemId, ref);
-  requireThat(sameNativePath(await canonicalPath(file), file), 'PATH',
-    'Validation storage cannot traverse links');
-  const bytes = context?.validationObjects?.get(ref.sha256) ??
-    await readBytes(file, LIMITS.artifact);
+  const staged = context?.validationObjects?.get(ref.sha256);
+  if (staged !== undefined && staged !== null) {
+    requireThat(sameNativePath(await canonicalPath(file), file), 'PATH',
+      'Validation storage cannot traverse links');
+  }
+  const bytes = staged ?? await readBytes(file, LIMITS.artifact);
   requireThat(bytes.length === ref.bytes && digest(bytes) === ref.sha256,
     'DIGEST', 'Immutable validation object bytes differ from their reference');
   let contents;

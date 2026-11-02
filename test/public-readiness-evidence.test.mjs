@@ -1,21 +1,23 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
-  "surfaces": [{"coverage": "direct", "paths": ["src/validation-readiness.mjs", "src/validation-report.mjs", "src/readiness-cli.mjs", "src/validation.mjs", "src/authority.mjs"]}]
+  "surfaces": [{"coverage": "direct", "paths": ["src/validation-readiness.mjs", "src/validation-report.mjs", "src/readiness-cli.mjs", "src/validation.mjs", "src/validation-catalog.mjs", "src/validation-evidence.mjs", "src/authority.mjs"]}]
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import fsPromises from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
+import { mkdir, mkdtemp, readFile, rename, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { canonical, digest } from '../src/core.mjs';
+import { canonical, digest, LIMITS } from '../src/core.mjs';
 import { runCli } from '../src/cli.mjs';
 import { Store } from '../src/store.mjs';
-import { validationObjectPath } from '../src/validation-catalog.mjs';
+import { objectReference, stageValidationObject, validationObjectPath } from '../src/validation-catalog.mjs';
 import { fixture as managedFixture, artifact, coding, testDefinitions } from './helpers.mjs';
 import { startCycle, recordTests } from '../src/validation.mjs';
 import { currentCycle, currentTestEvidence, stagePassed } from '../src/authority.mjs';
 import { evaluatePolicy } from '../src/policy.mjs';
-import { resetCycleResults } from '../src/validation-evidence.mjs';
+import { prepareCycleEvidence, resetCycleResults } from '../src/validation-evidence.mjs';
 import { readinessCaseProof, readinessCaseProofs } from '../src/validation-readiness.mjs';
 import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
   createEvidenceBundle, readEvidenceBundle, renderReadinessReport,
@@ -239,6 +241,219 @@ test('T-PRD076 referenced managed reload verifies every retained admission depen
     ...testDefinitions()[0], id: `T-graph-${String(index).padStart(3, '0')}`,
     expected: `Retained consumer contract ${index} holds`,
   })));
+});
+
+test('immutable validation object reads preserve fresh disk checks and staged path guards', async t => {
+  const f = await managedFixture(t);
+  const value = { kind: 'immutable-fixture', workItemId: f.workItemId,
+    content: 'Owned validation object' };
+  const context = { validationObjects: new Map() };
+  const ref = stageValidationObject(context, value);
+  const bytes = context.validationObjects.get(ref.sha256);
+  const staged = () => ({ validationObjects: new Map([[ref.sha256, Buffer.from(bytes)]]) });
+  const file = validationObjectPath(f.store, f.workItemId, ref);
+  const directory = path.dirname(file);
+  const read = selected => readValidationObject(f.store, f.workItemId, ref, selected);
+  await mkdir(directory, { recursive: true });
+  assert.deepEqual(await read(staged()), value);
+  await writeFile(file, bytes);
+  assert.deepEqual(await read(), value);
+  await writeFile(file, '{}\n');
+  await assert.rejects(read(), { code: 'DIGEST' });
+  await unlink(file);
+  await assert.rejects(read(), { code: 'ENOENT' });
+  const target = path.join(f.root, 'owned-validation-object.json');
+  await writeFile(target, bytes);
+  await symlink(target, file, 'file');
+  try {
+    await assert.rejects(read(), { code: 'PATH' });
+    await assert.rejects(read(staged()), { code: 'PATH' });
+  } finally { await unlink(file); }
+  await mkdir(file);
+  try { await assert.rejects(read(), { code: 'PATH' }); }
+  finally { await rm(file, { recursive: true }); }
+  await writeFile(file, bytes);
+  assert.deepEqual(await read(), value);
+  const original = path.join(f.root, 'owned-validation-objects');
+  await rename(directory, original);
+  try {
+    await symlink(original, directory, process.platform === 'win32' ? 'junction' : 'dir');
+    try {
+      await assert.rejects(read(), { code: 'PATH' });
+      await assert.rejects(read(staged()), { code: 'PATH' });
+    } finally { await unlink(directory); }
+  } finally { await rename(original, directory); }
+  assert.deepEqual(await read(), value);
+  assert.deepEqual(await read(staged()), value);
+});
+
+test('normalized import object-map reads overlap within four slots and drain ordered failures', async t => {
+  const input = await managedReports(t);
+  const result = await input.admit(input.evaluate(input.captures()));
+  const originalRecords = canonical(await input.f.store.records(input.f.workItemId));
+  const admission = await readValidationObject(input.f.store, input.f.workItemId,
+    result.evidence[0].retainedPayloadRef);
+  const imported = await readValidationObject(input.f.store, input.f.workItemId, result.importRef);
+  const originalPage = await readValidationObject(input.f.store, input.f.workItemId,
+    imported.content.objectMapRefs[0]);
+  assert.ok(originalPage.content.objects.length > 4);
+  assert.equal(imported.content.objectMapRefs.length, 1);
+  for (const mode of ['overlap', 'io', 'undefined', 'malformed-io', 'malformed',
+    'budget-io', 'budget']) {
+    const state = await input.f.store.load(input.f.workItemId);
+    const records = structuredClone(state.records);
+    const cycle = records.find(record => record.id === input.cycle.id);
+    assert.notEqual(cycle.storageVersion, 2);
+    const context = { all: () => records, validationObjects: new Map() };
+    const retain = content => stageValidationObject(context, {
+      schemaVersion: 1, kind: 'execution-payload', workItemId: input.f.workItemId, content,
+      provenance: { sourceDigest: digest(content), sanitizer: 'sdlc-normalized-v1' },
+    });
+    const page = structuredClone(originalPage.content);
+    const budget = mode.startsWith('budget');
+    const malformed = mode.startsWith('malformed');
+    if (budget) {
+      page.objects = [];
+      for (let index = 0; index < 24; index++) {
+        const content = { kind: 'owned-map-probe', index };
+        const retainedRef = retain(content);
+        const file = validationObjectPath(input.f.store, input.f.workItemId, retainedRef);
+        await writeFile(file, context.validationObjects.get(retainedRef.sha256));
+        context.validationObjects.delete(retainedRef.sha256);
+        page.objects.push({ originalRef: { sha256: digest(content),
+          bytes: index < 2 ? LIMITS.artifact / 2 : LIMITS.artifact }, retainedRef });
+      }
+    } else if (malformed) page.objects[3].originalRef.sha256 = 'not-a-digest';
+    let importRef = result.importRef;
+    if (budget || malformed) {
+      const changed = structuredClone(imported.content);
+      changed.objectMapRefs = [retain(page)];
+      if (budget) {
+        changed.manifest.objectRefs = page.objects.map(entry => entry.originalRef);
+        changed.manifestRef = objectReference(changed.manifest);
+      }
+      importRef = retain(changed);
+      const evidence = records.find(record => record.id === result.evidence[0].id);
+      evidence.retainedPayloadRef = retain({ ...admission.content, importRef });
+    }
+    const files = page.objects.map(entry =>
+      validationObjectPath(input.f.store, input.f.workItemId, entry.retainedRef));
+    const offset = budget ? 16 : 0;
+    const first = budget ? 16 : 1;
+    const failsRead = ['io', 'undefined', 'malformed-io', 'budget-io'].includes(mode);
+    const earlyError = mode === 'undefined' ? undefined :
+      Object.assign(new Error('Earlier owned proof read failed'), { code: 'EIO' });
+    const laterError = Object.assign(new Error('Later owned proof read failed'), { code: 'EACCES' });
+    const ready = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const releaseEarlier = Promise.withResolvers();
+    const releaseLater = Promise.withResolvers();
+    const earlierClosed = Promise.withResolvers();
+    const laterClosed = Promise.withResolvers();
+    const opened = [];
+    const closed = [];
+    let active = 0;
+    let maximum = 0;
+    let settled = false;
+    const wait = async promise => {
+      let timeout;
+      try {
+        await Promise.race([promise, new Promise((resolve, reject) => {
+          timeout = setTimeout(() => reject(new Error(
+            `Owned proof-read barrier not reached: ${mode}, ${opened.length} opened, ${active} live`)), 5000);
+        })]);
+      } finally { clearTimeout(timeout); }
+    };
+    const open = fsPromises.open;
+    const mocked = t.mock.method(fsPromises, 'open', async (file, ...options) => {
+      const handle = await open(file, ...options);
+      const index = files.indexOf(file);
+      if (index < 0) return handle;
+      const read = handle.read.bind(handle);
+      const close = handle.close.bind(handle);
+      active++;
+      maximum = Math.max(maximum, active);
+      opened.push(index);
+      if (opened.filter(value => value >= offset).length === (budget ? 1 : malformed ? 3 : 4)) {
+        ready.resolve();
+      }
+      handle.read = async (...args) => {
+        if (index >= offset) {
+          if (failsRead && index === first) {
+            await releaseEarlier.promise;
+            throw earlyError;
+          }
+          if (['io', 'undefined'].includes(mode) && index === 3) {
+            await releaseLater.promise;
+            throw laterError;
+          }
+          await release.promise;
+        }
+        return read(...args);
+      };
+      handle.close = async () => {
+        try { return await close(); }
+        finally {
+          active--;
+          closed.push(index);
+          if (index === first) earlierClosed.resolve();
+          if (index === 3) laterClosed.resolve();
+        }
+      };
+      return handle;
+    });
+    syncBuiltinESMExports();
+    const replay = prepareCycleEvidence(input.f.store, cycle, context).then(
+      () => { settled = true; return { status: 'fulfilled' }; },
+      reason => { settled = true; return { status: 'rejected', reason }; });
+    try {
+      await wait(ready.promise);
+      assert.deepEqual([...opened].sort((a, b) => a - b),
+        Array.from({ length: budget ? 17 : malformed ? 3 : 4 }, (_, index) => index), mode);
+      assert.equal(active, budget ? 1 : malformed ? 3 : 4, mode);
+      if (['io', 'undefined'].includes(mode)) {
+        releaseLater.resolve();
+        await wait(laterClosed.promise);
+        assert.equal(settled, false);
+      }
+      if (failsRead) {
+        releaseEarlier.resolve();
+        await wait(earlierClosed.promise);
+        if (!budget) {
+          await new Promise(resolve => setImmediate(resolve));
+          assert.equal(settled, false, 'Failed replay must drain its still-open siblings');
+          assert.equal(active, 2);
+        }
+      } else assert.equal(settled, false, 'Later metadata failure must await earlier reads');
+      release.resolve();
+      const outcome = await replay;
+      if (mode === 'overlap') {
+        assert.equal(outcome.status, 'fulfilled');
+        assert.equal(stagePassed(cycle, records, 'local', input.f.clock), true);
+        assert.deepEqual([...opened].sort((a, b) => a - b), files.map((file, index) => index));
+      } else {
+        assert.equal(outcome.status, 'rejected');
+        if (failsRead) assert.equal(outcome.reason, earlyError);
+        else assert.equal(outcome.reason?.code, budget ? 'CAPACITY' : 'SCHEMA');
+        assert.equal(context.normalizedReadinessImports.has(importRef.sha256), false);
+        assert.equal(opened.length, budget ? 17 : malformed ? 3 : 4,
+          'A failed batch must not dispatch its following batch');
+      }
+      assert.ok(maximum <= 4 && maximum > 1, 'Real owned FileHandles must overlap within four slots');
+      assert.equal(active, 0);
+      assert.deepEqual([...closed].sort((a, b) => a - b), [...opened].sort((a, b) => a - b));
+      t.diagnostic(`Object-map barrier case passed: ${mode}`);
+    } finally {
+      release.resolve();
+      releaseEarlier.resolve();
+      releaseLater.resolve();
+      await replay;
+      mocked.mock.restore();
+      syncBuiltinESMExports();
+      assert.equal(active, 0, 'Every dispatched real handle must settle before restoring instrumentation');
+    }
+  }
+  assert.equal(canonical(await input.f.store.records(input.f.workItemId)), originalRecords);
 });
 
 test('T-PRD064 managed normalized admission retains original bytes and passes only the current legitimate cycle', async t => {

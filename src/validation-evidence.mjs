@@ -541,13 +541,22 @@ async function prepareRetainedReadinessEvidence(store, cycle, evidence, payload,
       requireThat(page.kind === 'normalized-object-map' && page.index === index &&
         Array.isArray(page.objects) && page.objects.length === count,
       'EVIDENCE', 'Normalized object-map page is unavailable or incomplete');
-      for (const entry of page.objects) {
-        object(entry, ['originalRef', 'retainedRef'], ['originalRef', 'retainedRef']);
-        validateObjectReference(entry.originalRef);
-        bytes += entry.originalRef.bytes;
-        requireThat(bytes <= MAX_BUNDLE_BYTES, 'CAPACITY',
-          'Normalized import exceeds the retained bundle byte budget');
-        objects.push({ ref: entry.originalRef, value: await readContent(entry.retainedRef) });
+      const batchSize = 4;
+      for (let offset = 0; offset < page.objects.length; offset += batchSize) {
+        const batch = await Promise.allSettled(page.objects.slice(offset, offset + batchSize)
+          .map(async entry => {
+            // Guard and budget accounting stays in input order before the first await.
+            object(entry, ['originalRef', 'retainedRef'], ['originalRef', 'retainedRef']);
+            validateObjectReference(entry.originalRef);
+            bytes += entry.originalRef.bytes;
+            requireThat(bytes <= MAX_BUNDLE_BYTES, 'CAPACITY',
+              'Normalized import exceeds the retained bundle byte budget');
+            return { ref: entry.originalRef, value: await readContent(entry.retainedRef) };
+          }));
+        for (const result of batch) {
+          if (result.status === 'rejected') throw result.reason;
+          objects.push(result.value);
+        }
       }
     }
     imported = { bytes: admission.importRef.bytes,
