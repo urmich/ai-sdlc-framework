@@ -458,6 +458,242 @@ test('normalized import object-map reads overlap within four slots and drain ord
   assert.equal(canonical(await input.f.store.records(input.f.workItemId)), originalRecords);
 });
 
+test('referenced assertion preparation overlaps within its shared serialized reservation and preserves ordered authority', async t => {
+  const definitions = Array.from({ length: 101 }, (_, index) => ({
+    ...testDefinitions()[0], id: `T-child-${String(index).padStart(3, '0')}`,
+    expected: `Prepared assertion ${index} retains its original proof`,
+  }));
+  const input = await managedReports(t, { definitions });
+  await input.admit(input.evaluate(input.captures()));
+  const state = await input.f.store.load(input.f.workItemId);
+  const originalRecords = canonical(await input.f.store.records(input.f.workItemId));
+  const originalCycle = state.records.find(record => record.id === input.cycle.id);
+  const originalRoot = await readValidationObject(input.f.store, input.f.workItemId,
+    originalCycle.testOutcomeRef);
+  const originalPage = await readValidationObject(input.f.store, input.f.workItemId,
+    originalRoot.pageRefs[0]);
+  const admissions = await Promise.all(originalPage.slots.map(slot =>
+    readValidationObject(input.f.store, input.f.workItemId, slot.history[0].retainedPayloadRef)));
+  const childRefs = admissions.map(payload => payload.content.assertionPageRefs[0]);
+  const childFiles = childRefs.map(ref => validationObjectPath(input.f.store, input.f.workItemId, ref));
+  const childBytes = await readFile(childFiles[4]);
+  for (const mode of ['overlap', 'undefined', 'metadata', 'child-payload', 'child-metadata',
+    'cache', 'staged', 'staged-invalid', 'mismatch', 'mismatch-null',
+    'projection-invalid', 'alias', 'alias-length', 'reservation']) {
+    const records = structuredClone(state.records);
+    const cycle = records.find(record => record.id === input.cycle.id);
+    const context = { all: () => records, validationObjects: new Map() };
+    const page = structuredClone(originalPage);
+    const retain = async value => {
+      const ref = objectReference(value);
+      await writeFile(validationObjectPath(input.f.store, input.f.workItemId, ref), canonical(value));
+      return ref;
+    };
+    if (mode === 'metadata') page.slots[4].history[0].testId = 'T-other-case';
+    if (mode === 'child-metadata') page.slots[5].history[0].testId = 'T-other-case';
+    if (mode.startsWith('alias')) {
+      const value = structuredClone(admissions[5]);
+      value.content.assertionPageRefs = [{ ...childRefs[4],
+        ...(mode === 'alias-length' ? { bytes: childRefs[4].bytes + 1 } : {}) }];
+      value.provenance.sourceDigest = digest(value.content);
+      page.slots[5].history[0].retainedPayloadRef = await retain(value);
+    }
+    if (mode === 'projection-invalid') {
+      const value = structuredClone(admissions[4]);
+      value.content.assertionPageRefs = [null];
+      value.provenance.sourceDigest = digest(value.content);
+      page.slots[4].history[0].retainedPayloadRef = await retain(value);
+    }
+    if (mode === 'reservation') {
+      for (let index = 4; index < 8; index++) {
+        const value = structuredClone(admissions[index]);
+        value.content.blockers = Array.from({ length: 3500 }, () => 'x'.repeat(1000));
+        value.provenance.sourceDigest = digest(value.content);
+        page.slots[index].history[0].retainedPayloadRef = await retain(value);
+      }
+      const parentBytes = page.slots.slice(4, 8).reduce((sum, slot) =>
+        sum + slot.history[0].retainedPayloadRef.bytes, 0);
+      assert.ok(parentBytes <= 4 * LIMITS.artifact &&
+        parentBytes + LIMITS.artifact > 4 * LIMITS.artifact);
+    }
+    if (['metadata', 'child-metadata', 'projection-invalid', 'alias', 'alias-length', 'reservation'].includes(mode)) {
+      const root = structuredClone(originalRoot);
+      root.pageRefs[0] = stageValidationObject(context, page);
+      cycle.testOutcomeRef = stageValidationObject(context, root);
+    }
+    const payloadFiles = page.slots.map(slot =>
+      validationObjectPath(input.f.store, input.f.workItemId, slot.history[0].retainedPayloadRef));
+    const expected = mode === 'reservation' ? [4] : mode === 'projection-invalid' ? [5, 6, 7] :
+      ['child-payload', 'alias', 'alias-length'].includes(mode) ? [4, 6, 7] : [4, 5, 6];
+    const ready = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const earlier = Promise.withResolvers();
+    const later = Promise.withResolvers();
+    const earlierClosed = Promise.withResolvers();
+    const laterClosed = Promise.withResolvers();
+    const firstError = mode === 'undefined' ? undefined :
+      Object.assign(new Error('Earlier assertion read failed'), { code: 'EIO' });
+    const laterError = Object.assign(new Error('Later prepared read failed'), { code: 'EACCES' });
+    const opened = [];
+    const payloads = [];
+    const occurrences = new Map();
+    let active = 0;
+    let maximum = 0;
+    let settled = false;
+    let authoritative;
+    const wait = async promise => {
+      let timeout;
+      try {
+        await Promise.race([promise, new Promise((resolve, reject) => {
+          timeout = setTimeout(() => reject(new Error(
+            `Assertion barrier not reached: ${mode}, ${opened.join(',')}, ${active} live`)), 5000);
+        })]);
+      } finally { clearTimeout(timeout); }
+    };
+    const open = fsPromises.open;
+    const mocked = t.mock.method(fsPromises, 'open', async (file, ...options) => {
+      const handle = await open(file, ...options);
+      const child = childFiles.indexOf(file);
+      const parent = payloadFiles.indexOf(file);
+      const occurrence = (occurrences.get(file) ?? 0) + 1;
+      occurrences.set(file, occurrence);
+      const read = handle.read.bind(handle);
+      const close = handle.close.bind(handle);
+      active++;
+      maximum = Math.max(maximum, active);
+      if (parent >= 0) payloads.push(parent);
+      if (child >= 4 && child < 8) {
+        opened.push(child);
+        if (expected.every(index => opened.includes(index))) ready.resolve();
+      }
+      handle.read = async (...args) => {
+        if (mode === 'child-payload' && parent === 5) throw laterError;
+        if (expected.includes(child) && occurrence === 1) {
+          if (mode === 'undefined' && child === 4) {
+            await earlier.promise;
+            throw firstError;
+          }
+          if (mode === 'undefined' && child === 6) {
+            await later.promise;
+            throw laterError;
+          }
+          await release.promise;
+          if (child === 4 && ['metadata', 'child-payload', 'child-metadata',
+            'cache', 'staged', 'staged-invalid', 'mismatch', 'mismatch-null'].includes(mode)) throw firstError;
+        }
+        return read(...args);
+      };
+      handle.close = async () => {
+        try { return await close(); }
+        finally {
+          active--;
+          if (child === 4) earlierClosed.resolve();
+          if (child === 6) laterClosed.resolve();
+        }
+      };
+      return handle;
+    });
+    syncBuiltinESMExports();
+    const replay = prepareCycleEvidence(input.f.store, cycle, context).then(
+      () => { settled = true; return { status: 'fulfilled' }; },
+      reason => { settled = true; return { status: 'rejected', reason }; });
+    try {
+      await wait(ready.promise);
+      assert.deepEqual([...opened].sort((a, b) => a - b), expected, mode);
+      assert.equal(active, expected.length, mode);
+      assert.equal(context.normalizedReadinessImports.size, 1, 'Only the original completed import is eligible');
+      assert.equal(context.validationReadObjects.has(page.slots[4].history[0].retainedPayloadRef.sha256),
+        mode === 'reservation', 'Preparation cannot publish parents; exhausted reservation must replay normally');
+      assert.equal(context.validationReadObjects.has(childRefs[4].sha256), false);
+      if (mode === 'cache') {
+        await readValidationObject(input.f.store, input.f.workItemId, childRefs[4], context);
+        authoritative = context.validationReadObjects.get(childRefs[4].sha256);
+      }
+      if (mode.startsWith('staged')) context.validationObjects.set(childRefs[4].sha256,
+        mode === 'staged' ? childBytes : Buffer.from('{}'));
+      if (mode.startsWith('mismatch')) {
+        const alternate = JSON.parse(childBytes);
+        alternate.provenance.reference = 'owned-alternate-assertion';
+        const replacement = await retain(alternate);
+        await readValidationObject(input.f.store, input.f.workItemId,
+          page.slots[4].history[0].retainedPayloadRef, context);
+        const cached = context.validationReadObjects.get(page.slots[4].history[0].retainedPayloadRef.sha256);
+        cached.value.content.assertionPageRefs = [mode === 'mismatch' ? replacement : null];
+        cached.value.provenance.sourceDigest = digest(cached.value.content);
+      }
+      if (mode === 'undefined') {
+        later.resolve();
+        await wait(laterClosed.promise);
+        assert.equal(settled, false);
+        earlier.resolve();
+        await wait(earlierClosed.promise);
+        assert.equal(settled, false, 'Even undefined rejection must wait for the remaining real handle');
+        assert.equal(active, 1);
+      }
+      release.resolve();
+      const result = await replay;
+      if (['overlap', 'cache', 'staged', 'mismatch', 'reservation'].includes(mode)) {
+        assert.equal(result.status, 'fulfilled', result.reason?.stack);
+        assert.equal(stagePassed(cycle, records, 'local', input.f.clock), true);
+        if (mode === 'cache') assert.equal(context.validationReadObjects.get(childRefs[4].sha256), authoritative);
+        if (mode === 'overlap') assert.equal(opened.filter(index => index === 7).length, 1,
+          'Fourth child is deferred, not removed or prepared beyond the reservation');
+      } else {
+        assert.equal(result.status, 'rejected');
+        if (['undefined', 'child-payload', 'child-metadata'].includes(mode)) assert.equal(result.reason, firstError);
+        else assert.equal(result.reason?.code,
+          ['alias-length', 'staged-invalid'].includes(mode) ? 'DIGEST' :
+            ['mismatch-null', 'projection-invalid'].includes(mode) ? 'INPUT' : 'EVIDENCE');
+        assert.ok(payloads.every(index => index < 8), 'Ordered failure must not dispatch another batch');
+        if (mode.startsWith('alias')) assert.equal(opened.filter(index => index === 4).length, 1,
+          'Later aliases remain at the authoritative original cache/length boundary');
+      }
+      assert.equal(active, 0);
+      assert.equal(maximum, 4, 'Parents, children and original imports retain one global handle ceiling');
+      t.diagnostic(`Assertion preparation case passed: ${mode}`);
+    } finally {
+      release.resolve(); earlier.resolve(); later.resolve();
+      await replay;
+      mocked.mock.restore();
+      syncBuiltinESMExports();
+      assert.equal(active, 0);
+    }
+  }
+  {
+    const context = { validationObjects: new Map() };
+    const ref = originalPage.slots[4].history[0].retainedPayloadRef;
+    const consume = await validationCatalog.prepareValidationObjectRead(
+      input.f.store, input.f.workItemId, ref, context);
+    const projected = consume.projectAssertionPage(context);
+    assert.equal(projected.bytes, (await stat(validationObjectPath(input.f.store, input.f.workItemId, ref))).size);
+    assert.deepEqual(projected.ref, childRefs[4]);
+    assert.deepEqual(projected.importRef, admissions[4].content.importRef);
+    projected.ref.sha256 = 'a'.repeat(64);
+    assert.deepEqual(consume.projectAssertionPage(context).ref, childRefs[4],
+      'Projection cannot expose or mutate the private checked payload');
+    assert.equal(context.validationReadObjects, undefined);
+    assert.equal(context.normalizedReadinessImports, undefined);
+    assert.throws(() => consume.projectAssertionPage({ ...context }), { code: 'BINDING' });
+    await assert.rejects(consume({ ...ref, bytes: ref.bytes + 1 }, context), { code: 'BINDING' });
+    assert.throws(() => consume.projectAssertionPage(context), { code: 'RECOVERY' });
+    const failed = await validationCatalog.prepareValidationObjectRead(
+      input.f.store, input.f.workItemId, { ...ref, bytes: ref.bytes + 1 }, context);
+    assert.equal(failed.projectAssertionPage(context), undefined,
+      'Rejected preparation cannot project an unchecked child or byte length');
+    await assert.rejects(failed({ ...ref, bytes: ref.bytes + 1 }, context), { code: 'DIGEST' });
+  }
+  const originalFile = childFiles[4];
+  for (const missing of [true, false]) {
+    if (missing) await unlink(originalFile);
+    else await writeFile(originalFile, '{}\n');
+    try {
+      const fresh = await new Store(input.f.home, { clock: input.f.clock }).ready();
+      await assert.rejects(fresh.load(input.f.workItemId), { code: missing ? 'ENOENT' : 'DIGEST' });
+    } finally { await writeFile(originalFile, childBytes); }
+  }
+  assert.equal(canonical(await input.f.store.records(input.f.workItemId)), originalRecords);
+});
+
 test('referenced case payload preparation overlaps four reads without publishing or reordering proof failures', async t => {
   const definitions = Array.from({ length: 101 }, (_, index) => ({
     ...testDefinitions()[0], id: `T-prepared-${String(index).padStart(3, '0')}`,

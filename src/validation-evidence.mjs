@@ -500,7 +500,7 @@ export function initializeReferencedCycle(tx, cycle, specification) {
   cycle.testOutcomeRef = stageValidationObject(tx, root);
   attachView(cycle, pages, refs, root);
 }
-async function prepareRetainedReadinessEvidence(store, cycle, evidence, payload, context) {
+async function prepareRetainedReadinessEvidence(store, cycle, evidence, payload, context, assertion) {
   const admission = payload.content;
   if (admission?.kind !== 'normalized-case-admission') return;
   object(admission, ['kind', 'cycleId', 'testId', 'status', 'importRef', 'assertionPageRefs', 'blockers'],
@@ -508,8 +508,12 @@ async function prepareRetainedReadinessEvidence(store, cycle, evidence, payload,
   requireThat(admission.cycleId === cycle.id && admission.testId === evidence.testId &&
     admission.status === evidence.status && Array.isArray(admission.assertionPageRefs),
   'EVIDENCE', 'Retained normalized admission differs from its immutable case result');
+  let readPreparedAssertion;
   const readContent = async ref => {
-    const retained = await readValidationObject(store, cycle.workItemId, ref, context);
+    const consume = readPreparedAssertion;
+    readPreparedAssertion = undefined;
+    const retained = consume ? await consume(ref, context) :
+      await readValidationObject(store, cycle.workItemId, ref, context);
     requireThat(retained.kind === 'execution-payload' &&
       retained.provenance?.sanitizer === 'sdlc-normalized-v1' &&
       retained.provenance.sourceDigest === digest(retained.content),
@@ -578,6 +582,8 @@ async function prepareRetainedReadinessEvidence(store, cycle, evidence, payload,
   'EVIDENCE', 'Retained normalized input is not bound to its original managed case');
   const assertions = new Set();
   for (const [index, ref] of admission.assertionPageRefs.entries()) {
+    if (index === 0 && assertion && ref?.sha256 === assertion.ref.sha256 &&
+        ref?.bytes === assertion.ref.bytes) readPreparedAssertion = assertion.read;
     const page = await readContent(ref);
     object(page, ['kind', 'testId', 'index', 'observations'],
       ['kind', 'testId', 'index', 'observations']);
@@ -636,7 +642,7 @@ async function readExecutionPayload(store, cycle, evidence, context) {
   const payload = await readValidationObject(store, cycle.workItemId, evidence.retainedPayloadRef, context);
   return payload;
 }
-async function prepareExecutionEvidence(store, cycle, evidence, context, retainedEvents, readPayload) {
+async function prepareExecutionEvidence(store, cycle, evidence, context, retainedEvents, readPayload, assertion) {
   if (!evidence.retainedPayloadRef) return;
   const test = cycleTests(cycle).find(test => test.id === evidence.testId);
   const payload = readPayload ? await readPayload(evidence.retainedPayloadRef, context) :
@@ -651,7 +657,7 @@ async function prepareExecutionEvidence(store, cycle, evidence, context, retaine
     requireThat(payload.provenance?.sanitizer === 'sdlc-normalized-v1' &&
       payload.provenance.sourceDigest === digest(payload.content), 'EVIDENCE',
     'Normalized admission requires its originally verified managed import');
-    await prepareRetainedReadinessEvidence(store, cycle, evidence, payload, context);
+    await prepareRetainedReadinessEvidence(store, cycle, evidence, payload, context, assertion);
   } else if (evidence.operationId) {
     const operation = lookupOperation(context.all(), evidence.operationId);
     requireThat(operation?.executionSourceRef && operation.class === 'test' &&
@@ -737,6 +743,7 @@ export async function prepareCycleEvidence(store, cycle, context) {
     'EVIDENCE', 'Outcome page does not cover its exact catalog slots');
     let items;
     let prepared;
+    let assertions;
     for (let offset = 0; offset < tests.length; offset++) {
       const position = offset % 4;
       if (position === 0) {
@@ -746,6 +753,31 @@ export async function prepareCycleEvidence(store, cycle, context) {
         prepared = await Promise.allSettled(items.map(item => item?.retainedPayloadRef ?
           prepareValidationObjectRead(store, cycle.workItemId, item.retainedPayloadRef, context) :
           undefined));
+        const projections = prepared.map(result => {
+          if (result.status !== 'fulfilled' || !result.value) return;
+          return result.value.projectAssertionPage(context);
+        });
+        let reserved = projections.reduce((bytes, projection) => bytes + (projection?.bytes ?? 0), 0);
+        const parents = new Set(items.map(item => item?.retainedPayloadRef?.sha256));
+        const children = new Set();
+        const selected = projections.map(projection => {
+          if (!projection?.ref) return;
+          const { ref, importRef } = projection;
+          const alias = parents.has(ref.sha256) || children.has(ref.sha256);
+          children.add(ref.sha256);
+          if (alias || context.normalizedReadinessImports?.get(importRef.sha256)?.bytes !== importRef.bytes ||
+              context.validationReadObjects?.has(ref.sha256) ||
+              context.validationObjects?.has(ref.sha256) ||
+              reserved + LIMITS.artifact > 4 * LIMITS.artifact) return;
+          // A malformed file can exceed its claimed length before the digest check.
+          reserved += LIMITS.artifact;
+          return ref;
+        });
+        const reads = await Promise.allSettled(selected.map(ref => ref ?
+          prepareValidationObjectRead(store, cycle.workItemId, ref, context) : undefined));
+        assertions = selected.map((ref, position) => ref ? { ref,
+          read: reads[position].status === 'rejected' ?
+            () => Promise.reject(reads[position].reason) : reads[position].value } : undefined);
       }
       const slot = page.slots[offset];
       object(slot, ['testId', 'history', 'historyRef', 'events', 'selected', 'barrier'],
@@ -816,7 +848,8 @@ export async function prepareCycleEvidence(store, cycle, context) {
         const preparation = items[position] === item ? prepared[position] : undefined;
         const readPayload = preparation?.status === 'rejected' ?
           () => Promise.reject(preparation.reason) : preparation?.value;
-        await prepareExecutionEvidence(store, cycle, item, context, retainedEvents, readPayload);
+        await prepareExecutionEvidence(store, cycle, item, context, retainedEvents, readPayload,
+          items[position] === item ? assertions[position] : undefined);
       }
       requireThat(slot.selected === null || slot.history.some(item => item.id === slot.selected),
         'EVIDENCE', 'Selected observation is missing from complete history');

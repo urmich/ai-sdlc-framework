@@ -85,7 +85,7 @@ export async function prepareValidationObjectRead(store, workItemId, ref, contex
       value: await readUncachedValidationObject(store, workItemId, boundRef) };
   } catch (reason) { result = { status: 'rejected', reason }; }
   let consumed = false;
-  return async (selectedRef, selectedContext) => {
+  const consume = async (selectedRef, selectedContext) => {
     requireThat(!consumed, 'RECOVERY', 'Prepared validation reads can only be consumed once');
     consumed = true;
     try {
@@ -105,6 +105,24 @@ export async function prepareValidationObjectRead(store, workItemId, ref, contex
       return publishValidationObject(context, selectedRef, result.value);
     } finally { result = undefined; }
   };
+  Object.defineProperty(consume, 'projectAssertionPage', { value: selectedContext => {
+    requireThat(!consumed, 'RECOVERY', 'Consumed validation reads cannot project dependencies');
+    requireThat(selectedContext === context, 'BINDING',
+      'Prepared validation read belongs to another invocation context');
+    if (result.status !== 'fulfilled') return;
+    const projection = { bytes: result.value.bytes };
+    const payload = result.value.value;
+    const admission = payload.content;
+    if (payload.kind !== 'execution-payload' || admission?.kind !== 'normalized-case-admission' ||
+        !Array.isArray(admission.assertionPageRefs) || !admission.assertionPageRefs.length) return projection;
+    try {
+      validateObjectReference(admission.importRef);
+      validateObjectReference(admission.assertionPageRefs[0]);
+    } catch { return projection; }
+    return { ...projection, importRef: { ...admission.importRef },
+      ref: { ...admission.assertionPageRefs[0] } };
+  } });
+  return consume;
 }
 function validateSafeObject(value) {
   if (value.kind === 'execution-payload') {
