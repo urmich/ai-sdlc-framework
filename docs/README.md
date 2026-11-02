@@ -1,7 +1,12 @@
 # Documentation
 
-Start with the task you want to accomplish. These guides describe current
-contracts and distinguish released behavior from unvalidated candidate work.
+Guides for the AI SDLC Framework's development workflow, with integration
+support for **GitHub** and **Azure DevOps**, including **GitHub Actions** and
+**Azure Pipelines**. Start with the task you want to accomplish.
+
+These guides explain the supported capability scopes and host prerequisites,
+and distinguish released behavior from candidate work.
+See [integration support and pipelines](integrations/README.md).
 
 | Topic | Start here |
 | --- | --- |
