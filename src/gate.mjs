@@ -85,7 +85,8 @@ export async function publicHookInvocationEvents(hook) {
     const event = await inputHookInvocationEvent(hook, words);
     if (event !== undefined) return event ? [event] : [];
   }
-  if (typeof command !== 'string') return [];
+  if (typeof command !== 'string' ||
+      !/(?:^|[^A-Za-z0-9_.-])sdlc(?:\.(?:mjs|exe|cmd|ps1))?(?=[^A-Za-z0-9_.-]|$)/iu.test(command)) return [];
   const events = [];
   // Literal fragments identify callbacks, never authorize an opaque shell command.
   for (const fragment of command.split(/[;|&<>\r\n]/u)) {

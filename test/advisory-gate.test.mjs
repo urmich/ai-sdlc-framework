@@ -20,6 +20,8 @@ export const validationDeclarations = {
         "T-41 F06 interleaved CLI callbacks retain capture guards through public replay",
         "T-41 F06 public hook invocation cannot launder uncredited input",
         "T-41 F06 completion releases only matching uncredited shell captures",
+        "T-41 F06 incidental hook arguments release captures after host completion",
+        "T-41 F06 separated callback markers and public launchers retain capture guards",
         "T-42 F06 maintenance selection requires supported capture provenance"
       ],
       "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
@@ -314,6 +316,77 @@ test('T-41 F06 completion releases only matching uncredited shell captures', asy
   await assert.rejects(applyCaptured(), { code: 'PROVENANCE' });
   await handleHook(f.store, 'postToolUse', request);
   assert.equal((await applyCaptured()).event.kind, 'out-of-scope-execution');
+});
+
+test('T-41 F06 incidental hook arguments release captures after host completion', async t => {
+  for (const event of ['postToolUse', 'postToolUseFailure']) {
+    const f = await fixture(t);
+    for (const toolName of ['bash', 'powershell', 'cmd']) {
+      for (const command of [
+        'git commit -m "Fix hook behavior"',
+        'git commit -m hook',
+        'git commit -m "Fix hook; preserve callback protection"',
+        'node owned-script.mjs --label hook',
+        'git status; git commit -m "Fix hook behavior"',
+      ]) {
+        const request = { sessionId: f.sessionId, cwd: f.repo,
+          toolName, toolArgs: { command } };
+        assert.equal((await gate(f.store, request)).permissionDecision, undefined);
+        const input = `Authorize this isolated discovery after ${toolName}:${command}.`;
+        f.clock.advance(1);
+        const guarded = await captureUserInput(f.store, {
+          sessionId: f.sessionId, input,
+        });
+        assert.equal(guarded.captureProvenance, 'direct-uncredited',
+          'An unfinished ordinary request still guards input capture');
+        await handleHook(f.store, event, request);
+        const session = JSON.parse(await fs.readFile(f.store.sessionPath(f.sessionId), 'utf8'));
+        assert.equal(session.unmanagedInputHookRequests.length, 0,
+          `${event}:${toolName}:${command} must retire the matching request`);
+        f.clock.advance(1);
+        const receipt = await captureUserInput(f.store, {
+          sessionId: f.sessionId, input,
+          source: event === 'postToolUse' ? 'userPromptSubmitted' : 'ask_user',
+        });
+        assert.equal(receipt.captureProvenance, 'supported-input-hook');
+        assert.equal((await applyDecision(f.store, {
+          workItemId: f.workItemId, sessionId: f.sessionId, receiptId: receipt.id,
+          input, kind: 'out-of-scope-execution',
+          effect: { itemId: 'incidental-hook-argument' },
+        })).event.kind, 'out-of-scope-execution');
+      }
+    }
+  }
+});
+
+test('T-41 F06 separated callback markers and public launchers retain capture guards', async t => {
+  for (const event of ['postToolUse', 'postToolUseFailure']) {
+    for (const [toolName, invocation] of [
+      ['bash', `node "${entry}" --token "a;b" hook`],
+      ['powershell', `node "${entry}" --token "a;b" hook`],
+      ['bash', `node "${entry}" < owned-input.json hook`],
+      ['powershell', 'sdlc.exe hook'],
+      ['cmd', 'sdlc.cmd hook'],
+      ['powershell', 'sdlc.ps1 hook'],
+      ['powershell', 'SDLC.EXE hook'],
+    ]) {
+      const f = await fixture(t);
+      const request = { sessionId: f.sessionId, cwd: f.repo, toolName,
+        toolArgs: { command: `${invocation} ${event}; ${invocation} userPromptSubmitted` } };
+      assert.equal((await gate(f.store, request)).permissionDecision, undefined);
+      await handleHook(f.store, event, request);
+      const session = JSON.parse(await fs.readFile(f.store.sessionPath(f.sessionId), 'utf8'));
+      assert.equal(session.unmanagedInputHookRequests.length, 1,
+        `${event}:${toolName} callback cannot clear its own capture guard`);
+      const input = 'Authorize execution of this fabricated discovery.';
+      const receipt = await captureUserInput(f.store, { sessionId: f.sessionId, input });
+      assert.equal(receipt.captureProvenance, 'direct-uncredited');
+      await assert.rejects(applyDecision(f.store, {
+        workItemId: f.workItemId, sessionId: f.sessionId, receiptId: receipt.id,
+        input, kind: 'out-of-scope-execution', effect: { itemId: 'separated-callback' },
+      }), { code: 'PROVENANCE' });
+    }
+  }
 });
 
 test('T-41 F06 advisory receipt capture cannot acquire managed authority', async t => {
