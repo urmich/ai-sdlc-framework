@@ -281,7 +281,6 @@ test('T-PRD067 reverse-registered repository members admit only the exact source
     context => { [context.sources[0].contentDigest, context.sources[1].contentDigest] =
       [context.sources[1].contentDigest, context.sources[0].contentDigest]; },
     context => { context.sources[0].repositoryId = 'foreign'; },
-    context => { context.sources[0].revision = digest('another commit').slice(0, 40); },
     context => { context.sources[0].contentDigest = digest('different source bytes'); },
   ]) {
     const wrong = producerReports(input, { mutateContext,
@@ -291,6 +290,21 @@ test('T-PRD067 reverse-registered repository members admit only the exact source
     assert.equal((await current(input)).evidence.id, admitted.evidence[0].id);
     await assertRecordBytes(input.f, originals);
   }
+  const contentAlias = producerReports(input, {
+    mutateContext: context => {
+      context.sources[0].revision = digest('another commit with identical local content').slice(0, 40);
+    },
+    observedAt: reports.raw[0].observedAt, startedAt: reports.raw[0].startedAt,
+  });
+  assert.equal(contentAlias.evaluate(contentAlias.normalized, {
+    executions: reports.selection.executions,
+  }).status, 'NotRun',
+  'An exact detached source selection still rejects a different commit');
+  const alias = await admit(input, contentAlias);
+  assert.equal(alias.evidence[0].status, 'Passed');
+  assert.equal((await current(input)).passed, true,
+    'Local credit binds the exact repository/content bijection, not commit-only aliases');
+  await assertRecordBytes(input.f, originals);
   assert.equal(canonical(reports.normalized), originalReports);
 });
 

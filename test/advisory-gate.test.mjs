@@ -2,6 +2,16 @@ export const validationDeclarations = {
   "schemaVersion": 1,
   "applicability": [
     {
+      "names": [
+        "T-41 failed unmanaged candidate recheck clears current assurance",
+        "T-42 README documents cross-platform npm migration and complete maintenance procedures"
+      ],
+      "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+      "owner": "maintainer",
+      "reason": "PR-only assurance invalidation and maintenance guidance regressions; independent processes use an owned fixture or read-only documentation.",
+      "prerequisites": ["Node >=22 and Git"]
+    },
+    {
       "names": ["T-41 F06 advisory receipt capture cannot acquire managed authority"],
       "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
       "owner": "maintainer",
@@ -733,7 +743,9 @@ test('T-41 failed unmanaged candidate recheck clears current assurance', async t
   let before = await f.store.load(f.workItemId);
   assert.equal(stagePassed(currentCycle(before.records, before.checkpoint),
     before.records, 'local', f.clock), true);
-  await fs.writeFile(path.join(f.repo, 'docs/test-plan.md'), '# Invalid empty Test Plan\n');
+  const testPlan = path.join(f.repo, 'docs/test-plan.md');
+  const originalTestPlan = await fs.readFile(testPlan);
+  await fs.writeFile(testPlan, '# Invalid empty Test Plan\n');
   const result = await handleHook(f.store, 'postToolUse', {
     sessionId: f.sessionId,
     cwd: f.repo,
@@ -749,6 +761,8 @@ test('T-41 failed unmanaged candidate recheck clears current assurance', async t
   assert.deepEqual(invalidated.deployments, {});
   assert.equal(invalidated.reviewRef, null);
   assert.equal(stagePassed(invalidated, after.records, 'local', f.clock), false);
+  // Late callbacks must fail on stale assurance, not malformed fixture syntax.
+  await fs.writeFile(testPlan, originalTestPlan);
   await assert.rejects(recordTest(f.store, {
     workItemId: f.workItemId,
     cycleId: cycle.id,
@@ -1560,8 +1574,13 @@ test('T-42 README documents cross-platform npm migration and complete maintenanc
   const commands = section => [...section.matchAll(
     /^```(?:sh|powershell|bat)\r?\n([\s\S]*?)^```/gmu)]
     .map(match => match[1]).join('\n');
-  assert.equal((commands(migration).match(/sdlc install --purge-existing/gu) ?? []).length, 1);
-  assert.match(migration, /single cross-platform command/iu);
+  const migrationCommands = commands(migration);
+  assert.equal((migrationCommands.match(/sdlc install --purge-existing/gu) ?? []).length, 1);
+  assert.ok(migrationCommands.includes(
+    `npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@${packageVersion} sdlc install --purge-existing --home "<owned-copilot-home>"`));
+  assert.match(migration, /cross-platform command/iu);
+  assert.match(migration, /postpublication/iu);
+  assert.match(migration, /explicit,[\s\S]*irreversible clean migration/iu);
   assert.match(migration, /Close every Copilot CLI process first/iu);
   assert.match(migration, /preserves unrelated[\s\S]*Copilot files/iu);
   const updateStart = installation.indexOf('## Update the framework');

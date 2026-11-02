@@ -275,18 +275,28 @@ test('legacy environment execution proof without full hosted identity cannot ear
   delete legacyExecution.resultProof.executionIdentity;
   await writeJson(f.store.recordPath(f.workItemId, f.execution.id), legacyExecution);
   const legacyBytes = await fs.readFile(f.store.recordPath(f.workItemId, f.execution.id));
-  await assert.rejects(recordTest(f.store, {
-    ...f.input, evidenceRef: 'fixture:must-not-upgrade-legacy-test',
-  }), { code: 'OPERATION' });
+  try {
+    const mismatch = { code: 'EVIDENCE',
+      message: 'Retained operation result has no matching original terminal execution' };
+    await assert.rejects(recordTest(f.store, {
+      ...f.input, evidenceRef: 'fixture:must-not-upgrade-legacy-test',
+    }), mismatch);
+    await assert.rejects(f.store.load(f.workItemId), mismatch);
+    await assert.rejects(status(f.store, f.workItemId), mismatch);
+    await assert.rejects(f.store.transaction(f.workItemId, () => {}), mismatch);
+    assert.deepEqual(await fs.readFile(f.store.recordPath(f.workItemId, f.execution.id)),
+      legacyBytes, 'Recovery must not fabricate full hosted execution identity');
+  } finally {
+    await writeJson(f.store.recordPath(f.workItemId, f.execution.id), f.execution);
+  }
   const state = await f.store.load(f.workItemId);
   const cycle = currentCycle(state.records, state.checkpoint);
   assert.equal(cycle.artifacts.DEV, f.artifact.id);
   assert.equal(cycle.deployments.DEV, f.deployment.id);
-  assert.equal(stagePassed(cycle, state.records, 'DEV', f.clock), false);
+  assert.equal(stagePassed(cycle, state.records, 'DEV', f.clock), true,
+    'Only restoring the original admitted operation restores its credit');
   assert.equal(stagePassed(cycle, state.records, 'local', f.clock), true);
   assert.equal(currentTestEvidence(cycle, state.records,
-    cycle.tests.find(item => item.id === 'T-dev'), f.clock), null);
-  await f.store.transaction(f.workItemId, () => {});
-  assert.deepEqual(await fs.readFile(f.store.recordPath(f.workItemId, f.execution.id)),
-    legacyBytes, 'Recovery must not fabricate full hosted execution identity');
+    cycle.tests.find(item => item.id === 'T-dev'), f.clock).id, f.evidence.id);
+  await unchangedHistory(f);
 });

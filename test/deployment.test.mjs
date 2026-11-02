@@ -61,8 +61,13 @@ test('T-24/T-26/T-27/T-28 DEV artifact-deployment-test chain and policy-owned ST
       deploymentId: dev.operation.id, operationId: wrongTargetOperation.id,
       expectedMet: true, owner: 'agent', host: 'development-machine',
       evidenceRef: 'fixture:wrong-dev-target' }), {
-      code: 'EVIDENCE', message: 'DEV test operation target differs from the current deployment target',
+      code: 'EVIDENCE', message: 'Retained operation result has no matching original terminal execution',
     });
+    await assert.rejects(f.store.load(f.workItemId), {
+      code: 'EVIDENCE', message: 'Retained operation result has no matching original terminal execution',
+    });
+    assert.deepEqual(await readJson(wrongTargetFile), wrongTargetOperation,
+      'Recovery rejects a changed admitted operation without rewriting its proof');
   } finally {
     await writeJson(wrongTargetFile, devTestResult);
   }

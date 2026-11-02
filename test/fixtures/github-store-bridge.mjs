@@ -310,12 +310,13 @@ export async function bridgeFixture(t) {
   f.prepare = async (family, suffix = '', { claim = true } = {}) => {
     f.clock.advance(1);
     const action = actionFor(family);
+    const operationId = `op-${families.indexOf(family)}${suffix}`;
     if (family === 'notification' && suffix) action.contentDigest = digest(`fixture publication:${suffix}`);
     const preparation = await bridge.legacyOperations.prepare({
-      workItemId: f.workItemId, sessionId: f.sessionId, operationId: `op-${family}${suffix}`, action,
+      workItemId: f.workItemId, sessionId: f.sessionId, operationId, action,
       request: { toolName: 'github-existing-consumer', toolArgs: { family, suffix }, cwd: f.repo },
       // Compact fixture labels leave room for full digests and proofs within 4 KiB.
-      correlationKey: `${family}${suffix}`, intent: family,
+      correlationKey: operationId, intent: family,
     }, f.store);
     assert.equal(preparation.operation.intendedOutcome.family, family);
     if (family === 'notification') notificationContent.set(preparation.operation.id,

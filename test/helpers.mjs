@@ -158,16 +158,17 @@ export async function captureUserInput(store, { sessionId, input,
     sessionId, 'receipts', `${session.lastReceiptId}.json`), 'utf8'));
 }
 export async function fixture(t, { initialize = true, compactPath = false } = {}) {
-  const root = path.resolve('.test-data', compactPath ?
-    randomUUID().slice(0, 16) : randomUUID());
+  const parent = path.resolve('.test-data');
+  await fs.mkdir(parent, { recursive: true });
+  const root = compactPath ? await fs.mkdtemp(path.join(parent, 'b')) : path.join(parent, randomUUID());
   await fs.mkdir(root, { recursive: true });
   t.after(async () => {
     assert.equal(path.dirname(root), path.resolve('.test-data'));
     await fs.rm(root, { recursive: true });
     await assert.rejects(fs.stat(root), { code: 'ENOENT' });
   });
-  const repo = path.join(root, 'repository with spaces');
-  const home = path.join(root, 'isolated copilot home');
+  const repo = path.join(root, compactPath ? 'r s' : 'repository with spaces');
+  const home = path.join(root, compactPath ? 'h s' : 'isolated copilot home');
   await fs.mkdir(repo);
   const runGit = async (...args) => (await execute('git', args, { cwd: repo,
     env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 'Fixture',

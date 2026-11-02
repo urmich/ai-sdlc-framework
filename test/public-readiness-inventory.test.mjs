@@ -17,6 +17,12 @@ export const validationDeclarations = {
     "minimumSlots": 3
   }],
   "applicability": [{
+    "names": ["T-PRD013 measured GitHub process partitions preserve every original assertion and callback definition"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "native-regression-contract",
+    "reason": "PR-only source inventory guard: retain all 143 partitioned assertions and their historical fingerprint, pin the exact strengthened proof and isolated-dispatch callbacks, and separately account for the owned-path capacity regression. No critical promotion or source execution.",
+    "prerequisites": ["Node; independent read-only root with no shared mutable state or external resources"]
+  }, {
     "names": [
       "T-PRD074 source literal ownership uses enclosing quotes instead of URL prefixes",
       "T-PRD074 source literal ownership isolates genuine interpolation from nested ordinary strings",
@@ -1281,6 +1287,11 @@ test('T-PRD013 measured GitHub process partitions preserve every original assert
     [operationFamily, operationFamily, operationFamily,
       boundaryFamily, boundaryFamily, boundaryFamily, boundaryFamily]);
   const snapshotId = 'assertion-2be026a15f5d572e8573f9b9a31de64fea9d53fec0ac215767c7bc378901c216';
+  const capacityRoot = 'GH37 artifact proof fits bounded records beneath a long owned checkout path';
+  const capacityIds = [
+    'assertion-2a9c0fe3719d4fa6dccc791d98c75530c780deb23722a02d290045720ad8fa72',
+    'assertion-f47d61acc8586dfe5859e415407a691d6b448cfb3e24bb740df769d38ab838ef',
+  ];
   const allCases = declarations.flatMap(file => file.cases);
   const snapshot = allCases.filter(test => test.id === snapshotId);
   assert.equal(snapshot.length, 1);
@@ -1288,9 +1299,16 @@ test('T-PRD013 measured GitHub process partitions preserve every original assert
   assert.equal(snapshot[0].name,
     'fixture byte snapshots bound fresh reads and drain failures without caching or losing lock exclusions');
   assert.deepEqual(snapshot[0].parents, []);
-  assert.equal(allCases.length, 144);
+  assert.deepEqual(allCases.filter(test => capacityIds.includes(test.id))
+    .map(({ id, file, name, parents }) => ({ id, file, name, parents })), [
+    { id: capacityIds[0], file: operationFamily, name: capacityRoot, parents: [] },
+    { id: capacityIds[1], file: operationFamily,
+      name: 'complete terminal proof survives the longer native checkout binding', parents: [capacityRoot] },
+  ]);
+  assert.equal(allCases.length, 146);
   assert.equal(new Set(allCases.map(test => test.id)).size, allCases.length);
-  const originals = declarations.map(file => file.cases.filter(test => test.id !== snapshotId));
+  const originals = declarations.map(file => file.cases.filter(test =>
+    test.id !== snapshotId && !capacityIds.includes(test.id)));
   assert.deepEqual(originals.map(cases => cases.filter(test => !test.parents.length).length),
     [2, 1, 1, 1, 1, 1, 1]);
   const assertions = originals.flat().map(test => ({
@@ -1298,6 +1316,48 @@ test('T-PRD013 measured GitHub process partitions preserve every original assert
   })).sort((left, right) => left.id.localeCompare(right.id, 'en'));
   assert.equal(assertions.length, 143);
   assert.equal(new Set(assertions.map(test => test.id)).size, assertions.length);
+  // c8eb58e strengthens terminal-proof checks and isolates the local dispatch fixture.
+  // Pin only those corrected callbacks before comparing the unchanged partition baseline.
+  const correctedCallbacks = [
+    {
+      ids: ['assertion-968fe49ad80856f14328b72ebe847c64ae1b114d930e1c2cae2004c1dc94025c'],
+      original: 'f941e1be1bc5f03d7e35e00ede49c78c15c60b69549456cc878c0924820c01b5',
+      current: '1c0e36246105d1f8a32d1a95c6b16e93777a7399a47abdb1f89014552ea54142',
+    },
+    {
+      ids: [
+        'assertion-18cb1a1c0c043d01ccf7ef51b94c52eaeedcb13b9289b8e7a14fb968f56d1cdf',
+        'assertion-70c5ec78bf1b0ae4771c75fb32f95c0d386ab3d1663a571a53f0b94e6d67290a',
+        'assertion-3ad3a1769ef0144563e7bd1d365320bc4f99199e645fbfdc51022e70e27536e1',
+        'assertion-c7224c831ea10b5563bd0b4965f01851ff9130a9776c92c55760b650ccd3f019',
+        'assertion-0a9f06d9ab74cc5d172c5808bd4f8bdacf5aa6af7bd6ec2eece40e8c6c224dce',
+        'assertion-d31bdc7d0cc5235598988d1967c13eb304c586619f2a610047dbbf89f7ff3ee4',
+        'assertion-df53171e5806a94cabb6e3cc99cd5633fcea9becd9918d2bf78db5b0ed596572',
+        'assertion-334b2c336d1d8bf8377acd456872dbef631b9bd7f863d38f15585d96737ec26d',
+        'assertion-ef66a2f4b9808f540911e7d25b7f8bafa84ac93ad3dd5f03f992bd36fb0f78dc',
+      ],
+      original: '877caa4b50e86556a6e65b5447b97083e203c8a2bbc9d5cb2a5eb3349ba2c96e',
+      current: '5e727ee9e093a0c2b7bd24be16239d2a37256996f5effba8a292c5dd470c3654',
+    },
+    {
+      ids: ['assertion-f723e3a3643a54c3d9d35b1c71ec9f37c09007afa801240ba63943258550e9d3'],
+      original: 'dd9fd7d4a2be36160b0a98778e25f37f13fa8e1836bfd3ddb1d442e6c34859d7',
+      current: '6ce3935477e0ddbbdfb99ed3ad3e1659f6bc9c41dbc53b71acd935c4d59d6ed6',
+    },
+    {
+      ids: ['assertion-a09f1cf05fd498f17ea880655763b3e7c2dcd0b5f86a7593be62adf9e97d6aa1'],
+      original: 'c6a5d4af883deeb7bc28b9991c6eb78b9eca9b0e9370d2a6a233b82cb3fb6723',
+      current: '154aeb0c0c10c95c7edd03e5708248ae2162f60674c13908da89cd6e5fa9aceb',
+    },
+  ];
+  for (const correction of correctedCallbacks) {
+    for (const id of correction.ids) {
+      const callback = assertions.find(test => test.id === id);
+      assert.ok(callback, `Missing corrected callback ${id}`);
+      assert.equal(callback.definitionDigest, correction.current, callback.name);
+      callback.definitionDigest = correction.original;
+    }
+  }
   assert.equal(digest(assertions), '04af554a098d1422688e958a838c68c70b0a576f699e3d509dbfac7c943f8a2a');
 });
 
