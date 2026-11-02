@@ -143,6 +143,8 @@ export async function smokeGitHubImports(moduleDirectory, options = {}, commandO
     }
     const filesystem = await import('node:fs');
     const promises = await import('node:fs/promises');
+    const readOnlyOpenFlags = new Set(['r', filesystem.default.constants.O_RDONLY,
+      filesystem.default.constants.O_RDONLY | (filesystem.default.constants.O_NOFOLLOW ?? 0)]);
     for (const name of ['appendFile', 'chmod', 'chown', 'copyFile', 'cp', 'link', 'lchmod',
       'lchown', 'lutimes', 'mkdir', 'mkdtemp', 'rename', 'rm', 'rmdir', 'symlink',
       'truncate', 'unlink', 'utimes', 'writeFile']) {
@@ -154,13 +156,13 @@ export async function smokeGitHubImports(moduleDirectory, options = {}, commandO
     for (const target of [filesystem.default, promises.default]) {
       const open = target.open;
       target.open = function(file, flags, ...args) {
-        if (flags !== 'r' && flags !== 0) deny();
+        if (!readOnlyOpenFlags.has(flags)) deny();
         return open.call(this, file, flags, ...args);
       };
     }
     const openSync = filesystem.default.openSync;
     filesystem.default.openSync = function(file, flags, ...args) {
-      if (flags !== 'r' && flags !== 0) deny();
+      if (!readOnlyOpenFlags.has(flags)) deny();
       return openSync.call(this, file, flags, ...args);
     };
     (await import('node:module')).syncBuiltinESMExports();

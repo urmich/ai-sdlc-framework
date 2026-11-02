@@ -49,7 +49,7 @@ test('local-only admission does not require or snapshot an external repository p
 });
 
 async function provenCandidate(t, { secondary = false,
-  snapshotBeforeProof = false } = {}) {
+  snapshotBeforeProof = false, explicitEvidenceId } = {}) {
   const f = await coding(await fixture(t, { compactPath: true }));
   const configuration = {
     defaultBranch: 'refs/heads/main',
@@ -157,7 +157,27 @@ async function provenCandidate(t, { secondary = false,
     artifactId: artifact.artifactId, deploymentId: deployment.id,
     operationId: execution.id,
   };
-  const evidence = await recordTest(f.store, input);
+  const transaction = f.store.transaction.bind(f.store);
+  const controlledIdentity = explicitEvidenceId && t.mock.method(f.store, 'transaction',
+    (workItemId, action) => transaction(workItemId, tx => {
+      const put = tx.put;
+      tx.put = record => {
+        if (record.type === 'test-evidence' && record.testId === input.testId &&
+            record.operationId === input.operationId && !tx.get(record.id)) {
+          // Seed only the new observation's nonce, never an existing record or its proof.
+          assert.equal(tx.get(explicitEvidenceId), undefined);
+          record.id = explicitEvidenceId;
+        }
+        return put(record);
+      };
+      return action(tx);
+    }));
+  let evidence;
+  try {
+    evidence = await recordTest(f.store, input);
+  } finally {
+    controlledIdentity?.mock.restore();
+  }
   const state = await f.store.load(f.workItemId);
   assert.equal(stagePassed(currentCycle(state.records, state.checkpoint),
     state.records, 'DEV', f.clock), true);
@@ -270,7 +290,31 @@ test('selected configuration and repository members cannot transfer external cre
 });
 
 test('legacy environment execution proof without full hosted identity cannot earn new admission or recovery credit', async t => {
-  const f = await provenCandidate(t);
+  const f = await provenCandidate(t, {
+    explicitEvidenceId: 'evidence-00000000-0000-4000-8000-000000000000',
+  });
+  const originalState = await f.store.load(f.workItemId);
+  const originalCycle = currentCycle(originalState.records, originalState.checkpoint);
+  const operationEvidenceId = `evidence-${digest({
+    operationId: f.execution.id, terminalSequence: f.execution.terminalSequence,
+  }).slice(0, 40)}`;
+  const originalEvidence = originalState.records.find(record =>
+    record.type === 'test-evidence' && record.id === operationEvidenceId);
+  assert.ok(originalEvidence, 'Terminal recording must retain its exact operation-derived observation');
+  assert.equal(originalEvidence.operationId, f.execution.id);
+  assert.equal(originalEvidence.operationDigest, digest(f.execution));
+  assert.equal(originalEvidence.cycleId, f.cycle.id);
+  assert.equal(originalEvidence.testId, f.input.testId);
+  assert.equal(originalEvidence.executionSourceDigest, digest(f.cycle.sources));
+  assert.deepEqual(originalEvidence.executionSources, f.cycle.sources);
+  assert.notEqual(originalEvidence.id, f.evidence.id,
+    'Explicit admission retains a distinct observation of the same original operation');
+  for (const records of [originalState.records, [...originalState.records].reverse()]) {
+    assert.equal(currentTestEvidence(originalCycle, records,
+      originalCycle.tests.find(item => item.id === 'T-dev'), f.clock).id, originalEvidence.id);
+  }
+  const originalEvidenceFile = f.store.recordPath(f.workItemId, originalEvidence.id);
+  f.history.push({ file: originalEvidenceFile, bytes: await fs.readFile(originalEvidenceFile) });
   const legacyExecution = structuredClone(f.execution);
   delete legacyExecution.resultProof.executionIdentity;
   await writeJson(f.store.recordPath(f.workItemId, f.execution.id), legacyExecution);
@@ -296,7 +340,10 @@ test('legacy environment execution proof without full hosted identity cannot ear
   assert.equal(stagePassed(cycle, state.records, 'DEV', f.clock), true,
     'Only restoring the original admitted operation restores its credit');
   assert.equal(stagePassed(cycle, state.records, 'local', f.clock), true);
-  assert.equal(currentTestEvidence(cycle, state.records,
-    cycle.tests.find(item => item.id === 'T-dev'), f.clock).id, f.evidence.id);
+  for (const records of [state.records, [...state.records].reverse()]) {
+    assert.deepEqual(currentTestEvidence(cycle, records,
+      cycle.tests.find(item => item.id === 'T-dev'), f.clock), originalEvidence,
+    'Restoration selects the exact original operation-backed observation in either record order');
+  }
   await unchangedHistory(f);
 });
