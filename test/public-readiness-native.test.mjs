@@ -59,7 +59,9 @@ export const validationDeclarations = {
     {"root": "TOOL03 switch recovery finalizers retain private unsettled state and reject serialized authority",
       "minimumSlots": 1, "exclusiveResources": []},
     {"root": "TOOL03 actual native child boundary quarantines a surviving detached writer before outer cleanup",
-      "minimumSlots": 4, "exclusiveResources": []}
+      "minimumSlots": 4, "exclusiveResources": []},
+    {"root": "T-PRD018 native timing notices retain only ten source-bound actual group and root durations",
+      "minimumSlots": 2, "exclusiveResources": []}
   ]
 };
 import test from 'node:test';
@@ -95,6 +97,7 @@ import { aggregateNativeReadiness, nativeArtifacts, nativeSpecification, nativeG
   nativePlatformUnitFrameworkShardProtocol, nativeFourBodyFrameworkShardProtocol,
   nativeFrameworkUnitShardNames, nativeStageSelections, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
 import { runNativeValidation } from '../scripts/native-validation.mjs';
+import { readTestBudget } from '../scripts/test-budget.mjs';
 import { nativeSourceDummyValues } from '../scripts/native-source-dummy-values.mjs';
 import { observerApiFixture } from './readiness-observer-fixture.mjs';
 import * as nativePass from '../scripts/native-validation.mjs';
@@ -2326,6 +2329,99 @@ test('T-PRD023 native ambient scratch checks every Git ancestor and rejects link
       lstat(file) }), { code: 'HOST' });
 });
 
+test('T-PRD018 native timing notices retain only ten source-bound actual group and root durations', async t => {
+  const root = path.join(repositoryRoot, '.test-data', `native-timing-${randomUUID()}`);
+  await fs.mkdir(path.join(root, 'test'), { recursive: true });
+  t.after(async () => {
+    await fs.rm(root, { recursive: true });
+    await assert.rejects(fs.stat(root), { code: 'ENOENT' });
+  });
+  const file = 'test/timing-contract.test.mjs';
+  const source = 'import test from "node:test";\n' +
+    Array.from({ length: 12 }, (_, index) => `test("timing ${index}",()=>{});`).join('\n');
+  await fs.writeFile(path.join(root, 'test', 'timing-contract.test.mjs'), source);
+  const declared = discoverDeclarations(source, file);
+  const selectedInventory = { complete: true, unresolved: [], files: [{ file }], cases: declared.cases,
+    independentProjects: baselineCalculatorInventory.independentProjects };
+  const target = process.platform === 'win32' ? 'windows-x64' :
+    process.platform === 'darwin' ? `macos-${process.arch}` : 'linux-x64';
+  const specification = nativeSpecification({ plan, inventory: selectedInventory,
+    goSources: sources, target, profile: 'pr' });
+  const context = structuredClone(fixture().lanes.find(lane => lane.target === target).context);
+  context.inventoryDigest = validationInventoryDigest(specification);
+  const allocation = await readTestBudget();
+  context.native.toolchain.resources = nativeResourceFacts({
+    availableParallelism: os.availableParallelism(), totalMemoryBytes: os.totalmem(),
+    configuredWorkers: allocation.capacity,
+  });
+  const producer = { schemaVersion: 1, sourceCommit: sourceRevision, target, profile: 'pr',
+    workflowRef: context.producer.definitionRef, repositoryId: context.sources[0].repositoryId,
+    runId: context.producer.executionRef, attempt: context.producer.attemptRef };
+  const stages = [];
+  const reports = [];
+  const data = { texts: {} };
+  // Two-root fixture stages retain all twelve groups while respecting the reserved nested demand.
+  for (let offset = 0; offset < 12; offset += 2) {
+    const pattern = `^(?:timing ${offset}|timing ${offset + 1})$`;
+    const stage = { name: `required-units-${offset / 2}`, files: [file],
+      cases: declared.cases.slice(offset, offset + 2), selectorName: pattern,
+      args: ['targeted', '--workers', '2', '--name', pattern, file] };
+    const selected = await createPlan(parseOptions(['targeted', '--workers', '2', '--name', pattern,
+      path.join(root, 'test', 'timing-contract.test.mjs')]), root);
+    selected.environment = { SDLC_TEST_REPORT_CONTEXT: JSON.stringify(producer) };
+    const output = path.join(root, `${stage.name}.json`);
+    assert.equal(await runTests(selected, { reportPath: output }), 0);
+    const report = JSON.parse(await fs.readFile(output, 'utf8'));
+    assert.equal(report.selection.concurrency, 2);
+    assert.equal(report.resources.budget.capacity, allocation.capacity);
+    const journal = await fs.readFile(`${output}.journal.ndjson`, 'utf8');
+    const command = { kind: 'validation-command', complete: true, exitCode: 0,
+      node: process.version, platform: process.platform, architecture: process.arch,
+      command: [process.execPath, 'scripts/test-runner.mjs', ...stage.args], context: producer,
+      startedAt: report.startedAt, finishedAt: report.finishedAt };
+    await fs.writeFile(path.join(root, `${stage.name}-command.json`), JSON.stringify(command));
+    stages.push(stage);
+    reports.push(report);
+    data[`${stage.name}.json`] = report;
+    data[`${stage.name}-command.json`] = command;
+    data.texts[`${stage.name}.json.journal.ndjson`] = journal;
+  }
+  const options = { directory: root, inventory: selectedInventory, sources, target, stages,
+    context, specification, startedAt: reports[0].startedAt, plan, candidate,
+    completeReportRef: 'https://github.com/fixture/repo/actions/runs/1/attempts/1' };
+  const finalized = await finalizeNativeEvidence(options);
+  assert.equal(finalized.timingAnnotations.length, 10);
+  assert.notEqual(finalized.evaluation.status, 'Passed', 'Timing metadata cannot pass missing native procedures');
+  const expected = reports.flatMap(report => report.groupExecution.groups.map(group => ({
+    groupId: group.id, rootId: group.rootId, sourceDigest: group.sourceDigest,
+    groupMs: Date.parse(group.finishedAt) - Date.parse(group.startedAt),
+    rootMs: report.executions.find(row => row.groupId === group.id).durationMs,
+  }))).sort((left, right) => right.groupMs - left.groupMs ||
+    left.groupId.localeCompare(right.groupId)).slice(0, 10);
+  assert.deepEqual(finalized.timingAnnotations, expected.map(row =>
+    `::notice title=Native group timing::group=${row.groupId} root=${row.rootId} source=${row.sourceDigest} ` +
+    `groupMs=${row.groupMs} rootMs=${row.rootMs} group=completed producer=partial`));
+  assert.ok(finalized.timingAnnotations.every(line => Buffer.byteLength(line) < 400 &&
+    !/[\r\n]/u.test(line) && !line.includes('timing-contract') && !line.includes(root)));
+  for (const mutate of [
+    (report, command) => { report.groupExecution.groups[0].sourceDigest = 'f'.repeat(64); },
+    (report, command) => { command.context.sourceCommit = 'f'.repeat(40); },
+    (report, command) => { report.executions[0].durationMs = -1; },
+    (report, command) => { report.executions[0].durationMs = Infinity; },
+    (report, command) => { report.executions[0].durationMs = 'secret\n::error::'; },
+  ]) {
+    const changed = structuredClone(data);
+    for (const stage of stages) mutate(changed[`${stage.name}.json`], changed[`${stage.name}-command.json`]);
+    const rejected = await nativePass.reconcileNativeEvidenceData({ ...options, data: changed });
+    assert.deepEqual(rejected.timings, []);
+    assert.equal(rejected.raw.complete, false);
+  }
+  for (const [index, stage] of stages.entries()) {
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(root, `${stage.name}.json`), 'utf8')), reports[index],
+      'Original runner fields remain unchanged by timing retention');
+  }
+});
+
 test('T-PRD016 private Linux library fixtures preserve frozen published bytes without adding a Linux distribution', async () => {
   const frozen = structuredClone(candidate);
   frozen.descriptor.sourceCommit = sourceRevision;
@@ -4312,4 +4408,19 @@ test('T-PRD018 native failure annotations escape workflow-command injection with
   assert.match(annotations[0], /50%25 failed%0D%0A::notice::/u);
   assert.ok(!/[\r\n]/u.test(annotations[0]));
   assert.equal(evaluation.status, 'Failed');
+  const message = 'Owned process identity capture did not complete [observer phase=identity ' +
+    'startup=true exitObserved=true exitCode=7 signal=none stdoutBytes=34 stderrBytes=43 byteLimit=65536]';
+  const retained = sanitizeExecutionPayload(Buffer.from(JSON.stringify({ message }))).message;
+  assert.equal(retained, message);
+  const captureFailure = f.evaluate(lane, raw => {
+    raw.results[0].status = 'Failed';
+    raw.results[0].expectedMet = false;
+    raw.results[0].exitCode = 1;
+    raw.results[0].detail = retained;
+    raw.exitCode = 1;
+  });
+  const captureAnnotation = nativeFailureAnnotations(captureFailure);
+  assert.equal(captureAnnotation.length, 1);
+  assert.ok(captureAnnotation[0].includes(message));
+  assert.equal(captureFailure.status, 'Failed');
 });

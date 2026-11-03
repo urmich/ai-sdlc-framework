@@ -1540,6 +1540,24 @@ rejection placeholder. Do not expose the rejected original text or change its
 failure outcome. Render/upload the retained output
 after failed producers too, with interruption limitations explicit.
 
+Windows owned-process capture emits a closed startup marker before opening the
+native process identity. Its unchanged five-second first-record deadline retains
+only the observed marker phase, exit/code/allowlisted signal and capped stdout
+and stderr byte counts. Never include raw output, error-file contents or spawn
+arguments. An exit event records state but does not discard an identity still
+draining from stdout. These facts distinguish observations, not the unproven
+cause of an earlier hosted timeout.
+
+After existing source, original journal, command, context and resource checks,
+native framework producers emit at most ten slowest group timing notices.
+Retain only closed group/root/source identities, actual group wall intervals and
+root durations, and explicit completed-group/partial-or-completed-producer labels.
+Unbound or unfinished stages supply no timings. Timing-only formatting rejection
+adds a presentation diagnostic without changing readiness; existing evidence
+validation remains authoritative. Notices contain no names, paths or raw output
+and neither establish speedup nor replace original SDK/cleanup reconciliation
+or the unchanged whole-lane delivery limits.
+
 GitHub renders Markdown summaries, not arbitrary result JSON automatically.
 Reuse the runner records and generic report projection for this small adapter;
 no third-party test-reporting action or per-test signature is required.

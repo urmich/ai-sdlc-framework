@@ -1012,6 +1012,31 @@ outcome; never emit rejected original text. This Node-only isolated root retains
 its existing four-platform applicability and introduces no dependencies, shared
 resources, worker increase or critical-profile membership.
 
+The same annotation root preserves closed Windows observer phase/exit/byte-count
+facts through sanitization without changing the Failed outcome.
+`T-PRD018 Windows capture diagnostics distinguish startup and exited observers
+without exposing output` in `test/test-runner.test.mjs` is maintainer-owned,
+PR-only and Node-only on all four existing native lanes. Its isolated controlled
+streams reserve one slot and cover startup, exit-before-close with buffered
+identity, spawn/record/size failures and rejected raw output. An isolated process
+stub supplies the PID and a synthetic SystemRoot; require the mocked spawn path
+to use that root without reading or mutating the host environment.
+Keep the five-second capture allowance, native retained-handle/PID-reuse/exit-order
+positive controls and cleanup assertions unchanged. Controlled diagnostics do
+not reproduce or clear the historical hosted timeout.
+
+`T-PRD018 native timing notices retain only ten source-bound actual group and
+root durations` in `test/public-readiness-native.test.mjs` is maintainer-owned,
+PR-only and Node-only on the existing native lanes. Reserve two aggregate slots
+before its isolated timed root; six sequential owned fixture stages retain all
+twelve real inner groups and borrow the same broker, not a second allowance.
+Compare notice IDs and durations with original runner/journal fields, enforce
+the ten-notice/closed-output bounds, reject mismatched source/command and invalid
+durations, preserve partial readiness and verify fixture cleanup. It has no
+provider access, shared resources or prerequisite roots. Neither new root
+expands critical27, changes native role membership or grants native timing,
+original SDK reconciliation or release-readiness credit.
+
 | ID | Environment | Level | Checkpoint | Mode | Owner | Location | Requirements | Observe or assert | Implementation | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | T-PRD014-LX | local | integration | post-review | automated | provider | github-linux-x64 | FR-203; AC-203.1; AC-203.2 | P: open/update the approved fixture PR with no local-result artifact; full current applicable cases execute on Ubuntu, including shared filesystem/Git/tooling; retain exact candidate and case inventory. | procedure: section-7-pr-matrix | NotRun | |

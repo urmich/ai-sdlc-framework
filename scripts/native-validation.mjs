@@ -1004,6 +1004,23 @@ async function retainedToolReports(directory) {
   return found.filter(Boolean);
 }
 
+function nativeGroupTimings(groups, report) {
+  return groups.map(group => {
+    const original = report.groupExecution.groups.find(row => row.id === group.id);
+    const root = report.executions.find(row => row.groupId === group.id &&
+      row.file === group.file && row.name === group.root && row.parents.length === 0);
+    const groupMs = Date.parse(original.finishedAt) - Date.parse(original.startedAt);
+    requireThat(/^[a-f0-9]{64}$/u.test(group.id) &&
+      /^assertion-[a-f0-9]{64}$/u.test(group.rootId) &&
+      /^[a-f0-9]{64}$/u.test(group.sourceDigest) &&
+      Number.isFinite(groupMs) && groupMs >= 0 &&
+      Number.isFinite(root?.durationMs) && root.durationMs >= 0,
+    'EVIDENCE', 'Native timing diagnostics require closed source identities and actual bounded durations');
+    return { groupId: group.id, rootId: group.rootId, sourceDigest: group.sourceDigest,
+      groupMs, rootMs: root.durationMs };
+  });
+}
+
 async function collectExecution({ directory, data, inventory, sources, calculatorSources, target, stages, context, specification, startedAt, plan,
   candidate, profile = context.profile.startsWith('r-pre-') ? 'r-pre' : 'pr',
   component = componentFromContext(context, target), shard = shardFromContext(context, target),
@@ -1012,6 +1029,7 @@ async function collectExecution({ directory, data, inventory, sources, calculato
   const part = assignment?.parts.find(part => part.shard === shard);
   const observations = [];
   const diagnostics = [];
+  const timings = [];
   let complete = true;
   let exitCode = 0;
   const read = name => data ? Promise.resolve(data[name] ?? null) : readOptional(path.join(directory, name));
@@ -1076,10 +1094,16 @@ async function collectExecution({ directory, data, inventory, sources, calculato
     const budget = resources?.budget;
     const capacity = expectedResources?.workerCapacity;
     let groupCount = 0;
+    let stageTimings = [];
     try {
       const journal = data ? data.texts?.[`${stage.name}.json.journal.ndjson`] :
         await fs.readFile(path.join(directory, `${stage.name}.json.journal.ndjson`), 'utf8');
-      groupCount = validateNativeGroupReport({ inventory, stage, report, journal, target, schedulingPolicy }).length;
+      const groups = validateNativeGroupReport({ inventory, stage, report, journal, target, schedulingPolicy });
+      groupCount = groups.length;
+      try { stageTimings = nativeGroupTimings(groups, report); }
+      catch {
+        diagnostics.push({ stage: stage.name, code: 'INVALID_NATIVE_TIMING_METADATA' });
+      }
     } catch (error) {
       complete = false;
       diagnostics.push({ stage: stage.name, code: error.code ?? 'INVALID_ORIGINAL_GROUP_EXECUTION', message: error.message });
@@ -1102,16 +1126,18 @@ async function collectExecution({ directory, data, inventory, sources, calculato
       complete = false;
       diagnostics.push({ stage: stage.name, code: 'INVALID_ORIGINAL_RESOURCE_ALLOCATION' });
     }
-    if (reconciliation.status !== 'Passed' ||
+    const invalidStage = reconciliation.status !== 'Passed' ||
         !commandMatches(command, ['scripts/test-runner.mjs', ...stage.args], expectedStageContext) ||
         report.node !== `v${nativeToolchain.node}` ||
         digest(report.context ?? null) !== digest(expectedStageContext) ||
         Date.parse(report.startedAt) < Date.parse(command.startedAt) ||
         Date.parse(report.finishedAt) > Date.parse(command.finishedAt) ||
-        !Number.isFinite(Date.parse(report.startedAt)) || !Number.isFinite(Date.parse(report.finishedAt))) {
+        !Number.isFinite(Date.parse(report.startedAt)) || !Number.isFinite(Date.parse(report.finishedAt));
+    if (invalidStage) {
       complete = false;
       diagnostics.push({ stage: stage.name, code: 'INVALID_ORIGINAL_STAGE_COMMAND' });
     }
+    if (!invalidStage && resourceMatches) timings.push(...stageTimings);
     originalStages.push(report);
     diagnostics.push({ stage: stage.name, status: reconciliation.status, blockers: reconciliation.blockers,
       dispositions: reconciliation.dispositions });
@@ -1312,7 +1338,7 @@ async function collectExecution({ directory, data, inventory, sources, calculato
   const raw = { schemaVersion: 1, kind: 'test-execution', context, startedAt,
     finishedAt: complete ? observedAt : null, observedAt, sequence: 1, complete,
     exitCode: complete ? exitCode : exitCode || 2, results };
-  return { raw, diagnostics };
+  return { raw, diagnostics, timings };
 }
 
 export function reconcileNativeEvidenceData(options) {
@@ -1804,7 +1830,12 @@ export async function finalizeNativeEvidence({ directory, inventory, sources, ca
     `Their owners, reasons and raw skips remain in producer.json and the complete original reports.\n\n` +
     renderReadinessReport(evaluation, { completeReportRef });
   await fs.writeFile(path.join(directory, 'readiness.md'), markdown, { flag: 'wx' });
-  return { evaluation, diagnostics: collected.diagnostics, markdown };
+  const producer = collected.raw.complete ? 'completed' : 'partial';
+  const timingAnnotations = collected.timings.sort((left, right) =>
+    right.groupMs - left.groupMs || left.groupId.localeCompare(right.groupId)).slice(0, 10).map(row =>
+    `::notice title=Native group timing::group=${row.groupId} root=${row.rootId} source=${row.sourceDigest} ` +
+    `groupMs=${row.groupMs} rootMs=${row.rootMs} group=completed producer=${producer}`);
+  return { evaluation, diagnostics: collected.diagnostics, markdown, timingAnnotations };
 }
 
 export function nativeFailureAnnotations(evaluation) {
@@ -2202,6 +2233,7 @@ export async function runNativeValidation(options, { lifetime = { cleanupSafe: t
     evaluation = finalized.evaluation;
     diagnostics = finalized.diagnostics;
     markdown = finalized.markdown;
+    for (const annotation of finalized.timingAnnotations) console.error(annotation);
   } else {
     markdown = `# Native ${target}: NotRun\n\n${phase === 'candidate' && candidateReady && !failure ?
       'Source candidate frozen after canonical units and static validation; native assertions have not executed.' :

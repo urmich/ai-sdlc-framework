@@ -73,7 +73,9 @@ export async function windowsProcessIdentity(pid, exitPath, { createdBeforeMs, r
       `!$owner.WaitForExit(10)){}};`
     : '';
   // Closed scalar records avoid cmdlet-module loading within the capture budget.
-  const script = `$ErrorActionPreference='Stop';$p=[Diagnostics.Process]::GetProcessById(${pid});` +
+  const startupMarker = 'owned-process-observer-started-v1';
+  const script = `$ErrorActionPreference='Stop';[Console]::Out.WriteLine('${startupMarker}');` +
+    `$p=[Diagnostics.Process]::GetProcessById(${pid});` +
     `$ownedVerified=$false;$owner=$null;` +
     `try{$null=$p.Handle;$creation=$p.StartTime.ToUniversalTime().Ticks.ToString();$image=$p.ProcessName;` +
     creationGuard +
@@ -103,20 +105,47 @@ export async function windowsProcessIdentity(pid, exitPath, { createdBeforeMs, r
     return closed;
   };
   let stdout = '';
+  let stdoutBytes = 0;
   let stderrBytes = 0;
-  child.stderr.on('data', bytes => { stderrBytes += bytes.length; });
+  let startup = false;
+  let exitObserved = false;
+  let exitCode = null;
+  let exitSignal = null;
+  const byteLimit = 65536;
+  const countBytes = (count, bytes) => Math.min(byteLimit, count + bytes.length);
+  child.stderr.on('data', bytes => { stderrBytes = countBytes(stderrBytes, bytes); });
+  child.once('exit', (code, signal) => {
+    exitObserved = true;
+    exitCode = Number.isInteger(code) && code >= -2147483648 && code <= 4294967295 ? code : null;
+    exitSignal = ['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGBREAK', 'SIGABRT'].includes(signal) ? signal : null;
+  });
+  const captureFailure = message => new Error(`${message} [observer phase=${startup ? 'identity' : 'startup'} ` +
+    `startup=${startup} exitObserved=${exitObserved} exitCode=${exitCode ?? 'none'} ` +
+    `signal=${exitSignal ?? 'none'} stdoutBytes=${stdoutBytes} stderrBytes=${stderrBytes} byteLimit=${byteLimit}]`);
   const captured = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Owned process identity capture did not complete')), 5000);
-    child.once('error', error => { clearTimeout(timer); reject(error); });
-    child.once('close', (code, signal) => {
+    const timer = setTimeout(() => reject(captureFailure('Owned process identity capture did not complete')), 5000);
+    child.once('error', () => { clearTimeout(timer); reject(captureFailure('Owned process observer spawn failed')); });
+    child.once('close', () => {
       clearTimeout(timer);
-      reject(new Error(JSON.stringify({ kind: 'process-identity-unavailable', pid, code, signal, stderrBytes })));
+      reject(captureFailure('process-identity-unavailable'));
     });
     child.stdout.on('data', bytes => {
+      stdoutBytes = countBytes(stdoutBytes, bytes);
+      if (stdoutBytes === byteLimit) {
+        clearTimeout(timer);
+        reject(captureFailure('Owned process identity output exceeded its capture limit'));
+        return;
+      }
       stdout += bytes;
-      if (!stdout.includes('\n')) return;
-      clearTimeout(timer);
-      try { resolve(JSON.parse(stdout.trim())); } catch (error) { reject(error); }
+      for (let newline; (newline = stdout.indexOf('\n')) >= 0;) {
+        const line = stdout.slice(0, newline).trim();
+        stdout = stdout.slice(newline + 1);
+        if (!startup && line === startupMarker) { startup = true; continue; }
+        clearTimeout(timer);
+        try { resolve(JSON.parse(line)); }
+        catch { reject(captureFailure('Owned process identity record was invalid')); }
+        return;
+      }
     });
   });
   try {

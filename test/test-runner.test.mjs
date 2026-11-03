@@ -2,6 +2,10 @@ export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [{"coverage": "process", "paths": ["scripts/test-runner.mjs", "scripts/test-worker.mjs"]}],
   "groups": [{
+    "root": "T-PRD018 Windows capture diagnostics distinguish startup and exited observers without exposing output",
+    "minimumSlots": 1,
+    "exclusiveResources": []
+  }, {
     "root": "T-PRD018 Windows process identity stays pinned through exit probes until explicit release",
     "minimumSlots": 3
   }, {
@@ -19,6 +23,12 @@ export const validationDeclarations = {
     "reason": "These actual overlap/cancellation callbacks need two slots reserved before their deadlines start."
   },
   "applicability": [{
+    "names": ["T-PRD018 Windows capture diagnostics distinguish startup and exited observers without exposing output"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-process-identity-contract",
+    "reason": "PR-only controlled observer-stream regression; process-isolated module context, no native child or shared mutable state.",
+    "prerequisites": ["Node; owned repository-local test evidence"]
+  }, {
     "names": [
       "T-PRD018 Windows process identity stays pinned through exit probes until explicit release"
     ],
@@ -315,6 +325,65 @@ test('T-PRD018 owned worker exit assertions distinguish reused identities from s
     assert.match(await fs.readFile(`${exitPath}.error`, 'utf8'), /creation does not predate its ready observation/u);
     assert.doesNotThrow(() => process.kill(process.pid, 0),
       'Rejecting an unexpected creation must never terminate that process');
+  }
+});
+
+test('T-PRD018 Windows capture diagnostics distinguish startup and exited observers without exposing output', async () => {
+  const systemRoot = path.join(repositoryRoot, '.test-data', 'synthetic-system-root');
+  for (const mode of ['not-started', 'started', 'exited', 'buffered-identity', 'closed',
+    'signaled', 'negative-exit', 'unknown-signal', 'spawn-error', 'oversized', 'invalid-record']) {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    let expire;
+    let allowance;
+    let executable;
+    const context = createContext({ assert, path, fs,
+      process: { pid: process.pid, env: { SystemRoot: systemRoot } },
+      spawn: command => { executable = command; return child; },
+      setTimeout(callback, milliseconds) { expire = callback; allowance = milliseconds; return 1; },
+      clearTimeout() {} });
+    const capture = runInContext(`(${windowsProcessIdentity.toString()})`, context);
+    const pending = capture(process.pid, 'owned-unused-exit', { createdBeforeMs: Date.now() });
+    const outcome = pending.then(value => ({ value }), error => ({ message: error.message }));
+    assert.equal(executable, path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'));
+    assert.equal(allowance, 5000);
+    const secret = 'private-observer-output-not-for-annotations';
+    child.stderr.write(secret);
+    if (!['not-started', 'spawn-error'].includes(mode)) {
+      child.stdout.write('owned-process-observer-');
+      child.stdout.write('started-v1\n');
+    }
+    if (['exited', 'buffered-identity', 'closed'].includes(mode)) child.emit('exit', 7, null);
+    if (mode === 'signaled') child.emit('exit', null, 'SIGTERM');
+    if (mode === 'negative-exit') child.emit('exit', -1073741510, null);
+    if (mode === 'unknown-signal') child.emit('exit', null, `SIG${secret}`);
+    if (mode === 'buffered-identity') {
+      child.stdout.write(JSON.stringify({ pid: process.pid, present: true,
+        creationTime: '100', image: 'node', observedAt: new Date().toISOString() }) + '\n');
+      child.emit('close', 7, null);
+      const result = await outcome;
+      assert.equal(result.value.identity.pid, process.pid,
+        'An exit event must not discard an identity still draining from stdout');
+      continue;
+    }
+    if (mode === 'closed') child.emit('close', 7, null);
+    else if (mode === 'spawn-error') child.emit('error', new Error(secret));
+    else if (mode === 'oversized') child.stdout.write(secret.repeat(3000));
+    else if (mode === 'invalid-record') child.stdout.write(`${secret}\n`);
+    else expire();
+    const { message } = await outcome;
+    assert.ok(message, mode);
+    assert.equal(message.includes(secret), false);
+    assert.match(message, /observer phase=(?:startup|identity) startup=(?:true|false)/u);
+    assert.ok(message.includes(`startup=${!['not-started', 'spawn-error'].includes(mode)}`), mode);
+    assert.ok(message.includes(`exitObserved=${['exited', 'closed', 'signaled', 'negative-exit', 'unknown-signal'].includes(mode)}`), mode);
+    assert.ok(message.includes(`exitCode=${mode === 'negative-exit' ? -1073741510 :
+      ['exited', 'closed'].includes(mode) ? 7 : 'none'}`), mode);
+    assert.ok(message.includes(`signal=${mode === 'signaled' ? 'SIGTERM' : 'none'}`), mode);
+    assert.ok(message.includes(`stderrBytes=${Buffer.byteLength(secret)}`), mode);
+    if (mode === 'oversized') assert.match(message, /stdoutBytes=65536 /u);
+    assert.equal(sanitizeExecutionPayload(Buffer.from(JSON.stringify({ message }))).message, message);
   }
 });
 
