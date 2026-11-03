@@ -1550,6 +1550,22 @@ error. Retain the original message digest, rejection cause, incomplete evidence
 and Failed outcome. These facts diagnose an execution; they neither explain the
 historical Intel failure nor change process ownership, assertions or deadlines.
 
+TOOL02 records separate closed phases for cancellation return or watchdog,
+cleanup lifetime, retention/result checks, retained report/stdout and controller
+dispatch/stop. A phase timestamp describes entry into that assertion block, not
+the duration or cause of a termination failure. Preserve the six real scenarios,
+their assertions, controller ownership and original budgets.
+
+The native-toolchain CLI catches request/provisioning/cleanup errors after
+module loading, emits an escaped check annotation, then rethrows the same error.
+Bound sanitized diagnostic JSON to 8192 bytes and retain only an original-byte
+digest/length if that representation is unsafe or oversized. Include the closed
+bootstrap/cleanup stage and actual Node/platform/architecture so an early
+failure remains observable before toolchain evidence exists. Do not retain raw
+subprocess streams or claim that this boundary catches module-import errors.
+This changes diagnostics only, not prerequisite selection, prefix ownership,
+cleanup authority, execution outcome or the unproven cause of a hosted failure.
+
 Windows owned-process capture emits a closed startup marker before opening the
 native process identity. Its unchanged five-second first-record deadline retains
 only the observed marker phase, exit/code/allowlisted signal and capped stdout

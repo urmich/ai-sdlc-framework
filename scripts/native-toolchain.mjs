@@ -483,20 +483,47 @@ export async function cleanupNativeToolchain(options) {
   });
 }
 
+export function nativeToolchainFailureAnnotation(error, stage) {
+  requireThat(['bootstrap', 'cleanup'].includes(stage), 'INPUT', 'Native failure annotation needs its closed stage');
+  const bytes = Buffer.from(JSON.stringify({
+    code: typeof error?.code === 'string' ? error.code : 'NATIVE_BOOTSTRAP',
+    message: typeof error?.message === 'string' ? error.message : 'Native toolchain operation failed',
+  }));
+  let retained;
+  try {
+    requireThat(bytes.length <= 8192, 'INPUT', 'Native failure diagnostic exceeds its retention bound');
+    retained = sanitizeExecutionPayload(bytes);
+    requireThat(Buffer.byteLength(JSON.stringify(retained)) <= 8192, 'INPUT',
+      'Retained native failure diagnostic exceeds its annotation bound');
+  } catch {
+    retained = { code: 'NATIVE_BOOTSTRAP', message: 'Failure diagnostic text was rejected; its original identity is preserved.',
+      original: { sha256: digest(bytes), bytes: bytes.length } };
+  }
+  const text = JSON.stringify({ ...retained, stage, node: process.versions.node,
+    platform: process.platform, architecture: process.arch });
+  return `::error title=Native toolchain ${stage} failed::` +
+    text.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+}
+
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   const args = process.argv.slice(2);
   const cleanup = args[0] === '--cleanup';
-  if (cleanup) args.shift();
-  requireThat((args.length === 4 || !cleanup && args.length === 10 &&
-    args[4] === '--profile' && args[6] === '--component' && args[7] === 'homebrew' && args[8] === '--role' ||
-    !cleanup && args.length === 12 &&
-    args[4] === '--profile' && args[6] === '--component' && args[8] === '--framework-shard' &&
-    args[10] === '--role') && args[0] === '--target' && args[2] === '--output-dir',
-    'INPUT', 'Usage: native-toolchain.mjs [--cleanup] --target PLATFORM --output-dir OWNED_DIRECTORY ' +
-    '[--profile pr --component framework --framework-shard SHARD --role ROLE | --profile pr --component homebrew --role ROLE]');
-  const request = { target: args[1], outputDir: args[3],
-    ...(args.length === 12 ? { profile: args[5], component: args[7], shard: args[9], role: args[11] } :
-      args.length === 10 ? { profile: args[5], component: args[7], role: args[9] } : {}) };
-  if (cleanup) await cleanupNativeToolchain(request);
-  else await bootstrapNativeToolchain(request);
+  try {
+    if (cleanup) args.shift();
+    requireThat((args.length === 4 || !cleanup && args.length === 10 &&
+      args[4] === '--profile' && args[6] === '--component' && args[7] === 'homebrew' && args[8] === '--role' ||
+      !cleanup && args.length === 12 &&
+      args[4] === '--profile' && args[6] === '--component' && args[8] === '--framework-shard' &&
+      args[10] === '--role') && args[0] === '--target' && args[2] === '--output-dir',
+      'INPUT', 'Usage: native-toolchain.mjs [--cleanup] --target PLATFORM --output-dir OWNED_DIRECTORY ' +
+      '[--profile pr --component framework --framework-shard SHARD --role ROLE | --profile pr --component homebrew --role ROLE]');
+    const request = { target: args[1], outputDir: args[3],
+      ...(args.length === 12 ? { profile: args[5], component: args[7], shard: args[9], role: args[11] } :
+        args.length === 10 ? { profile: args[5], component: args[7], role: args[9] } : {}) };
+    if (cleanup) await cleanupNativeToolchain(request);
+    else await bootstrapNativeToolchain(request);
+  } catch (error) {
+    console.error(nativeToolchainFailureAnnotation(error, cleanup ? 'cleanup' : 'bootstrap'));
+    throw error;
+  }
 }

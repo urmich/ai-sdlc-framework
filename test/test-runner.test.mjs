@@ -887,6 +887,8 @@ test('T-PRD018 rejected failure diagnostics retain only closed error and owned p
   assert.match(format(cleanup).diagnostic.message, /owned=stalled\/root-close\/71ms/u);
   cleanup.cause.cause = cleanup;
   assert.match(format(cleanup).diagnostic.message, /owned=stalled\/root-close\/71ms/u);
+  cleanup.cause.ownedSettlementScenario.phase = 'controller-stop';
+  assert.match(format(cleanup).diagnostic.message, /owned=stalled\/controller-stop\/71ms/u);
 });
 
 test('T-PRD018 unsafe failure diagnostics terminate without hanging or manufacturing complete evidence',

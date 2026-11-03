@@ -298,11 +298,14 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
         const outcome = await Promise.race([observed, new Promise(resolve => {
           timer = setTimeout(() => resolve(sentinel), 1500);
         })]).finally(() => clearTimeout(timer));
+        phase(outcome === sentinel ? 'cancellation-watchdog' : 'cancellation-return');
         assert.notEqual(outcome, sentinel, `${mode}: cancellation must settle inside its original one-second stop window`);
         assert.ok(performance.now() - started < 1500);
+        phase('cleanup-lifetime');
         assert.equal(lifetime.cleanupSafe, false, 'A bounded return must not authorize deletion under the owned writer');
         assert.equal(lifetime.unsettledCommands[0].pid, child.pid);
         assert.equal(lifetime.unsettledCommands[0].reportPath, path.join(directory, 'owned.json'));
+        phase('retention-result');
         if (mode === 'retention-failed') {
           assert.equal(outcome.error, retentionFailure);
           t.diagnostic(JSON.stringify({ mode, pid: child.pid, cleanupSafe: lifetime.cleanupSafe,
@@ -310,20 +313,29 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
           return;
         }
         assert.equal(outcome.error, undefined);
+        phase('cancellation-report');
         const result = outcome.report;
         assert.equal(result.complete, false);
         assert.equal(result.cleanup.survivorsVerified, false);
         assert.equal(result.cleanup.outcome, 'uncertain');
         assert.ok(result.causes.some(cause => cause.type === 'cancellation'));
         assert.ok(result.causes.some(cause => cause.type === 'cleanup'));
+        phase('retained-report');
         assert.deepEqual(JSON.parse(await fs.readFile(path.join(directory, 'owned.json'), 'utf8')), result);
+        phase('stdout-retention');
         assert.equal(result.stdout, 'owned-natural-tail');
         if (mode === 'root-exit') {
+          phase('root-exit-result');
           assert.equal(result.exitCode, 23);
           assert.equal(launches, 0);
-        } else assert.equal(launches, 1);
-        if (mode === 'stalled') assert.equal(killerSignals, 1,
-          'Stop the owned controller before it can issue a late tree request');
+        } else {
+          phase('controller-dispatch');
+          assert.equal(launches, 1);
+        }
+        if (mode === 'stalled') {
+          phase('controller-stop');
+          assert.equal(killerSignals, 1, 'Stop the owned controller before it can issue a late tree request');
+        }
         t.diagnostic(JSON.stringify({ mode, pid: child.pid, complete: result.complete,
           exitCode: result.exitCode, cleanup: result.cleanup }));
       } catch (error) {

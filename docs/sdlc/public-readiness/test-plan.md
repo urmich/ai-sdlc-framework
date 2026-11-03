@@ -224,6 +224,23 @@ npm-dependent distribution fixture remains required on capable PR runners.
 The finite critical27 gate, production deadlines and native delivery limits do
 not change.
 
+After module loading, native-toolchain CLI request, provisioning and cleanup
+failures emit a bounded sanitized check annotation even when bootstrap evidence
+does not yet exist. Retain the closed stage and actual Node/platform/architecture;
+reject oversized or unsafe diagnostics into an original-byte identity rather
+than printing them in the annotation. Preserve the original thrown error and
+nonzero exit. Module-import failures remain outside that CLI catch boundary.
+The process-isolated, one-slot, all-four-platform PR-only regression is owned by
+the native-bootstrap diagnostics contract and checks an actual early CLI failure,
+workflow escaping, secret exclusion and the bounded fallback. It requires stock
+Node, not Go, npm or native Homebrew, and does not prove native provisioning.
+The existing TOOL02 failure facts additionally distinguish its bounded return,
+cleanup/retention/report/stdout checks and controller dispatch/stop assertions.
+These are observed assertion phases; phase-entry elapsed time is not a measured
+termination duration. The earlier Intel bootstrap failure and Windows
+cancellation failures remain unexplained until actual retained evidence
+establishes their causes; diagnostic changes do not claim to fix those causes.
+
 Local test results are not inputs required from an external contributor merely
 to open a PR. PR jobs never
 perform A's permission-requiring disposable-PR/ref probes or publication.

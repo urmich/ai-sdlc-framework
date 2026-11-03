@@ -63,6 +63,8 @@ export const validationDeclarations = {
     {"root": "T-PRD018 native timing notices retain only ten source-bound actual group and root durations",
       "minimumSlots": 2, "exclusiveResources": []},
     {"root": "T-PRD018 optional timing consumer preserves legacy partial and blocked outcomes and finalizer errors",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD014 bootstrap CLI failures retain safe annotations before bootstrap evidence exists",
       "minimumSlots": 1, "exclusiveResources": []}
   ]
 };
@@ -108,7 +110,7 @@ import { sourceValidationSchedulingPolicy, validationSchedulingPolicy,
 import { validateBootstrapRequest, bootstrapNativeToolchain, nativeBootstrapEnvironment,
   nativeBootstrapExports, portableRubyBootstrapEnvironment, requireHomebrewBottlePlan,
   requireHomebrewBottleReceipts, homebrewSetupLimits, homebrewBottlePlanSource } from '../scripts/native-toolchain.mjs';
-import { cleanupNativeToolchain } from '../scripts/native-toolchain.mjs';
+import { cleanupNativeToolchain, nativeToolchainFailureAnnotation } from '../scripts/native-toolchain.mjs';
 import { reconcileGoExecution, executeValidationCommand, validationCommandArguments } from '../scripts/validation-tools.mjs';
 import { repositoryRoot, createPlan, parseOptions, run as runTests } from '../scripts/test-runner.mjs';
 import { discoverDeclarations, compileValidationInventory, compileValidationSourceInventory,
@@ -136,6 +138,45 @@ import { verifyReleaseChecksums } from '../scripts/verify-platform-package.mjs';
 import { releaseRepository } from '../scripts/release-bundle.mjs';
 import { generateHomebrewFormula } from '../packaging/homebrew/generate-formula.mjs';
 import { homebrewFormulaEvidence } from '../packaging/homebrew/evidence.mjs';
+
+test('T-PRD014 bootstrap CLI failures retain safe annotations before bootstrap evidence exists', async () => {
+  const directory = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'bootstrap-annotation-'));
+  try {
+    const failure = await promisify(execFile)(process.execPath,
+      [path.join(repositoryRoot, 'scripts', 'native-toolchain.mjs'), '--invalid-bootstrap-request'], {
+        cwd: repositoryRoot, timeout: 15_000, maxBuffer: 64 * 1024,
+        env: { ...process.env, HOME: directory, USERPROFILE: directory, COPILOT_HOME: directory },
+      }).then(() => assert.fail('Invalid bootstrap must preserve its nonzero exit'), error => error);
+    assert.equal(failure.code, 1);
+    const annotation = failure.stderr.split(/\r?\n/u)
+      .find(line => line.startsWith('::error title=Native toolchain bootstrap failed::'));
+    assert.ok(annotation, 'Early bootstrap failure must be visible in permitted check annotations');
+    const retained = JSON.parse(annotation.split('::').at(-1)
+      .replaceAll('%0D', '\r').replaceAll('%0A', '\n').replaceAll('%25', '%'));
+    assert.equal(retained.code, 'INPUT');
+    assert.match(retained.message, /^Usage: native-toolchain\.mjs/u);
+    assert.equal(retained.stage, 'bootstrap');
+    assert.equal(retained.node, process.versions.node);
+    assert.equal(retained.platform, process.platform);
+    assert.equal(retained.architecture, process.arch);
+    assert.equal(await fs.stat(path.join(directory, 'toolchain.json')).catch(error => error.code), 'ENOENT');
+    const diagnostic = Object.assign(new Error('Owned cleanup failed 100%\n::error::not another annotation'), { code: 'HOST' });
+    const rendered = nativeToolchainFailureAnnotation(diagnostic, 'cleanup');
+    assert.equal(rendered.split('\n').length, 1);
+    const decoded = JSON.parse(rendered.slice(rendered.indexOf('::', 2) + 2)
+      .replaceAll('%0D', '\r').replaceAll('%0A', '\n').replaceAll('%25', '%'));
+    assert.equal(decoded.stage, 'cleanup');
+    assert.equal(decoded.message, diagnostic.message);
+    assert.equal(decoded.code, 'HOST');
+    assert.equal(diagnostic.message, 'Owned cleanup failed 100%\n::error::not another annotation');
+    const secret = ['gh', 'p_', 'A'.repeat(36)].join('');
+    const withheld = nativeToolchainFailureAnnotation(new Error(secret), 'bootstrap');
+    assert.equal(withheld.includes(secret), false);
+    const oversized = nativeToolchainFailureAnnotation(new Error('x'.repeat(8193)), 'cleanup');
+    assert.match(oversized, /original.*sha256/u);
+    assert.ok(Buffer.byteLength(oversized) < 1024);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
 
 async function nativeChildPrefixApi(project, directory, environment, commandProof) {
   const disk = ownedMacFilesystem(directory);

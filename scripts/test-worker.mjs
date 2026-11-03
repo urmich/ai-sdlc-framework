@@ -158,7 +158,10 @@ function failureDiagnostic(error) {
     const owned = new Map();
     const modes = ['natural', 'root-exit', 'failed', 'stalled', 'reported-stopped', 'retention-failed'];
     const phases = ['directory', 'writer-provenance', 'peer-provenance', 'natural-settlement',
-      'cancellation-settlement', 'writer-drain', 'root-close', 'final-command-settlement', 'cleaned'];
+      'cancellation-settlement', 'cancellation-watchdog', 'cancellation-return', 'cleanup-lifetime',
+      'retention-result', 'cancellation-report', 'retained-report', 'stdout-retention',
+      'root-exit-result', 'controller-dispatch', 'controller-stop',
+      'writer-drain', 'root-close', 'final-command-settlement', 'cleaned'];
     let cause = error;
     for (let depth = 0; depth < 3 && cause && typeof cause === 'object'; depth++, cause = cause.cause) {
       if (['ERR_TEST_FAILURE', 'ERR_ASSERTION'].includes(cause.code)) codes.add(cause.code);
