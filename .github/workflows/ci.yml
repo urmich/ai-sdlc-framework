@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 env:
-  SDLC_MAC_ADMISSION_POLICY: arm-regression-allocation-v6-all-critical-bodies-first
+  SDLC_MAC_ADMISSION_POLICY: arm-regression-allocation-v7-bounded-queue-wait
   # Representative public regression input, not an installer version-support whitelist.
   SUPPORTED_PREVIOUS_REPOSITORY: urmich/ai-sdlc-framework
   SUPPORTED_PREVIOUS_VERSION: '0.3.1'
@@ -1296,7 +1296,7 @@ jobs:
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
     name: Intel retained admission
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 22
     permissions: { actions: read, contents: read }
     env:
       SDLC_REPOSITORY_ID: ${{ github.repository_id }}
@@ -1341,7 +1341,7 @@ jobs:
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
     name: ARM refresh admission
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 22
     permissions: { actions: read, contents: read }
     env:
       SDLC_REPOSITORY_ID: ${{ github.repository_id }}
@@ -1386,7 +1386,7 @@ jobs:
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
     name: Mac regression admission
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 22
     permissions:
       actions: read
       contents: read
@@ -1540,7 +1540,7 @@ jobs:
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
     name: Intel body admission
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 22
     permissions:
       actions: read
       contents: read
@@ -1589,7 +1589,7 @@ jobs:
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
     name: Intel Homebrew admission
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 22
     permissions:
       actions: read
       contents: read

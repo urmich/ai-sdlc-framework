@@ -16,7 +16,7 @@ const admissionGroups = Object.freeze({
   'arm-refresh': ['native-macos-arm64-framework-refresh'],
 });
 const api = 'https://api.github.com';
-const maximumWaitMs = 8 * 60 * 1000;
+const maximumWaitMs = 20 * 60 * 1000;
 const maximumPages = 20;
 const maximumBodyBytes = 2 * 1024 * 1024;
 const positive = value => Number.isSafeInteger(value) && value > 0;
@@ -124,7 +124,7 @@ function nextPage(headers, base, page, pages) {
 export async function waitForMacAdmission(expected, {
   token, fetch = globalThis.fetch, signal, now = () => performance.now(),
   sleep = (ms, options) => delay(ms, undefined, options),
-  timeoutMs = maximumWaitMs, pollMs = 3000,
+  timeoutMs = maximumWaitMs, pollMs = 5000,
 } = {}) {
   validateExpected(expected);
   requireFact(typeof token === 'string' && token.length > 0 && !/[\r\n]/u.test(token),

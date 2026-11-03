@@ -1319,7 +1319,7 @@ test('T-PRD022 actual workflow graph applies semantic YAML, effective permission
   const workflows = await readWorkflowPolicySources(repositoryRoot);
   const positive = inspectWorkflowTrust(workflows);
   assert.equal(positive.complete, true, JSON.stringify(positive.blockers));
-  assert.equal(positive.nativeResourcePolicy, 'arm-regression-allocation-v6-all-critical-bodies-first');
+  assert.equal(positive.nativeResourcePolicy, 'arm-regression-allocation-v7-bounded-queue-wait');
   const producer = positive.workflows.find(item => item.file === '.github/workflows/ci.yml');
   assert.deepEqual(producer.document.permissions, { contents: 'read' });
   assert.deepEqual(producer.jobs.find(job => job.id === 'mac-admission').effectivePermissions,
@@ -1723,8 +1723,13 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.deepEqual(ci.jobs.native.needs, ['intent', 'source', 'native-units']);
   assert.deepEqual(ci.jobs['native-units'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-homebrew'].needs, ['intent', 'source']);
-  assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v6-all-critical-bodies-first');
-  const historicalV5 = structuredClone(ci);
+  assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v7-bounded-queue-wait');
+  const historicalV6 = structuredClone(ci);
+  historicalV6.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v6-all-critical-bodies-first';
+  const admissionKeys = ['mac-admission', 'intel-admission', 'intel-homebrew-admission',
+    'intel-retained-admission', 'arm-refresh-admission'];
+  for (const key of admissionKeys) historicalV6.jobs[key]['timeout-minutes'] = 10;
+  const historicalV5 = structuredClone(historicalV6);
   historicalV5.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v5-critical-body-first';
   historicalV5.jobs['native-mi'].needs = ['intent', 'source', 'native-units-mi', 'intel-homebrew-admission'];
   historicalV5.jobs['intel-admission'].needs = ['intent', 'source', 'native-units-mi', 'intel-homebrew-admission'];
@@ -1744,12 +1749,18 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   const inspectDocument = document => inspectWorkflowTrust(workflows.map(workflow =>
     workflow.file === '.github/workflows/ci.yml' ? { ...workflow, contents: Object.entries(document)
       .map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n' } : workflow));
+  assert.equal(inspectDocument(historicalV6).complete, true,
+    'Historical v6 retains its original ten-minute coordinator watchdogs and unchanged dependency graph');
+  const relabeledV6 = structuredClone(historicalV6);
+  relabeledV6.env.SDLC_MAC_ADMISSION_POLICY = ci.env.SDLC_MAC_ADMISSION_POLICY;
+  assert.equal(inspectDocument(relabeledV6).complete, false,
+    'Current policy cannot silently reuse the historical shorter observation watchdog');
   assert.equal(inspectDocument(historicalV5).complete, true,
     'Historical v5 topology and closed receipt groups remain authentic without being relabeled');
   const relabeledV5 = structuredClone(historicalV5);
   relabeledV5.env.SDLC_MAC_ADMISSION_POLICY = ci.env.SDLC_MAC_ADMISSION_POLICY;
   assert.equal(inspectDocument(relabeledV5).complete, false,
-    'A cosmetic v6 label cannot admit the old Homebrew-before-bodies graph');
+    'A current policy label cannot admit the old Homebrew-before-bodies graph');
   const hybrid = structuredClone(ci);
   hybrid.jobs['intel-homebrew-admission'].steps[4].run =
     historicalV5.jobs['intel-homebrew-admission'].steps[4].run;
@@ -1947,6 +1958,11 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   const admissionStep = document => document.jobs['mac-admission'].steps
     .find(step => step.name === 'Wait for actual ARM body worker allocation');
   for (const [label, mutate, code] of [
+    ...admissionKeys.flatMap(key => [10, 23].map(minutes => [
+      `${key} changes the source-bound observation watchdog to ${minutes} minutes`,
+      doc => { doc.jobs[key]['timeout-minutes'] = minutes; },
+      'MAC_ADMISSION_POLICY_DIFFERS',
+    ])),
     ['missing Intel admission edge', doc => { doc.jobs['native-mi'].needs.pop(); }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
     ['missing Intel own unit barrier', doc => {
       doc.jobs['native-mi'].needs = ['intent', 'source', 'mac-admission'];
@@ -2227,6 +2243,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
       `${label}: ${JSON.stringify(rejected.blockers)}`);
   }
   const removeRetainedPriority = document => {
+    for (const key of admissionKeys) document.jobs[key]['timeout-minutes'] = 10;
     document.jobs['native-ma'].strategy.matrix.include.unshift(
       ...document.jobs['native-ma-refresh'].strategy.matrix.include);
     document.jobs['native-mi'].strategy.matrix.include.push(

@@ -1429,7 +1429,7 @@ the original subset. A new legitimate test must not erase preservation checks.
    Require the Linux `mac-admission` coordinator to observe all three long ARM
    body workers in the exact repository/run/attempt/head context before Intel's
    measured critical body-0 producer dispatches under
-   `arm-regression-allocation-v6-all-critical-bodies-first`, still behind both Intel unit jobs.
+   `arm-regression-allocation-v7-bounded-queue-wait`, still behind both Intel unit jobs.
    Require `intel-retained-admission` to observe that actual worker before
    ARM's separate short refresh dispatches, retaining its own ARM unit barrier.
    Its historical job/artifact identifier remains, but current
@@ -1453,7 +1453,18 @@ the original subset. A new legitimate test must not erase preservation checks.
    without allocation. Admission must not wait for allocated ARM parts to
    complete, consume a waiting Mac VM, add a native part or supply passing
    assertion credit. Exercise bounded timeout/cancellation without a passing
-   fallback. Preserve ARM's own unit barrier, both Intel units and all
+   fallback. V7 retains v6's dependency graph and uses a twenty-minute allocation
+   observation budget, five-second polling and twenty-two-minute coordinator
+   watchdogs. Keep historical v1-v6's original ten-minute watchdogs authentic.
+   The PR-only T-MACADM017 regression uses a private injected clock and synthetic
+   attempt-scoped metadata to reproduce allocation after eleven minutes, prove
+   continued observation, and retain explicit twenty-minute timeout and terminal
+   cancellation failures. It has no network, ambient credentials, mutable module
+   state or shared resources; the maintainer owns its complete sequential root
+   on the existing native unit lanes. It does not expand the critical profile.
+   Neither longer observation nor allocation success satisfies the unchanged
+   whole-lane delivery limits; queued time inside a running lane still counts.
+   Preserve ARM's own unit barrier, both Intel units and all
    twenty-five native parts and worker limits; verify real overlap and queues
    again on the next frozen candidate. Verify the split ARM refresh and Intel
    primary body cleanup receipts bind their actual `GITHUB_JOB` identities,

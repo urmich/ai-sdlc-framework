@@ -190,6 +190,45 @@ test('T-MACADM008 only classified transient GET failures retry finitely without 
     error.code === 'ADMISSION_HTTP' && error.observation.admitted === false);
 });
 
+test('T-MACADM017 delayed provider allocation remains observable without waiving timeout or terminal failure', async () => {
+  const identity = { ...expected, group: 'arm-bodies' };
+  for (const outcome of ['allocated', 'pending', 'terminated']) {
+    let time = 0;
+    let observedPastOldCutoff = false;
+    const options = {
+      token: 'synthetic-no-credential', pollMs: 5000, now: () => time,
+      sleep: async ms => { time += ms; },
+      fetch: async (url, request) => {
+        assert.equal(request.method, 'GET');
+        assert.equal(request.redirect, 'error');
+        assert.ok(url.startsWith(prefix));
+        if (time > 8 * 60 * 1000) observedPastOldCutoff = true;
+        const late = time >= 11 * 60 * 1000;
+        if (url === prefix) return json(run());
+        return json({ total_count: 3, jobs: jobs().slice(1).map(job => ({
+          ...job,
+          ...(late && outcome === 'allocated' ?
+            { status: 'in_progress', runner_name: 'synthetic-late-worker' } : {}),
+          ...(late && outcome === 'terminated' ?
+            { status: 'completed', conclusion: 'cancelled' } : {}),
+        })) });
+      },
+    };
+    if (outcome === 'allocated') {
+      const result = await waitForMacAdmission(identity, options);
+      assert.equal(result.admitted, true);
+      assert.equal(time, 11 * 60 * 1000);
+      assert.ok(result.parts.every(part => part.proof === 'runner' && part.conclusion === null));
+    } else {
+      await assert.rejects(waitForMacAdmission(identity, options), error =>
+        error.code === (outcome === 'pending' ? 'ADMISSION_TIMEOUT' : 'ADMISSION_TERMINATED') &&
+        error.observation.admitted === false);
+      assert.equal(time, (outcome === 'pending' ? 20 : 11) * 60 * 1000);
+    }
+    assert.equal(observedPastOldCutoff, true);
+  }
+});
+
 test('T-MACADM009 Linux admission preserves all twenty-five native identities barriers pins limits and critical budget', async () => {
   const contents = await fs.readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
   const ci = parseWorkflow({ file: '.github/workflows/ci.yml', contents });
@@ -272,7 +311,7 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   const coordinator = ci.jobs['mac-admission'];
   assert.equal(coordinator.name, 'Mac regression admission');
   assert.equal(coordinator['runs-on'], 'ubuntu-24.04');
-  assert.equal(coordinator['timeout-minutes'], 10);
+  assert.equal(coordinator['timeout-minutes'], 22);
   assert.equal(coordinator.strategy, undefined);
   assert.deepEqual(coordinator.permissions, { actions: 'read', contents: 'read' });
   assert.deepEqual(coordinator.needs, ['intent', 'source', 'native-units-ma']);
@@ -302,7 +341,7 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   const intelGate = ci.jobs['intel-admission'];
   assert.equal(intelGate.name, 'Intel body admission');
   assert.equal(intelGate['runs-on'], 'ubuntu-24.04');
-  assert.equal(intelGate['timeout-minutes'], 10);
+  assert.equal(intelGate['timeout-minutes'], 22);
   assert.deepEqual(intelGate.permissions, { actions: 'read', contents: 'read' });
   assert.match(intelGate.steps.find(step => step.name === 'Wait for actual Intel body worker allocation').run,
     /--group intel-bodies --output \.test-data\/intel-admission\.json/u);
@@ -310,7 +349,7 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   assert.deepEqual(homebrewGate.needs, ['intent', 'source', 'native-units-mi', 'arm-refresh-admission']);
   assert.equal(homebrewGate.name, 'Intel Homebrew admission');
   assert.equal(homebrewGate['runs-on'], 'ubuntu-24.04');
-  assert.equal(homebrewGate['timeout-minutes'], 10);
+  assert.equal(homebrewGate['timeout-minutes'], 22);
   assert.equal(homebrewGate.strategy, undefined);
   assert.deepEqual(homebrewGate.permissions, { actions: 'read', contents: 'read' });
   assert.match(homebrewGate.steps.find(step => step.name === 'Wait for actual Intel critical body worker allocation').run,
@@ -322,7 +361,7 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
     const gate = ci.jobs[key];
     assert.deepEqual(gate.needs, needs);
     assert.equal(gate['runs-on'], 'ubuntu-24.04');
-    assert.equal(gate['timeout-minutes'], 10);
+    assert.equal(gate['timeout-minutes'], 22);
     assert.equal(gate.strategy, undefined);
     assert.ok(!gate.name.startsWith('native-'));
     assert.deepEqual(gate.permissions, { actions: 'read', contents: 'read' });

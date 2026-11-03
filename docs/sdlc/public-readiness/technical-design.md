@@ -470,7 +470,7 @@ Historical v2-v8 identities and captured-source replay remain unchanged.
 It does not cache cold Go builds, prune lifecycle/failure probes or alter assertions.
 
 The PR workflow uses five Linux read-only allocation coordinators under
-`arm-regression-allocation-v6-all-critical-bodies-first`. After ARM's own unit barrier,
+`arm-regression-allocation-v7-bounded-queue-wait`. After ARM's own unit barrier,
 `mac-admission` observes its three long body workers before releasing Intel's
 measured critical body-0 producer, still behind both Intel unit jobs. The
 `intel-retained-admission` coordinator observes that actual worker before
@@ -493,16 +493,24 @@ started step is required. Completed allocated parts also satisfy admission; no s
 waits for its allocated parts to finish. Each helper invocation selects only
 the closed `arm-bodies`, `intel-primary-body`, `arm-refresh`,
 `intel-homebrew` or `intel-bodies` group. The historical `arm-regressions`
-group remains the default for existing callers. Current v6 and historical v5
+group remains the default for existing callers. Current v7 and historical v5-v6
 use `intel-primary-body`; historical v4 retains `intel-retained-body` and its
 original body-1 receipt semantics. Preserve v5's original Homebrew-allocation
 dependency only as historical v5, never relabel it as current v6.
-Retain the exact historical v1-v5 resource graphs and unmarked native v1-v4 replay rather than
+Retain the exact historical v1-v6 resource graphs and unmarked native v1-v4 replay rather than
 silently adopting new dependencies.
 No coordinator occupies a Mac VM while waiting or adds a native producer
 part. The policy does not change the twenty-five-part assertion union,
-architecture coverage, resource allowances or command watchdogs. Their
-same-run metadata reads use ephemeral read-only CI tokens, bounded polling
+architecture coverage, resource allowances or native command watchdogs. V7
+retains v6's dependency graph but gives each allocation observer twenty minutes
+instead of eight, with five-second polling and a twenty-two-minute coordinator
+job watchdog for setup and receipt retention. The previous eight-minute cutoff
+failed before the measured eleven-minute provider allocation and suppressed
+mandatory downstream roles. This observation budget is not a delivery limit:
+late allocation still counts in an already running lane and can fail its
+unchanged latency requirement. Historical v1-v6 retain their original
+ten-minute coordinator watchdogs.
+Their same-run metadata reads use ephemeral read-only CI tokens, bounded polling
 and complete pagination;
 identity mismatches, unavailable reads and incomplete allocation fail explicitly.
 All five gates are included in producer completeness. Bind the split ARM
