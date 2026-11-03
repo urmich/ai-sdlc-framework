@@ -1004,6 +1004,20 @@ a Test Design/review responsibility.
 
 ### 5.2 Complete PR coverage, trust and provider enforcement
 
+`T-PRD018 rejected failure diagnostics retain only closed error and owned phase
+facts` in `test/test-runner.test.mjs` is maintainer-owned, PR-only and Node-only
+on all four native lanes. Its isolated actual formatter VM reserves one slot,
+with no prerequisite roots, child processes or shared resources. Prove rejected
+text retains its original identity plus allowlisted Node error codes/types and
+available bounded owned-settlement facts; exclude unknown values, invalid
+durations, oversized assertion arrays and raw messages, bound cyclic causes,
+and keep ordinary diagnostics unchanged. The existing real unsafe-diagnostic
+root must still preserve genuine Failed outcomes, passing siblings, incomplete
+evidence and fatal opaque-event rejection. TOOL02 adds observed mode/phase facts
+to its original error only on failure; all six real modes, assertions, five-slot
+allocation, deadlines and cleanup remain unchanged. No critical promotion,
+historical Intel-cause claim or native pass follows from these diagnostic tests.
+
 The maintainer-owned, PR-only `T-PRD018 native failure annotations escape
 workflow-command injection without changing the underlying failure` root also
 requires the exact failed assertion identity when the retained diagnostic is a

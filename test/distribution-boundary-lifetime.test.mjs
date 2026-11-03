@@ -354,7 +354,15 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
       }
     };
     for (let index = 0; index < modes.length; index += 2) {
-      const outcomes = await Promise.allSettled(modes.slice(index, index + 2).map(runMode));
+      const outcomes = await Promise.allSettled(modes.slice(index, index + 2).map(mode =>
+        runMode(mode).catch(error => {
+          if (error && typeof error === 'object' && Object.isExtensible(error)) {
+            Object.defineProperty(error, 'ownedSettlementScenario', {
+              value: { mode, ...phases.get(mode) }, enumerable: true,
+            });
+          }
+          throw error;
+        })));
       for (const outcome of outcomes) {
         if (outcome.status === 'rejected') throw outcome.reason;
       }

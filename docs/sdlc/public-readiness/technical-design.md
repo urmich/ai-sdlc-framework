@@ -1540,6 +1540,16 @@ rejection placeholder. Do not expose the rejected original text or change its
 failure outcome. Render/upload the retained output
 after failed producers too, with interruption limitations explicit.
 
+Rejected failure text additionally retains only closed Node failure codes/types
+and available owned-settlement mode/phase/rounded elapsed facts. Inspect at most
+three error/cause objects, retain at most one fact for each of the six declared
+modes, and exclude arbitrary messages, field values and oversized assertion
+arrays. The TOOL02 fixture attaches its observed mode/phase to the original
+error before rethrowing, including cleanup failures, without replacing that
+error. Retain the original message digest, rejection cause, incomplete evidence
+and Failed outcome. These facts diagnose an execution; they neither explain the
+historical Intel failure nor change process ownership, assertions or deadlines.
+
 Windows owned-process capture emits a closed startup marker before opening the
 native process identity. Its unchanged five-second first-record deadline retains
 only the observed marker phase, exit/code/allowlisted signal and capped stdout
