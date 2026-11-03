@@ -499,16 +499,19 @@ Historical v2-v8 identities and captured-source replay remain unchanged.
 It does not cache cold Go builds, prune lifecycle/failure probes or alter assertions.
 
 The PR workflow uses five Linux read-only allocation coordinators under
-`arm-regression-allocation-v7-bounded-queue-wait`. After ARM's own unit barrier,
-`mac-admission` observes its three long body workers before releasing Intel's
-body-0 producer, still behind both Intel unit jobs. The
-`intel-retained-admission` coordinator observes that actual worker before
-releasing ARM's separate short refresh, which retains its own ARM unit barrier.
+`arm-regression-allocation-v8-own-platform-critical`. All three Intel critical
+bodies become eligible after both Intel unit jobs, independently of queued
+ARM body or refresh allocations. This removes coordination-only cross-platform
+request blocking, not either platform's own complete unit barrier. After ARM's
+own unit barrier, `mac-admission` observes its three long body workers. The
+`intel-retained-admission` coordinator observes Intel's actual body-0 worker before
+releasing ARM's separate short refresh together with `mac-admission`; refresh
+retains its own ARM unit barrier and both allocation prerequisites.
 The coordinator retains its historical job/artifact identifier, while its
 current closed `intel-primary-body` group requires body-0 allocation.
-Then `arm-refresh-admission` observes the refresh worker before Intel body-1
-and body-2 become eligible, retaining both Intel unit jobs and no Homebrew
-dependency. ARM's genuine Homebrew producer retains its initial schedule.
+`arm-refresh-admission` still observes the refresh worker and is required for
+producer completeness, but no longer gates independent Intel critical requests.
+ARM's genuine Homebrew producer retains its initial schedule.
 The existing `intel-homebrew-admission` coordinator now observes allocation
 of all three Intel bodies through the closed `intel-bodies` group before
 releasing Intel's genuine Homebrew producer. This lets eligible critical bodies
@@ -522,17 +525,17 @@ started step is required. Completed allocated parts also satisfy admission; no s
 waits for its allocated parts to finish. Each helper invocation selects only
 the closed `arm-bodies`, `intel-primary-body`, `arm-refresh`,
 `intel-homebrew` or `intel-bodies` group. The historical `arm-regressions`
-group remains the default for existing callers. Current v7 and historical v5-v6
+group remains the default for existing callers. Current v8 and historical v5-v7
 use `intel-primary-body`; historical v4 retains `intel-retained-body` and its
 original body-1 receipt semantics. Preserve v5's original Homebrew-allocation
 dependency only as historical v5, never relabel it as current v6.
-Retain the exact historical v1-v6 resource graphs and unmarked native v1-v4 replay rather than
+Retain the exact historical v1-v7 resource graphs and unmarked native v1-v4 replay rather than
 silently adopting new dependencies.
 No coordinator occupies a Mac VM while waiting or adds a native producer
 part. The policy does not change the twenty-five-part assertion union,
-architecture coverage, resource allowances or native command watchdogs. V7
-retains v6's dependency graph but gives each allocation observer twenty minutes
-instead of eight, with five-second polling and a twenty-two-minute coordinator
+architecture coverage, resource allowances or native command watchdogs. V8
+retains v7's twenty-minute allocation observation budget,
+with five-second polling and a twenty-two-minute coordinator
 job watchdog for setup and receipt retention. The previous eight-minute cutoff
 failed before the measured eleven-minute provider allocation and suppressed
 mandatory downstream roles. This observation budget is not a delivery limit:
@@ -1531,7 +1534,10 @@ NotRun totals, raw skip/cancellation diagnostics, per-test success/failure lists
 and links to job/step logs and the complete sanitized readable/machine reports.
 PR check/status details link to the matching run. Emit escaped `::error`
 annotations for failures where a real source location is available; ordinary
-runner logs retain the assertion diagnostics. Render/upload the retained output
+runner logs retain the assertion diagnostics. Include the protected evaluation's
+required assertion identity even when diagnostic text was replaced by a retention
+rejection placeholder. Do not expose the rejected original text or change its
+failure outcome. Render/upload the retained output
 after failed producers too, with interruption limitations explicit.
 
 GitHub renders Markdown summaries, not arbitrary result JSON automatically.

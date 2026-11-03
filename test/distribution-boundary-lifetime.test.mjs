@@ -270,8 +270,9 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
           return;
         }
         if (mode === 'root-exit') {
+          const exitDeadline = performance.now() + 5000;
           while (child.exitCode === null) {
-            assert.ok(performance.now() < deadline, 'Owned root must exit before cancellation');
+            assert.ok(performance.now() < exitDeadline, 'Owned root must exit before cancellation');
             await delay(10);
           }
           assert.equal(child.exitCode, 23);

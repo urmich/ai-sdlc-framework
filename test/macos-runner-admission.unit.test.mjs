@@ -1,6 +1,10 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
-  "surfaces": [{"coverage": "direct", "paths": ["scripts/macos-runner-admission.mjs"]}]
+  "surfaces": [{"coverage": "direct", "paths": ["scripts/macos-runner-admission.mjs"]}],
+  "groups": [
+    {"root": "T-MACADM018 queued ARM allocation cannot suppress own-unit-ready Intel critical requests", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-MACADM009 Linux admission preserves all twenty-five native identities barriers pins limits and critical budget", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}
+  ]
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -229,6 +233,42 @@ test('T-MACADM017 delayed provider allocation remains observable without waiving
   }
 });
 
+// PR-only: native-validation maintainer; Node-only, isolated read-only workflow and synthetic metadata.
+test('T-MACADM018 queued ARM allocation cannot suppress own-unit-ready Intel critical requests', async () => {
+  const contents = await fs.readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const ci = parseWorkflow({ file: '.github/workflows/ci.yml', contents });
+  const results = new Map([['intent', 'success'], ['source', 'success'], ['native-units-mi', 'success']]);
+  const eligible = key => ci.jobs[key].needs.every(dep => results.get(dep) === 'success');
+  const arm = evaluateMacAdmission(observation(jobs()), { ...expected, group: 'arm-bodies' });
+  assert.equal(arm.admitted, false, 'Queued timestamp placeholders remain unverified allocation');
+  for (const key of ['native-mi-retained', 'native-mi', 'intel-retained-admission',
+    'intel-admission', 'intel-homebrew-admission']) {
+    assert.equal(eligible(key), true, `${key} must not wait for queued ARM bodies or refresh`);
+    for (const unitResult of ['failure', undefined]) {
+      results.set('native-units-mi', unitResult);
+      assert.equal(eligible(key), false, `${key} must require the complete successful Intel unit matrix`);
+    }
+    results.set('native-units-mi', 'success');
+  }
+  assert.equal(ci.jobs['native-units-mi'].strategy.matrix.include.length, 2);
+  assert.equal(eligible('native-homebrew-mi'), false);
+  assert.equal(eligible('native-mi-refresh'), false);
+  const intel = [0, 1, 2].map(index => ({ ...jobs()[0], id: 50 + index,
+    name: `native-macos-x64-framework-body-${index}` }));
+  const allocated = () => evaluateMacAdmission(observation(intel), { ...expected, group: 'intel-bodies' });
+  assert.equal(allocated().admitted, false);
+  for (const record of intel) Object.assign(record, { status: 'in_progress', runner_name: 'synthetic-intel' });
+  assert.equal(allocated().admitted, true, 'Actual allocation, not ARM completion, releases opportunistic work');
+  results.set('intel-admission', 'success');
+  results.set('intel-homebrew-admission', 'success');
+  assert.equal(eligible('native-homebrew-mi'), true);
+  assert.equal(eligible('native-mi-refresh'), true);
+  for (const key of ['native-ma-refresh', 'arm-refresh-admission']) {
+    assert.ok(ci.jobs[key].needs.includes('mac-admission'), 'ARM bodies must still precede short ARM refresh');
+    assert.ok(ci.jobs[key].needs.includes('native-units-ma'));
+  }
+});
+
 test('T-MACADM009 Linux admission preserves all twenty-five native identities barriers pins limits and critical budget', async () => {
   const contents = await fs.readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
   const ci = parseWorkflow({ file: '.github/workflows/ci.yml', contents });
@@ -294,7 +334,7 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   advance();
   assert.equal(trace.find(row => /^native-macos-x64-framework-body-/u.test(row.name))?.name,
     'native-macos-x64-framework-body-0',
-    'The measured critical body must receive the first Intel allocation after both unit origins and ARM bodies');
+    'The first declared Intel critical body receives allocation after both own unit origins');
   for (let index = 0; index < 3; index++) {
     completeWorker(`native-macos-arm64-framework-body-${index}`);
     advance();
@@ -315,11 +355,11 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   assert.equal(coordinator.strategy, undefined);
   assert.deepEqual(coordinator.permissions, { actions: 'read', contents: 'read' });
   assert.deepEqual(coordinator.needs, ['intent', 'source', 'native-units-ma']);
-  assert.deepEqual(ci.jobs['native-mi'].needs, ['intent', 'source', 'native-units-mi', 'arm-refresh-admission']);
+  assert.deepEqual(ci.jobs['native-mi'].needs, ['intent', 'source', 'native-units-mi']);
   assert.deepEqual(ci.jobs['native-ma'].needs, ['intent', 'source', 'native-units-ma']);
   assert.deepEqual(ci.jobs['native-units-ma'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-units-mi'].needs, ['intent', 'source']);
-  assert.deepEqual(ci.jobs['intel-admission'].needs, ['intent', 'source', 'native-units-mi', 'arm-refresh-admission']);
+  assert.deepEqual(ci.jobs['intel-admission'].needs, ['intent', 'source', 'native-units-mi']);
   assert.deepEqual(ci.jobs['native-mi-refresh'].needs,
     ['intent', 'source', 'native-units-mi', 'intel-admission']);
   assert.deepEqual(ci.jobs['native-homebrew'].needs, ['intent', 'source']);
@@ -329,10 +369,10 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   assert.deepEqual(ci.jobs['native-ma'].strategy.matrix.include.map(part => part.shard),
     ['body-0', 'body-1', 'body-2']);
   assert.deepEqual(ci.jobs['native-mi-retained'].needs,
-    ['intent', 'source', 'native-units-mi', 'mac-admission']);
+    ['intent', 'source', 'native-units-mi']);
   assert.deepEqual(ci.jobs['native-mi-retained'].strategy.matrix.include.map(part => part.shard), ['body-0']);
   assert.deepEqual(ci.jobs['native-ma-refresh'].needs,
-    ['intent', 'source', 'native-units-ma', 'intel-retained-admission']);
+    ['intent', 'source', 'native-units-ma', 'intel-retained-admission', 'mac-admission']);
   assert.deepEqual(ci.jobs['native-ma-refresh'].strategy.matrix.include.map(part => part.shard), ['refresh']);
   assert.equal(ci.jobs['native-mi-refresh'].strategy.matrix.include.length, 1);
   assert.equal(ci.jobs['native-homebrew'].strategy.matrix.include[0].target, 'macos-arm64');
@@ -346,7 +386,7 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   assert.match(intelGate.steps.find(step => step.name === 'Wait for actual Intel body worker allocation').run,
     /--group intel-bodies --output \.test-data\/intel-admission\.json/u);
   const homebrewGate = ci.jobs['intel-homebrew-admission'];
-  assert.deepEqual(homebrewGate.needs, ['intent', 'source', 'native-units-mi', 'arm-refresh-admission']);
+  assert.deepEqual(homebrewGate.needs, ['intent', 'source', 'native-units-mi']);
   assert.equal(homebrewGate.name, 'Intel Homebrew admission');
   assert.equal(homebrewGate['runs-on'], 'ubuntu-24.04');
   assert.equal(homebrewGate['timeout-minutes'], 22);
@@ -355,8 +395,8 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   assert.match(homebrewGate.steps.find(step => step.name === 'Wait for actual Intel critical body worker allocation').run,
     /--group intel-bodies --output \.test-data\/intel-homebrew-admission\.json/u);
   for (const [key, needs, group] of [
-    ['intel-retained-admission', ['intent', 'source', 'native-units-mi', 'mac-admission'], 'intel-primary-body'],
-    ['arm-refresh-admission', ['intent', 'source', 'native-units-ma', 'intel-retained-admission'], 'arm-refresh'],
+    ['intel-retained-admission', ['intent', 'source', 'native-units-mi'], 'intel-primary-body'],
+    ['arm-refresh-admission', ['intent', 'source', 'native-units-ma', 'intel-retained-admission', 'mac-admission'], 'arm-refresh'],
   ]) {
     const gate = ci.jobs[key];
     assert.deepEqual(gate.needs, needs);

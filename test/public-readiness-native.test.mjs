@@ -4299,11 +4299,16 @@ test('T-PRD018 native failure annotations escape workflow-command injection with
     raw.results[0].status = 'Failed';
     raw.results[0].expectedMet = false;
     raw.results[0].exitCode = 1;
-    raw.results[0].detail = '50% failed\r\n::notice::not another annotation';
+    raw.results[0].detail = 'Failure diagnostic text was rejected; its original identity is preserved. ' +
+      '50% failed\r\n::notice::not another annotation';
     raw.exitCode = 1;
   });
   const annotations = nativeFailureAnnotations(evaluation);
   assert.equal(annotations.length, 1);
+  const failed = evaluation.cases.flatMap(value => value.assertions)
+    .find(assertion => assertion.status === 'Failed');
+  assert.ok(annotations[0].includes(`[assertion ${failed.id}]`),
+    'Native annotations must retain the exact failed assertion identity when diagnostic text is unavailable');
   assert.match(annotations[0], /50%25 failed%0D%0A::notice::/u);
   assert.ok(!/[\r\n]/u.test(annotations[0]));
   assert.equal(evaluation.status, 'Failed');

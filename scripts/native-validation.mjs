@@ -1814,7 +1814,8 @@ export function nativeFailureAnnotations(evaluation) {
     assertion.status === 'Failed' && typeof assertion.selector.file === 'string' &&
     isValidationTestPath(assertion.selector.file)).map(assertion =>
     `::error file=${escape(assertion.selector.file).replaceAll(',', '%2C').replaceAll(':', '%3A')}::` +
-    escape(`${test.testId}: ${assertion.detail || 'Required assertion failed; see retained complete reports.'}`)));
+    escape(`${test.testId}: ${assertion.detail || 'Required assertion failed; see retained complete reports.'} ` +
+      `[assertion ${assertion.id}]`)));
 }
 
 async function definitionInputs(target, profile, component = 'full', shard = null,

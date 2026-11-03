@@ -5,6 +5,8 @@ export const validationDeclarations = {
     {"coverage": "direct", "paths": ["scripts/pr-readiness.mjs", "scripts/github-readiness-host.mjs", "scripts/pr-observer.mjs", "scripts/workflow-policy.mjs", "scripts/native-toolchain.mjs", "scripts/native-homebrew-prefix.mjs"]}
   ],
   "groups": [
+    {"root": "T-PRD020 actual CI schedules twenty-five producer parts behind both Intel unit jobs and distinguishes edited base retargets", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD022 actual workflow graph applies semantic YAML, effective permissions and immutable action policy", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD020 required source safety scans complete committed definitions before native bootstrap", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}
   ]
 };
@@ -1319,7 +1321,7 @@ test('T-PRD022 actual workflow graph applies semantic YAML, effective permission
   const workflows = await readWorkflowPolicySources(repositoryRoot);
   const positive = inspectWorkflowTrust(workflows);
   assert.equal(positive.complete, true, JSON.stringify(positive.blockers));
-  assert.equal(positive.nativeResourcePolicy, 'arm-regression-allocation-v7-bounded-queue-wait');
+  assert.equal(positive.nativeResourcePolicy, 'arm-regression-allocation-v8-own-platform-critical');
   const producer = positive.workflows.find(item => item.file === '.github/workflows/ci.yml');
   assert.deepEqual(producer.document.permissions, { contents: 'read' });
   assert.deepEqual(producer.jobs.find(job => job.id === 'mac-admission').effectivePermissions,
@@ -1708,6 +1710,7 @@ test('T-PRD020 required source safety scans complete committed definitions befor
   assert.equal(viewDiagnostic.includes(encodedUsername), false, 'Encoded query credentials must not leak into diagnostics');
 });
 
+// PR-only: native-validation maintainer; owned Node/source fixtures, no new capability or critical membership.
 test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel unit jobs and distinguishes edited base retargets', async t => {
   const workflows = await readWorkflowPolicySources(repositoryRoot);
   const result = inspectWorkflowTrust(workflows);
@@ -1723,8 +1726,19 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.deepEqual(ci.jobs.native.needs, ['intent', 'source', 'native-units']);
   assert.deepEqual(ci.jobs['native-units'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-homebrew'].needs, ['intent', 'source']);
-  assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v7-bounded-queue-wait');
-  const historicalV6 = structuredClone(ci);
+  assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v8-own-platform-critical');
+  const historicalV7 = structuredClone(ci);
+  historicalV7.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v7-bounded-queue-wait';
+  for (const key of ['native-mi-retained', 'intel-retained-admission']) {
+    historicalV7.jobs[key].needs.push('mac-admission');
+  }
+  for (const key of ['native-mi', 'intel-admission', 'intel-homebrew-admission']) {
+    historicalV7.jobs[key].needs.push('arm-refresh-admission');
+  }
+  for (const key of ['native-ma-refresh', 'arm-refresh-admission']) {
+    historicalV7.jobs[key].needs = historicalV7.jobs[key].needs.filter(dep => dep !== 'mac-admission');
+  }
+  const historicalV6 = structuredClone(historicalV7);
   historicalV6.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v6-all-critical-bodies-first';
   const admissionKeys = ['mac-admission', 'intel-admission', 'intel-homebrew-admission',
     'intel-retained-admission', 'arm-refresh-admission'];
@@ -1749,6 +1763,13 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   const inspectDocument = document => inspectWorkflowTrust(workflows.map(workflow =>
     workflow.file === '.github/workflows/ci.yml' ? { ...workflow, contents: Object.entries(document)
       .map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n' } : workflow));
+  assert.equal(inspectDocument(historicalV7).complete, true, 'Historical v7 keeps its actual cross-platform graph');
+  const relabeledV7 = structuredClone(historicalV7);
+  relabeledV7.env.SDLC_MAC_ADMISSION_POLICY = ci.env.SDLC_MAC_ADMISSION_POLICY;
+  assert.equal(inspectDocument(relabeledV7).complete, false, 'Old v7 dependencies are not current v8 semantics');
+  const mislabeledV8 = structuredClone(ci);
+  mislabeledV8.env.SDLC_MAC_ADMISSION_POLICY = historicalV7.env.SDLC_MAC_ADMISSION_POLICY;
+  assert.equal(inspectDocument(mislabeledV8).complete, false, 'New v8 graph cannot borrow an old v7 identity');
   assert.equal(result.nativeProtocol, nativeFrameworkShardProtocol);
   for (const marker of ['native-framework-shards-v6', 'native-framework-shards-v4-split-intel-units', false]) {
     const changed = structuredClone(ci);
@@ -1780,19 +1801,19 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     'An old retained-body allocation cannot be relabeled as a current primary-body allocation');
   assert.deepEqual(ci.jobs['mac-admission'].needs, ['intent', 'source', 'native-units-ma']);
   assert.deepEqual(ci.jobs['native-ma'].needs, ['intent', 'source', 'native-units-ma']);
-  assert.deepEqual(ci.jobs['native-mi'].needs, ['intent', 'source', 'native-units-mi', 'arm-refresh-admission']);
+  assert.deepEqual(ci.jobs['native-mi'].needs, ['intent', 'source', 'native-units-mi']);
   assert.deepEqual(ci.jobs['native-units-ma'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-units-mi'].needs, ['intent', 'source']);
-  assert.deepEqual(ci.jobs['intel-admission'].needs, ['intent', 'source', 'native-units-mi', 'arm-refresh-admission']);
+  assert.deepEqual(ci.jobs['intel-admission'].needs, ['intent', 'source', 'native-units-mi']);
   assert.deepEqual(ci.jobs['native-mi-refresh'].needs,
     ['intent', 'source', 'native-units-mi', 'intel-admission']);
   assert.deepEqual(ci.jobs['intel-homebrew-admission'].needs,
-    ['intent', 'source', 'native-units-mi', 'arm-refresh-admission']);
+    ['intent', 'source', 'native-units-mi']);
   assert.deepEqual(ci.jobs['native-homebrew-mi'].needs, ['intent', 'source', 'intel-homebrew-admission']);
-  assert.deepEqual(ci.jobs['native-mi-retained'].needs, ['intent', 'source', 'native-units-mi', 'mac-admission']);
-  assert.deepEqual(ci.jobs['native-ma-refresh'].needs, ['intent', 'source', 'native-units-ma', 'intel-retained-admission']);
-  assert.deepEqual(ci.jobs['intel-retained-admission'].needs, ['intent', 'source', 'native-units-mi', 'mac-admission']);
-  assert.deepEqual(ci.jobs['arm-refresh-admission'].needs, ['intent', 'source', 'native-units-ma', 'intel-retained-admission']);
+  assert.deepEqual(ci.jobs['native-mi-retained'].needs, ['intent', 'source', 'native-units-mi']);
+  assert.deepEqual(ci.jobs['native-ma-refresh'].needs, ['intent', 'source', 'native-units-ma', 'intel-retained-admission', 'mac-admission']);
+  assert.deepEqual(ci.jobs['intel-retained-admission'].needs, ['intent', 'source', 'native-units-mi']);
+  assert.deepEqual(ci.jobs['arm-refresh-admission'].needs, ['intent', 'source', 'native-units-ma', 'intel-retained-admission', 'mac-admission']);
   assert.deepEqual(ci.jobs['native-mi'].strategy.matrix.include.map(row => row.shard),
     ['body-1', 'body-2']);
   assert.deepEqual(ci.jobs['native-ma'].strategy.matrix.include.map(row => row.shard),
@@ -1875,11 +1896,9 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     const part = ci.jobs[key].strategy.matrix.include[0];
     assert.deepEqual(ci.jobs[key].needs, ['intent', 'source',
       ...(part.shard && part.shard !== 'units' ? [nativePartJobKey({ ...part, shard: 'units' })] : []),
-      ...(key === 'native-mi' ? ['arm-refresh-admission'] : []),
       ...(key === 'native-mi-refresh' ? ['intel-admission'] : []),
       ...(key === 'native-homebrew-mi' ? ['intel-homebrew-admission'] : []),
-      ...(key === 'native-mi-retained' ? ['mac-admission'] : []),
-      ...(key === 'native-ma-refresh' ? ['intel-retained-admission'] : [])]);
+      ...(key === 'native-ma-refresh' ? ['intel-retained-admission', 'mac-admission'] : [])]);
     if (part.shard === 'units') {
       assert.equal(ci.jobs[key].strategy.matrix.include.length, part.target === 'macos-x64' ? 2 : 1);
       assert.ok(ci.jobs[key].strategy.matrix.include.every(row =>
@@ -1969,7 +1988,16 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
       doc => { doc.jobs[key]['timeout-minutes'] = minutes; },
       'MAC_ADMISSION_POLICY_DIFFERS',
     ])),
-    ['missing Intel admission edge', doc => { doc.jobs['native-mi'].needs.pop(); }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
+    ['missing Intel own units edge', doc => { doc.jobs['native-mi'].needs.pop(); }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
+    ['Intel critical bodies regain an ARM allocation wait', doc => {
+      doc.jobs['native-mi'].needs.push('arm-refresh-admission');
+    }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
+    ['Intel primary body regains an ARM allocation wait', doc => {
+      doc.jobs['native-mi-retained'].needs.push('mac-admission');
+    }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
+    ['ARM refresh loses its own critical-body priority', doc => {
+      doc.jobs['native-ma-refresh'].needs.pop();
+    }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
     ['missing Intel own unit barrier', doc => {
       doc.jobs['native-mi'].needs = ['intent', 'source', 'mac-admission'];
     }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
@@ -2066,7 +2094,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     ['Intel admission loses own unit barrier', doc => {
       doc.jobs['intel-admission'].needs = ['intent', 'source', 'mac-admission'];
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
-    ['Intel admission loses ARM admission', doc => {
+    ['Intel admission loses its complete own unit barrier', doc => {
       doc.jobs['intel-admission'].needs.pop();
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
     ['Intel admission waits on Mac runner', doc => {

@@ -541,7 +541,11 @@ before assertions. The real-kernel root reserves four aggregate slots for its
 test worker, owned root, descendant writer and unrelated sibling; host worker
 limits and the one-second settlement bound remain unchanged.
 The separate TOOL02 controlled Windows settlement root retains all six modes
-under its twenty-second ceiling. Admit at most two independent VM/root/writer
+under its twenty-second ceiling. Its pre-cancellation root-exit observation
+has a separate five-second window after writer/peer readiness; preparation
+cannot consume that observation window. Preserve native ownership/drain checks,
+the cancellation settlement assertion and the one-second production stop budget.
+Admit at most two independent VM/root/writer
 scopes together and declare five slots for the test process plus their four
 children. Require both first-pair provenance announcements before release;
 serial-execution mutation must fail this bounded overlap check. Drain every
@@ -999,6 +1003,14 @@ a Test Design/review responsibility.
 | T-PRD013 | local | integration | post-review | automated | provider | github-pr-matrix | FR-202; AC-202.4 | F: compare pre/post assertion and stress-limit inventories; actual lock/durability/retention/cleanup behavior remains real; missing cases, cheaper substituted mocks or reduced exhaustion boundaries fail the contract. | test/public-readiness-inventory.test.mjs#T-PRD013 fingerprint/stress assertions plus explicit cross-file original storage and retention selectors in section 3.1.1 | NotRun | |
 
 ### 5.2 Complete PR coverage, trust and provider enforcement
+
+The maintainer-owned, PR-only `T-PRD018 native failure annotations escape
+workflow-command injection without changing the underlying failure` root also
+requires the exact failed assertion identity when the retained diagnostic is a
+rejection placeholder. Keep workflow-command escaping and the original Failed
+outcome; never emit rejected original text. This Node-only isolated root retains
+its existing four-platform applicability and introduces no dependencies, shared
+resources, worker increase or critical-profile membership.
 
 | ID | Environment | Level | Checkpoint | Mode | Owner | Location | Requirements | Observe or assert | Implementation | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1485,17 +1497,24 @@ the original subset. A new legitimate test must not erase preservation checks.
    They require Node and owned local files on the existing native lanes, add no
    critical-profile assertion, and prove neither actual native overlap nor a
    latency improvement. Fresh complete hosted measurements remain required.
+   Under `arm-regression-allocation-v8-own-platform-critical`, require all three
+   Intel critical bodies and their allocation observers to become eligible
+   after both successful Intel unit jobs without waiting for queued ARM bodies
+   or refresh. T-MACADM018 covers this boundary, failed/missing own-unit
+   prerequisites, actual allocation and preserved opportunistic-work priority.
+   It is PR-only, Node-only and network-free; the native-validation maintainer
+   owns its isolated complete root and synthetic read-only metadata, with no
+   shared resources, new capacity or critical-profile membership.
    Require the Linux `mac-admission` coordinator to observe all three long ARM
-   body workers in the exact repository/run/attempt/head context before Intel's
-   body-0 producer dispatches under
-   `arm-regression-allocation-v7-bounded-queue-wait`, still behind both Intel unit jobs.
+   body workers in the exact repository/run/attempt/head context before ARM's
+   short refresh dispatches.
    Require `intel-retained-admission` to observe that actual worker before
    ARM's separate short refresh dispatches, retaining its own ARM unit barrier.
    Its historical job/artifact identifier remains, but current
    `intel-primary-body` receipts must identify body-0, not a relabelled body-1.
-   Require `arm-refresh-admission` to observe that refresh worker before Intel
-   body-1 and body-2 become eligible, independently of Homebrew and retaining
-   both Intel units. Keep ARM genuine Homebrew initial.
+   Require `arm-refresh-admission` to observe that refresh worker for producer
+   completeness without gating independent Intel critical bodies. Keep ARM
+   genuine Homebrew initial.
    Require the existing `intel-homebrew-admission` coordinator to select the
    closed `intel-bodies` group and observe actual allocation of all three Intel
    bodies before Intel Homebrew dispatch. The new T-MACADM016 regression must
@@ -1512,7 +1531,7 @@ the original subset. A new legitimate test must not erase preservation checks.
    without allocation. Admission must not wait for allocated ARM parts to
    complete, consume a waiting Mac VM, add a native part or supply passing
    assertion credit. Exercise bounded timeout/cancellation without a passing
-   fallback. V7 retains v6's dependency graph and uses a twenty-minute allocation
+   fallback. V8 retains v7's twenty-minute allocation
    observation budget, five-second polling and twenty-two-minute coordinator
    watchdogs. Keep historical v1-v6's original ten-minute watchdogs authentic.
    The PR-only T-MACADM017 regression uses a private injected clock and synthetic
@@ -1530,7 +1549,8 @@ the original subset. A new legitimate test must not erase preservation checks.
    alongside the existing split Intel refresh/Homebrew bindings. Reject stale
    aliases. Preserve v4's original `intel-retained-body`/body-1 receipt semantics;
    retain v5's original Homebrew-first dependencies only as v5 and reject a
-   label-only or hybrid v5-to-v6 substitution. Replay the exact v1-v5
+   label-only or hybrid v5-to-v6 substitution. Reject either v7/v8 graph under
+   the other protocol's label. Replay the exact v1-v7
    resource graphs and unmarked historical
    native graphs without borrowing new dependency or origin proof.
    Configured priority is only a lead; provider allocation gaps remain in the

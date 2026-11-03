@@ -12,7 +12,7 @@ permissions:
 
 env:
   SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL: native-framework-shards-v5-root-components
-  SDLC_MAC_ADMISSION_POLICY: arm-regression-allocation-v7-bounded-queue-wait
+  SDLC_MAC_ADMISSION_POLICY: arm-regression-allocation-v8-own-platform-critical
   # Representative public regression input, not an installer version-support whitelist.
   SUPPORTED_PREVIOUS_REPOSITORY: urmich/ai-sdlc-framework
   SUPPORTED_PREVIOUS_VERSION: '0.3.1'
@@ -1085,7 +1085,7 @@ jobs:
           retention-days: 90
 
   native-mi-retained:
-    needs: [intent, source, native-units-mi, mac-admission]
+    needs: [intent, source, native-units-mi]
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
     name: native-${{ matrix.role }}
     strategy:
@@ -1189,7 +1189,7 @@ jobs:
           retention-days: 90
 
   native-ma-refresh:
-    needs: [intent, source, native-units-ma, intel-retained-admission]
+    needs: [intent, source, native-units-ma, intel-retained-admission, mac-admission]
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
     name: native-${{ matrix.role }}
     strategy:
@@ -1293,7 +1293,7 @@ jobs:
           retention-days: 90
 
   intel-retained-admission:
-    needs: [intent, source, native-units-mi, mac-admission]
+    needs: [intent, source, native-units-mi]
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
     name: Intel retained admission
     runs-on: ubuntu-24.04
@@ -1338,7 +1338,7 @@ jobs:
           retention-days: 90
 
   arm-refresh-admission:
-    needs: [intent, source, native-units-ma, intel-retained-admission]
+    needs: [intent, source, native-units-ma, intel-retained-admission, mac-admission]
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
     name: ARM refresh admission
     runs-on: ubuntu-24.04
@@ -1432,7 +1432,7 @@ jobs:
           retention-days: 90
 
   native-mi:
-    needs: [intent, source, native-units-mi, arm-refresh-admission]
+    needs: [intent, source, native-units-mi]
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
     name: native-${{ matrix.role }}
     strategy:
@@ -1537,7 +1537,7 @@ jobs:
           retention-days: 90
 
   intel-admission:
-    needs: [intent, source, native-units-mi, arm-refresh-admission]
+    needs: [intent, source, native-units-mi]
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
     name: Intel body admission
     runs-on: ubuntu-24.04
@@ -1586,7 +1586,7 @@ jobs:
           retention-days: 90
 
   intel-homebrew-admission:
-    needs: [intent, source, native-units-mi, arm-refresh-admission]
+    needs: [intent, source, native-units-mi]
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
     name: Intel Homebrew admission
     runs-on: ubuntu-24.04

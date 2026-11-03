@@ -191,7 +191,7 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
   if (['arm-regression-allocation-v1', 'arm-regression-allocation-v2-priority-intel-bodies',
     'arm-regression-allocation-v3-intel-homebrew-first', 'arm-regression-allocation-v4-retained-first',
     'arm-regression-allocation-v5-critical-body-first', 'arm-regression-allocation-v6-all-critical-bodies-first',
-    'arm-regression-allocation-v7-bounded-queue-wait']
+    'arm-regression-allocation-v7-bounded-queue-wait', 'arm-regression-allocation-v8-own-platform-critical']
     .includes(workflow.env?.SDLC_MAC_ADMISSION_POLICY) && admissionHelper !== 'missing') {
     const macAdmissionHelper = readFileSync(
       new URL('../scripts/macos-runner-admission.mjs', import.meta.url), 'utf8');
