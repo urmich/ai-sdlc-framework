@@ -352,15 +352,16 @@ function summarizeValue(value, cache) {
     [key, sensitiveKey.test(key) ?
       (typeof item === 'string' && redactedValue.test(item) ?
         item : `[redacted:${digest(item === undefined ? 'undefined' : item)}]`) :
-      summarizeValue(item, cache)]));
+      cache.shallowObjects ? item : summarizeValue(item, cache)]));
 }
 export function safeSummary(value) {
   if (typeof value === 'string') return richSummaryText.test(value) ? safeSummaryText(value) : value;
   if (!value || typeof value !== 'object') return value;
   return summarizeValue(value, { texts: new Map(), bytes: 0 });
 }
-export function createSummarySanitizer() {
-  const cache = { texts: new Map(), bytes: 0 };
+// Shallow object summaries require children already fully sanitized by the caller.
+export function createSummarySanitizer({ shallowObjects = false } = {}) {
+  const cache = { texts: new Map(), bytes: 0, shallowObjects };
   return value => summarizeValue(value, cache);
 }
 export function shellArgument(value) {

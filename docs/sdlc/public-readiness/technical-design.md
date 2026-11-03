@@ -340,6 +340,15 @@ fast path and every redaction rule, and never cache objects, evidence or current
 eligibility. Retained-payload node, depth, byte and decoded-work budgets still run
 independently. The PR-only regression observes actual parsing work and checks
 fresh calls, sensitive keys, high-cardinality input and oversized-text fallback.
+Retained-payload object children are already fully sanitized before their own
+summary-key redaction. Use the same summary rules in shallow-object mode at that
+boundary instead of recursively summarizing each completed subtree again for
+every ancestor. Keep ordinary summary callers deep by default, both payload
+sanitization and retained-output validation passes, exact redaction digests and
+all structure, depth, byte and decoded-work guards. Reuse no object result,
+verification outcome or previous invocation. The PR-only regression observes
+constant per-object visits across nested objects/arrays and compares exact
+legacy redaction, fresh-input rejection and capacity boundaries.
 ASCII alphanumeric/space-only values cannot match the existing scalar text
 redaction markers, so return them unchanged before rich-text scans or text-map
 lookup. Sensitive object keys still redact their values first. Punctuation,

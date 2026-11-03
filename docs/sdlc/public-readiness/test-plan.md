@@ -719,6 +719,17 @@ sanitization when the temporary reuse budget is exhausted.
 The literal-text regression checks scanner bypass only for ASCII letters,
 digits and spaces; sensitive-key redaction, rich-text fallback and the original
 payload byte limit remain enforced.
+The maintainer-owned PR-only root `T-PRD037 retained object children are sanitized
+once without changing legacy redaction or admission guards` in
+`test/validation-evidence.unit.test.mjs` observes actual per-object traversal
+through nested objects and arrays. Both payload passes remain; completed
+children must not be re-summarized per ancestor. Require exact legacy digests
+for core-only and payload-only sensitive keys, embedded JSON and mixed-case
+redaction markers; retain deep ordinary summaries, fresh mutation rejection,
+assertion-proof rejection and independent node/depth/byte bounds. This is a
+process-isolated Node-only root on all four existing native lanes. Its
+`Object.entries` instrumentation is restored locally; it adds no critical
+assertion, dependency or shared external resource.
 The existing PR-only root `referenced assertion preparation overlaps within its
 shared serialized reservation and preserves ordered authority` in
 `test/public-readiness-evidence.test.mjs` includes a controlled initial proof-read

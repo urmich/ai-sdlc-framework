@@ -2,6 +2,12 @@ export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [{"coverage": "direct", "paths": ["src/validation-evidence.mjs", "src/validation-readiness.mjs", "src/core.mjs", "src/store.mjs"]}],
   "applicability": [{
+    "names": ["T-PRD037 retained object children are sanitized once without changing legacy redaction or admission guards"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "maintainer",
+    "reason": "PR-only AC-207.5 and AC-213.7 regression: observe actual nested object traversal and exact legacy redaction/digests, fresh mutable-input rejection and independent sanitizer bounds. One independent process-isolated root patches Object.entries with t.mock; no shared resources, network, tools, dependencies or critical promotion.",
+    "prerequisites": ["Node"]
+  }, {
     "names": ["T-PRD037 fresh readiness validation reuses only its own canonical input and retains every data guard"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "evidence-validation",
@@ -359,6 +365,105 @@ test('T-PRD037 fresh readiness validation reuses only its own canonical input an
   let deep = initial;
   for (let index = 0; index < 34; index++) deep = { detail: deep };
   assert.throws(() => validateReadinessData(deep), { code: 'CAPACITY' });
+});
+
+test('T-PRD037 retained object children are sanitized once without changing legacy redaction or admission guards', t => {
+  const mixed = `[ReDaCtEd:${'AB'.repeat(32)}]`;
+  const source = {
+    nested: [{
+      prompt: { visible: 'fixture-private-value', Cookie: 'fixture-private-value' },
+      rawPrompt: 'fixture-private-value',
+      providerPayload: ['fixture-private-value', { password: 'fixture-private-value' }],
+      headers: { Cookie: 'fixture-private-value', public: 'visible' },
+      env: { SERVICE_AUTH_TOKEN: 'fixture-private-value', count: 2 },
+      marked: { prompt: mixed, rawPrompt: '[redacted]', SERVICE_AUTH_TOKEN: mixed },
+      log: `capture ${JSON.stringify({
+        prompt: 'fixture-private-value', AWS_SECRET_ACCESS_KEY: 'fixture-private-value',
+        visible: [mixed, { detail: 'ordinary diagnostic' }],
+      })} end`,
+    }],
+    visible: [['ordinary diagnostic', { count: 1 }]],
+  };
+  const expected = {
+    nested: [{
+      prompt: '[redacted:044e4e42416028bedafab9f86967b19b877ee1ff4a0463ff3b614d8964a5bc15]',
+      rawPrompt: '[redacted:7d247bee84ae89e2adfc245dd4e22ddbd3965b2cf78fc6eb823114a7c8895154]',
+      providerPayload: '[redacted:e806696ab2acf0d77af3794457e7122ee788be25fe5a654dc3099d20e69c519b]',
+      headers: '[redacted:cd3dbd326c73d49003cce077c87679a426b9892811214ac3f60331f780470bbe]',
+      env: {
+        SERVICE_AUTH_TOKEN: '[redacted:7d247bee84ae89e2adfc245dd4e22ddbd3965b2cf78fc6eb823114a7c8895154]',
+        count: 2,
+      },
+      marked: {
+        prompt: mixed, rawPrompt: '[redacted]',
+        SERVICE_AUTH_TOKEN: '[redacted:e10a5d64a47d873df1c2eb8bfe095473d68bdcdb9f3ad15f8f0d34725f4beae7]',
+      },
+      log: 'capture {"prompt":"[redacted:7d247bee84ae89e2adfc245dd4e22ddbd3965b2cf78fc6eb823114a7c8895154]",' +
+        '"AWS_SECRET_ACCESS_KEY":"[redacted:7d247bee84ae89e2adfc245dd4e22ddbd3965b2cf78fc6eb823114a7c8895154]",' +
+        `"visible":["${mixed}",{"detail":"ordinary diagnostic"}]} end`,
+    }],
+    visible: [['ordinary diagnostic', { count: 1 }]],
+  };
+  const original = JSON.stringify(source);
+  assert.deepEqual(sanitizeExecutionPayload(Buffer.from(original)), expected);
+  assert.equal(JSON.stringify(source), original, 'Sanitization must not mutate the caller');
+  assert.equal(validateReadinessData(expected), expected);
+  assert.throws(() => validateReadinessData(source), { code: 'UNSAFE' });
+  assert.throws(() => validateRetainedPayload(source), { code: 'UNSAFE' });
+  assert.throws(() => sanitizeExecutionPayload(Buffer.from(JSON.stringify({
+    cases: [{ testId: 'T-owned-fixture', status: 'Passed',
+      assertions: [{ name: 'capture {"prompt":"fixture-private-value"} end', passed: true }] }],
+  }))), { code: 'UNSAFE' }, 'Sensitive assertion proof must reject, not become passing evidence');
+  const summarize = createSummarySanitizer();
+  for (const summary of [safeSummary, summarize]) {
+    assert.deepEqual(summary({ visible: [{ prompt: 'fixture-private-value' }] }), {
+      visible: [{ prompt: '[redacted:7d247bee84ae89e2adfc245dd4e22ddbd3965b2cf78fc6eb823114a7c8895154]' }],
+    }, 'Ordinary summary callers must retain deep traversal');
+  }
+
+  const leaf = { traversalSentinel: 'leaf', detail: 'ordinary diagnostic' };
+  const branch = { traversalSentinel: 'branch', leaf,
+    arrays: [{ traversalSentinel: 'arrayLeaf', detail: 'ordinary diagnostic' },
+      [{ traversalSentinel: 'deepArrayLeaf', detail: 'ordinary diagnostic' }]] };
+  const tree = { traversalSentinel: 'root', branch };
+  const expectedTree = structuredClone(tree);
+  const entries = Object.entries;
+  const visits = { root: 0, branch: 0, leaf: 0, arrayLeaf: 0, deepArrayLeaf: 0 };
+  const observer = t.mock.method(Object, 'entries', function (value) {
+    const result = Reflect.apply(entries, this, [value]);
+    const sentinel = result.find(([key]) => key === 'traversalSentinel')?.[1];
+    if (Object.hasOwn(visits, sentinel)) visits[sentinel]++;
+    return result;
+  });
+  try {
+    assert.deepEqual(sanitizeExecutionPayload(Buffer.from(JSON.stringify(tree))), expectedTree);
+  } finally {
+    observer.mock.restore();
+  }
+  assert.deepEqual(tree, expectedTree);
+  assert.deepEqual(visits, { root: 4, branch: 4, leaf: 4, arrayLeaf: 4, deepArrayLeaf: 4 },
+    'Both sanitization and retained validation visit each object and key summary once, never again per ancestor');
+
+  leaf.detail = 'Cookie: fixture-private-value';
+  assert.throws(() => validateReadinessData(tree), { code: 'UNSAFE' },
+    'A previously safe subtree must be checked afresh after mutation');
+  leaf.detail = 'ordinary diagnostic';
+  assert.equal(validateReadinessData(tree), tree);
+  assert.doesNotThrow(() => validateRetainedPayload(Array(65535).fill(0)));
+  assert.throws(() => validateRetainedPayload(Array(65536).fill(0)), {
+    code: 'CAPACITY', message: 'Retained payload exceeds bounded sanitizer structure or decode depth',
+  });
+  let deep = 'ordinary diagnostic';
+  for (let index = 0; index < 33; index++) deep = { detail: deep };
+  assert.throws(() => validateRetainedPayload(deep), {
+    code: 'CAPACITY', message: 'Retained payload exceeds bounded sanitizer structure or decode depth',
+  });
+  const unicode = { detail: 'é' };
+  const bytes = Buffer.byteLength(JSON.stringify(unicode));
+  assert.equal(validateReadinessData(unicode, bytes), unicode);
+  assert.throws(() => validateReadinessData(unicode, bytes - 1), { code: 'CAPACITY' });
+  assert.throws(() => sanitizeExecutionPayload(Buffer.alloc(LIMITS.artifact + 1, 0x61)),
+    { code: 'CAPACITY' });
 });
 
 test('T-PRD037 markerless payload text retains core redaction without impossible structured scans', t => {

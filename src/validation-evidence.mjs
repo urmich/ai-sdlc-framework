@@ -46,7 +46,7 @@ function redactPayloadValue(value) {
 }
 function payloadSanitizerState() {
   return { nodes: 0, parsedBytes: 0, scannedCharacters: 0,
-    keyClassifications: new Map(), summarize: createSummarySanitizer() };
+    keyClassifications: new Map(), summarize: createSummarySanitizer({ shallowObjects: true }) };
 }
 function checkPayloadWork(state, depth) {
   requireThat(depth <= 32 && ++state.nodes <= 65536, 'CAPACITY',
