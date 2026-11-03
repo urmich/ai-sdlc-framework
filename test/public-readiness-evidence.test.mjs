@@ -477,7 +477,7 @@ test('referenced assertion preparation overlaps within its shared serialized res
   const childRefs = admissions.map(payload => payload.content.assertionPageRefs[0]);
   const childFiles = childRefs.map(ref => validationObjectPath(input.f.store, input.f.workItemId, ref));
   const childBytes = await readFile(childFiles[4]);
-  for (const mode of ['overlap', 'undefined', 'metadata', 'child-payload', 'child-metadata',
+  for (const mode of ['initial-read', 'overlap', 'undefined', 'metadata', 'child-payload', 'child-metadata',
     'cache', 'staged', 'staged-invalid', 'mismatch', 'mismatch-null',
     'projection-invalid', 'alias', 'alias-length', 'reservation']) {
     const records = structuredClone(state.records);
@@ -544,7 +544,10 @@ test('referenced assertion preparation overlaps within its shared serialized res
     const wait = async promise => {
       let timeout;
       try {
-        await Promise.race([promise, new Promise((resolve, reject) => {
+        await Promise.race([promise, replay.then(outcome => {
+          if (outcome.status === 'rejected') throw outcome.reason;
+          throw new Error(`Evidence replay completed before the assertion barrier: ${mode}`);
+        }), new Promise((resolve, reject) => {
           timeout = setTimeout(() => reject(new Error(
             `Assertion barrier not reached: ${mode}, ${opened.join(',')}, ${active} live`)), 5000);
         })]);
@@ -552,6 +555,7 @@ test('referenced assertion preparation overlaps within its shared serialized res
     };
     const open = fsPromises.open;
     const mocked = t.mock.method(fsPromises, 'open', async (file, ...options) => {
+      if (mode === 'initial-read') throw firstError;
       const handle = await open(file, ...options);
       const child = childFiles.indexOf(file);
       const parent = payloadFiles.indexOf(file);
@@ -598,6 +602,14 @@ test('referenced assertion preparation overlaps within its shared serialized res
       () => { settled = true; return { status: 'fulfilled' }; },
       reason => { settled = true; return { status: 'rejected', reason }; });
     try {
+      if (mode === 'initial-read') {
+        await assert.rejects(wait(ready.promise), error => error === firstError);
+        assert.equal(settled, true);
+        assert.equal(active, 0);
+        assert.deepEqual(opened, []);
+        t.diagnostic(`Assertion preparation case passed: ${mode}`);
+        continue;
+      }
       await wait(ready.promise);
       assert.deepEqual([...opened].sort((a, b) => a - b), expected, mode);
       assert.equal(active, expected.length, mode);

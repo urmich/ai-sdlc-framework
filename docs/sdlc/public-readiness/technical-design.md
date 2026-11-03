@@ -396,7 +396,8 @@ observed part results. Require source-, platform-, job-, run- and attempt-bound
 unit evidence before regression shards execute. Independently verify every
 part's SDK context, complete assertion union and allocated-prefix cleanup;
 missing, duplicated, overlapping or swapped parts cannot produce completeness.
-The source-adopted `native-framework-shards-v4-split-intel-units` protocol uses four
+The source-adopted `native-framework-shards-v5-root-components` protocol retains
+v4's four
 explicit platform-specific unit-to-regression job groups. A platform's unit
 producers must all complete successfully, including retention and cleanup, before
 its own regression jobs start. Unrelated unit producers may finish later, but
@@ -408,6 +409,18 @@ execute only on the original `units` producer; `units-1` executes only its
 nonempty extended-unit subset. Both Intel unit jobs share `native-units-mi`'s
 standard runner matrix, each with its own four-worker budget and prefix. No waiting
 regression host is started early merely to overlap provisioning.
+For body placement, derive complete root groups from the existing scheduler,
+then join dependency and shared-exclusive-resource edges transitively. Assign
+whole connected components deterministically by assertion count, group count
+and stable identity to the least-loaded existing body producer. Independent
+roots from one file may execute on different hosts; a root's descendants and
+connected components may not. Body file lists may overlap, but source-bound
+escaped full-name selectors must execute each assigned assertion exactly once.
+Ambiguous selectors fail rather than executing an unassigned closure.
+This changes cross-host assignment only: within-host scheduling policy v9
+remains byte-identical. Verify the workflow's selected protocol against the
+captured native planner and SDK reconstruction; old source cannot be relabelled
+as v5. Keep v4's exact historical file assignments and twenty-five-part topology.
 Preserve the original `native-framework-shards-v1` global-barrier and
 `native-framework-shards-v2-platform-units` twenty-part proof and archive
 semantics, and the `native-framework-shards-v3-four-body-platform-units`
@@ -441,7 +454,7 @@ facts/archive recovery, distribution lifecycle and runner probes, in that order,
 where those files belong to the selected shard, before shorter families.
 Distribution stays ahead of runner probes because its measured long roots are
 longer; this ordering is a lead, not a predicted latency gain.
-File/group selection metadata is unchanged. Parallel admission considers
+Within-host file/group scheduling metadata is unchanged. Parallel admission considers
 declared demand first, so strict actual start order across unequal demands is
 not promised; equal-demand ties retain the input order.
 Preserve the relative retained-identity acceptance, catalog, native
@@ -458,21 +471,22 @@ live observations, separate slots and shared producer/budget checks.
 The catalog's independent long root can use the three remaining ARM slots while
 the retained guard reserves four of the existing seven. Retain the complete
 38-assertion closure, callback ordering/concurrency and every catalog root.
-This changes neither host capacity, shard ownership nor explicit targeted
+The within-host priority policy changes neither host capacity, shard ownership nor explicit targeted
 caller order. Actual overlap and whole-lane improvement require native proof.
 Immediately after PR-description work, admit the measured long
 `public-readiness-native.test.mjs` family before the shorter queued remainder.
-This advances bootstrap validation on its unchanged source-assigned shard;
+This advances bootstrap validation on the shard owning each selected root;
 the bootstrap commands, assertions and resource allowance remain intact.
 Policy v9 adds only this source-adopted file-priority entry and retains v8's
-demand-first admission, declared minima, workloads and shard ownership.
+demand-first admission, declared minima and workloads; it does not itself
+change cross-host ownership.
 Historical v2-v8 identities and captured-source replay remain unchanged.
 It does not cache cold Go builds, prune lifecycle/failure probes or alter assertions.
 
 The PR workflow uses five Linux read-only allocation coordinators under
 `arm-regression-allocation-v7-bounded-queue-wait`. After ARM's own unit barrier,
 `mac-admission` observes its three long body workers before releasing Intel's
-measured critical body-0 producer, still behind both Intel unit jobs. The
+body-0 producer, still behind both Intel unit jobs. The
 `intel-retained-admission` coordinator observes that actual worker before
 releasing ARM's separate short refresh, which retains its own ARM unit barrier.
 The coordinator retains its historical job/artifact identifier, while its
@@ -606,16 +620,16 @@ only setup that has no semantic consumer in the complete selected closure:
 
 | Producer on the current source | Go | CPython runtime | Schema packages | Brew/core/Ruby/owned prefix |
 | --- | --- | --- | --- | --- |
-| Every framework `body-0` | Required | Required | Required | Not required |
-| Linux/Windows `body-1` and `body-2` | Not required | Required | Not required | Not required |
-| Linux/Windows `body-3` | Not required | Not required | Not required | Not required |
-| Both Mac `body-1` and `body-2` | Not required | Required | Not required | Not required |
+| Framework body owning the Go/schema/calculator procedures | Required | Required | Required | Not required |
+| Other framework bodies owning Go-dependent Node roots | Required | Required | Not required | Not required |
+| Remaining current framework bodies | Not required | Required | Not required | Not required |
 | All current unit partitions | Not required | Required | Not required | Not required |
 | Refresh | Not required | Not required | Not required | Not required |
 | Genuine Homebrew on both Mac architectures | Not required | Not required | Not required | Required |
 
-The implementation follows the existing source-selected root closures rather
-than hardcoding body order. The real pinned Go/schema root and native launcher
+Derive these owners from each frozen source-selected root closure, not fixed
+body numbers: protocol v5 can place roots from one file on different hosts.
+The real pinned Go/schema root and native launcher
 roots retain their tests, vet, native executable behavior and two independent
 cold-cache builds. Artifact consumers retain stdlib CPython subprocess readers;
 consumer roots retain the real non-Node producer. Even Intel's main unit partition
@@ -651,8 +665,9 @@ owner, pinned Sigstore inputs and npm 11.16.0 prerequisite; a missing or unknown
 declaration fails closed. Unrecognized verifier/crypto prerequisites retain
 acquisition rather than authorizing omission.
 
-On the current 25-role source inventory, Linux/Windows `body-0` and both Mac
-`body-2` closures require the authentic fixture. The other 21 roles, including
+On the current 25-role source inventory, the one closure owning the authentic
+root on each platform requires the fixture. Derive its body index from the
+selected source plan, not a historical affinity. The other 21 roles, including
 both genuine Homebrew roles, have no semantic consumer of that fixture. V6 alone
 omits their bundle/trust/npm acquisition, install, version probe and setup
 verification, as well as their fixture directories, exported inputs and
@@ -1341,6 +1356,13 @@ Missing/corrupt children remove current credit; they never delete or recreate
 the original observations. Inline and referenced cycles share that rule.
 Fresh-Store regressions cover each missing/corrupt graph class while old
 snapshot/decision/execution bytes remain unchanged.
+
+The referenced-assertion preparation regression observes both its required read
+barrier and the actual replay outcome. An early replay rejection preserves its
+original cause instead of becoming a misleading barrier timeout; successful
+completion before the required barrier fails explicitly. Its five-second
+watchdog, four-handle ceiling, serialized reservation and ordered authority,
+failure-drain, cache and alias checks remain unchanged.
 
 ### 5.5 Sanitization and retention
 

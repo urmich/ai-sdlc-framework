@@ -28,7 +28,7 @@ import { writePayloadFixture, fixtureCanonical, fixtureSHA, fixtureWindowsLaunch
 import { repositoryRoot } from '../scripts/test-runner.mjs';
 import { previousReleasePins } from '../scripts/release-bundle.mjs';
 import { nativePrParts, nativeLegacyPrParts, nativePartJobKey, nativeFrameworkShardPlan,
-  nativeResourceFacts, nativePrPartsForProtocol, nativeFrameworkShardProtocols,
+  nativeResourceFacts, nativePrPartsForProtocol, nativeFrameworkShardProtocols, nativeFrameworkShardProtocol,
   nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
 import { compileValidationInventory } from '../scripts/validation-inventory.mjs';
 import { expectedBodySdkRequirements } from './native-sdk-expectations.mjs';
@@ -1749,6 +1749,12 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   const inspectDocument = document => inspectWorkflowTrust(workflows.map(workflow =>
     workflow.file === '.github/workflows/ci.yml' ? { ...workflow, contents: Object.entries(document)
       .map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n' } : workflow));
+  assert.equal(result.nativeProtocol, nativeFrameworkShardProtocol);
+  for (const marker of ['native-framework-shards-v6', 'native-framework-shards-v4-split-intel-units', false]) {
+    const changed = structuredClone(ci);
+    changed.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = marker;
+    assert.ok(inspectDocument(changed).blockers.some(blocker => blocker.code === 'NATIVE_SHARD_PROTOCOL_DIFFERS'));
+  }
   assert.equal(inspectDocument(historicalV6).complete, true,
     'Historical v6 retains its original ten-minute coordinator watchdogs and unchanged dependency graph');
   const relabeledV6 = structuredClone(historicalV6);
@@ -2322,6 +2328,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.equal(previousResource.nativeResourcePolicy, 'arm-regression-allocation-v1');
   for (const protocol of nativeFrameworkShardProtocols) {
     const historical = structuredClone(ci);
+    if (protocol !== nativeFrameworkShardProtocol) delete historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL;
     removePriority(historical);
     delete historical.env.SDLC_MAC_ADMISSION_POLICY;
     delete historical.jobs['mac-admission'];

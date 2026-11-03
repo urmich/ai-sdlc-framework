@@ -24,6 +24,7 @@ import { discoverGoDeclarations, executeValidationCommand, reconcileGoExecution,
   createOwnedCommandRunner } from './validation-tools.mjs';
 import { repositoryRoot, unitFiles, validationSelectionDescriptor, validationSelectionProtocol,
   writeValidationSelection } from './test-runner.mjs';
+import { exactPattern } from './test-profiles.mjs';
 import { verifyCandidate, archiveRecord } from './release-bundle.mjs';
 import { readZip, canonical as releaseCanonical } from '../packaging/standalone/archive.mjs';
 import { runtimePreflight } from '../packaging/standalone/runtime.mjs';
@@ -55,11 +56,20 @@ const locations = { 'linux-x64': 'github-linux-x64', 'windows-x64': 'github-wind
 export const nativeLegacyFrameworkShardProtocol = 'native-framework-shards-v1';
 export const nativePlatformUnitFrameworkShardProtocol = 'native-framework-shards-v2-platform-units';
 export const nativeFourBodyFrameworkShardProtocol = 'native-framework-shards-v3-four-body-platform-units';
-export const nativeFrameworkShardProtocol = 'native-framework-shards-v4-split-intel-units';
+export const nativeSplitUnitFrameworkShardProtocol = 'native-framework-shards-v4-split-intel-units';
+export const nativeFrameworkShardProtocol = 'native-framework-shards-v5-root-components';
 export const nativeFrameworkShardProtocols = Object.freeze([
   nativeLegacyFrameworkShardProtocol, nativePlatformUnitFrameworkShardProtocol,
-  nativeFourBodyFrameworkShardProtocol, nativeFrameworkShardProtocol,
+  nativeFourBodyFrameworkShardProtocol, nativeSplitUnitFrameworkShardProtocol, nativeFrameworkShardProtocol,
 ]);
+export function sourceNativeFrameworkShardProtocol(sourceFiles) {
+  const sources = sourceFiles.filter(source => source.file === 'scripts/native-validation.mjs');
+  requireThat(sources.length === 1, 'EVIDENCE', 'Shard assignment needs the exact original native planner source');
+  const declarations = [...sources[0].contents.matchAll(/export const nativeFrameworkShardProtocol = '([^']+)';/gu)];
+  requireThat(declarations.length === 1 && nativeFrameworkShardProtocols.includes(declarations[0][1]),
+    'EVIDENCE', 'Unknown or malformed source-declared native shard protocol');
+  return declarations[0][1];
+}
 export const nativeLegacyPrParts = Object.freeze(validationPlatforms.flatMap(target =>
   (target.startsWith('macos-') ? ['framework', 'homebrew'] : ['full'])
     .map(component => Object.freeze({ target, component, role: nativeProducerRole(target, component) }))));
@@ -82,7 +92,8 @@ export function nativeFrameworkShardNames(target, protocol = nativeFrameworkShar
     'INPUT', 'Select an exact native shard target and supported protocol');
   return [...nativeFrameworkUnitShardNames(target, protocol), 'refresh', ...Array.from({
     length: target.startsWith('macos-') ? 3 :
-      [nativeFourBodyFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? 4 : 2,
+      [nativeFourBodyFrameworkShardProtocol, nativeSplitUnitFrameworkShardProtocol,
+        nativeFrameworkShardProtocol].includes(protocol) ? 4 : 2,
   },
     (_, index) => `body-${index}`)];
 }
@@ -90,7 +101,8 @@ export function nativeFrameworkShardNames(target, protocol = nativeFrameworkShar
 export function nativeFrameworkUnitShardNames(target, protocol = nativeFrameworkShardProtocol) {
   requireThat(validationPlatforms.includes(target) && nativeFrameworkShardProtocols.includes(protocol),
     'INPUT', 'Select an exact native unit target and supported protocol');
-  const count = target === 'macos-x64' && protocol === nativeFrameworkShardProtocol ? 2 : 1;
+  const count = target === 'macos-x64' &&
+    [nativeSplitUnitFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? 2 : 1;
   return Array.from({ length: count }, (_, index) => index === 0 ? 'units' : `units-${index}`);
 }
 
@@ -355,6 +367,43 @@ function deriveNativeSpecification({ plan, inventory, goSources, target, profile
   }) };
 }
 
+function partitionNativeBodyGroups(groups, count) {
+  const parents = new Map(groups.map(group => [group.id, group.id]));
+  const find = id => {
+    requireThat(parents.has(id), 'INVENTORY', 'Native body dependency must remain inside the complete body selection');
+    if (parents.get(id) !== id) parents.set(id, find(parents.get(id)));
+    return parents.get(id);
+  };
+  const join = (left, right) => parents.set(find(right), find(left));
+  const resources = new Map();
+  for (const group of groups) {
+    group.dependsOn.forEach(dependency => join(group.id, dependency));
+    for (const resource of group.exclusiveResources) {
+      if (resources.has(resource)) join(group.id, resources.get(resource));
+      else resources.set(resource, group.id);
+    }
+  }
+  const components = new Map();
+  for (const group of groups) {
+    const key = find(group.id);
+    if (!components.has(key)) components.set(key, []);
+    components.get(key).push(group);
+  }
+  const ranked = [...components.values()].map(component => ({
+    groups: component, assertionIds: component.flatMap(group => group.assertionIds),
+    key: component.map(group => group.id).sort()[0],
+  })).sort((left, right) => right.assertionIds.length - left.assertionIds.length ||
+    right.groups.length - left.groups.length || left.key.localeCompare(right.key, 'en'));
+  const partitions = Array.from({ length: count }, (_, index) => ({ index, assertionIds: [], groups: 0 }));
+  for (const component of ranked) {
+    const selected = [...partitions].sort((left, right) =>
+      left.assertionIds.length - right.assertionIds.length || left.groups - right.groups || left.index - right.index)[0];
+    selected.assertionIds.push(...component.assertionIds);
+    selected.groups += component.groups.length;
+  }
+  return partitions;
+}
+
 export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = nativeFrameworkShardProtocol,
   schedulingPolicy = validationSchedulingPolicy }) {
   requireThat(inventory.complete && validationPlatforms.includes(target),
@@ -380,13 +429,16 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
   'INVENTORY', 'The complete causal refresh root cannot be partially assigned or moved between stages');
   const bodyCases = regression.cases.filter(test => !refreshIds.has(test.id));
   const bodyFiles = new Set(bodyCases.map(test => test.file));
-  const partitions = partitionValidationInventory({ ...inventory, cases: bodyCases,
-    files: inventory.files.filter(file => bodyFiles.has(file.file)) },
-  nativeFrameworkShardNames(target, protocol).filter(shard => shard.startsWith('body-')).length);
   const roots = validationExecutionGroups(inventory, {
-    ...(protocol === nativeFrameworkShardProtocol ? {} :
+    ...([nativeSplitUnitFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? {} :
       { files: regression.files, pattern: regression.selectorName }), preserveOrder: true,
   });
+  const bodyCount = nativeFrameworkShardNames(target, protocol).filter(shard => shard.startsWith('body-')).length;
+  const bodyIds = new Set(bodyCases.map(test => test.id));
+  const partitions = protocol === nativeFrameworkShardProtocol ?
+    partitionNativeBodyGroups(roots.filter(group => bodyIds.has(group.rootId)), bodyCount) :
+    partitionValidationInventory({ ...inventory, cases: bodyCases,
+      files: inventory.files.filter(file => bodyFiles.has(file.file)) }, bodyCount);
   const procedureFile = 'test/public-readiness-ci.test.mjs';
   const toolRoot = inventory.cases.find(test => test.file === procedureFile && !test.parents.length &&
     test.name === 'T-PRD015 actual pinned Go, Python schema and static validators execute valid and invalid owned inputs');
@@ -406,17 +458,19 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
         bodyCases.filter(test => partitions[Number(shard.slice(5))].assertionIds.includes(test.id)) }];
     const selectedStages = selected.map(stage => {
       const files = stage.files.filter(file => stage.cases.some(test => test.file === file));
+      const selectorName = protocol === nativeFrameworkShardProtocol && shard.startsWith('body-') ?
+        exactPattern(stage.cases.map(test => [...test.parents, test.name].join(' '))) : stage.selectorName;
       requireThat(files.length > 0 && stage.cases.some(test => test.applicability.platforms.includes(target)),
         'INVENTORY', 'Every required native shard stage needs a nonempty applicable assertion denominator');
       const groups = validationExecutionGroups(inventory, {
-        files, pattern: stage.name === 'unit' ? undefined : stage.selectorName, preserveOrder: true,
+        files, pattern: stage.name === 'unit' ? undefined : selectorName, preserveOrder: true,
       });
       requireThat(digest(groups.flatMap(group => group.assertionIds).sort()) ===
         digest(stage.cases.map(test => test.id).sort()), 'INVENTORY',
       'Native shard selectors must preserve exact complete causal root closures');
-      const definition = { ...stage, files, groups };
+      const definition = { ...stage, files, groups, selectorName };
       if (stage.name === 'unit') return definition;
-      const { payload, ...selection } = validationSelectionDescriptor({ files, name: stage.selectorName });
+      const { payload, ...selection } = validationSelectionDescriptor({ files, name: selectorName });
       return { ...definition, args: ['targeted', '--selection-file', selection.path], selection };
     });
     const assertionIds = selectedStages.flatMap(stage => stage.cases.map(test => test.id));
@@ -1568,6 +1622,8 @@ function compileNativeDefinition({ target, profile, sourceFiles, selectedWorkers
   component = 'full', shard = null, frameworkShards,
   shardProtocol = frameworkShards ?? nativeFrameworkShardProtocol }) {
   validateNativeSourceDefinitions(sourceFiles);
+  if (shard !== null) requireThat(sourceNativeFrameworkShardProtocol(sourceFiles) === shardProtocol,
+    'EVIDENCE', 'Archived shard protocol differs from its original native planner source');
   const schedulingPolicy = sourceValidationSchedulingPolicy(sourceFiles);
   const bootstrapProtocol = sourceNativeBootstrapProtocol(sourceFiles);
   const paths = sourceFiles.map(source => source.file);

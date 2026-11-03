@@ -17,7 +17,8 @@ import { compileValidationSourceInventory, validationPlatforms, validationSource
 import { nativeSpecification, nativeConfigurationDigest, nativeArtifacts, nativeGoObservations,
   nativeWorkflowContract, nativeStageSelections, nativeProducerRole } from '../scripts/native-validation.mjs';
 import { nativeLegacyPrParts, nativeFrameworkShardPlan, nativeFrameworkShardProtocol,
-  nativeLegacyFrameworkShardProtocol, nativePartJobKey, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
+  nativeLegacyFrameworkShardProtocol, nativeSplitUnitFrameworkShardProtocol,
+  nativePartJobKey, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
 import { nativeResourceFacts, nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
 import { repositoryRoot, unitFiles } from '../scripts/test-runner.mjs';
 import { createReadinessGitHubClient } from '../scripts/github-readiness-host.mjs';
@@ -132,7 +133,8 @@ function fixturePlan(names, additionalTests = []) {
 
 function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = false, docsOnly = false,
   narrowedRequiredScope = false, additionalTests = [], producerChange, bootstrapProtocol = null,
-  admissionHelper = 'source', schedulingSource = currentSchedulingSource, priorityFixture = false } = {}) {
+  admissionHelper = 'source', schedulingSource = currentSchedulingSource, priorityFixture = false,
+  shardProtocol = nativeFrameworkShardProtocol } = {}) {
   const names = [
     ...unitFiles.map((file, index) => ({ file, stage: 'unit', id: `T-FIX-CANONICAL-${index + 1}`,
       name: `T-FIX-CANONICAL-${index + 1} controlled canonical assertion` })),
@@ -180,6 +182,8 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
   });
   const files = new Map(reporterPaths.map(file => [file,
     file.endsWith('.yml') ? ci : 'throw new Error("candidate reporter must never execute in the observer");\n']));
+  files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
+    `export const nativeFrameworkShardProtocol = '${shardProtocol}';\n`);
   files.set('scripts/test-scheduling.mjs', schedulingSource);
   const schedulingPolicy = sourceValidationSchedulingPolicy([{ file: 'scripts/test-scheduling.mjs', contents: schedulingSource }]);
   assert.ok(['source', 'missing', 'mutated'].includes(admissionHelper));
@@ -825,7 +829,9 @@ export async function observerApiFixture(t, options = {}) {
     }).join('') + (shardProtocol === nativeLegacyFrameworkShardProtocol ? '' :
       `  producer-summary:\n    permissions: {}\n    needs: ${JSON.stringify(['intent', 'minimum-node', 'source', ...protocolKeys])}\n` +
       '    steps:\n      - run: echo "Controlled historical summary; never execute"\n');
-  const ci = options.frameworkShards ? shardProtocol === nativeFrameworkShardProtocol ? currentCi : historicalCi : `name: CI
+  const ci = options.frameworkShards ? shardProtocol === nativeFrameworkShardProtocol ? currentCi :
+    shardProtocol === nativeSplitUnitFrameworkShardProtocol ?
+      currentCi.replace(/^  SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL:.*\r?\n/mu, '') : historicalCi : `name: CI
 on: pull_request
 permissions:
   contents: read
@@ -843,7 +849,7 @@ jobs:
           persist-credentials: false
 `;
   const revisions = { head: 'a'.repeat(40), base: 'b'.repeat(40), merge: 'c'.repeat(40), trusted: 'd'.repeat(40) };
-  const adopted = fixtureSources(ci, { bootstrapProtocol: options.bootstrapProtocol,
+  const adopted = fixtureSources(ci, { bootstrapProtocol: options.bootstrapProtocol, shardProtocol,
     admissionHelper: options.adoptedAdmissionHelper });
   const source = fixtureSources(ci, options);
   const { candidate, entries } = candidateData(revisions.merge);

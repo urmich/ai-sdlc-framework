@@ -314,9 +314,11 @@ controlled tests.
 The separate source-selected `native-bootstrap-role-capabilities-v5` omits
 Go/schema setup from framework bodies without the real Go/schema or native
 launcher roots; all real Go tests, vet, native execution and independent
-cold-cache rebuild assertions remain intact. Linux/Windows `body-3` omits
-CPython; other current bodies retain runtime-only CPython except the real schema
-body. All framework Mac bodies omit unused Brew/core/Ruby/prefix setup. Genuine
+cold-cache rebuild assertions remain intact. Derive Go, CPython and schema
+requirements from each frozen selected root closure, not historical body
+indices. Current body closures retain CPython; schema packages belong only to
+the actual schema-procedure owner. All framework Mac bodies omit unused
+Brew/core/Ruby/prefix setup. Genuine
 Homebrew omits independent Go/CPython/schema SDK setup but preserves pinned
 Brew/core/Ruby, the complete native Node bottle closure, real audit/style,
 previous/current lifecycle and cleanup. Whole/full and R-PRE are unchanged.
@@ -717,6 +719,15 @@ sanitization when the temporary reuse budget is exhausted.
 The literal-text regression checks scanner bypass only for ASCII letters,
 digits and spaces; sensitive-key redaction, rich-text fallback and the original
 payload byte limit remain enforced.
+The existing PR-only root `referenced assertion preparation overlaps within its
+shared serialized reservation and preserves ordered authority` in
+`test/public-readiness-evidence.test.mjs` includes a controlled initial proof-read
+failure. Require the exact original rejection rather than a later barrier
+timeout, and reject replay completion before its required read barrier.
+Preserve the five-second watchdog and every existing overlap, four-handle,
+reservation, ordered-failure, cache, staged-read and alias assertion. The
+maintainer owns this process-isolated, network-free fixture on the existing
+native Node lanes; it adds no critical-profile assertion or shared resource.
 The JWT-header regression observes avoided JSON parses for decoded non-object
 candidates while retaining real object headers with JSON whitespace, exact
 redaction digests, malformed-object handling and conservative overlong headers.
@@ -1218,7 +1229,8 @@ retained guard within seven shared slots` root in
 using owned entered/finished barriers. Three catalog workers, including the
 third long root, must start before the four-slot retained guard is released.
 Keep all closures, the seven-slot budget, explicit caller order and unchanged
-assertion-to-native-shard ownership; no fixed-duration sleep substitutes for
+assertion-to-native-shard ownership within that captured within-host policy
+comparison; no fixed-duration sleep substitutes for
 the barriers.
 The fixture requests only its declared seven participant slots under aggregates
 of seven, fourteen or fifteen. Verify four live source-bound leases, distinct
@@ -1416,7 +1428,8 @@ the original subset. A new legitimate test must not erase preservation checks.
    platform's regression shards execute; another platform or attempt cannot
    supply the prerequisite. Include the unit barrier, every part's provisioning,
    evidence retention and cleanup in the whole-lane elapsed time.
-   For `native-framework-shards-v4-split-intel-units`, require each platform's
+   For current `native-framework-shards-v5-root-components` and historical
+   `native-framework-shards-v4-split-intel-units`, require each platform's
    actual unit jobs to finish successfully, including evidence and cleanup,
    before its own regression jobs start. Other platforms' unit jobs may finish
    later; all twenty-five successful parts still remain mandatory for completeness.
@@ -1426,9 +1439,27 @@ the original subset. A new legitimate test must not erase preservation checks.
    unions including descendants, dependencies and exclusive resources. The new
    Intel producer has no unit prerequisite of its own. Every Intel regression
    must wait for both unit jobs, not a borrowed ARM/original-unit result.
+   Current v5 assigns complete dependency/exclusive-resource-connected root
+   components across the existing bodies, balancing assertion and group counts
+   deterministically. Independent roots of one file may occupy different
+   hosts, but descendants and connected components must remain together.
+   Body file lists may overlap; exact source-bound escaped full-name selectors
+   must preserve the disjoint complete assertion union and reject ambiguity.
+   Keep scheduling policy v9 byte-identical and replay v1-v4 assignments exactly.
+   A v5 workflow label must match the captured planner and archived SDK source;
+   relabelling an old planner is non-passing.
+   The three PR-only roots in `test/public-readiness-native.test.mjs` are
+   `T-PRD017 native protocol4 retains its exact historical file and assertion assignments`,
+   `T-PRD017 native protocol5 spreads independent same-file roots and executes connected complete closures exactly once`,
+   and `T-PRD017 native protocol5 and historical4 retain source-bound observer and SDK reconstruction`.
+   The native-validation maintainer owns their network-free, process-isolated
+   source and SDK fixtures with declared synthetic dependency/resource edges.
+   They require Node and owned local files on the existing native lanes, add no
+   critical-profile assertion, and prove neither actual native overlap nor a
+   latency improvement. Fresh complete hosted measurements remain required.
    Require the Linux `mac-admission` coordinator to observe all three long ARM
    body workers in the exact repository/run/attempt/head context before Intel's
-   measured critical body-0 producer dispatches under
+   body-0 producer dispatches under
    `arm-regression-allocation-v7-bounded-queue-wait`, still behind both Intel unit jobs.
    Require `intel-retained-admission` to observe that actual worker before
    ARM's separate short refresh dispatches, retaining its own ARM unit barrier.
@@ -1977,8 +2008,8 @@ certificate and transparency positives/negatives on the same statement bytes.
 
 Source-selected bootstrap v6 requires acquisition only for closures consuming
 the authentic T-PRD041 root or another declared crypto/verifier prerequisite.
-Current owners are Linux/Windows framework `body-0` and both Mac framework
-`body-2`; all other 21 current PR roles omit the unused setup. Extend existing
+Derive the four platform owners from the frozen source plan instead of a fixed
+body-number affinity; all other 21 current PR roles omit the unused setup. Extend existing
 T-PRD015 controlled bootstrap checks to execute the actual bootstrap function
 with side-effect callbacks for all 25 roles, asserting four acquisitions and
 21 genuine absences of calls, directories, reports, facts and exported inputs.

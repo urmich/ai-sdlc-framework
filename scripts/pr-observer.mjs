@@ -341,7 +341,7 @@ function macAdmissionPolicyMatches(document, protocol, priority, homebrewFirst, 
     copy.strategy = right.strategy;
     return digest(copy) === digest(right);
   };
-  return protocol === native.nativeFrameworkShardProtocol &&
+  return [native.nativeSplitUnitFrameworkShardProtocol, native.nativeFrameworkShardProtocol].includes(protocol) &&
     digest(document.jobs?.['mac-admission'] ?? null) ===
       digest(expectedMacAdmissionJob(retainedFirst ? 'arm-bodies' : 'arm-regressions', false, false, boundedQueue)) &&
     (priority ? digest(document.jobs?.['intel-admission'] ?? null) ===
@@ -378,10 +378,17 @@ export function inspectWorkflowTrust(workflows) {
     const fourBody = Object.values(jobs ?? {}).some(job => job?.strategy?.matrix?.include?.some(row =>
       ['linux-x64', 'windows-x64'].includes(row.target) && ['body-2', 'body-3'].includes(row.shard)));
     const splitUnits = jobs?.['native-units-mi']?.strategy?.matrix?.include?.some(row => row.shard === 'units-1');
-    const protocol = platformBarrier ? splitUnits ? native.nativeFrameworkShardProtocol :
+    const topologyProtocol = platformBarrier ? splitUnits ? native.nativeSplitUnitFrameworkShardProtocol :
       fourBody ? native.nativeFourBodyFrameworkShardProtocol :
       native.nativePlatformUnitFrameworkShardProtocol :
       sharded ? native.nativeLegacyFrameworkShardProtocol : null;
+    const marker = selected.document.env?.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL;
+    const rootComponents = marker === native.nativeFrameworkShardProtocol &&
+      topologyProtocol === native.nativeSplitUnitFrameworkShardProtocol;
+    if (marker !== undefined && !rootComponents) {
+      result.blockers.push({ file: selected.file, code: 'NATIVE_SHARD_PROTOCOL_DIFFERS' });
+    }
+    const protocol = rootComponents ? native.nativeFrameworkShardProtocol : topologyProtocol;
     nativeProtocol = protocol;
     const resourcePolicy = selected.document.env?.SDLC_MAC_ADMISSION_POLICY;
     const admission = admissionPolicies.includes(resourcePolicy);
@@ -851,6 +858,9 @@ async function sourceDefinitions(api, sha) {
   const trust = inspectWorkflowTrust([workflow]);
   requireThat(trust.complete, 'EVIDENCE', 'Native producer role/dependency definition differs from the adopted topology');
   const frameworkShards = trust.nativeProtocol !== null;
+  if (frameworkShards) requireThat(native.sourceNativeFrameworkShardProtocol([{
+    file: 'scripts/native-validation.mjs', contents: await api.file(tree, 'scripts/native-validation.mjs'),
+  }]) === trust.nativeProtocol, 'EVIDENCE', 'Workflow shard protocol differs from the original native planner source');
   const bootstrapProtocol = sourceNativeBootstrapProtocol([{ file: 'scripts/toolchain-baseline.mjs',
     contents: await api.file(tree, 'scripts/toolchain-baseline.mjs') }]);
   return { tree, inventory, goSources, requirements, testPlans, files, adapterSource,
