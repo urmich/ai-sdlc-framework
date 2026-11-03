@@ -571,7 +571,13 @@ try {
   };
   const pool = await runValidationReadyPool(groups, {
     concurrency: options.concurrency, capacity: options.executionCapacity ?? capacity,
-    execute: executeGroup, signal: cancellation.signal,
+    execute: async group => {
+      const status = await executeGroup(group);
+      requireThat(!(await readTestBudget()).admissionStopped,
+        'BUDGET', 'Test admission stopped after unsettled owned resources');
+      return status;
+    },
+    signal: cancellation.signal,
   });
   if (pool.notRun.length) process.exitCode ||= 2;
   if (report && summaries.length) report.summary = {

@@ -1556,6 +1556,69 @@ dispatch/stop. A phase timestamp describes entry into that assertion block, not
 the duration or cause of a termination failure. Preserve the six real scenarios,
 their assertions, controller ownership and original budgets.
 
+For the recurring Windows capture root, keep native observation test-only.
+Interpose `spawn` only in its isolated controller, invoke the original function
+unchanged, and observe only the exact SystemRoot `System32/taskkill.exe` child.
+Publish the actual PID and spawn-event UTC bound atomically to the prestarted
+observer's nonce request. Do not await it inside `executeValidationCommand` or
+alter the unchanged 1000ms stop deadline. Complete existing command/controller
+cleanup before awaiting native finalization; append compact validated facts to
+the same assertion error, preserving a concurrent cleanup failure separately.
+Retain the exact spawn request bound, target binding reason/capture timestamp,
+attempt count and late/truncated-sample flags before removing owned files.
+Absent facts remain unknown.
+
+The repository-local observer uses stock Windows PowerShell 5.1 `Add-Type`,
+with only its own TEMP/TMP and assembly output redirected into its new owned
+compiler directory. Compilation completes before readiness and command creation;
+compiler/policy failures remain unavailable without an alternate compiler or
+policy workaround. Pin each supplied owner/target .NET `Process.Handle` once.
+Subsequent reads use that saved handle through `QueryFullProcessImageNameW`,
+`GetProcessTimes`, `WaitForSingleObject(handle, 0)` and `GetExitCodeProcess`.
+Do not refresh PID-backed .NET properties or enumerate threads. Retain only the
+closed image basename, exact decimal FILETIME/CPU ticks, bounded UTC/monotonic
+read intervals and native wait/exit facts, never paths, arguments or raw output.
+Require creation ticks strictly before the original UTC upper bound using
+integer arithmetic; same-ms ambiguity, reuse and inaccessible binding stay
+unverified. Read exit time/code only after a signaled original handle; code 259
+alone never establishes liveness.
+
+Limit attempts to 32, retained samples to first four/latest four and the closed
+record to 8192 bytes, with truncation/late drops explicit. Root-native observation
+and thread waits remain unavailable. This sampling window is spawn-bound and
+must not be interpreted as the backend's stop-entry clock or an atomic kernel
+snapshot. Zero CPU or absent capture cannot identify a loader/scheduling cause.
+Finalization is idempotent and signals only the original observer child on its
+own bounded cleanup timeout. A strict post-compilation marker bound to captured
+PowerShell/bridge source hashes, or proven failure before observer dispatch,
+establishes compiler settlement; PowerShell
+closure or a post-spawn error alone does not. Unknown observer or compiler
+lifetime prevents fixture removal. On readiness failure, await this settlement
+before creating any controller or command; otherwise rethrow the original
+startup failure without admitting additional processes. Injected startup/close
+regressions exercise these boundaries without a native compiler or target and
+restore their process-local spawn instrumentation. Wrong-source markers never
+establish settlement. A subsequent finalization can refine an unknown snapshot
+from late affirmative proof without repeating signals or mutating old results.
+If cleanup or compiler settlement remains unknown, the original acquired worker
+requests persistent aggregate admission stop over its existing authenticated
+socket. Mark the broker stopped before acknowledgement and reject queued/new
+producer, registration and not-yet-started worker entries before released slots
+can admit another root. Worker closure never clears that flag; already-started
+peers, resumptions, inspection and cleanup may settle without cancellation or
+signals. Persist the original group failure before stopping the producer's ready
+pool, preserving a concurrent admission-stop error separately. No PID discovery,
+compiler/target signal or inferred compiler exit is introduced. The isolated
+four-slot PR-only broker regression models uncertain cleanup with owned stock
+Node roots; it checks queued/fresh rejection across failing-worker closure,
+original failure retention and independent peer completion. This fail-stop
+contains uncertainty but does not resolve it or fix native cancellation.
+Reserve five slots for the original root and three for the separate Windows
+native-fact regression, with compilation and target lifetime non-overlapping.
+The six-slot admission regression preserves independent peer reuse and refusal
+of multi-process overlap. No production termination correction, native failure
+cause, timing waiver, critical-profile growth or passing current CI is claimed.
+
 The native-toolchain CLI catches request/provisioning/cleanup errors after
 module loading, emits an escaped check annotation, then rethrows the same error.
 Bound sanitized diagnostic JSON to 8192 bytes and retain only an original-byte

@@ -18,6 +18,10 @@ export const validationDeclarations = {
     "root": "T-PRD010 protocol pool retains uncertain writers and cleans only proven safe operations",
     "minimumSlots": 2,
     "exclusiveResources": []
+  }, {
+    "root": "T-PRD010 uncertain native cleanup stops aggregate admission after its original worker closes",
+    "minimumSlots": 4,
+    "exclusiveResources": []
   }],
   "applicability": [{
     "names": ["T-PRD011 exclusive ready clocks exclude the previous holder capture without hiding eligible failures"],
@@ -37,6 +41,12 @@ export const validationDeclarations = {
     "owner": "runner-resource-contract",
     "reason": "PR-only actual pool control flow with controlled executor lifetime, snapshot and close failures and owned stock Node writers; no native termination or provider access.",
     "prerequisites": ["Node and two aggregate worker slots"]
+  }, {
+    "names": ["T-PRD010 uncertain native cleanup stops aggregate admission after its original worker closes"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "PR-only authenticated aggregate fail-stop regression with an isolated broker, original failing worker, running peer and queued stock Node worker; modeled uncertainty creates no compiler or native target.",
+    "prerequisites": ["Node and four aggregate worker slots; owned repository-local fixtures"]
   }, {
     "names": [
       "T-PRD010 independent file workers overlap without sharing environment, module patches or fixture ownership",
@@ -64,7 +74,8 @@ export const validationDeclarations = {
   },
   "plannedCases": [
     {"id": "T-PRD010", "selectors": [
-      {"name": "T-PRD010 PR-description priority admits its isolated closure before queued work while the retained guard is live", "parents": []}
+      {"name": "T-PRD010 PR-description priority admits its isolated closure before queued work while the retained guard is live", "parents": []},
+      {"name": "T-PRD010 uncertain native cleanup stops aggregate admission after its original worker closes", "parents": []}
     ]},
     {"id": "T-PRD011", "selectors": [
       {"name": "T-PRD010 independent file workers overlap without sharing environment, module patches or fixture ownership", "parents": []}
@@ -911,6 +922,202 @@ test('T-PRD010 impossible four-level resident lineage rejects before yielding an
       }
     }
   }
+});
+
+test('T-PRD010 uncertain native cleanup stops aggregate admission after its original worker closes',
+  { timeout: 30000 }, async t => {
+  const budget = await import('../scripts/test-budget.mjs');
+  assert.equal(typeof budget.stopTestAdmission, 'function');
+  const root = path.join(repositoryRoot, '.test-data', `admission-uncertainty-${randomUUID()}`);
+  const home = path.join(root, 'home');
+  await fs.mkdir(home, { recursive: true });
+  const children = [];
+  let owner;
+  let queuedProducer;
+  t.after(async () => {
+    await Promise.all(['stop-fault', 'release-fault', 'release-peer']
+      .map(name => fs.writeFile(path.join(root, name), 'release')));
+    await Promise.all(children.map(child => child.completed));
+    await queuedProducer?.close();
+    await owner?.close();
+    assert.equal(path.dirname(root), path.join(repositoryRoot, '.test-data'));
+    await fs.rm(root, { recursive: true });
+    await assert.rejects(fs.stat(root), { code: 'ENOENT' });
+  });
+  const waitFor = async (label, observe) => {
+    const deadline = performance.now() + 10000;
+    while (performance.now() < deadline) {
+      const result = await observe();
+      if (result) return result;
+      await delay(10);
+    }
+    assert.fail(`Owned admission barrier did not settle: ${label}`);
+  };
+  const exists = file => fs.stat(file).then(() => true, error => {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  });
+  const record = async name => {
+    const file = path.join(root, `${name}.json`);
+    await waitFor(name, () => exists(file));
+    return JSON.parse(await fs.readFile(file, 'utf8'));
+  };
+  const script = path.join(root, 'worker.mjs');
+  await fs.writeFile(script, `
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as fs from 'node:fs/promises';
+import path from 'node:path';
+import {setTimeout as delay} from 'node:timers/promises';
+import * as budget from ${JSON.stringify(new URL('../scripts/test-budget.mjs', import.meta.url).href)};
+const [root,mode]=process.argv.slice(2);
+const failsafe=setTimeout(()=>process.exit(2),20000);
+failsafe.unref();
+async function publish(name,value){
+  const file=path.join(root,name+'.json');
+  await fs.writeFile(file+'.pending',JSON.stringify(value),{flag:'wx'});
+  await fs.rename(file+'.pending',file);
+}
+async function barrier(name){
+  const deadline=performance.now()+10000;
+  while(performance.now()<deadline){
+    try{await fs.stat(path.join(root,name));return;}
+    catch(error){if(error.code!=='ENOENT')throw error;}
+    await delay(10);
+  }
+  assert.fail('Owned fixture release was not published');
+}
+let lease;
+try{
+  if(mode==='queued'||mode==='new'){
+    try{lease=await budget.acquireTestWorker();}
+    catch(error){
+      assert.equal(error.code,'BUDGET');
+      const state=await budget.readTestBudget();
+      await publish(mode+'-rejected',{code:error.code,budgetId:state.id,admissionStopped:state.admissionStopped});
+    }
+    if(lease){
+      await publish(mode+'-started',{started:true});
+      assert.fail('Stopped aggregate admitted another original root');
+    }
+  }else{
+    lease=await budget.acquireTestWorker();
+    await test(mode==='fault'?'owned original runtime failure':'owned running peer',async()=>{
+      const initial=await budget.readTestBudget();
+      await publish(mode+'-ready',{budgetId:initial.id,admissionStopped:initial.admissionStopped});
+      if(mode==='fault'){
+        const original=Object.assign(new Error('owned original native cleanup failure'),{code:'OWNED_RUNTIME_UNCERTAINTY'});
+        const nativeCleanup={cleanup:'unknown',compilerSettled:false};
+        await publish('uncertain-cleanup',nativeCleanup);
+        await barrier('stop-fault');
+        await budget.stopTestAdmission();
+        const stopped=await budget.readTestBudget();
+        await publish('fault-stopped',{budgetId:stopped.id,admissionStopped:stopped.admissionStopped,
+          nativeCleanup,originalCode:original.code,originalMessage:original.message});
+        await barrier('release-fault');
+        throw original;
+      }
+      await barrier('release-peer');
+      const finished=await budget.readTestBudget();
+      await publish('peer-finished',{budgetId:finished.id,admissionStopped:finished.admissionStopped});
+    });
+  }
+}finally{
+  lease?.close();
+  clearTimeout(failsafe);
+}
+`);
+  const launch = (mode, producer) => {
+    const env = { ...process.env, ...producer.environment, HOME: home, USERPROFILE: home,
+      TEMP: home, TMP: home };
+    delete env.NODE_TEST_CONTEXT;
+    const child = spawn(process.execPath, ['--test-reporter=tap', script, root, mode], {
+      cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+      env,
+    });
+    let stdout = '';
+    let stderr = '';
+    let spawnError;
+    child.stdout.on('data', data => { stdout += data; });
+    child.stderr.on('data', data => { stderr += data; });
+    child.once('error', error => { spawnError = error.code; });
+    const completed = new Promise(resolve => {
+      child.once('close', (code, signal) => resolve({ code, signal, stdout, stderr, spawnError }));
+    });
+    const owned = { process: child, completed };
+    children.push(owned);
+    return owned;
+  };
+  owner = await enterTestBudget({ workers: 2, fileCount: 2, inherited: null, parent: null, slot: null });
+  const initial = await owner.snapshot();
+  assert.equal(initial.admissionStopped, false);
+  const fault = launch('fault', owner);
+  const peer = launch('peer', owner);
+  for (const name of ['fault-ready', 'peer-ready']) {
+    assert.deepEqual(await record(name), { budgetId: owner.id, admissionStopped: false });
+  }
+  queuedProducer = await enterTestBudget({
+    workers: 1, fileCount: 1, inherited: owner.inherited, parent: null, slot: null,
+  });
+  const queued = launch('queued', queuedProducer);
+  await waitFor('original queued worker registration', async () => {
+    const state = await owner.snapshot();
+    return state.activeWorkers === 2 && state.residentWorkers === 3 && !state.admissionStopped;
+  });
+  await fs.writeFile(path.join(root, 'stop-fault'), 'release');
+  const stopped = await record('fault-stopped');
+  assert.deepEqual(stopped, {
+    budgetId: owner.id, admissionStopped: true,
+    nativeCleanup: { cleanup: 'unknown', compilerSettled: false },
+    originalCode: 'OWNED_RUNTIME_UNCERTAINTY', originalMessage: 'owned original native cleanup failure',
+  });
+  assert.deepEqual(await record('queued-rejected'), {
+    code: 'BUDGET', budgetId: owner.id, admissionStopped: true,
+  });
+  const rejected = await queued.completed;
+  assert.deepEqual([rejected.code, rejected.signal], [0, null]);
+  assert.equal(fault.process.exitCode, null, 'Queued admission must stop before the failing worker closes');
+  assert.equal(peer.process.exitCode, null, 'Stopping admission must not cancel an already-running peer');
+  await fs.writeFile(path.join(root, 'release-fault'), 'release');
+  const failed = await fault.completed;
+  assert.deepEqual([failed.code, failed.signal], [1, null]);
+  const failureOutput = failed.stdout + failed.stderr;
+  assert.ok(/owned original native cleanup failure/u.test(failureOutput), 'Original fixture error message is retained');
+  assert.ok(/OWNED_RUNTIME_UNCERTAINTY/u.test(failureOutput), 'Original fixture error code is retained');
+  assert.ok(/not ok 1 - owned original runtime failure/u.test(failureOutput), 'Original Node root remains failed');
+  await waitFor('failed original worker closure', async () => {
+    const state = await owner.snapshot();
+    return state.admissionStopped && state.activeWorkers === 1 && state.residentWorkers === 1;
+  });
+  await assert.rejects(enterTestBudget({
+    workers: 1, fileCount: 1, inherited: owner.inherited, parent: null, slot: null,
+  }), { code: 'BUDGET' });
+  const fresh = launch('new', queuedProducer);
+  assert.deepEqual(await record('new-rejected'), {
+    code: 'BUDGET', budgetId: owner.id, admissionStopped: true,
+  });
+  const freshRejected = await fresh.completed;
+  assert.deepEqual([freshRejected.code, freshRejected.signal], [0, null]);
+  for (const name of ['queued-started', 'new-started']) {
+    assert.equal(await exists(path.join(root, `${name}.json`)), false);
+  }
+  await fs.writeFile(path.join(root, 'release-peer'), 'release');
+  const finished = await peer.completed;
+  assert.deepEqual([finished.code, finished.signal], [0, null]);
+  assert.deepEqual(await record('peer-finished'), { budgetId: owner.id, admissionStopped: true });
+  await waitFor('all original worker closures', async () => {
+    const state = await owner.snapshot();
+    return state.activeWorkers === 0 && state.residentWorkers === 0;
+  });
+  const terminal = await owner.snapshot();
+  assert.equal(terminal.admissionStopped, true, 'Worker closure cannot reopen aggregate admission');
+  assert.deepEqual(await record('uncertain-cleanup'), { cleanup: 'unknown', compilerSettled: false });
+  assert.ok(terminal.peakActiveWorkers <= 2);
+  t.diagnostic(JSON.stringify({ admissionStopped: terminal.admissionStopped,
+    originalFailureExit: failed.code, originalFailureCode: stopped.originalCode, peerExit: finished.code,
+    queuedAdmission: 'BUDGET', freshWorkerAdmission: 'BUDGET', freshProducerAdmission: 'BUDGET',
+    cleanup: 'unknown', compilerSettled: false, peakActiveWorkers: terminal.peakActiveWorkers,
+    maximumOwnedChildren: 3, minimumSlots: 4, nativeCompilerOrTargetCreated: false }));
 });
 
 test('T-PRD005 affected planned units without a unit suffix keep their root closure before all integration work', async t => {

@@ -241,6 +241,67 @@ termination duration. The earlier Intel bootstrap failure and Windows
 cancellation failures remain unexplained until actual retained evidence
 establishes their causes; diagnostic changes do not claim to fix those causes.
 
+The original Windows capture/cancellation root additionally observes the actual
+`taskkill.exe` spawn without changing that invocation, the production backend or
+its one-second stop budget. Before creating the controller or command, an optional
+owned PowerShell 5.1 observer compiles a small C# bridge inside its new
+repository-local compiler directory. The isolated controller atomically publishes
+only the dispatched PID and original spawn-event UTC bound to the observer's
+nonce-owned request. Neither observation nor publication is awaited by the
+production cancellation decision. Preserve all original journal, redaction,
+closure and cleanup assertions; native facts cannot satisfy a missing root-close
+event. A failed readiness attempt must settle both observer and compiler before
+creating any controller/command; unknown startup lifetime fails without creating
+additional processes. PowerShell closure alone never proves compiler settlement.
+Complete the original root/controller cleanup before awaiting observer
+finalization, so diagnostics add no delay before existing fixture cleanup.
+
+The observer pins original owner/target process handles once, then uses only
+handle-based image, creation/CPU/exit-time, wait and exit-code queries. Retain at
+most eight samples, 32 attempts and 8192 bytes; unknown, late, inaccessible and
+same-millisecond/reused identity remain unavailable, never success. A real native
+exit code 259 is not a liveness test. Root-native survival and thread wait reasons
+remain explicitly unavailable. Its spawn-bound sampling window is diagnostic,
+not the production stop-entry clock; timestamps bound non-atomic native reads.
+Compact validated first/latest facts accompany the original assertion failure,
+including the exact dispatch bound, binding/capture reason and late/truncated
+sample distinctions; missing facts stay unknown rather than becoming false.
+Observer teardown releases and awaits only its own process, never signals the
+observed target, and prevents directory removal while its exit or compiler
+settlement is unknown. A strict post-compilation marker bound to the captured
+PowerShell/bridge source hashes, or genuine pre-dispatch failure, provides
+affirmative compiler-settlement evidence; a later process error does not.
+Unknown observer/compiler cleanup additionally stops later admission through the
+original acquired worker's authenticated aggregate-budget connection. The stopped
+state survives that worker's closure: queued and fresh roots/producers cannot
+reuse its released slots, while already-running peers and cleanup may finish.
+This is fail-stop containment of uncertain lifetime, not proof of compiler exit.
+The four-slot, all-four-platform PR-only runner regression uses an isolated
+owned broker and stock Node marker barriers to retain the original failed root,
+reject queued/fresh admission before and after its closure, preserve unknown
+cleanup, and let an already-running peer finish without signals. It creates no
+native compiler or observed target and cannot poison the enclosing test broker.
+
+Conservatively reserve five capture-root slots (worker, controller, command,
+taskkill and observer); the compiler finishes before target creation. The
+all-four-platform admission regression models this reservation in a six-slot
+pool and proves an independent one-slot peer can progress without admitting
+multi-process peers into its single remaining slot. A new Windows-only,
+three-slot PR root exercises controlled live, exit-259 and image-mismatch
+observations against owned targets. Its ready/release barriers test native fact
+semantics, not cold taskkill startup or hosted cancellation equivalence.
+Injected original-child cases additionally distinguish missing readiness,
+affirmative post-compilation readiness, genuine spawn failure and an error after
+spawn. They create no native observer/compiler and provide no native execution
+credit; process-local spawn instrumentation is always restored. Wrong-source
+proof remains unknown; late affirmative proof can refine a new result without
+mutating the previous unknown snapshot or repeating stop attempts.
+Compilation precedes target creation; only one compiler or one target overlaps
+the worker/observer. Both roots remain outside critical27. New-source local,
+Review and native results remain NotRun until their actual executions; the prior
+24-of-25 native producer pass and recurring Windows failure remain historical,
+not a current completeness or cancellation-fix claim.
+
 Local test results are not inputs required from an external contributor merely
 to open a PR. PR jobs never
 perform A's permission-requiring disposable-PR/ref probes or publication.

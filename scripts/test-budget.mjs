@@ -3,6 +3,7 @@ import { randomUUID, randomBytes } from 'node:crypto';
 import { requireThat } from '../src/core.mjs';
 
 const version = 2;
+let workerClient;
 function endpoint(value) {
   const data = typeof value === 'string' ? JSON.parse(value) : value;
   requireThat(data && data.version === version && data.host === '127.0.0.1' &&
@@ -94,10 +95,12 @@ async function broker(capacity) {
   const groupProcesses = new Map();
   const sockets = new Set();
   const queue = [];
+  let admissionStopped = false;
   const resourceNode = value => producers.get(value) ?? controls.get(value) ?? workers.get(value);
   const peaks = { activeWorkers: 0, producers: 0, residentWorkers: 0, potentialResidentWorkers: 0, controls: 0 };
   const snapshot = () => ({
-    version, id, capacity, producerLimit: capacity * 2 + 1, controlLimit: capacity * 2 + 1,
+    version, id, capacity, admissionStopped,
+    producerLimit: capacity * 2 + 1, controlLimit: capacity * 2 + 1,
     orchestrationLimit: capacity * 4 + 2,
     residentLimit: capacity * 3, activeWorkers: [...workers.values()].filter(worker => worker.token).length,
     residentWorkers: workers.size, producers: producers.size, controls: controls.size,
@@ -186,6 +189,14 @@ async function broker(capacity) {
         const item = queue[index];
         if (item.socket?.destroyed || item.kind === 'worker' && !workers.has(item.worker.id)) {
           queue.splice(index, 1);
+          continue;
+        }
+        if (admissionStopped && (item.kind === 'producer' || item.kind === 'registration' ||
+          item.kind === 'worker' && !item.worker.started)) {
+          queue.splice(index, 1);
+          changed = true;
+          reply(item, { error: 'Test admission stopped after unsettled owned resources' });
+          if (item.kind === 'producer') resume(item.slot, item.id, () => {});
           continue;
         }
         if (item.kind === 'producer' && item.parent &&
@@ -338,7 +349,8 @@ async function broker(capacity) {
             reply(request, { processes: groupProcesses.get(`${input.producer}:${input.groupId}`) ?? [] });
           }
           else if (input.op === 'begin') {
-            requireThat(!socket.producerId && !socket.controlId && !socket.workerId && !socket.pendingWorker,
+            requireThat(!admissionStopped && !socket.producerId && !socket.controlId &&
+              !socket.workerId && !socket.pendingWorker,
               'BUDGET', 'A budget connection already owns an allocation');
             const parent = input.parent ?? null;
             const ancestor = resourceNode(parent);
@@ -369,7 +381,8 @@ async function broker(capacity) {
             drain();
           } else if (input.op === 'worker') {
             const producer = producers.get(input.producer);
-            requireThat(producer && !producer.closing && !socket.workerId && !socket.pendingWorker &&
+            requireThat(!admissionStopped && producer && !producer.closing &&
+              !socket.workerId && !socket.pendingWorker &&
               Number.isInteger(input.slots) && input.slots > 0 && input.slots <= producer.limit &&
               Number.isInteger(input.pid) && input.pid > 0 &&
               (input.groupId === null || typeof input.groupId === 'string' && /^[a-f0-9]{64}$/u.test(input.groupId)) &&
@@ -381,6 +394,13 @@ async function broker(capacity) {
             'BUDGET', 'File worker has no remaining declared allocation');
             socket.pendingWorker = true;
             queue.push({ ...request, kind: 'registration', producer: producer.id, slots: input.slots });
+            drain();
+          } else if (input.op === 'stop-admission') {
+            const worker = workers.get(socket.workerId);
+            requireThat(worker && worker.started && !worker.closing,
+              'BUDGET', 'Only the original active worker can stop test admission');
+            admissionStopped = true;
+            reply(request, { complete: true, admissionStopped });
             drain();
           } else if (input.op === 'end') {
             const producer = producers.get(socket.producerId);
@@ -450,6 +470,7 @@ export async function acquireTestWorker(slots = 1, { groupId = null, exclusiveRe
       producer: process.env.SDLC_TEST_BUDGET_PRODUCER, slots, groupId, exclusiveResources, pid: process.pid });
     process.env.SDLC_TEST_BUDGET_SLOT = allocation.slot;
     process.env.SDLC_TEST_BUDGET_PARENT = allocation.slot;
+    workerClient = client;
     let closed = false;
     client.signal.addEventListener('abort', () => {
       if (!closed) { process.exitCode ||= 2; process.kill(process.pid, 'SIGTERM'); }
@@ -461,8 +482,20 @@ export async function acquireTestWorker(slots = 1, { groupId = null, exclusiveRe
       }
     });
     client.socket.unref();
-    return { ...allocation, close: () => { closed = true; client.close(); } };
+    return { ...allocation, close: () => {
+      closed = true;
+      if (workerClient === client) workerClient = undefined;
+      client.close();
+    } };
   } catch (error) { client.close(); throw error; }
+}
+
+export async function stopTestAdmission() {
+  requireThat(workerClient && !workerClient.socket.destroyed,
+    'BUDGET', 'Stopping test admission requires the original active worker allocation');
+  const result = await workerClient.request({ op: 'stop-admission' });
+  requireThat(result.admissionStopped === true, 'BUDGET', 'Test admission stop was not acknowledged');
+  return result;
 }
 
 export async function readTestBudget({ signal } = {}) {
