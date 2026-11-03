@@ -19,7 +19,8 @@ import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
   validateExecutionContext, sanitizeExecutionPayload } from 'ai-sdlc-framework/evidence';
 import { compileValidationInventory, compileValidationSourceInventory, reconcileNodeExecution,
   validationPlatforms, validationSourcePaths, isValidationTestPath,
-  partitionValidationInventory, declarationTokens, sourceLiteralAt, decodeString } from './validation-inventory.mjs';
+  partitionValidationInventory, declarationTokens, sourceLiteralAt, decodeString,
+  matchesNodeSelection } from './validation-inventory.mjs';
 import { discoverGoDeclarations, executeValidationCommand, reconcileGoExecution, processDiagnostic,
   createOwnedCommandRunner } from './validation-tools.mjs';
 import { repositoryRoot, unitFiles, validationSelectionDescriptor, validationSelectionProtocol,
@@ -411,15 +412,31 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
   requireThat(nativeFrameworkShardProtocols.includes(protocol),
     'INVENTORY', 'Unknown native framework prerequisite topology');
   const stages = nativeStageSelections(inventory, plan, schedulingPolicy);
+  const completeGroups = validationExecutionGroups(inventory, { preserveOrder: true });
+  const groupsByFile = new Map(inventory.files.map(source =>
+    [source.file, completeGroups.filter(group => group.file === source.file)]));
+  // Native stages select complete roots; project those validated closures within this invocation only.
+  const selectedGroups = (files, pattern) => {
+    const selected = pattern === undefined ? null : new RegExp(pattern);
+    const assertions = new Set(inventory.cases.filter(test => files.includes(test.file) &&
+      (!selected || matchesNodeSelection(test, selected))).map(test => test.id));
+    const groups = files.flatMap(file => groupsByFile.get(file) ?? [])
+      .filter(group => assertions.has(group.rootId));
+    requireThat(groups.every(group => group.assertionIds.every(id => assertions.has(id))) &&
+      groups.reduce((count, group) => count + group.assertionIds.length, 0) === assertions.size,
+    'INVENTORY', 'Native shard selectors must preserve exact complete causal root closures');
+    const ids = new Set(groups.map(group => group.id));
+    requireThat(groups.every(group => group.dependsOn.every(id => ids.has(id))), 'INVENTORY',
+      'Selected execution group is missing a prerequisite root; select its dependency explicitly');
+    return groups;
+  };
   const unitShards = nativeFrameworkUnitShardNames(target, protocol);
   const extendedUnits = stages.find(stage => stage.name === 'required-units');
   const unitPartitions = partitionValidationInventory({ ...inventory, cases: extendedUnits.cases,
     files: inventory.files.filter(file => extendedUnits.files.includes(file.file)) }, unitShards.length);
   const regression = stages.find(stage => stage.name === 'regression');
   const refreshFile = 'test/observation-retention-refresh.test.mjs';
-  const refreshGroups = validationExecutionGroups(inventory, {
-    files: [refreshFile], pattern: regression.selectorName, preserveOrder: true,
-  });
+  const refreshGroups = selectedGroups([refreshFile], regression.selectorName);
   requireThat(refreshGroups.length === 1 &&
     refreshGroups[0].root === 'FR-063/064 real refresh and prune archive superseded observations/facts before exhaustion',
   'INVENTORY', 'The unchanged causal refresh root must exist as one complete regression closure');
@@ -429,10 +446,8 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
   'INVENTORY', 'The complete causal refresh root cannot be partially assigned or moved between stages');
   const bodyCases = regression.cases.filter(test => !refreshIds.has(test.id));
   const bodyFiles = new Set(bodyCases.map(test => test.file));
-  const roots = validationExecutionGroups(inventory, {
-    ...([nativeSplitUnitFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? {} :
-      { files: regression.files, pattern: regression.selectorName }), preserveOrder: true,
-  });
+  const roots = [nativeSplitUnitFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
+    completeGroups : selectedGroups(regression.files, regression.selectorName);
   const bodyCount = nativeFrameworkShardNames(target, protocol).filter(shard => shard.startsWith('body-')).length;
   const bodyIds = new Set(bodyCases.map(test => test.id));
   const partitions = protocol === nativeFrameworkShardProtocol ?
@@ -462,9 +477,7 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
         exactPattern(stage.cases.map(test => [...test.parents, test.name].join(' '))) : stage.selectorName;
       requireThat(files.length > 0 && stage.cases.some(test => test.applicability.platforms.includes(target)),
         'INVENTORY', 'Every required native shard stage needs a nonempty applicable assertion denominator');
-      const groups = validationExecutionGroups(inventory, {
-        files, pattern: stage.name === 'unit' ? undefined : selectorName, preserveOrder: true,
-      });
+      const groups = selectedGroups(files, stage.name === 'unit' ? undefined : selectorName);
       requireThat(digest(groups.flatMap(group => group.assertionIds).sort()) ===
         digest(stage.cases.map(test => test.id).sort()), 'INVENTORY',
       'Native shard selectors must preserve exact complete causal root closures');

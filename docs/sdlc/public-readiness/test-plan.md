@@ -724,10 +724,27 @@ shared serialized reservation and preserves ordered authority` in
 `test/public-readiness-evidence.test.mjs` includes a controlled initial proof-read
 failure. Require the exact original rejection rather than a later barrier
 timeout, and reject replay completion before its required read barrier.
-Preserve the five-second watchdog and every existing overlap, four-handle,
-reservation, ordered-failure, cache, staged-read and alias assertion. The
+Complete and verify the original normalized import before starting the
+five-second concurrent-read watchdog. Bound that real setup separately at
+thirty seconds, observed through the first original assertion read closing;
+neither preload a context nor bypass any retained dependency validation.
+A controlled original-import read and mocked five-second clock advance must
+not consume the later overlap deadline; restore real timers before releasing
+that read so the overlap watchdog remains active. Preserve all fifteen original modes,
+every overlap, four-handle, reservation, ordered-failure, cache, staged-read and
+alias assertion, and add this deterministic slow-setup mode. The
 maintainer owns this process-isolated, network-free fixture on the existing
 native Node lanes; it adds no critical-profile assertion or shared resource.
+The maintainer-owned PR-only root `T-PRD017 native shard construction derives
+complete root groups once and preserves exact dispatch selectors` in
+`test/public-readiness-native.test.mjs` compares complete stage groups to the
+independent canonical grouping, including escaped names, descendants, dependency
+edges, exclusive resources, slot demand and the exact once-only assertion union.
+Its process-local Node inspector session observes one complete-inventory
+derivation per planning call; a second call must observe mutated resource input
+without changing the earlier result. Run on the existing native Node lanes,
+with owned, credential/network-free fixtures and no cross-process profiler or
+shared resource. This adds one PR-only root, not a critical-profile assertion.
 The JWT-header regression observes avoided JSON parses for decoded non-object
 candidates while retaining real object headers with JSON whitespace, exact
 redaction digests, malformed-object handling and conservative overlong headers.

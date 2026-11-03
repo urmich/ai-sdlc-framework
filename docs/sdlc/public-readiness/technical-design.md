@@ -417,6 +417,12 @@ roots from one file may execute on different hosts; a root's descendants and
 connected components may not. Body file lists may overlap, but source-bound
 escaped full-name selectors must execute each assigned assertion exactly once.
 Ambiguous selectors fail rather than executing an unassigned closure.
+Derive the complete validated root-group inventory once per planning invocation,
+index it by file and project each shard's exact complete selection in original
+file order. Check the assertion union and prerequisites for each projection.
+Reuse never crosses an invocation or caches mutable inventory inputs; a later
+call must observe changed resource declarations. Historical protocols and
+current component placement remain unchanged for identical inputs.
 This changes cross-host assignment only: within-host scheduling policy v9
 remains byte-identical. Verify the workflow's selected protocol against the
 captured native planner and SDK reconstruction; old source cannot be relabelled
@@ -1360,9 +1366,17 @@ snapshot/decision/execution bytes remain unchanged.
 The referenced-assertion preparation regression observes both its required read
 barrier and the actual replay outcome. An early replay rejection preserves its
 original cause instead of becoming a misleading barrier timeout; successful
-completion before the required barrier fails explicitly. Its five-second
-watchdog, four-handle ceiling, serialized reservation and ordered authority,
-failure-drain, cache and alias checks remain unchanged.
+completion before the required barrier fails explicitly. The first original
+assertion read closes only after the common normalized import is fully verified.
+Wait for this real setup with a separate thirty-second watchdog before arming
+the unchanged five-second concurrent-read deadline; do not preload or reuse a
+previous context. A controlled import read and mocked clock advance reproduce
+the old premature deadline without waiting on wall-clock latency. All fifteen
+original modes and the four-handle ceiling, serialized reservation, ordered
+authority, failure-drain, cache and alias checks remain, alongside this new
+slow-setup mode. Restore real timers before releasing the controlled import so
+the subsequent overlap watchdog remains live. No native command watchdog or
+whole-lane limit changes.
 
 ### 5.5 Sanitization and retention
 

@@ -5,6 +5,7 @@ export const validationDeclarations = {
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
+import { setImmediate as yieldEventLoop } from 'node:timers/promises';
 import fsPromises from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { mkdir, mkdtemp, readFile, rename, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
@@ -477,7 +478,8 @@ test('referenced assertion preparation overlaps within its shared serialized res
   const childRefs = admissions.map(payload => payload.content.assertionPageRefs[0]);
   const childFiles = childRefs.map(ref => validationObjectPath(input.f.store, input.f.workItemId, ref));
   const childBytes = await readFile(childFiles[4]);
-  for (const mode of ['initial-read', 'overlap', 'undefined', 'metadata', 'child-payload', 'child-metadata',
+  const importFile = validationObjectPath(input.f.store, input.f.workItemId, admissions[0].content.importRef);
+  for (const mode of ['initial-read', 'startup', 'overlap', 'undefined', 'metadata', 'child-payload', 'child-metadata',
     'cache', 'staged', 'staged-invalid', 'mismatch', 'mismatch-null',
     'projection-invalid', 'alias', 'alias-length', 'reservation']) {
     const records = structuredClone(state.records);
@@ -531,6 +533,10 @@ test('referenced assertion preparation overlaps within its shared serialized res
     const later = Promise.withResolvers();
     const earlierClosed = Promise.withResolvers();
     const laterClosed = Promise.withResolvers();
+    const primed = Promise.withResolvers();
+    const startupRead = Promise.withResolvers();
+    const startupRelease = Promise.withResolvers();
+    const realTimers = { setTimeout, clearTimeout };
     const firstError = mode === 'undefined' ? undefined :
       Object.assign(new Error('Earlier assertion read failed'), { code: 'EIO' });
     const laterError = Object.assign(new Error('Later prepared read failed'), { code: 'EACCES' });
@@ -541,17 +547,17 @@ test('referenced assertion preparation overlaps within its shared serialized res
     let maximum = 0;
     let settled = false;
     let authoritative;
-    const wait = async promise => {
+    const wait = async (promise, timeoutMs = 5000, timers = globalThis) => {
       let timeout;
       try {
         await Promise.race([promise, replay.then(outcome => {
           if (outcome.status === 'rejected') throw outcome.reason;
           throw new Error(`Evidence replay completed before the assertion barrier: ${mode}`);
         }), new Promise((resolve, reject) => {
-          timeout = setTimeout(() => reject(new Error(
-            `Assertion barrier not reached: ${mode}, ${opened.join(',')}, ${active} live`)), 5000);
+          timeout = timers.setTimeout(() => reject(new Error(
+            `Assertion barrier not reached: ${mode}, ${opened.join(',')}, ${active} live`)), timeoutMs);
         })]);
-      } finally { clearTimeout(timeout); }
+      } finally { timers.clearTimeout(timeout); }
     };
     const open = fsPromises.open;
     const mocked = t.mock.method(fsPromises, 'open', async (file, ...options) => {
@@ -571,6 +577,10 @@ test('referenced assertion preparation overlaps within its shared serialized res
         if (expected.every(index => opened.includes(index))) ready.resolve();
       }
       handle.read = async (...args) => {
+        if (mode === 'startup' && file === importFile) {
+          startupRead.resolve();
+          await startupRelease.promise;
+        }
         if (mode === 'child-payload' && parent === 5) throw laterError;
         if (expected.includes(child) && occurrence === 1) {
           if (mode === 'undefined' && child === 4) {
@@ -591,6 +601,7 @@ test('referenced assertion preparation overlaps within its shared serialized res
         try { return await close(); }
         finally {
           active--;
+          if (child === 0) primed.resolve();
           if (child === 4) earlierClosed.resolve();
           if (child === 6) laterClosed.resolve();
         }
@@ -598,6 +609,7 @@ test('referenced assertion preparation overlaps within its shared serialized res
       return handle;
     });
     syncBuiltinESMExports();
+    if (mode === 'startup') t.mock.timers.enable({ apis: ['setTimeout'] });
     const replay = prepareCycleEvidence(input.f.store, cycle, context).then(
       () => { settled = true; return { status: 'fulfilled' }; },
       reason => { settled = true; return { status: 'rejected', reason }; });
@@ -610,7 +622,26 @@ test('referenced assertion preparation overlaps within its shared serialized res
         t.diagnostic(`Assertion preparation case passed: ${mode}`);
         continue;
       }
-      await wait(ready.promise);
+      let barrierSettled = false;
+      const barrier = (async () => {
+        await wait(primed.promise, 30000, realTimers);
+        await wait(ready.promise);
+      })().then(
+        () => { barrierSettled = true; return { status: 'fulfilled' }; },
+        reason => { barrierSettled = true; return { status: 'rejected', reason }; });
+      if (mode === 'startup') {
+        await wait(startupRead.promise, 30000, realTimers);
+        assert.deepEqual(opened, []);
+        assert.equal(context.normalizedReadinessImports.size, 0);
+        t.mock.timers.tick(5001);
+        await yieldEventLoop();
+        assert.equal(barrierSettled, false,
+          'Original import setup must not consume the concurrent-read deadline');
+        t.mock.timers.reset();
+        startupRelease.resolve();
+      }
+      const barrierResult = await barrier;
+      if (barrierResult.status === 'rejected') throw barrierResult.reason;
       assert.deepEqual([...opened].sort((a, b) => a - b), expected, mode);
       assert.equal(active, expected.length, mode);
       assert.equal(context.normalizedReadinessImports.size, 1, 'Only the original completed import is eligible');
@@ -644,7 +675,7 @@ test('referenced assertion preparation overlaps within its shared serialized res
       }
       release.resolve();
       const result = await replay;
-      if (['overlap', 'cache', 'staged', 'mismatch', 'reservation'].includes(mode)) {
+      if (['startup', 'overlap', 'cache', 'staged', 'mismatch', 'reservation'].includes(mode)) {
         assert.equal(result.status, 'fulfilled', result.reason?.stack);
         assert.equal(stagePassed(cycle, records, 'local', input.f.clock), true);
         if (mode === 'cache') assert.equal(context.validationReadObjects.get(childRefs[4].sha256), authoritative);
@@ -664,8 +695,9 @@ test('referenced assertion preparation overlaps within its shared serialized res
       assert.equal(maximum, 4, 'Parents, children and original imports retain one global handle ceiling');
       t.diagnostic(`Assertion preparation case passed: ${mode}`);
     } finally {
-      release.resolve(); earlier.resolve(); later.resolve();
+      startupRelease.resolve(); release.resolve(); earlier.resolve(); later.resolve();
       await replay;
+      if (mode === 'startup') t.mock.timers.reset();
       mocked.mock.restore();
       syncBuiltinESMExports();
       assert.equal(active, 0);

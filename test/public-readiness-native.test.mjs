@@ -71,6 +71,7 @@ import path from 'node:path';
 import { createContext, runInContext, Script } from 'node:vm';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { Session } from 'node:inspector';
 import { PassThrough } from 'node:stream';
 import { finished } from 'node:stream/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -97,7 +98,8 @@ import { runNativeValidation } from '../scripts/native-validation.mjs';
 import { nativeSourceDummyValues } from '../scripts/native-source-dummy-values.mjs';
 import { observerApiFixture } from './readiness-observer-fixture.mjs';
 import * as nativePass from '../scripts/native-validation.mjs';
-import { sourceValidationSchedulingPolicy, validationSchedulingPolicy } from '../scripts/test-scheduling.mjs';
+import { sourceValidationSchedulingPolicy, validationSchedulingPolicy,
+  validationExecutionGroups } from '../scripts/test-scheduling.mjs';
 import { validateBootstrapRequest, bootstrapNativeToolchain, nativeBootstrapEnvironment,
   nativeBootstrapExports, portableRubyBootstrapEnvironment, requireHomebrewBottlePlan,
   requireHomebrewBottleReceipts, homebrewSetupLimits, homebrewBottlePlanSource } from '../scripts/native-toolchain.mjs';
@@ -3384,6 +3386,63 @@ test('T-PRD016 six PR producer parts require both exact Mac originals and reject
     changed[index] = { ...passing[index], evaluation: f.evaluate(f.lanes[index], mutate) };
     assert.equal(aggregateNativeReadiness(changed, f.expected).status, 'NotRun');
   }
+});
+
+test('T-PRD017 native shard construction derives complete root groups once and preserves exact dispatch selectors', async t => {
+  const f = await observerApiFixture(t);
+  const file = 'test/observer-shard-body.test.mjs';
+  const originalRoot = f.source.names.find(test => test.file === file).name;
+  const escapedRoot = 'literal [a]+(b)?';
+  const child = 'literal child .*[x]';
+  const files = [...f.source.files].map(([file, contents]) => ({ file, contents }));
+  files.find(source => source.file === file).contents =
+    `export const validationDeclarations=${JSON.stringify({ schemaVersion: 1,
+      resources: { workers: 3, names: [child], owner: 'native-planning-fixture',
+        reason: 'Only the complete escaped root requires these slots' },
+      groups: [{ root: escapedRoot, dependsOn: [originalRoot], exclusiveResources: ['owned-planning-fixture'] }],
+    })};\nimport test from 'node:test';\n` +
+    `test(${JSON.stringify(originalRoot)},()=>{});\n` +
+    `test(${JSON.stringify(escapedRoot)},async t=>{await t.test(${JSON.stringify(child)},()=>{});});\n`;
+  const paths = new Set(validationSourcePaths(files.map(source => source.file)));
+  const inventory = compileValidationSourceInventory({ files: files.filter(source => paths.has(source.file)),
+    surfacePaths: files.map(source => source.file) });
+  assert.equal(inventory.complete, true, JSON.stringify(inventory.unresolved));
+  const session = new Session();
+  session.connect();
+  const post = (method, params = {}) => new Promise((resolve, reject) =>
+    session.post(method, params, (error, value) => error ? reject(error) : resolve(value)));
+  let assignment;
+  let coverage;
+  try {
+    await post('Profiler.enable');
+    await post('Profiler.startPreciseCoverage', { callCount: true, detailed: false });
+    assignment = nativeFrameworkShardPlan({ inventory, plan: f.source.plan, target: 'linux-x64' });
+    coverage = (await post('Profiler.takePreciseCoverage')).result;
+  } finally {
+    await post('Profiler.stopPreciseCoverage');
+    session.disconnect();
+  }
+  for (const part of assignment.parts) for (const stage of part.stages) {
+    assert.deepEqual(stage.groups, validationExecutionGroups(inventory, { files: stage.files,
+      pattern: stage.name === 'unit' ? undefined : stage.selectorName, preserveOrder: true }));
+  }
+  const groups = assignment.parts.flatMap(part => part.stages.flatMap(stage => stage.groups));
+  assert.equal(groups.find(group => group.root === escapedRoot).minimumSlots, 3);
+  assert.equal(groups.find(group => group.root === originalRoot).minimumSlots, 1);
+  assert.equal(groups.find(group => group.root === escapedRoot).assertionIds.length, 2);
+  const ids = assignment.parts.flatMap(part => part.assertionIds);
+  assert.deepEqual([...ids].sort(), inventory.cases.map(test => test.id).sort());
+  assert.equal(new Set(ids).size, ids.length);
+  const scheduling = coverage.find(source => source.url.endsWith('/scripts/test-scheduling.mjs'));
+  const construction = scheduling.functions.find(fn => fn.functionName === 'validationExecutionGroups');
+  assert.equal(construction.ranges[0].count, 1,
+    'One native planning invocation must not rebuild every complete root closure for each shard');
+  inventory.resourceRequirements.find(resource => resource.file === file).workers = 4;
+  const next = nativeFrameworkShardPlan({ inventory, plan: f.source.plan, target: 'linux-x64' });
+  assert.equal(next.parts.flatMap(part => part.stages.flatMap(stage => stage.groups))
+    .find(group => group.root === escapedRoot).minimumSlots, 4,
+  'A later invocation must derive fresh resource requirements even for the same mutable inventory object');
+  assert.equal(groups.find(group => group.root === escapedRoot).minimumSlots, 3);
 });
 
 test('T-PRD017 native protocol4 retains its exact historical file and assertion assignments', async t => {
