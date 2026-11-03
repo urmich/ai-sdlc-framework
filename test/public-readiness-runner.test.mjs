@@ -5,6 +5,10 @@ export const validationDeclarations = {
     {"coverage": "direct", "paths": ["scripts/test-scheduling.mjs", "scripts/test-budget.mjs", "scripts/test-local-evidence.mjs", "scripts/validation-benchmark.mjs"]}
   ],
   "groups": [{
+    "root": "T-PRD011 exclusive ready clocks exclude the previous holder capture without hiding eligible failures",
+    "minimumSlots": 1,
+    "exclusiveResources": []
+  }, {
     "root": "T-PRD010 PR-description priority admits its isolated closure before queued work while the retained guard is live",
     "minimumSlots": 5
   }, {
@@ -16,6 +20,12 @@ export const validationDeclarations = {
     "exclusiveResources": []
   }],
   "applicability": [{
+    "names": ["T-PRD011 exclusive ready clocks exclude the previous holder capture without hiding eligible failures"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "PR-only controlled readiness-clock regression; isolated VM and owned logical contenders, no native processes or shared resources.",
+    "prerequisites": ["Node and one aggregate worker slot"]
+  }, {
     "names": ["T-PRD010 PR-description priority admits its isolated closure before queued work while the retained guard is live"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "runner-resource-contract",
@@ -1775,6 +1785,98 @@ test('T-PRD010 same-file roots overlap in isolated processes while ordered child
     'A failed prerequisite cannot create a passing or cancelled observation for an unstarted dependent');
 });
 
+async function captureOwnedReady(labels, entered, capture, { exclusive = false, signal } = {}) {
+  const wait = async pending => {
+    const deadline = Date.now() + 10000;
+    while (true) {
+      signal?.throwIfAborted();
+      for (const label of pending) {
+        try {
+          const owned = JSON.parse(await fs.readFile(path.join(entered, `${label}.ready`), 'utf8'));
+          return { label, owned };
+        } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      }
+      assert.ok(Date.now() < deadline, `Owned worker never reached its identity barrier: ${pending.join(', ')}`);
+      await delay(10);
+    }
+  };
+  if (exclusive) {
+    const pending = new Set(labels);
+    while (pending.size) {
+      const { label, owned } = await wait([...pending]);
+      await capture(label, owned);
+      pending.delete(label);
+    }
+  } else {
+    const outcomes = await Promise.allSettled(labels.map(async label => {
+      const ready = await wait([label]);
+      await capture(label, ready.owned);
+    }));
+    const failure = outcomes.find(outcome => outcome.status === 'rejected');
+    if (failure) throw failure.reason;
+  }
+}
+
+test('T-PRD011 exclusive ready clocks exclude the previous holder capture without hiding eligible failures', async () => {
+  for (const mode of ['ready', 'never-ready', 'capture-error', 'producer-error']) {
+    const result = await controlledReadyClock(captureOwnedReady, mode);
+    if (mode === 'ready') {
+      assert.equal(result.status, 'Passed');
+      assert.deepEqual(result.captured, ['exclusive right', 'exclusive left']);
+      assert.equal(result.clock, 13030);
+    } else if (mode === 'never-ready') {
+      assert.equal(result.status, 'Failed');
+      assert.match(result.message, /identity barrier: exclusive left/u);
+      assert.equal(result.clock, 23000);
+    } else {
+      assert.equal(result.status, 'Failed');
+      assert.equal(result.message, `original ${mode}`);
+    }
+  }
+});
+
+async function controlledReadyClock(implementation, mode = 'ready') {
+  let clock = 0;
+  let releaseAt = null;
+  const timers = [];
+  const captured = [];
+  const controller = new AbortController();
+  const pause = milliseconds => new Promise(resolve => timers.push({ at: clock + milliseconds, resolve }));
+  const readFile = async file => {
+    const right = path.basename(file) === 'exclusive right.ready';
+    const ready = right ? clock >= 9000 :
+      releaseAt !== null && clock >= releaseAt + 30 && mode !== 'never-ready';
+    if (!ready) throw Object.assign(new Error('not ready'), { code: 'ENOENT' });
+    return JSON.stringify({ pid: right ? 2 : 1, observedAtMs: clock });
+  };
+  const context = createContext({ Date: { now: () => clock }, fs: { readFile, async writeFile() {} },
+    path, assert, delay: pause });
+  const run = runInContext(`(${implementation.toString()})`, context);
+  let result;
+  const pending = run(['exclusive left', 'exclusive right'], 'owned', async label => {
+    captured.push(label);
+    if (label === 'exclusive right') {
+      await pause(4000);
+      if (mode === 'capture-error') throw new Error('original capture-error');
+      releaseAt = clock;
+      if (mode === 'producer-error') controller.abort(new Error('original producer-error'));
+    }
+  }, { exclusive: true, signal: controller.signal }).then(() => { result = { status: 'Passed' }; },
+    error => { result = { status: 'Failed', message: error.message }; });
+  for (let step = 0; !result && step < 4000; step++) {
+    for (let flush = 0; flush < 128; flush++) await Promise.resolve();
+    if (result) break;
+    assert.ok(timers.length, 'Controlled readiness must yield to an observable clock event');
+    clock = Math.min(...timers.map(timer => timer.at));
+    for (let index = timers.length - 1; index >= 0; index--) {
+      if (timers[index].at <= clock) timers.splice(index, 1)[0].resolve();
+    }
+  }
+  assert.ok(result, 'Controlled readiness must settle within its unchanged allowances');
+  await pending;
+  return { ...result, clock, captured };
+}
+
 test('T-PRD011 sibling producers dynamically consume freed aggregate capacity without token multiplication', async t => {
   const f = await runnerFixture(t);
   const inheritedBudget = Boolean(process.env.SDLC_TEST_BUDGET);
@@ -1803,23 +1905,13 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
         catch(error){if(error.code!=='ENOENT')throw error;}
         await delay(10);}
     }`;
-  const runOwnedPhase = async (files, paths, labels) => {
+  const runOwnedPhase = async (files, paths, labels, { exclusive = false } = {}) => {
     const monitors = new Map();
+    const readiness = new AbortController();
     const releases = labels.flat().map(label => path.join(entered, `${label}.release`));
     const releaseAll = () => Promise.all(releases.map(file => fs.writeFile(file, 'released')));
     const capture = process.platform !== 'win32' ? Promise.resolve(null) :
-      Promise.allSettled(labels.flat().map(async label => {
-        const ready = path.join(entered, `${label}.ready`);
-        const deadline = Date.now() + 10000;
-        let owned;
-        while (!owned) {
-          try { owned = JSON.parse(await fs.readFile(ready, 'utf8')); }
-          catch (error) {
-            if (error.code !== 'ENOENT') throw error;
-            assert.ok(Date.now() < deadline, `Owned worker never reached its identity barrier: ${label}`);
-            await delay(10);
-          }
-        }
+      captureOwnedReady(labels.flat(), entered, async (label, owned) => {
         assert.ok(Number.isSafeInteger(owned.observedAtMs),
           'The live worker ready observation must establish its creation bound');
         const exitPath = path.join(entered, `${label}.exit.json`);
@@ -1828,14 +1920,14 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
         t.diagnostic(JSON.stringify({ kind: 'owned-worker-identity-captured',
           owned: monitor.identity, capturedBeforeTrigger: true, label }));
         await fs.writeFile(path.join(entered, `${label}.release`), 'captured');
-      })).then(async outcomes => {
-        const failure = outcomes.find(outcome => outcome.status === 'rejected');
-        if (failure) await releaseAll();
-        return failure?.reason ?? null;
+      }, { exclusive, signal: readiness.signal }).then(() => null, async error => {
+        await releaseAll();
+        return error;
       });
     const producers = files.map((file, index) =>
       f.invoke(['targeted', '--workers', '2', file],
         { ...budget.environment, SDLC_TEST_REPORT_FILE: paths[index] }).then(result => {
+        if (exclusive && result.exitCode !== 0) readiness.abort(new Error(result.stdout + result.stderr));
         t.diagnostic(JSON.stringify({ kind: 'owned-producer-completed', index,
           completedAtMs: result.completedAtMs, completionClockPrecisionMs: 1,
           independentProducer: independent.parent, independentProducerActive: !independent.signal.aborted }));
@@ -1928,7 +2020,7 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
   }));
   const exclusiveReports = exclusiveFiles.map((_, index) => path.join(entered, `exclusive-${index}.json`));
   const exclusive = await runOwnedPhase(exclusiveFiles, exclusiveReports,
-    [['exclusive left'], ['exclusive right']]);
+    [['exclusive left'], ['exclusive right']], { exclusive: true });
   const exclusiveGroups = exclusive.reports.map(report => report.groupExecution.groups[0]);
   const ordered = exclusiveGroups.sort((left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt));
   assert.ok(Date.parse(ordered[0].finishedAt) <= Date.parse(ordered[1].startedAt),

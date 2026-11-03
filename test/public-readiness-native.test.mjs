@@ -61,7 +61,9 @@ export const validationDeclarations = {
     {"root": "TOOL03 actual native child boundary quarantines a surviving detached writer before outer cleanup",
       "minimumSlots": 4, "exclusiveResources": []},
     {"root": "T-PRD018 native timing notices retain only ten source-bound actual group and root durations",
-      "minimumSlots": 2, "exclusiveResources": []}
+      "minimumSlots": 2, "exclusiveResources": []},
+    {"root": "T-PRD018 optional timing consumer preserves legacy partial and blocked outcomes and finalizer errors",
+      "minimumSlots": 1, "exclusiveResources": []}
   ]
 };
 import test from 'node:test';
@@ -4386,6 +4388,42 @@ test('T-PRD018 unretainable successful Homebrew evidence fails explicitly and ca
   assert.equal(report.diagnostic.code, 'UNSAFE');
   await assert.rejects(writeNativeHomebrewReport(directory, { nativeValidation: 'Passed' }), { code: 'EEXIST' });
   assert.deepEqual(await fs.readFile(path.join(directory, 'native-homebrew.json')), original);
+});
+
+test('T-PRD018 optional timing consumer preserves legacy partial and blocked outcomes and finalizer errors', async () => {
+  const source = runNativeValidation.toString();
+  const start = source.indexOf('  const details = ');
+  const end = source.indexOf('  const status = ', start);
+  assert.ok(start > 0 && end > start);
+  const consume = `async () => { let evaluation; ${source.slice(start, end)}
+    return { evaluation, diagnostics, markdown }; }`;
+  const primary = Object.assign(new Error('Owned original failure'), { code: 'OWNED_PRIMARY' });
+  for (const status of ['Passed', 'Failed', 'NotRun']) {
+    for (const timingAnnotations of [undefined, null, [], {}, 'not-an-annotation-array']) {
+      const evaluation = { status, blockers: status === 'NotRun' ? ['required-source-blocked'] : [] };
+      const diagnostics = [{ code: 'OWNED_ORIGINAL_DIAGNOSTIC' }];
+      const notices = [];
+      const context = createContext({
+        process: { env: {} }, context: {}, phase: 'validation', directory: 'owned-evidence',
+        inputs: {}, target: 'windows-x64', startedAt: 'owned-start', candidate: {},
+        failure: primary, cancellation: { signal: { aborted: true } },
+        console: { error: value => notices.push(value) },
+        finalizeNativeEvidence: async options => {
+          assert.equal(options.failure, primary);
+          assert.equal(options.cancelled, true);
+          return { evaluation, diagnostics, markdown: 'Owned partial report',
+            ...(timingAnnotations === undefined ? {} : { timingAnnotations }) };
+        },
+      });
+      const result = await runInContext(`(${consume})`, context)();
+      assert.equal(result.evaluation, evaluation);
+      assert.equal(result.diagnostics, diagnostics);
+      assert.equal(result.markdown, 'Owned partial report');
+      assert.deepEqual(notices, []);
+      context.finalizeNativeEvidence = async () => { throw primary; };
+      await assert.rejects(runInContext(`(${consume})`, context)(), error => error === primary);
+    }
+  }
 });
 
 test('T-PRD018 native failure annotations escape workflow-command injection without changing the underlying failure', () => {

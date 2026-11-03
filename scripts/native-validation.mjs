@@ -2233,7 +2233,9 @@ export async function runNativeValidation(options, { lifetime = { cleanupSafe: t
     evaluation = finalized.evaluation;
     diagnostics = finalized.diagnostics;
     markdown = finalized.markdown;
-    for (const annotation of finalized.timingAnnotations) console.error(annotation);
+    for (const annotation of Array.isArray(finalized.timingAnnotations) ? finalized.timingAnnotations : []) {
+      console.error(annotation);
+    }
   } else {
     markdown = `# Native ${target}: NotRun\n\n${phase === 'candidate' && candidateReady && !failure ?
       'Source candidate frozen after canonical units and static validation; native assertions have not executed.' :

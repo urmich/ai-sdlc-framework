@@ -1548,6 +1548,15 @@ arguments. An exit event records state but does not discard an identity still
 draining from stdout. These facts distinguish observations, not the unproven
 cause of an earlier hosted timeout.
 
+The Windows sibling-producer test captures and releases whichever exclusive
+holder becomes ready first, then starts the remaining contender's unchanged
+ten-second ready allowance. Do not spend that allowance while the previous
+holder is legitimately being captured and released. Nonexclusive ready capture
+remains concurrent; failed exclusive producers abort pending readiness.
+Keep native identity capture, stop budgets, resource bounds, exit proofs and
+overall watchdogs unchanged. This corrects controlled clock accounting, not
+the unproven cause of a historical hosted failure.
+
 After existing source, original journal, command, context and resource checks,
 native framework producers emit at most ten slowest group timing notices.
 Retain only closed group/root/source identities, actual group wall intervals and
@@ -1557,6 +1566,11 @@ adds a presentation diagnostic without changing readiness; existing evidence
 validation remains authoritative. Notices contain no names, paths or raw output
 and neither establish speedup nor replace original SDK/cleanup reconciliation
 or the unchanged whole-lane delivery limits.
+
+The entry consumer treats absent or non-array optional timing metadata as no
+notices, including legacy partial and blocked finalizer responses. Preserve the
+original evaluation, diagnostics and Markdown, and propagate actual finalizer
+errors unchanged; presentation cannot mask the primary result.
 
 GitHub renders Markdown summaries, not arbitrary result JSON automatically.
 Reuse the runner records and generic report projection for this small adapter;

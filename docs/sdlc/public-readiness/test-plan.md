@@ -1037,6 +1037,29 @@ provider access, shared resources or prerequisite roots. Neither new root
 expands critical27, changes native role membership or grants native timing,
 original SDK reconciliation or release-readiness credit.
 
+`T-PRD018 optional timing consumer preserves legacy partial and blocked outcomes
+and finalizer errors` is maintainer-owned, PR-only and Node-only on all four
+existing native lanes. Its isolated VM uses the actual entry consumer with one
+slot, no dependencies or shared resources. Cover absent, null, empty-array and
+malformed non-array metadata for Passed, Failed and blocked NotRun responses;
+preserve the original evaluation, diagnostics, primary failure and cancellation
+inputs, and rethrow original finalizer errors. Retain the unchanged `TOOL03
+actual native child boundary quarantines a surviving detached writer before
+outer cleanup` regression and its real child teardown. No critical-profile,
+native-role, deadline or evidence-validation change is implied.
+
+`T-PRD011 exclusive ready clocks exclude the previous holder capture without
+hiding eligible failures` is maintainer-owned, PR-only and Node-only on all four
+native lanes. Its isolated VM reserves one slot and uses a controlled clock:
+either holder may become ready first, its valid capture/release cannot exhaust
+the blocked contender's ready allowance, and an eligible non-ready contender
+still fails that unchanged allowance. Preserve capture and producer failures.
+It has no prerequisite roots, shared resources or native-process requirement.
+The existing real sibling-producer test retains nonexclusive overlap,
+exclusive ordering, aggregate capacity, native identities and exit/cleanup
+proofs. Neither this control nor a local positive clears the historical hosted
+failure or grants delivery-limit credit.
+
 | ID | Environment | Level | Checkpoint | Mode | Owner | Location | Requirements | Observe or assert | Implementation | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | T-PRD014-LX | local | integration | post-review | automated | provider | github-linux-x64 | FR-203; AC-203.1; AC-203.2 | P: open/update the approved fixture PR with no local-result artifact; full current applicable cases execute on Ubuntu, including shared filesystem/Git/tooling; retain exact candidate and case inventory. | procedure: section-7-pr-matrix | NotRun | |
