@@ -1567,6 +1567,16 @@ Keep native identity capture, stop budgets, resource bounds, exit proofs and
 overall watchdogs unchanged. This corrects controlled clock accounting, not
 the unproven cause of a historical hosted failure.
 
+The standalone simultaneous-activation fixture similarly separates cold staging
+from the contender's lock-wait allowance. Hold the first real promotion after
+staging, observe an actual competing `mkdir` returning `EEXIST`, then release and
+settle both activations. Preserve successful serialization, foreign-lock
+retention, busy refusal and tampered-version rejection. Restore filesystem
+observation only after both operations settle. A process-isolated PR regression
+exercises the actual fixture and activation source with controlled slow staging;
+it does not replace native distribution acceptance or alter production locking,
+timeouts, critical membership or whole-lane delivery limits.
+
 After existing source, original journal, command, context and resource checks,
 native framework producers emit at most ten slowest group timing notices.
 Retain only closed group/root/source identities, actual group wall intervals and

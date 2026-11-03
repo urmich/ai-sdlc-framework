@@ -209,6 +209,21 @@ refusal checks. Preserve the full 4096-byte proof, one delivery identity,
 no additional notice, conflict/stale refusals and archive/prune assertions.
 Production lock acquisition and its original budget remain unchanged.
 
+The simultaneous standalone-channel fixture first completes the real cold
+staging and holds promotion, then observes the contender's actual `EEXIST`
+against that still-owned lock before releasing the first activation. Require
+both successful activations and the same launcher, the unchanged short busy-lock
+refusal with retained foreign bytes, and tampered-version rejection. Do not spend
+the contender's five-second allowance on the first install's cold copy.
+A new PR-only, all-four-platform, one-process regression executes that exact
+fixture and actual activation/lock source against an owned synthetic tree with
+controlled staging elapsed time. It preserves real filesystem contention and
+settles both activations before restoring its process-local filesystem
+observation. This is not native package/launcher acceptance; the original
+npm-dependent distribution fixture remains required on capable PR runners.
+The finite critical27 gate, production deadlines and native delivery limits do
+not change.
+
 Local test results are not inputs required from an external contributor merely
 to open a PR. PR jobs never
 perform A's permission-requiring disposable-PR/ref probes or publication.

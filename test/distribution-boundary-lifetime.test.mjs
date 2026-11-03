@@ -1,7 +1,7 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [
-    {"coverage": "direct", "paths": ["scripts/validation-tools.mjs"]}
+    {"coverage": "direct", "paths": ["scripts/validation-tools.mjs", "packaging/standalone/runtime.mjs"]}
   ],
   "groups": [{
     "root": "T-51 owned boundary terminates descendant writers before return while an unrelated sibling survives",
@@ -14,8 +14,18 @@ export const validationDeclarations = {
     "root": "TOOL02 owned writer provenance is invisible until its complete publication",
     "minimumSlots": 2,
     "exclusiveResources": []
+  }, {
+    "root": "T-51 simultaneous channel fixture excludes cold staging from the contender lock allowance",
+    "minimumSlots": 1,
+    "exclusiveResources": []
   }],
   "applicability": [{
+    "names": ["T-51 simultaneous channel fixture excludes cold staging from the contender lock allowance"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "distribution-activation-contract",
+    "reason": "PR-only controlled admission regression executes actual channel activation and the existing simultaneous fixture against an owned synthetic tree, not native distribution acceptance.",
+    "prerequisites": ["Node and one isolated fixture process"]
+  }, {
     "names": ["TOOL02 owned writer provenance is invisible until its complete publication"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "runner-resource-contract",
@@ -40,11 +50,14 @@ import { PassThrough } from 'node:stream';
 import { createContext, runInContext } from 'node:vm';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { stopOwnedProcessGroup, processDiagnostic } from '../scripts/validation-tools.mjs';
 import { boundaryPhaseDiagnostics } from './distribution-network-boundary.mjs';
 import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
 import { digest, SdlcError } from '../src/core.mjs';
-import { atomicWrite } from '../src/files.mjs';
+import { atomicWrite, canonicalPath, within } from '../src/files.mjs';
+import { canonical } from '../packaging/standalone/archive.mjs';
+import { extractEntries } from '../packaging/standalone/protocol.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const toolsModule = await fs.readFile(new URL('../scripts/validation-tools.mjs', import.meta.url), 'utf8');
@@ -370,6 +383,93 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
     assert.deepEqual([...completedModes].sort(), [...modes].sort());
     assert.deepEqual(failures, []);
   });
+
+test('T-51 simultaneous channel fixture excludes cold staging from the contender lock allowance', async t => {
+  const directory = await fs.mkdtemp(path.join(root, '.test-data', 'channel-admission-'));
+  const fixture = { directory, source: path.join(directory, 'source'),
+    channelRoot: path.join(directory, 'channel'), home: path.join(directory, 'home') };
+  const lock = path.join(fixture.channelRoot, '.channel-lock');
+  const entries = [{ path: 'package/src/install.mjs', data: Buffer.from('controlled channel payload\n'), mode: 0o644 }];
+  const contender = Promise.withResolvers();
+  const timedOut = Promise.withResolvers();
+  const active = [];
+  let sourceChecks = 0;
+  let copyCalls = 0;
+  let offset = 0;
+  const mkdir = fs.mkdir;
+  const observed = t.mock.method(fs.default, 'mkdir', async (...args) => {
+    try { return await mkdir(...args); }
+    catch (error) {
+      if (args[0] === lock && error.code === 'EEXIST') contender.resolve();
+      throw error;
+    }
+  });
+  syncBuiltinESMExports();
+  try {
+    await extractEntries(entries, fixture.source);
+    await fs.mkdir(fixture.home);
+    const runtime = (await fs.readFile(new URL('../packaging/standalone/runtime.mjs', import.meta.url), 'utf8'))
+      .split('export function invokeFramework(')[0]
+      .replace(/^import .+;\r?$/gmu, '').replace(/^export /gmu, '');
+    const channels = await fs.readFile(new URL('./distribution-channels.test.mjs', import.meta.url), 'utf8');
+    const start = channels.indexOf("test('T-51 simultaneous installs serialize; a busy channel times out without deleting its lock'");
+    const end = channels.indexOf('\ntest(', start + 5);
+    assert.ok(start >= 0 && end > start);
+    const context = createContext({
+      fs, path, process, randomUUID, Buffer, canonicalPath, within,
+      canonical: value => canonical(JSON.parse(JSON.stringify(value))),
+      Date: { now: () => Date.now() + offset }, setTimeout, syncBuiltinESMExports,
+      observeInstallOperation: action => action(),
+      observeInstallPhase: (_phase, action) => action(), installPhase() {},
+      async verifyTree(location) {
+        if (location === fixture.source) sourceChecks++;
+        for (const entry of entries) {
+          if (!(await fs.readFile(path.join(location, entry.path))).equals(entry.data)) {
+            throw new Error('Controlled channel payload mismatch');
+          }
+        }
+        return { entries, platform: { platform: process.platform, arch: process.arch },
+          manifest: { name: 'controlled-channel', version: '0.5.0',
+            payload: { sha256: digest('controlled-channel-payload') } } };
+      },
+      async extractEntries(selected, destination) {
+        copyCalls++;
+        if (sourceChecks > 1) await contender.promise;
+        offset += 6000;
+        if (sourceChecks > 1) await timedOut.promise;
+        return extractEntries(selected, destination);
+      },
+    });
+    const activate = runInContext(`${runtime}
+runtimePreflight = async () => process.execPath;
+validateChannelHome = async ({ channelRoot, home }) => ({ channelRoot, home });
+activateChannel;`, context);
+    context.activateChannel = options => {
+      const promise = activate(options);
+      active.push(promise);
+      promise.catch(error => {
+        if (/Channel is busy; lock timeout/u.test(error.message)) timedOut.resolve();
+      });
+      return promise;
+    };
+    context.fixture = async () => fixture;
+    context.assert = assert;
+    context.hostTarget = 'controlled-channel';
+    context.windowsLauncher = 'controlled-only-not-an-executable';
+    const exercise = runInContext(`let captured;
+const test = (_name, _options, action) => { captured = action; };
+${channels.slice(start, end)}
+captured;`, context);
+    await exercise(t);
+    assert.equal(copyCalls, 1, 'Both activations must share exactly one cold staged copy');
+    assert.equal(offset, 6000, 'Cold staging exceeds the unchanged five-second contender allowance');
+  } finally {
+    await Promise.allSettled(active);
+    observed.mock.restore();
+    syncBuiltinESMExports();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
 
 function controlled(mode = 'absent', { automatic = false, broker = false, budgetError = false, budgetAbort = false } = {}) {
   let clock = 0;
