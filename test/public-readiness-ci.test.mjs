@@ -32,6 +32,7 @@ import { previousReleasePins } from '../scripts/release-bundle.mjs';
 import { nativePrParts, nativeLegacyPrParts, nativePartJobKey, nativeFrameworkShardPlan,
   nativeResourceFacts, nativePrPartsForProtocol, nativeFrameworkShardProtocols, nativeFrameworkShardProtocol,
   nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
+  nativeCatalogIsolationFrameworkShardProtocol,
   nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
 import { compileValidationInventory } from '../scripts/validation-inventory.mjs';
 import { expectedBodySdkRequirements } from './native-sdk-expectations.mjs';
@@ -2394,7 +2395,8 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.equal(previousResource.nativeResourcePolicy, 'arm-regression-allocation-v1');
   for (const protocol of nativeFrameworkShardProtocols) {
     const historical = structuredClone(historicalV8);
-    if ([nativeFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
+    if ([nativeFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
+      nativeResourceAffinityFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
       'native-framework-shards-v5-root-components'].includes(protocol)) {
       historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = protocol;
     } else delete historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL;
@@ -2542,12 +2544,17 @@ with zipfile.ZipFile(sys.argv[2],"w",compression=zipfile.ZIP_DEFLATED) as bundle
     ['prefix-free-missing-request', [nonallocation[0]], { kind: 'cleanup', ownedPrefix: false }],
     ['valid-stage-journal', [...good, { name: 'regression.json.journal.ndjson',
       text: '{"kind":"diagnostic","text":"' + 'x'.repeat(1000) + '"}\n', repeat: 5000 }]],
+    ['valid-phase-journals', [...good, ...['regression-catalog', 'regression-retained'].flatMap(stage =>
+      [`${stage}.json.journal.ndjson`, `${stage}-command.journal.ndjson`].map(name =>
+        ({ name, text: '{"kind":"diagnostic","text":"' + 'x'.repeat(1000) + '"}\n', repeat: 5000 })))]],
     ['oversized-other', [...good, { name: 'other.log', text: 'x', repeat: 4 * 1024 * 1024 + 1 }]],
     ['unknown-journal', [...good, { name: 'unrecognized.json.journal.ndjson', text: 'x',
       repeat: 4 * 1024 * 1024 + 1 }]],
     ['nested-journal', [...good, { name: 'nested/regression.json.journal.ndjson', text: 'x',
       repeat: 4 * 1024 * 1024 + 1 }]],
     ['oversized-stage-journal', [...good, { name: 'regression.json.journal.ndjson', text: 'x',
+      repeat: 16 * 1024 * 1024 + 1 }]],
+    ['oversized-phase-journal', [...good, { name: 'regression-retained-command.journal.ndjson', text: 'x',
       repeat: 16 * 1024 * 1024 + 1 }]],
     ['aggregate-journals', [good[0], { name: 'readiness-bundle.json', text: ' ', repeat: 16 * 1024 * 1024 },
       ...['unit', 'required-units', 'regression'].map(stage => ({
@@ -2572,14 +2579,14 @@ with zipfile.ZipFile(sys.argv[2],"w",compression=zipfile.ZIP_DEFLATED) as bundle
       assert.equal(result['native-homebrew-prefix-request.json'].kind, 'native-homebrew-prefix-not-required');
       assert.equal(Object.hasOwn(result, 'native-homebrew-prefix-allocation.json'), false);
       assert.equal(Object.hasOwn(result, 'native-homebrew-prefix-cleanup.json'), false);
-    } else if (name === 'valid' || name === 'valid-stage-journal') {
+    } else if (name === 'valid' || name === 'valid-stage-journal' || name === 'valid-phase-journals') {
       const result = await api.client.artifact(metadata);
       assert.deepEqual(result['execution.json'], { kind: 'original-data' });
       assert.equal(result.texts['execution.json'], good[0].text);
       assert.equal(result.files.find(file => file.filename === 'execution.json').sha256, digest(good[0].text));
-      if (name === 'valid-stage-journal') {
-        const original = entries.at(-1).text.repeat(entries.at(-1).repeat);
-        const journal = 'regression.json.journal.ndjson';
+      for (const entry of entries.filter(entry => entry.name.endsWith('.journal.ndjson'))) {
+        const original = entry.text.repeat(entry.repeat);
+        const journal = entry.name;
         assert.ok(Buffer.byteLength(original) > 4 * 1024 * 1024);
         assert.equal(result.texts[journal], original);
         assert.deepEqual(result.files.find(file => file.filename === journal), {

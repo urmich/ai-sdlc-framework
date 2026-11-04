@@ -405,7 +405,8 @@ observed part results. Require source-, platform-, job-, run- and attempt-bound
 unit evidence before regression shards execute. Independently verify every
 part's SDK context, complete assertion union and allocated-prefix cleanup;
 missing, duplicated, overlapping or swapped parts cannot produce completeness.
-The source-adopted `native-framework-shards-v8-intel-catalog-isolation` protocol retains
+The current implementation candidate
+`native-framework-shards-v9-phased-intel-isolation` retains
 v4's four
 explicit platform-specific unit-to-regression job groups. A platform's unit
 producers must all complete successfully, including retention and cleanup, before
@@ -419,7 +420,7 @@ nonempty extended-unit subset. Both Intel unit jobs share `native-units-mi`'s
 standard runner matrix, each with its own four-worker budget and prefix. No waiting
 regression host is started early merely to overlap provisioning.
 For body placement, derive complete root groups from the existing scheduler,
-then join dependency and shared-exclusive-resource edges transitively. V8 retains
+then join dependency and shared-exclusive-resource edges transitively. V9 retains
 v7/v6's qualified observed root costs to place whole connected components, with a
 separate stable planning identity derived from exact file/root identities rather
 than whole-file source hashes. Preserve actual source-bound assertion, group,
@@ -472,16 +473,44 @@ selected closure through existing bootstrap requirements, retaining genuine
 absence/nonallocation evidence and all required tool assertions elsewhere.
 Isolation is a measurement hypothesis: fresh native results must establish
 both the catalog service and non-starved secondary tails within the lane limit.
+V9 replaces permanent catalog-only primary ownership with a qualified,
+two-phase assignment on the same existing Intel body-0. The first phase executes
+the complete catalog component alone. Only after its successful owned process
+execution and verified cleanup settlement may the second phase execute the
+entire retained-identity component alone, retaining its existing four-wide
+children. Keep fourteen-worker body capacity and four-worker unit barriers;
+do not batch causal callbacks or add a physical producer.
+Qualify both complete components, source, target, runtime, capacity and resources.
+Changed or incompatible inputs must retain explicit safe fallback without
+splitting a connected component, emptying a required body or inventing a phase.
+Repartition all remaining whole components across body-1/body-2 with separately
+authenticated C66 scheduling leads. Preserve every v6/v7/v8 literal and authentic
+v1-v8 assignment and serialized identity.
+Each phase retains its own original execution report and journal, exact source,
+configuration and full regression context. Their disjoint assertion union must
+equal the entire assigned producer closure. A failed phase, incomplete process
+settlement or uncertain cleanup prevents dispatch of the next phase and prevents
+producer completeness. Phase labels, elapsed timestamps or partial passing
+reports cannot substitute for the causal settlement barrier.
+Derive SDK requirements from the union of the actual selected phase closures,
+not the earlier catalog-only omission. Keep timing retention bounded to ten
+notices per producer, not ten per phase; offsets and the terminal-group capsule
+must describe the actual producer-wide sequence.
+Sequential isolation is a falsifiable placement hypothesis, not a sufficient
+latency proof: unchanged observed service sums can still exceed the Intel limit,
+and longer primary allocation can affect secondary provider queues. Require
+fresh measurements of all three bodies and the complete lane.
 Derive the complete validated root-group inventory once per planning invocation,
 index it by file and project each shard's exact complete selection in original
 file order. Check the assertion union and prerequisites for each projection.
 Reuse never crosses an invocation or caches mutable inventory inputs; a later
 call must observe changed resource declarations. Within each authentic protocol,
 identical inputs reproduce its deterministic component placement.
-This changes cross-host assignment only: within-host scheduling policy v9
-remains byte-identical. Verify the workflow's selected protocol against the
+Historical v5-v8 placement changes cross-host assignment only. V9 additionally
+orders producer phases outside the unchanged within-phase scheduling policy v9.
+Verify the workflow's selected protocol against the
 captured native planner and SDK reconstruction; old source cannot be relabelled
-as v7 or v8. Keep v4's exact historical file assignments and v5's original count/hash
+as v7, v8 or v9. Keep v4's exact historical file assignments and v5's original count/hash
 component assignments and serialized identities, each with its twenty-five-part
 topology. Replay `native-framework-shards-v6-stable-cost-components` with its exact
 original cost table, assignments, serialized identities and SDK source without
@@ -489,6 +518,18 @@ borrowing v7 overlays or affinities.
 Replay historical v7 through `nativeResourceAffinityFrameworkShardProtocol`
 with its original assignments, serialized identities, literals and SDK source,
 without borrowing v8 leads or isolation.
+Historical v8 retains its catalog-only primary without borrowing v9 phases or
+C66 leads. Authenticate the v9 phase and cost contracts from captured source;
+a protocol label or successful phase cannot relabel historical execution.
+The new strict JSON literals are `nativePlacementCostsV9` and
+`nativePlacementPhasesV9`; the historical v8 alias is
+`nativeCatalogIsolationFrameworkShardProtocol`. The phase contract
+`native-intel-primary-phases-v1` orders `regression-catalog` then
+`regression-retained`, both with regression context. Each phase retains its
+original report, report journal, command, command journal and settlement receipt.
+`verifyNativePhaseSettlement` binds the phase, context, command, report and
+command-journal digests to actual successful owned-process settlement before
+the successor can start. Missing or borrowed originals cannot establish it.
 Captured v6 planner source must carry the authentic adopted `nativePlacementCosts`
 literal. V7 additionally requires authentic `nativePlacementAffinities` and
 `nativePlacementCostsV7` strict JSON literals. Reject missing, computed, duplicate
@@ -514,13 +555,15 @@ Bootstrap v5 requires two genuine Homebrew owners and eleven source-bound
 nonallocation proofs, retaining all thirteen diagnostic artifacts and steps.
 Keep default whole-native execution and release prepublication compatible.
 The required logical lane span is at most 900 seconds (15 minutes) on each of
-Linux, Windows and Apple Silicon, and strictly under 1,200 seconds (20 minutes)
+Linux, Windows and Apple Silicon, and strictly under 1,500 seconds (25 minutes)
 on Intel macOS. Shorter recorded durations are historical measurements, not
 acceptance limits. Measure from the earliest required unit/framework/Homebrew
 worker start through the last evidence/cleanup completion, including unit barriers,
-repeated provisioning and internal queues. Intel's former fifteen-minute target
-is an optional stretch goal, not an acceptance requirement. Its observation
-cutoff moves from sixteen to twenty minutes, without changing command watchdogs,
+repeated provisioning and internal queues. Intel's earlier fifteen- and
+twenty-minute targets do not remain additional acceptance requirements.
+V9 uses the new twenty-five-minute limit; historical v1-v8 timing interpretation
+retains its original twenty-minute limit without retrospective passing credit.
+Its delivery observation cutoff is twenty-five minutes, without changing command watchdogs,
 owned-process settlement or other limits.
 Configured host fan-out, an isolated shard time or an elapsed-work estimate is
 not a passing latency result; fresh complete hosted measurements are required.
@@ -826,11 +869,11 @@ The four-body Linux/Windows matrices can provide five regression hosts per
 platform while at most five Mac hosts run, fitting fifteen native jobs within
 the conservative twenty-job standard personal allowance. Use standard runners
 in this public repository without paid larger runners or a billing change.
-If a required non-Intel lane remains active at 16 minutes, or Intel remains
-active at 20 minutes, cancel that attempt and retain its non-passing originals.
-Report misses of the tighter delivery limits separately; they do not cancel an
-Intel measurement before its cutoff. Revise the measured bottleneck rather than
-waiting for a late green result.
+If a required lane remains active beyond its delivery limit, record the timing
+miss immediately and retain its original execution through natural settlement.
+Do not cancel or retry unchanged source merely because a lane is late. Report
+native correctness separately from latency, then revise the measured bottleneck;
+a late green correctness result cannot pass the delivery limit.
 Reject a non-improving iteration as an unsuccessful optimization and revise its
 measured critical path; neither a configured allocation nor a passing local
 regression demonstrates a hosted speedup.
@@ -1099,7 +1142,7 @@ The dedicated history regression proves representative fixture/beforehook
 execution without the old object or alternates and guards an owned visible
 untracked canary against filesystem access and copying.
 
-The eighteen versioned protocol/bootstrap scenarios stay within their existing
+The nineteen versioned protocol/bootstrap scenarios stay within their existing
 logical root but execute as whole isolated Node children. Its four-slot
 reservation precedes setup; one existing shared producer and ready pool bound
 dispatch to the smaller of four and the actual caller/broker allocation.
@@ -1109,8 +1152,9 @@ completion and actual process/lease identity cross the boundary. Reject
 incomplete or mismatched row closures, stop new dispatch on observed failure,
 drain all started siblings, report the source-order primary error and await
 scratch cleanup before restoring the parent budget. Retain all original
-seventeen rows in order and append the current v8/bootstrap scenario as row
-eighteen, preserving every assertion and historical protocol semantic.
+seventeen rows and the historical v8/bootstrap eighteenth row in order, then
+append the current v9/bootstrap scenario as row nineteen, preserving every
+assertion and historical protocol semantic.
 Match each child's live lease with the same authoritative closed broker lease
 after actual owned process exit, using the explicit producer environment rather
 than changing the controller's process-global environment. Worker, command

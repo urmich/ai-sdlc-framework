@@ -16,12 +16,16 @@ export const validationDeclarations = {
       "T-PRD017 native v8 isolates the authentic Intel catalog and derives genuine SDK omissions",
       "T-PRD017 native v8 rejects incompatible catalog isolation without splitting connected closures",
       "T-PRD017 native v8 authenticates current leads and isolation without changing historical identities",
+      "T-PRD017 native v9 keeps catalog and retained components in qualified isolated primary phases",
+      "T-PRD017 native v9 falls back safely and authenticates unchanged historical v8",
+      "T-PRD017 native v9 phase originals require complete disjoint source assertions and settled causal order",
+      "T-PRD017 native v9 primary waits for owned process settlement and blocks failed or unsafe successors",
       "T-PRD018 native timing offsets retain the terminal group outside the ten longest notices",
       "T-PRD017 native protocol5 and historical4 retain source-bound observer and SDK reconstruction"
     ],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "native-validation-maintainer",
-    "reason": "PR-only network-free native placement units and exact SDK source replay; historical durations are leads, not current credit. No critical promotion, shared mutable resources or provider calls.",
+    "reason": "PR-only network-free native placement, source replay and owned child-process phase barriers using controlled provider reports; no native execution or performance credit. No critical promotion, shared mutable resources or provider calls.",
     "prerequisites": ["Node and owned repository-local source/report fixtures; complete causal roots remain sequential"]
   }],
   "groups": [
@@ -109,6 +113,14 @@ export const validationDeclarations = {
       "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD017 native v8 authenticates current leads and isolation without changing historical identities",
       "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD017 native v9 keeps catalog and retained components in qualified isolated primary phases",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD017 native v9 falls back safely and authenticates unchanged historical v8",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD017 native v9 phase originals require complete disjoint source assertions and settled causal order",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD017 native v9 primary waits for owned process settlement and blocks failed or unsafe successors",
+      "minimumSlots": 2, "exclusiveResources": []},
     {"root": "T-PRD018 native timing offsets retain the terminal group outside the ten longest notices",
       "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD017 native protocol5 spreads independent same-file roots and executes connected complete closures exactly once",
@@ -152,8 +164,10 @@ import { aggregateNativeReadiness, nativeArtifacts, nativeSpecification, nativeG
 import { runNativeValidation } from '../scripts/native-validation.mjs';
 import { readTestBudget } from '../scripts/test-budget.mjs';
 import { nativeSourceDummyValues } from '../scripts/native-source-dummy-values.mjs';
-import { observerApiFixture } from './readiness-observer-fixture.mjs';
+import { observerApiFixture, laneData as nativeLaneFixture,
+  sourceTree as nativeSourceTreeFixture } from './readiness-observer-fixture.mjs';
 import * as nativePass from '../scripts/native-validation.mjs';
+import { verifyOriginalNativeRows } from '../scripts/pr-observer.mjs';
 import { sourceValidationSchedulingPolicy, validationSchedulingPolicy,
   validationExecutionGroups } from '../scripts/test-scheduling.mjs';
 import { validateBootstrapRequest, bootstrapNativeToolchain, nativeBootstrapEnvironment,
@@ -161,9 +175,9 @@ import { validateBootstrapRequest, bootstrapNativeToolchain, nativeBootstrapEnvi
   requireHomebrewBottleReceipts, homebrewSetupLimits, homebrewBottlePlanSource } from '../scripts/native-toolchain.mjs';
 import { cleanupNativeToolchain, nativeToolchainFailureAnnotation } from '../scripts/native-toolchain.mjs';
 import { reconcileGoExecution, executeValidationCommand, validationCommandArguments } from '../scripts/validation-tools.mjs';
-import { repositoryRoot, createPlan, parseOptions, run as runTests } from '../scripts/test-runner.mjs';
+import { repositoryRoot, createPlan, parseOptions, run as runTests, writeValidationSelection } from '../scripts/test-runner.mjs';
 import { discoverDeclarations, compileValidationInventory, compileValidationSourceInventory,
-  validationSourcePaths, validationPlatforms, declarationTokens } from '../scripts/validation-inventory.mjs';
+  validationSourcePaths, validationPlatforms, declarationTokens, reconcileNodeExecution } from '../scripts/validation-inventory.mjs';
 import { testSpecificationDigest } from '../src/artifacts.mjs';
 import { runCalculator, calculatorFiles, calculatorProjectFiles, calculatorSelection, calculatorArguments,
   calculatorCommandArguments, reconcileCalculator } from '../scripts/pr-calculator.mjs';
@@ -3706,7 +3720,7 @@ async function nativeCostFixture(t, options) {
     assert.equal(result.complete, true, JSON.stringify(result.unresolved));
     return result;
   };
-  return { files, roots, compile, inventory: compile(files), plan: f.source.plan };
+  return { files, roots, compile, inventory: compile(files), plan: f.source.plan, original: f };
 }
 
 async function nativeAffinityFixture(t, options) {
@@ -3717,8 +3731,8 @@ async function nativeAffinityFixture(t, options) {
     retainedRoot: 'retained identity acceptance through existing public consumers' };
 }
 
-async function nativeIsolationFixture(t) {
-  const f = await nativeAffinityFixture(t, { bootstrapProtocol: nativeCryptoBootstrapProtocol });
+async function nativeIsolationFixture(t, options = {}) {
+  const f = await nativeAffinityFixture(t, { bootstrapProtocol: nativeCryptoBootstrapProtocol, ...options });
   const catalog = f.files.find(source => source.file === 'test/validation-catalog.test.mjs');
   catalog.contents = await fs.readFile(path.join(repositoryRoot, 'test', 'validation-catalog.test.mjs'), 'utf8');
   const file = 'test/github-host-authority.test.mjs';
@@ -3736,14 +3750,425 @@ async function nativeIsolationFixture(t) {
   return { ...f, inventory: f.compile(f.files) };
 }
 
+test('T-PRD017 native v9 keeps catalog and retained components in qualified isolated primary phases', async t => {
+  const f = await nativeIsolationFixture(t);
+  const options = { inventory: f.inventory, plan: f.plan, target: 'macos-x64' };
+  const historical = nativeFrameworkShardPlan({ ...options,
+    protocol: 'native-framework-shards-v8-intel-catalog-isolation' });
+  const assignment = nativeFrameworkShardPlan(options);
+  const primary = assignment.parts.find(part => part.shard === 'body-0');
+  assert.deepEqual(primary.stages.map(stage => stage.name), ['regression-catalog', 'regression-retained'],
+    'The early primary must retain separate complete catalog and retained phases, not release after catalog');
+  assert.deepEqual(primary.stages.map(stage => stage.groups.map(group => group.root)), [
+    [f.roots[0][1]], [f.retainedRoot],
+  ]);
+  assert.deepEqual(primary.stages.map(stage => stage.groups[0].minimumSlots), [1, 4]);
+  assert.ok(primary.stages.every(stage => stage.kind === 'regression' && stage.phase &&
+    stage.phase.protocol === 'native-intel-primary-phases-v1'));
+  assert.deepEqual(primary.stages.map(stage => stage.phase.index), [0, 1]);
+  assert.equal(assignment.placement.phases.status, 'applied');
+  assert.equal(assignment.placement.phases.capacity, 14);
+  assert.equal(assignment.placement.phases.evidenceCredit, false);
+  assert.equal(assignment.placement.phases.predictedSavingMs, null);
+  const ids = assignment.parts.flatMap(part => part.assertionIds);
+  assert.deepEqual([...ids].sort(), f.inventory.cases.map(test => test.id).sort());
+  assert.equal(new Set(ids).size, ids.length);
+  assert.ok(assignment.parts.every(part => part.assertionIds.length > 0));
+  assert.deepEqual(assignment.parts.filter(part => !part.shard.startsWith('body-')),
+    historical.parts.filter(part => !part.shard.startsWith('body-')));
+  const capability = nativeBootstrapCapability({ ...options, assignment, target: 'macos-x64',
+    profile: 'pr', component: 'framework', shard: 'body-0', protocol: nativeCryptoBootstrapProtocol });
+  assert.deepEqual(capability.tools,
+    { go: false, python: false, schema: false, homebrew: false, ownedPrefix: false, crypto: false },
+  'SDK decisions must derive from both real selected closures, not a catalog-only special case');
+  assert.ok(assignment.parts.find(part => part.go).stages.some(stage =>
+    stage.groups.some(group => group.root.startsWith('T-PRD015 actual pinned Go'))));
+  const leads = assignment.placement.groups.filter(group => group.costSource === 'v9-observed-lead');
+  assert.equal(leads.find(group => group.rootId ===
+    'assertion-30a06918b0d6d26eed9773acffe13e64087e7a1ec315a6a5c60d6a026fb52d22').durationMs, 796381);
+  assert.equal(leads.find(group => group.rootId ===
+    'assertion-b1b032561853815caa7a039f5c020e573a19067118dec177cae55e2d89dc1092').durationMs, 298047);
+  for (const target of ['linux-x64', 'windows-x64', 'macos-arm64']) {
+    assert.deepEqual(nativeFrameworkShardPlan({ ...options, target }).parts,
+      nativeFrameworkShardPlan({ ...options, target,
+        protocol: 'native-framework-shards-v8-intel-catalog-isolation' }).parts);
+  }
+});
+
+test('T-PRD017 native v9 falls back safely and authenticates unchanged historical v8', async t => {
+  const f = await nativeIsolationFixture(t);
+  const options = { plan: f.plan, target: 'macos-x64' };
+  for (const selected of [f.roots[0], [f.retainedFile, f.retainedRoot]]) {
+    const [file, root] = selected;
+    for (const [status, mutate] of [
+      ['changed-closure-or-resources', inventory => inventory.groupDeclarations
+        .push({ file, root, minimumSlots: root === f.retainedRoot ? 5 : 2 })],
+      ['changed-closure-or-resources', inventory => inventory.groupDeclarations
+        .push({ file, root, exclusiveResources: ['owned-phase-component'] })],
+      ['changed-source', inventory => inventory.cases.filter(test => test.file === file)
+        .forEach(test => { test.sourceDigest = 'a'.repeat(64); })],
+    ]) {
+      const inventory = structuredClone(f.inventory);
+      if (status !== 'changed-source') inventory.groupDeclarations = inventory.groupDeclarations.filter(group =>
+        group.file !== file || group.root !== root);
+      mutate(inventory);
+      const assignment = nativeFrameworkShardPlan({ ...options, inventory });
+      assert.equal(assignment.placement.phases.status, status);
+      assert.ok(assignment.parts.every(part => part.assertionIds.length > 0 &&
+        part.stages.every(stage => stage.phase === undefined)));
+      const ids = assignment.parts.flatMap(part => part.assertionIds);
+      assert.deepEqual([...ids].sort(), inventory.cases.map(test => test.id).sort());
+      assert.equal(new Set(ids).size, ids.length);
+    }
+  }
+  const source = await fs.readFile(path.join(repositoryRoot, 'scripts', 'native-validation.mjs'), 'utf8');
+  const qualified = nativeFrameworkShardPlan({ ...options, inventory: f.inventory });
+  const groups = qualified.parts.filter(part => part.shard.startsWith('body-'))
+    .flatMap(part => part.stages.flatMap(stage => stage.groups));
+  const partitionFrom = source.indexOf('function partitionNativeBodyGroups(');
+  const partitionTo = source.indexOf('\nfunction applyNativePlacementAffinities(', partitionFrom);
+  const partitionSource = `${source.slice(partitionFrom, partitionTo)}\npartitionNativeBodyGroups;`;
+  for (const [status, runtime, capacity] of [
+    ['unsupported-runtime', '24.20.1', 14], ['unsupported-capacity', '24.20.0', 13],
+  ]) {
+    const partition = runInContext(partitionSource, createContext({ requireThat, digest,
+      nativeToolchain: { node: runtime }, nativePlacementPhasesV9: nativePass.nativePlacementPhasesV9,
+      nativePlacementCosts: { workers: { 'macos-x64': capacity } } }));
+    const placement = structuredClone(qualified.placement);
+    placement.components = [];
+    const parts = partition(groups, 3, placement);
+    assert.equal(placement.phases.status, status);
+    assert.ok(parts.every(part => part.groups > 0));
+    assert.deepEqual([...parts.flatMap(part => part.assertionIds)].sort(),
+      groups.flatMap(group => group.assertionIds).sort());
+  }
+  const capacityFrom = source.indexOf('function nativeAffinityCapacityMatches(');
+  const capacityTo = source.indexOf('\nexport function nativeFrameworkShardPlan(', capacityFrom);
+  const capacityMatches = runInContext(`${source.slice(capacityFrom, capacityTo)}\nnativeAffinityCapacityMatches;`,
+    createContext({}));
+  assert.equal(capacityMatches(qualified, { workerCapacity: 14 }, 'body-0'), true);
+  assert.equal(capacityMatches(qualified, { workerCapacity: 13 }, 'body-0'), false);
+  assert.equal(capacityMatches(qualified, { workerCapacity: 4 }, 'units'), true);
+  assert.equal(capacityMatches(qualified, { workerCapacity: 4 }, 'units-1'), true);
+  const required = qualified.parts.find(part => part.shard === 'body-0').stages.flatMap(stage => stage.groups);
+  const other = groups.find(group => !required.includes(group) &&
+    !group.dependsOn.length && !group.exclusiveResources.length);
+  const narrow = [...required, other];
+  const placement = structuredClone(qualified.placement);
+  placement.groups = placement.groups.filter(group => narrow.some(row => row.rootId === group.rootId));
+  placement.components = [];
+  const partition = runInContext(partitionSource, createContext({ requireThat, digest, nativeToolchain,
+    nativePlacementPhasesV9: nativePass.nativePlacementPhasesV9, nativePlacementCosts: nativePass.nativePlacementCosts }));
+  const parts = partition(narrow, 3, placement);
+  assert.equal(placement.phases.status, 'would-empty-body');
+  assert.ok(parts.every(part => part.groups > 0));
+  const incoming = structuredClone(f.files);
+  incoming.find(row => row.file === f.retainedFile).contents +=
+    "\nnodeTest('incoming owned phase dependent',()=>{});\n";
+  const inventory = f.compile(incoming);
+  inventory.groupDeclarations.push({ file: f.retainedFile, root: 'incoming owned phase dependent',
+    dependsOn: [f.retainedRoot] });
+  const connected = nativeFrameworkShardPlan({ ...options, inventory });
+  assert.equal(connected.placement.phases.status, 'changed-component');
+  assert.ok(connected.parts.every(part => part.assertionIds.length > 0 &&
+    part.stages.every(stage => !stage.phase)));
+  const missing = f.compile(f.files.filter(row => row.file !== f.retainedFile));
+  const absent = nativeFrameworkShardPlan({ ...options, inventory: missing });
+  assert.equal(absent.placement.phases.status, 'missing-root');
+  assert.ok(absent.parts.every(part => part.assertionIds.length > 0 &&
+    part.stages.every(stage => !stage.phase)));
+  const select = contents => nativePass.sourceNativeFrameworkShardProtocol([
+    { file: 'scripts/native-validation.mjs', contents }]);
+  assert.equal(select(source), 'native-framework-shards-v9-phased-intel-isolation');
+  for (const name of ['nativePlacementCostsV9', 'nativePlacementPhasesV9']) {
+    assert.throws(() => select(source.replace(`export const ${name} =`, `const ${name} =`)),
+      { code: 'EVIDENCE' });
+    const value = structuredClone(nativePass[name]);
+    value.runId = '41828352390';
+    const from = source.indexOf(`export const ${name} = Object.freeze({`);
+    const end = source.indexOf('\n});', from) + 4;
+    assert.ok(from > 0 && end > from);
+    assert.throws(() => select(source.slice(0, from) +
+      `export const ${name} = Object.freeze(${JSON.stringify(value)});\n` + source.slice(end)),
+    { code: 'EVIDENCE' });
+    const adopted = JSON.stringify(nativePass[name]);
+    assert.throws(() => select(source.slice(0, from) +
+      `export const ${name} = Object.freeze(JSON.parse(${JSON.stringify(adopted)}));\n` + source.slice(end)),
+    { code: 'EVIDENCE' });
+    assert.throws(() => select(`${source}\nexport const ${name} = Object.freeze(${adopted});\n`),
+      { code: 'EVIDENCE' });
+  }
+  const historical = source.replace(
+    "export const nativeFrameworkShardProtocol = 'native-framework-shards-v9-phased-intel-isolation';",
+    "export const nativeFrameworkShardProtocol = 'native-framework-shards-v8-intel-catalog-isolation';")
+    .replace(/export const nativePlacement(?:Costs|Phases)V9 = Object\.freeze\(\{[\s\S]*?\n\}\);/gu, '');
+  assert.equal(select(historical), 'native-framework-shards-v8-intel-catalog-isolation',
+    'Captured v8 must need neither v9 literal nor any v9 phase identity');
+});
+
+async function nativePhaseOriginalFixture(t) {
+  const f = await nativeIsolationFixture(t, { frameworkShards: true });
+  const source = { ...f.original.source, inventory: f.inventory,
+    ...nativeSourceTreeFixture(new Map(f.files.map(({ file, contents }) => [file, contents]))) };
+  const lane = nativeLaneFixture(source, f.original.candidate, f.original.revisions, 'macos-x64', {
+    component: 'framework', shard: 'body-0', frameworkShards: true,
+    bootstrapProtocol: nativeCryptoBootstrapProtocol, configuredWorkers: 14,
+  });
+  const assignment = nativeFrameworkShardPlan({ inventory: f.inventory, plan: f.plan, target: lane.target });
+  const primary = assignment.parts.find(part => part.shard === lane.shard);
+  assert.equal(assignment.placement.phases.status, 'applied');
+  const data = Object.fromEntries([...lane.data].filter(([file]) => file.endsWith('.json')));
+  data.texts = Object.fromEntries([...lane.data].map(([file, value]) =>
+    [file, typeof value === 'string' ? value : canonical(value)]));
+  return { ...f, source, lane, primary, data, options: { data, inventory: f.inventory, plan: f.plan,
+    sources: f.files, calculatorSources: [], target: lane.target, stages: primary.stages,
+    context: lane.context, specification: lane.specification, candidate: f.original.candidate,
+    profile: 'pr', component: lane.component, shard: lane.shard,
+    shardProtocol: nativeFrameworkShardProtocol, bootstrapProtocol: nativeCryptoBootstrapProtocol,
+    startedAt: data['execution.json'].startedAt } };
+}
+
+test('T-PRD017 native v9 phase originals require complete disjoint source assertions and settled causal order', async t => {
+  const f = await nativePhaseOriginalFixture(t);
+  const originalDigest = digest(f.data);
+  const actual = await nativePass.reconcileNativeEvidenceData(f.options);
+  assert.equal(actual.raw.complete, true, JSON.stringify(actual.diagnostics));
+  assert.ok(actual.raw.results.every(row => row.status === 'Passed'));
+  assert.deepEqual(actual.raw.results.map(row => row.assertionId).sort(), [...f.primary.assertionIds].sort());
+  assert.equal(new Set(actual.raw.results.map(row => row.assertionId)).size, f.primary.assertionIds.length);
+  assert.deepEqual(actual.timings.map(row => row.stage), ['regression-catalog', 'regression-retained']);
+  assert.deepEqual(actual.timings.map(row => row.startOffsetMs), [9000, 25000],
+    'Both phases retain producer-global offsets, not a second per-phase zero');
+  assert.equal(actual.timingCoverageComplete, true);
+  const timing = nativePass.nativeTimingDiagnostics(actual.timings, { complete: true, producer: 'completed',
+    startedAt: f.options.startedAt, finishedAt: actual.raw.finishedAt });
+  assert.equal(timing.timingAnnotations.length, 2, 'The producer emits one combined notice set, not one quota per phase');
+  assert.equal(timing.timingAnnotations.filter(line => line.includes(' terminal=')).length, 1);
+  assert.equal(timing.terminalGroup.stage, 'regression-retained');
+  assert.equal(timing.terminalGroup.endOffsetMs, 44000);
+  assert.equal(timing.terminalGroup.producerEnvelope.durationMs, 44000);
+  assert.equal(f.data['toolchain.json'].native.executables.go, undefined);
+  assert.equal(f.data['toolchain.json'].native.executables.python, undefined);
+  await verifyOriginalNativeRows({ ...f.options, raw: f.data['execution.json'],
+    sourceFiles: f.files, goSources: f.source.goSources });
+  const definition = { schemaVersion: 1, kind: 'native-validation-definition', target: f.lane.target,
+    profile: 'pr', component: 'framework', shard: 'body-0', frameworkShards: nativeFrameworkShardProtocol,
+    bootstrapProtocol: nativeCryptoBootstrapProtocol, selectedWorkersRequest: 14, sourceFiles: f.files,
+    plan: f.plan, inventory: f.inventory, goSources: f.source.goSources,
+    calculatorSources: f.files.filter(row => calculatorFiles.includes(row.file)),
+    specification: f.lane.specification, stages: f.primary.stages,
+    configDigest: f.lane.context.configDigest, testSpecDigest: f.lane.context.testSpecDigest,
+    inventoryDigest: f.lane.context.inventoryDigest,
+    source: { revision: f.original.revisions.merge, treeSha: f.source.sha, repositoryId: 'repository-17' } };
+  const replay = await nativePass.replayNativeEvidence({ definition, data: f.data, candidate: f.original.candidate,
+    asOf: '2026-10-18T10:10:00.000Z', verifyArchive: request => ({
+      verifierId: 'owned-phased-source-fixture', definitionDigest: request.definitionDigest,
+      reportDigest: request.reportDigest, context: f.lane.context,
+      sourceTime: f.data['execution.json'].observedAt, sourceSequence: f.data['execution.json'].sequence,
+    }) });
+  assert.equal(replay.evaluation.status, 'Passed');
+  const [first, second] = f.primary.stages.map(stage => stage.name);
+  for (const [label, mutate] of [
+    ['missing-first', data => { delete data[`${first}.json`]; }],
+    ['missing-second', data => { delete data[`${second}.json`]; }],
+    ['missing-settlement', data => { delete data[`${first}-settlement.json`]; }],
+    ['borrowed-settlement', data => { data[`${second}-settlement.json`] = data[`${first}-settlement.json`]; }],
+    ['missing-assertion', data => { data[`${second}.json`].executions.pop(); }],
+    ['duplicate-assertion', data => {
+      data[`${second}.json`].executions.push(structuredClone(data[`${second}.json`].executions[0]));
+    }],
+    ['wrong-report-context', data => { data[`${second}.json`].context.candidateDigest = 'f'.repeat(64); }],
+    ['wrong-command-context', data => { data[`${second}-command.json`].context.configDigest = 'f'.repeat(64); }],
+    ['wrong-phase', data => { data[`${second}-settlement.json`].phase.index = 0; }],
+    ['unsettled-journal', data => {
+      data.texts[`${first}-command.journal.ndjson`] = data.texts[`${first}-command.journal.ndjson`]
+        .replace('"rootExitObserved":true', '"rootExitObserved":false');
+    }],
+    ['live-workers', data => { data[`${first}.json`].resources.budget.activeWorkers = 1; }],
+    ['foreign-resident-reservation', data => { data[`${first}.json`].resources.budget.potentialResidentWorkers = 2; }],
+    ['cleanup-after-successor-start', data => {
+      data[`${first}-settlement.json`].observedAt =
+        new Date(Date.parse(data[`${second}-command.json`].startedAt) + 1).toISOString();
+    }],
+  ]) {
+    const data = structuredClone(f.data);
+    mutate(data);
+    const rejected = await nativePass.reconcileNativeEvidenceData({ ...f.options, data });
+    assert.equal(rejected.raw.complete, false, label);
+    assert.equal(rejected.timingCoverageComplete, false, label);
+  }
+  assert.equal(digest(f.data), originalDigest, 'Reconciliation cannot rewrite its originals');
+});
+
+test('T-PRD017 native v9 primary waits for owned process settlement and blocks failed or unsafe successors', async t => {
+  const f = await nativePhaseOriginalFixture(t);
+  const source = await fs.readFile(path.join(repositoryRoot, 'scripts', 'native-validation.mjs'), 'utf8');
+  const toolStart = source.indexOf('    const runTool = options => {');
+  const toolEnd = source.indexOf('    const sdk = await probeNativeSdk(', toolStart);
+  const stageStart = source.indexOf('    const stage = async selected => {', toolEnd);
+  const stageEnd = source.indexOf("    if (component !== 'homebrew' && (part === undefined ||", stageStart);
+  const dispatch = "for (const selected of inputs.stages.filter(stage =>\n" +
+    "      stage.name === 'regression' || stage.kind === 'regression')) await stage(selected);";
+  assert.ok(toolStart > 0 && toolEnd > toolStart && stageStart > toolEnd && stageEnd > stageStart);
+  assert.ok(source.includes(dispatch), 'Exercise the actual source stage classifier and ordered dispatch');
+  const script = new Script(`(async () => { ${source.slice(toolStart, toolEnd)}\n` +
+    `${source.slice(stageStart, stageEnd)}\n${dispatch} })()`);
+  const [first, second] = f.primary.stages.map(stage => stage.name);
+  const ownedSelections = [];
+  for (const stage of f.primary.stages.filter(stage => stage.selection)) {
+    const file = path.join(repositoryRoot, ...stage.selection.path.split('/'));
+    try { await fs.stat(file); }
+    catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      ownedSelections.push(file);
+    }
+  }
+  t.after(async () => {
+    for (const file of ownedSelections) {
+      await fs.rm(file, { force: true });
+      await assert.rejects(fs.stat(file), { code: 'ENOENT' });
+    }
+  });
+  const waitForFile = async file => {
+    const expires = Date.now() + 10000;
+    for (;;) {
+      try { await fs.stat(file); return; }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+      assert.ok(Date.now() < expires, `Owned process did not reach ${path.basename(file)}`);
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  };
+  for (const mode of ['success', 'failed', 'unsafe', 'failed-unsafe', 'incomplete']) {
+    const root = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'native-phase-boundary-'));
+    const directory = path.join(root, 'evidence');
+    await fs.mkdir(directory);
+    await fs.mkdir(path.join(root, 'scripts'));
+    await fs.writeFile(path.join(root, 'templates.json'), JSON.stringify(Object.fromEntries(
+      f.primary.stages.map(stage => [stage.name, { report: f.data[`${stage.name}.json`],
+        journal: f.data.texts[`${stage.name}.json.journal.ndjson`] }]))));
+    await fs.writeFile(path.join(root, 'scripts', 'test-runner.mjs'), String.raw`
+import assert from 'node:assert/strict';
+import * as fs from 'node:fs/promises';
+import path from 'node:path';
+import { setTimeout } from 'node:timers/promises';
+const file = process.env.SDLC_TEST_REPORT_FILE;
+const name = path.basename(file, '.json');
+const mode = process.env.SDLC_PHASE_FIXTURE_MODE;
+const { report, journal } = JSON.parse(await fs.readFile('templates.json', 'utf8'))[name];
+const startedAt = new Date().toISOString();
+let failed = false;
+try { assert.ok(!mode.startsWith('failed') || name !== 'regression-catalog', 'Controlled original assertion failure'); }
+catch { failed = true; }
+const finishedAt = new Date().toISOString();
+report.startedAt = startedAt;
+report.finishedAt = finishedAt;
+report.exitCode = failed ? 1 : 0;
+report.summary.success = !failed;
+for (const row of report.executions) {
+  row.observedAt = finishedAt;
+  row.durationMs = 0;
+  if (failed) row.status = 'Failed';
+}
+for (const group of report.groupExecution.groups) {
+  group.startedAt = startedAt;
+  group.finishedAt = finishedAt;
+  group.processIds = [process.pid];
+  if (failed) group.status = 'Failed';
+}
+if (mode.includes('unsafe')) report.resources.budget.pendingParentRestorations = 1;
+if (mode === 'incomplete') report.executions.pop();
+const events = journal.trim().split('\n').map(JSON.parse).map(event => ({
+  ...event, observedAt: ['completion', 'group-end'].includes(event.kind) ? finishedAt : startedAt,
+  ...(event.startedAt ? { startedAt } : {}), ...(event.finishedAt ? { finishedAt } : {}),
+  ...(event.processIds ? { processIds: [process.pid] } : {}),
+  ...(event.kind === 'completion' ? { durationMs: 0 } : {}),
+}));
+await fs.writeFile(file, JSON.stringify(report), { flag: 'wx' });
+await fs.writeFile(file + '.journal.ndjson', events.map(JSON.stringify).join('\n') + '\n', { flag: 'wx' });
+await fs.writeFile('ready-' + name, String(process.pid), { flag: 'wx' });
+if (name === 'regression-catalog') {
+  const expires = Date.now() + 10000;
+  for (;;) {
+    try { await fs.stat('release-catalog'); break; }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (Date.now() >= expires) throw new Error('Owned catalog release was not observed');
+    await setTimeout(10);
+  }
+}
+process.exitCode = failed ? 1 : 0;
+`);
+    const lifetime = { cleanupSafe: true, unsettledCommands: [] };
+    const cancellation = new AbortController();
+    const calls = [];
+    const actualReports = [];
+    const context = createContext({
+      Buffer, path, fs, digest, requireThat, SdlcError, process, directory, lifetime, cancellation, prefixStage: null,
+      environment: { ...process.env, SDLC_TEST_REPORT_CONTEXT: JSON.stringify(f.lane.context),
+        SDLC_PHASE_FIXTURE_MODE: mode },
+      context: f.lane.context, target: f.lane.target, inputs: { inventory: f.inventory, stages: f.primary.stages },
+      resources: { workerCapacity: 14 },
+      verifyNativePhaseSettlement: nativePass.verifyNativePhaseSettlement,
+      validateNativeGroupReport, reconcileNodeExecution, writeValidationSelection,
+      readOptional: async file => JSON.parse(await fs.readFile(file, 'utf8')),
+      writeJson: async (file, value) => fs.writeFile(file, JSON.stringify(value), { flag: 'wx' }),
+      executeValidationCommand: async options => {
+        calls.push(options.name);
+        const report = await executeValidationCommand({ ...options, cwd: root });
+        actualReports.push(report);
+        return report;
+      },
+    });
+    const completed = script.runInContext(context).then(value => ({ value }), error => ({ error }));
+    try {
+      await waitForFile(path.join(root, `ready-${first}`));
+      assert.deepEqual(calls, [`${first}-command`]);
+      await assert.rejects(fs.stat(path.join(directory, `${second}-command.json`)), { code: 'ENOENT' });
+      await assert.rejects(fs.stat(path.join(directory, `${first}-settlement.json`)), { code: 'ENOENT' },
+        'A completed test report cannot certify its still-running producer');
+      await fs.writeFile(path.join(root, 'release-catalog'), 'owned release', { flag: 'wx' });
+      const result = await completed;
+      if (mode === 'success') {
+        assert.equal(result.error, undefined, result.error?.stack);
+        assert.deepEqual(calls, [`${first}-command`, `${second}-command`]);
+        const reports = await Promise.all(f.primary.stages.map(async stage => ({
+          command: JSON.parse(await fs.readFile(path.join(directory, `${stage.name}-command.json`), 'utf8')),
+          settlement: JSON.parse(await fs.readFile(path.join(directory, `${stage.name}-settlement.json`), 'utf8')),
+        })));
+        assert.ok(Date.parse(reports[0].command.finishedAt) <= Date.parse(reports[0].settlement.observedAt));
+        assert.ok(Date.parse(reports[0].settlement.observedAt) <= Date.parse(reports[1].command.startedAt));
+        assert.ok(reports.every(({ command, settlement }) => command.complete && settlement.settled));
+        assert.ok(reports.every(({ command, settlement }) => settlement.commandDigest === digest(command)),
+          'Settlement must authenticate the exact retained original command, not return-only process state');
+        assert.equal(lifetime.cleanupSafe, true);
+      } else {
+        assert.ok(result.error, mode);
+        assert.deepEqual(calls, [`${first}-command`]);
+        assert.equal(lifetime.cleanupSafe, !mode.includes('unsafe'));
+        if (mode.startsWith('failed')) assert.equal(result.error.code, 'VALIDATION');
+        if (mode === 'failed-unsafe') assert.equal(result.error.innerSettlementError.code, 'UNSETTLED_WRITERS');
+        await assert.rejects(fs.stat(path.join(directory, `${second}-command.json`)), { code: 'ENOENT' });
+        await assert.rejects(fs.stat(path.join(directory, `${first}-settlement.json`)), { code: 'ENOENT' });
+      }
+    } finally {
+      cancellation.abort();
+      await completed;
+      assert.equal(actualReports.length, calls.length, 'Retain the fixture if any actual command settlement is missing');
+      assert.ok(actualReports.every(report => report.cleanup.rootExitObserved &&
+        (!report.cleanup.requested || report.cleanup.survivorsVerified)), 'Drain the actual sole owned child before removal');
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      await assert.rejects(fs.stat(root), { code: 'ENOENT' });
+    }
+  }
+});
+
 test('T-PRD017 native v8 isolates the authentic Intel catalog and derives genuine SDK omissions', async t => {
   const f = await nativeIsolationFixture(t);
   const options = { inventory: f.inventory, plan: f.plan, target: 'macos-x64' };
   const historical = 'native-framework-shards-v7-resource-affinity-components';
   const current = 'native-framework-shards-v8-intel-catalog-isolation';
-  assert.equal(nativeFrameworkShardProtocol, current);
+  assert.equal(nativePass.nativeCatalogIsolationFrameworkShardProtocol, current);
   const before = nativeFrameworkShardPlan({ ...options, protocol: historical });
-  const after = nativeFrameworkShardPlan(options);
+  const after = nativeFrameworkShardPlan({ ...options, protocol: current });
   const catalog = f.inventory.cases.find(test => test.file === 'test/validation-catalog.test.mjs' &&
     test.name === f.roots[0][1]);
   const oldPart = before.parts.find(part => part.assertionIds.includes(catalog.id));
@@ -3759,7 +4184,7 @@ test('T-PRD017 native v8 isolates the authentic Intel catalog and derives genuin
   assert.equal(after.placement.isolation.evidenceCredit, false);
   assert.equal(after.placement.isolation.predictedSavingMs, null);
   assert.equal(nativePrPartsForProtocol(current).length, 25);
-  assert.deepEqual(nativeFrameworkShardPlan(options), after);
+  assert.deepEqual(nativeFrameworkShardPlan({ ...options, protocol: current }), after);
   const assigned = after.parts.flatMap(part => part.assertionIds);
   assert.deepEqual([...assigned].sort(), f.inventory.cases.map(test => test.id).sort());
   assert.equal(new Set(assigned).size, assigned.length);
@@ -3786,7 +4211,7 @@ test('T-PRD017 native v8 isolates the authentic Intel catalog and derives genuin
     'assertion-30a06918b0d6d26eed9773acffe13e64087e7a1ec315a6a5c60d6a026fb52d22').durationMs, 614424);
   for (const target of ['linux-x64', 'windows-x64', 'macos-arm64']) {
     const old = nativeFrameworkShardPlan({ ...options, target, protocol: historical });
-    const selected = nativeFrameworkShardPlan({ ...options, target });
+    const selected = nativeFrameworkShardPlan({ ...options, target, protocol: current });
     assert.deepEqual(selected.parts, old.parts, 'Other current platform placement remains unchanged');
     assert.deepEqual(selected.placement.affinities, old.placement.affinities);
   }
@@ -3794,7 +4219,8 @@ test('T-PRD017 native v8 isolates the authentic Intel catalog and derives genuin
 
 test('T-PRD017 native v8 rejects incompatible catalog isolation without splitting connected closures', async t => {
   const f = await nativeIsolationFixture(t);
-  const options = { plan: f.plan, target: 'macos-x64' };
+  const options = { plan: f.plan, target: 'macos-x64',
+    protocol: 'native-framework-shards-v8-intel-catalog-isolation' };
   const root = f.roots[0][1];
   const file = f.roots[0][0];
   for (const [status, mutate] of [
@@ -3882,7 +4308,10 @@ test('T-PRD017 native v8 rejects incompatible catalog isolation without splittin
 });
 
 test('T-PRD017 native v8 authenticates current leads and isolation without changing historical identities', async () => {
-  const source = await fs.readFile(path.join(repositoryRoot, 'scripts', 'native-validation.mjs'), 'utf8');
+  const source = (await fs.readFile(path.join(repositoryRoot, 'scripts', 'native-validation.mjs'), 'utf8'))
+    .replace("export const nativeFrameworkShardProtocol = 'native-framework-shards-v9-phased-intel-isolation';",
+      "export const nativeFrameworkShardProtocol = 'native-framework-shards-v8-intel-catalog-isolation';")
+    .replace(/export const nativePlacement(?:Costs|Phases)V9 = Object\.freeze\(\{[\s\S]*?\n\}\);/gu, '');
   const select = contents => nativePass.sourceNativeFrameworkShardProtocol([
     { file: 'scripts/native-validation.mjs', contents }]);
   assert.equal(select(source), 'native-framework-shards-v8-intel-catalog-isolation');
@@ -4369,8 +4798,9 @@ test('T-PRD017 native protocol5 spreads independent same-file roots and executes
 test('T-PRD017 native protocol5 and historical4 retain source-bound observer and SDK reconstruction', async t => {
   const protocols = ['native-framework-shards-v4-split-intel-units', 'native-framework-shards-v5-root-components',
     'native-framework-shards-v6-stable-cost-components', 'native-framework-shards-v7-resource-affinity-components',
-    'native-framework-shards-v8-intel-catalog-isolation'];
-  assert.equal(nativeFrameworkShardProtocol, protocols[4]);
+    'native-framework-shards-v8-intel-catalog-isolation',
+    'native-framework-shards-v9-phased-intel-isolation'];
+  assert.equal(nativeFrameworkShardProtocol, protocols[5]);
   for (const shardProtocol of protocols) {
     const f = await observerApiFixture(t, { frameworkShards: true, shardProtocol,
       bootstrapProtocol: nativeCryptoBootstrapProtocol, nodeArtifactReader: true });

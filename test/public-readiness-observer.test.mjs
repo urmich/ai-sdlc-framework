@@ -600,7 +600,7 @@ test('T-PRD020 RC66 CI01 platform timing limits preserve inclusive strict and in
   const at = milliseconds => new Date(epoch + milliseconds).toISOString();
   const limits = [
     ['linux-x64', 900000, true], ['windows-x64', 900000, true],
-    ['macos-arm64', 900000, true], ['macos-x64', 1200000, false],
+    ['macos-arm64', 900000, true], ['macos-x64', 1500000, false],
   ];
   const partsFor = durationMs => nativePrPartsForProtocol(nativeFrameworkShardProtocol)
     .map((part, index) => ({ ...part, job: {
@@ -616,6 +616,18 @@ test('T-PRD020 RC66 CI01 platform timing limits preserve inclusive strict and in
       assert.equal(lane.durationMs, durationMs);
       assert.ok(lane.parts.every(part => part.providerQueueMs === 1000));
     }
+  }
+  const historical = 'native-framework-shards-v8-intel-catalog-isolation';
+  for (const durationMs of [0, 1, 1199999, 1200000, 1200001, 1499999]) {
+    const historicalParts = nativePrPartsForProtocol(historical).map((part, index) => ({ ...part, job: {
+      id: index + 1, created_at: at(-1000), started_at: at(0), completed_at: at(durationMs),
+    } }));
+    const lane = nativeLaneTimings(historicalParts, { shardProtocol: historical })
+      .find(lane => lane.target === 'macos-x64');
+    assert.equal(lane.maximumMs, 1200000);
+    assert.equal(lane.maximumInclusive, false);
+    assert.equal(lane.withinBudget, durationMs < 1200000,
+      'The current v9 target cannot retroactively pass a historical v8 timing miss');
   }
   assert.equal(nativeLaneTimings(partsFor(1185000)).find(lane => lane.target === 'macos-x64').withinBudget, true);
   assert.equal(nativeLaneTimings(partsFor(500000)).find(lane => lane.target === 'linux-x64').withinBudget, true);
@@ -652,7 +664,7 @@ test('T-PRD020 RC66 CI01 current twenty-five-part observer admits Intel 1185s an
     completeReportRef: 'https://github.com/urmich/ai-sdlc-framework/actions/runs/999/attempts/1',
   });
   assert.match(summary, /Within budget/u);
-  assert.match(summary, /strictly below 1200000ms/u);
+  assert.match(summary, /strictly below 1500000ms/u);
   assert.doesNotMatch(summary, /Under 15m/u);
   intel.steps.find(step => step.name === 'Remove owned short Homebrew prefix').conclusion = 'skipped';
   assert.equal(verdict(await host.snapshot()).status, 'NotRun');
@@ -671,7 +683,7 @@ test('T-PRD020 RC66 CI01 current twenty-five-part observer admits Intel 1185s an
 
 test('T-PRD021 versioned twenty-five twenty-four and twenty-part originals require exact closures cleanup and protected SDK replay', async t => {
   const result = await runProtocolPool(t);
-  assert.equal(result.rows.length, 18);
+  assert.equal(result.rows.length, 19);
   t.diagnostic(JSON.stringify({ protocolPool: result }));
 });
 

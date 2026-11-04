@@ -21,6 +21,8 @@ import { nativeLegacyPrParts, nativeFrameworkShardPlan, nativeFrameworkShardProt
   nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
   nativePlacementCosts, nativePlacementAffinities, nativePlacementCostsV7,
   nativeResourceAffinityFrameworkShardProtocol, nativePlacementCostsV8, nativePlacementIsolationV8,
+  nativeCatalogIsolationFrameworkShardProtocol, nativePlacementCostsV9, nativePlacementPhasesV9,
+  verifyNativePhaseSettlement,
   nativePartJobKey, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
 import { nativeResourceFacts, nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
 import { repositoryRoot, unitFiles } from '../scripts/test-runner.mjs';
@@ -90,7 +92,7 @@ jobs:
 `;
 }
 
-function sourceTree(files) {
+export function sourceTree(files) {
   const blobs = new Map();
   const tree = [...files].sort(([left], [right]) => left.localeCompare(right, 'en'))
     .map(([file, contents]) => {
@@ -188,19 +190,25 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
   files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
     `export const nativeFrameworkShardProtocol = '${shardProtocol}';\n`);
   if ([nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
-    nativeFrameworkShardProtocol].includes(shardProtocol)) {
+    nativeCatalogIsolationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementCosts = Object.freeze(${JSON.stringify(nativePlacementCosts)});\n`);
   }
-  if ([nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
+  if ([nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementAffinities = Object.freeze(${JSON.stringify(nativePlacementAffinities)});\n` +
       `export const nativePlacementCostsV7 = Object.freeze(${JSON.stringify(nativePlacementCostsV7)});\n`);
   }
-  if (shardProtocol === nativeFrameworkShardProtocol) {
+  if ([nativeCatalogIsolationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementCostsV8 = Object.freeze(${JSON.stringify(nativePlacementCostsV8)});\n` +
       `export const nativePlacementIsolationV8 = Object.freeze(${JSON.stringify(nativePlacementIsolationV8)});\n`);
+  }
+  if (shardProtocol === nativeFrameworkShardProtocol) {
+    files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
+      `export const nativePlacementCostsV9 = Object.freeze(${JSON.stringify(nativePlacementCostsV9)});\n` +
+      `export const nativePlacementPhasesV9 = Object.freeze(${JSON.stringify(nativePlacementPhasesV9)});\n`);
   }
   files.set('scripts/test-scheduling.mjs', schedulingSource);
   const schedulingPolicy = sourceValidationSchedulingPolicy([{ file: 'scripts/test-scheduling.mjs', contents: schedulingSource }]);
@@ -400,10 +408,10 @@ function bundleFromOriginal(raw, specification, independentlyCapturedContext, as
   return createEvidenceBundle(evaluation);
 }
 
-function laneData(source, candidate, revisions, target, { prNumber = 1, executionId = runId,
+export function laneData(source, candidate, revisions, target, { prNumber = 1, executionId = runId,
   profile = 'pr', releaseIntentId = 'controlled-release-intent', startTime = epoch,
   previousMetadata = nativeReplayPreviousFixture(), component = 'full', shard = null, frameworkShards = false,
-  shardProtocol = nativeFrameworkShardProtocol, bootstrapProtocol = null } = {}) {
+  shardProtocol = nativeFrameworkShardProtocol, bootstrapProtocol = null, configuredWorkers = null } = {}) {
   const role = nativeProducerRole(target, component, shard);
   const assignment = shard === null ? null : nativeFrameworkShardPlan({
     inventory: source.inventory, plan: source.plan, target, protocol: shardProtocol, schedulingPolicy: source.schedulingPolicy,
@@ -422,7 +430,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
   const ImageVersion = `controlled-${target}-image-1`;
   const go = `go version go1.27.1 ${{ linux: 'linux', win32: 'windows', darwin: 'darwin' }[platforms[target]]}/${architecture === 'x64' ? 'amd64' : architecture}`;
   const resources = nativeResourceFacts({ availableParallelism: 4, totalMemoryBytes: 8 * 1024 ** 3,
-    configuredWorkers: null }, source.schedulingPolicy);
+    configuredWorkers }, source.schedulingPolicy);
   const bootstrap = { schemaVersion: 1, status: 'Passed', target,
     native: { platform: platforms[target], architecture, node: nativeToolchain.node, go,
       resources,
@@ -510,7 +518,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
     testSpecDigest: testSpecificationDigest(source.plan),
     configDigest: nativeConfigurationDigest({ inventory: source.inventory, plan: source.plan, assignment,
       profile, target, component, shard, shardProtocol, bootstrapProtocol,
-      shardPlanDigest: assignment?.digest ?? null, schedulingPolicy: source.schedulingPolicy }),
+      shardPlanDigest: assignment?.digest ?? null, schedulingPolicy: source.schedulingPolicy, configuredWorkers }),
     inventoryDigest: validationInventoryDigest(specification),
     sources: [{ repositoryId: `repository-${repositoryId}`, revision: revisions.merge,
       contentDigest: digest(source.sha) }],
@@ -540,18 +548,21 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
   const selectedStages = part?.stages ?? nativeStageSelections(source.inventory, source.plan, source.schedulingPolicy);
   for (const selectedStage of selectedStages) {
     const stage = selectedStage.name;
-    const index = nativeWorkflowContract.stages.indexOf(stage);
-    const selected = source.names.filter(test => selectedStage.cases.some(assertion =>
-      assertion.file === test.file && assertion.name === test.name));
+    const index = nativeWorkflowContract.stages.indexOf(selectedStage.kind ?? stage);
+    const selected = selectedStage.phase ? selectedStage.cases :
+      source.names.filter(test => selectedStage.cases.some(assertion =>
+        assertion.file === test.file && assertion.name === test.name));
     const { files, args, selectorName } = selectedStage;
     const pattern = stage === 'unit' ? undefined : selectorName;
-    const [start, finish] = [[7, 10], [11, 14], [15, 50]][index];
+    const [start, finish] = selectedStage.phase ? selectedStage.phase.index === 0 ? [15, 30] : [31, 50] :
+      [[7, 10], [11, 14], [15, 50]][index];
     const expectedGroups = validationExecutionGroups(source.inventory, { files, pattern, preserveOrder: true });
     const concurrency = Math.min(resources.workerCapacity, expectedGroups.length);
     const executions = selected.map(({ file, name }, offset) => {
       const definition = source.inventory.cases.find(test => test.file === file && test.name === name);
-      const row = { file, name, parents: [], nameDigest: digest(name), parentDigests: [],
-        nesting: 0, line: definition.line, column: definition.column, type: 'test',
+      const parents = selectedStage.phase ? definition.parents : [];
+      const row = { file, name, parents, nameDigest: digest(name), parentDigests: parents.map(digest),
+        nesting: parents.length, line: definition.line, column: definition.column, type: 'test',
         groupId: expectedGroups.find(group => group.assertionIds.includes(definition.id)).id,
         sequence: expectedGroups.length + 4 + offset * 3, status: 'Passed', observedAt: at(finish),
         skipReason: null, todoReason: null, durationMs: 1 };
@@ -568,7 +579,8 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
       files, node: `v${nativeToolchain.node}`, executable: '/controlled-fixture/node',
       command: ['/controlled-fixture/node', '/controlled-fixture/source/scripts/test-runner.mjs', ...args],
       workerCommand: ['/controlled-fixture/node', '/controlled-fixture/source/scripts/test-worker.mjs'],
-      platform: platforms[target], architecture, context: stage === 'regression' ? context : smallContext,
+      platform: platforms[target], architecture,
+      context: stage === 'regression' || selectedStage.kind === 'regression' ? context : smallContext,
       selection: { namePatterns: pattern === undefined ? [] : [pattern], concurrency, coverage: false },
       resources: { availableParallelism: resources.availableParallelism, totalMemoryBytes: resources.totalMemoryBytes,
         fileConcurrency: concurrency, budget: {
@@ -579,6 +591,8 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
           residentLimit: resources.workerCapacity * 3, peakActiveWorkers: concurrency,
           peakResidentWorkers: concurrency, peakPotentialResidentWorkers: concurrency,
           peakProducers: 1, peakControls: 1,
+          ...(selectedStage.phase ? { admissionStopped: false, activeWorkers: 0, residentWorkers: 0,
+            potentialResidentWorkers: 1, pendingParentRestorations: 0, controls: 0, producers: 1 } : {}),
         } },
       startedAt: at(start), finishedAt: at(finish), complete: true, exitCode: 0, executions,
       groupExecution: { schemaVersion: 1, protocol: validationGroupProtocol,
@@ -586,11 +600,12 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
       diagnostics: [], summary: { success: true, counts: {
         tests: executions.length, cancelled: 0, failed: 0, passed: executions.length,
         suites: 0, skipped: 0, todo: 0 }, durationMs: (finish - start) * 1000 } });
-    data.set(`${stage}-command.json`, commandReport(stage, target, stage === 'regression' ? context : smallContext,
+    data.set(`${stage}-command.json`, commandReport(stage, target,
+      stage === 'regression' || selectedStage.kind === 'regression' ? context : smallContext,
       ['scripts/test-runner.mjs', ...args], start, finish));
     data.set(`${stage}.json.journal.ndjson`, [
       { sequence: 1, kind: 'execution-start', observedAt: at(start), profile: stage === 'unit' ? 'unit' : 'targeted',
-        files, context: stage === 'regression' ? context : smallContext },
+        files, context: stage === 'regression' || selectedStage.kind === 'regression' ? context : smallContext },
       ...groups.map(group => ({ kind: 'group-start', observedAt: group.startedAt, groupId: group.id,
         rootId: group.rootId, startedAt: group.startedAt, processIds: group.processIds,
         minimumSlots: group.minimumSlots, exclusiveResources: group.exclusiveResources })),
@@ -603,7 +618,22 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
         rootId: group.rootId, finishedAt: group.finishedAt, processIds: group.processIds,
         status: group.status, summary: group.summary })),
     ].map((event, index) => JSON.stringify({ ...event, sequence: index + 1 })).join('\n') + '\n');
-    data.set(`${stage}-command.journal.ndjson`, `${JSON.stringify({ sequence: 1, kind: 'command-end', complete: true })}\n`);
+    if (selectedStage.phase) {
+      const command = data.get(`${stage}-command.json`);
+      command.pid = 4000 + selectedStage.phase.index;
+      const journal = [
+        { sequence: 1, kind: 'command-dispatched', observedAt: at(start), pid: command.pid },
+        { sequence: 2, kind: 'command-end', observedAt: at(finish), complete: true, exitCode: 0,
+          cleanup: { requested: false, survivorsVerified: false, rootExitObserved: true } },
+      ].map(event => JSON.stringify(event)).join('\n') + '\n';
+      command.checkpoint = { journalDurable: true,
+        originalJournalPrefix: { sha256: digest(Buffer.from(journal)), bytes: Buffer.byteLength(journal) } };
+      data.set(`${stage}-command.journal.ndjson`, journal);
+      data.set(`${stage}-settlement.json`, { ...verifyNativePhaseSettlement({
+        stage: selectedStage, report: data.get(`${stage}.json`), command, journal, capacity: resources.workerCapacity,
+      }), observedAt: at(finish) });
+    } else data.set(`${stage}-command.journal.ndjson`,
+      `${JSON.stringify({ sequence: 1, kind: 'command-end', complete: true })}\n`);
   }
   const goNames = ['TestContract', 'TestContract/minimum', 'TestIntegrity'];
   const stdout = [{ Time: at(31), Action: 'start', Package: 'controlled/launcher' }, ...goNames.flatMap(Test => [
@@ -713,7 +743,8 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
   data.set('producer.json', { status: 'Passed', complete: true, diagnostics: [] });
   data.set('readiness.md', '# Controlled provider fixture\nNot actual native acceptance.\n');
   for (const [file, report] of [...data]) {
-    if (file.endsWith('.json') && report.kind === 'validation-command') {
+    if (file.endsWith('.json') && report.kind === 'validation-command' &&
+      !nativePlacementPhasesV9.phases.some(phase => file === `${phase.name}-command.json`)) {
       data.set(`${file.slice(0, -5)}.journal.ndjson`, [
         { sequence: 1, observedAt: report.startedAt, kind: 'command-start',
           command: report.command, cwd: report.cwd, context: report.context },
@@ -882,6 +913,8 @@ export async function observerApiFixture(t, options = {}) {
       .map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n';
   }
   const ci = options.frameworkShards ? shardProtocol === nativeFrameworkShardProtocol ? currentCi :
+    shardProtocol === nativeCatalogIsolationFrameworkShardProtocol ? currentCi.replace(
+      nativeFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol) :
     splitHistoricalProtocols.includes(shardProtocol) ?
       splitHistoricalCi : historicalCi : `name: CI
 on: pull_request

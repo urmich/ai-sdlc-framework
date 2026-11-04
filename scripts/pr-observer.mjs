@@ -58,6 +58,7 @@ const nativeLaneLimits = Object.freeze({
   'macos-arm64': { maximumMs: 900000, maximumInclusive: true },
   'macos-x64': { maximumMs: 1200000, maximumInclusive: false },
 });
+const nativePhasedIntelLaneLimit = Object.freeze({ maximumMs: 1500000, maximumInclusive: false });
 function nativeLaneBudgetDescription({ maximumMs, maximumInclusive }) {
   return `${maximumInclusive ? 'at most' : 'strictly below'} ${maximumMs}ms`;
 }
@@ -366,7 +367,7 @@ function macAdmissionPolicyMatches(document, protocol, priority, homebrewFirst, 
   };
   return [native.nativeSplitUnitFrameworkShardProtocol, native.nativeRootComponentFrameworkShardProtocol,
     native.nativeStableCostFrameworkShardProtocol, native.nativeResourceAffinityFrameworkShardProtocol,
-    native.nativeFrameworkShardProtocol].includes(protocol) &&
+    native.nativeCatalogIsolationFrameworkShardProtocol, native.nativeFrameworkShardProtocol].includes(protocol) &&
     digest(document.jobs?.['mac-admission'] ?? null) ===
       digest(expectedMacAdmissionJob(retainedFirst ? 'arm-bodies' : 'arm-regressions', false, false,
         boundedQueue, false, readyCritical)) &&
@@ -413,7 +414,7 @@ export function inspectWorkflowTrust(workflows) {
     const marker = selected.document.env?.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL;
     const rootComponents = [native.nativeRootComponentFrameworkShardProtocol,
       native.nativeStableCostFrameworkShardProtocol, native.nativeResourceAffinityFrameworkShardProtocol,
-      native.nativeFrameworkShardProtocol].includes(marker) &&
+      native.nativeCatalogIsolationFrameworkShardProtocol, native.nativeFrameworkShardProtocol].includes(marker) &&
       topologyProtocol === native.nativeSplitUnitFrameworkShardProtocol;
     if (marker !== undefined && !rootComponents) {
       result.blockers.push({ file: selected.file, code: 'NATIVE_SHARD_PROTOCOL_DIFFERS' });
@@ -642,7 +643,9 @@ export function nativeLaneTimings(parts, { frameworkShards = true,
     const startedAt = new Date(Math.min(...selected.map(({ job }) => Date.parse(job.started_at)))).toISOString();
     const completedAt = new Date(Math.max(...selected.map(({ job }) => Date.parse(job.completed_at)))).toISOString();
     const durationMs = Date.parse(completedAt) - Date.parse(startedAt);
-    const { maximumMs, maximumInclusive } = nativeLaneLimits[target];
+    const { maximumMs, maximumInclusive } = frameworkShards &&
+      shardProtocol === native.nativeFrameworkShardProtocol && target === 'macos-x64' ?
+      nativePhasedIntelLaneLimit : nativeLaneLimits[target];
     return { target, startedAt, completedAt, durationMs, maximumMs, maximumInclusive,
       withinBudget: durationMs < maximumMs || maximumInclusive && durationMs === maximumMs,
       parts: selected.map(({ role, job }) => ({ role, jobId: job.id,

@@ -61,7 +61,8 @@ export const nativeSplitUnitFrameworkShardProtocol = 'native-framework-shards-v4
 export const nativeRootComponentFrameworkShardProtocol = 'native-framework-shards-v5-root-components';
 export const nativeStableCostFrameworkShardProtocol = 'native-framework-shards-v6-stable-cost-components';
 export const nativeResourceAffinityFrameworkShardProtocol = 'native-framework-shards-v7-resource-affinity-components';
-export const nativeFrameworkShardProtocol = 'native-framework-shards-v8-intel-catalog-isolation';
+export const nativeCatalogIsolationFrameworkShardProtocol = 'native-framework-shards-v8-intel-catalog-isolation';
+export const nativeFrameworkShardProtocol = 'native-framework-shards-v9-phased-intel-isolation';
 // Partial original group timings are placement leads, never current execution evidence.
 export const nativePlacementCosts = Object.freeze({
   "schemaVersion": 1,
@@ -232,11 +233,75 @@ export const nativePlacementIsolationV8 = Object.freeze({
   "shapeDigest": "40b59ccff4ce9caa7d8c65b1450c4862b8770ed7a1e3fdc26e589cf6e03b5a13",
   "minimumSlots": 1
 });
+export const nativePlacementCostsV9 = Object.freeze({
+  "schemaVersion": 1,
+  "sourceRevision": "07c64a0018645abd3d46b690590a353aea6716f3",
+  "runId": "41828352389",
+  "attempt": "1",
+  "node": "24.20.0",
+  "workers": {"macos-x64": 14},
+  "qualification": "completed original Intel group scheduling leads; exact target/runtime/closure/resources required; no execution credit or predicted lane duration; unknown work uses historical or count fallback",
+  "originalAnnotations": {
+    "126571226424": "ef5b16c25b7c27e116ffd3517f18fc7a2e6c0885d852ece56ae59d0a3e68bd5a",
+    "126571352000": "3753403de990d4b590bb32e7fb79bee8203d698c58eb769c604e7578334d8f36",
+    "126571352115": "b2ca84702da768f3d3e4be56b01b48e79b3894b06859995b676c8500f9dd1884"
+  },
+  "roots": [
+    {"rootId":"assertion-0f5721a6329b2ef16d4f48e70ef01d0f0715e6a4f3cefeedc3449361fa57e8e5","sourceDigest":"f04e8202d5adb8cea8aee41c2910a7d551dfc3732bbc6c46f7768b72253fdb94","shapeDigest":"40b59ccff4ce9caa7d8c65b1450c4862b8770ed7a1e3fdc26e589cf6e03b5a13","samples":{"macos-x64":[227014,"126571226424"]}},
+    {"rootId":"assertion-170a22b6fc70b1916f2ee09e1de78f6275b1aa46a21259d4e662a6cf3ee8e8f3","sourceDigest":"b93ad9aa0303a801fadd083755b42bd39eb1709159fb612fafad14d86da9227e","shapeDigest":"f25595cc6dd05161572b94ed4aa2dcebff57e6a775ce9f605c961695bdd0af31","samples":{"macos-x64":[144176,"126571352000"]}},
+    {"rootId":"assertion-ff45bf92348abb3ee3446f1084f9cfcc45bada03197936aca2981a95ad1d8665","sourceDigest":"f04e8202d5adb8cea8aee41c2910a7d551dfc3732bbc6c46f7768b72253fdb94","shapeDigest":"b6a30ae7ff82844eb8d73c6a1585a69906206588ad1535e775a9ccd608e32808","samples":{"macos-x64":[145179,"126571352000"]}},
+    {"rootId":"assertion-f5499e4dc0d5f9a249e2c7556748164af33a9a8717701df2670d9a516fdb52b3","sourceDigest":"1e80c22a797add7e9ac83ada791cca30beda432c264c45e904dc32035614b1d3","shapeDigest":"dc4aed2053e31a862435bea984a28752818f93a88519e6f150b61e2af5b50a9c","samples":{"macos-x64":[152401,"126571352000"]}},
+    {"rootId":"assertion-3a7922c4722be7913112ec7dd2a54bb21ba4ce6d9960efc7a19f0192ab70d049","sourceDigest":"d9075de57cc81c471ab4ca15ce17d4a9cef2f809051b23dfc425dc62efa4cfc8","shapeDigest":"ca6256578092b38627897dfe1d652f17d00f79face97f9babd04a5d8fc201181","samples":{"macos-x64":[185207,"126571352000"]}},
+    {"rootId":"assertion-c88fcc43622cb44b08aea5a9d7adc06253c79aedbfe31a9b43ad19f03e59d63c","sourceDigest":"4132e8d404c4625068ddebfc7e9465c0d230e04a97de2236b8b589682c573e49","shapeDigest":"2827b68451aba014b12a803b2c4129227230e2dcd54449979943fd5164afa2d6","samples":{"macos-x64":[198259,"126571352000"]}},
+    {"rootId":"assertion-774b6605ebd531372e319c27028ff9e9f17258323ee112a968fdfe43e3f44a2e","sourceDigest":"b325b2472b65bcfdf642968256d396c1271b6d8abfd950233a369293a604e13c","shapeDigest":"16bcccb024f09e44a788cfa45d6fcd58f8ed1b69555fb1d7907ac1612baceddf","samples":{"macos-x64":[206742,"126571352000"]}},
+    {"rootId":"assertion-95ad460a630507970746bfdf4bbec35491dc9749218a5cb6437baaa576c36d34","sourceDigest":"f04e8202d5adb8cea8aee41c2910a7d551dfc3732bbc6c46f7768b72253fdb94","shapeDigest":"b786c72a0cd53cc191e96099ee86c543b481ed56ab683c247fd8321e25494403","samples":{"macos-x64":[216446,"126571352000"]}},
+    {"rootId":"assertion-c937700e1f02501d67f93f8500acf29607768a75116ffa5c809237413d2c1505","sourceDigest":"2da5f828958be2bbaa3d5c3b2b7a888fce2c590ef00ed966829deb2416b98ddb","shapeDigest":"3c95ff0985754b08c246c7e638e667d73d649055da9a112a0c0602b76f0e8f61","samples":{"macos-x64":[252281,"126571352000"]}},
+    {"rootId":"assertion-063b315aa5106b822a0982a0ee26caa7c4d26179ed1a79958a3bc918d786dfde","sourceDigest":"a67a6da1ea28c54eb8ca17463ef232eb7afa4d4fd86b1ef090ab944e542f4809","shapeDigest":"6871839e5d2760bf9ef8b3d09578bfdb535a49c403dd6c34a3387a609a7571a2","samples":{"macos-x64":[265265,"126571352000"]}},
+    {"rootId":"assertion-30a06918b0d6d26eed9773acffe13e64087e7a1ec315a6a5c60d6a026fb52d22","sourceDigest":"dd4e878f1d8d9fc15fc7b167da7edce801d06b6767cbf25f133aa9581e4a07cf","shapeDigest":"8f3e8ad75abca04eb87793bec9b882909d3eaa9b263041d1830a3724b9078951","samples":{"macos-x64":[796381,"126571352000"]}},
+    {"rootId":"assertion-fbba6948bfbddb931f8ceb750aebddfbcf2f2d4a7432bc539cf7558351d206aa","sourceDigest":"d48a0b74138d1e0bfdf34477d80e0df7062fb636caba2cccbe947165d15beb2a","shapeDigest":"0a0af1c920a2449128d015017c405db236a0734b8a5364a4b65f7545ca08bf3d","samples":{"macos-x64":[144560,"126571352115"]}},
+    {"rootId":"assertion-b0a14ca74a43eb87fbdece3db7dd5ca468cfef0549f890797206d7671b31afcc","sourceDigest":"04ee07ac02e8de025ffc97755da22ecfb624197d8266d8d718413c2b53c3822f","shapeDigest":"92055d23287b6f60b448820ccde4aca39abd154714033b5d023ee9c0943b9bab","samples":{"macos-x64":[146062,"126571352115"]}},
+    {"rootId":"assertion-67716b485944f5af7e87adc105fb7026085b7f47639e86c6afe1bf330e998305","sourceDigest":"d48a0b74138d1e0bfdf34477d80e0df7062fb636caba2cccbe947165d15beb2a","shapeDigest":"2b331b5fce15957103bd4ccd3cd5f67a30e87b1be82c2cf67021ec547e7bf8d7","samples":{"macos-x64":[146888,"126571352115"]}},
+    {"rootId":"assertion-ae62135c83d676d2db6d13a3b7cdfd189adab6a9145d95a58d51d6113e79a06a","sourceDigest":"b93ad9aa0303a801fadd083755b42bd39eb1709159fb612fafad14d86da9227e","shapeDigest":"a00a7af10779b6745c12d4ab7f772f499268a1e8f41e9eac589dae087d48d2e8","samples":{"macos-x64":[148006,"126571352115"]}},
+    {"rootId":"assertion-867c856a68e6962fca9d8495772ab2ab98ddcfb3c6d0858cae4cfe44ddec7e3c","sourceDigest":"f04e8202d5adb8cea8aee41c2910a7d551dfc3732bbc6c46f7768b72253fdb94","shapeDigest":"9126eca32fece324dacc2b4bd39840a12fbe1f8505b195f5cf5ab7c1475b1b90","samples":{"macos-x64":[156078,"126571352115"]}},
+    {"rootId":"assertion-080e2671f869e26190362df0dcac0349c7a47e03fd497c6a70179489ef478386","sourceDigest":"f04e8202d5adb8cea8aee41c2910a7d551dfc3732bbc6c46f7768b72253fdb94","shapeDigest":"bfcaa88f62ce793e61a1de810faa6328c61530a7f5f48724d22d9bd32d2aa7e5","samples":{"macos-x64":[183824,"126571352115"]}},
+    {"rootId":"assertion-4dda1118e3095dddc78d663d95c3c839b19807c0c4d91e69ca176e40b93df30c","sourceDigest":"03ce5028aa70a35070f7a81a8d601669c98235a89ef775da8f4928883374dcc4","shapeDigest":"dd3c0415779ff6a5e3d06a4ca78015b0b6683c58b7c0e2a37ca4356335fcce6c","samples":{"macos-x64":[187601,"126571352115"]}},
+    {"rootId":"assertion-0ea538f933586c33183708df2824759a052883291fefb6424328a21553cfa543","sourceDigest":"d64c98e670a4fc650881e3ec0f21279858bf0b3d217ccc480fcf93fcc3aab730","shapeDigest":"5e3c09692ad710209995957de63291f64e6fda72b6e91a0dd70ffc71312925a5","samples":{"macos-x64":[202462,"126571352115"]}},
+    {"rootId":"assertion-b1b032561853815caa7a039f5c020e573a19067118dec177cae55e2d89dc1092","sourceDigest":"b93ad9aa0303a801fadd083755b42bd39eb1709159fb612fafad14d86da9227e","shapeDigest":"c37a4c9b2a3458f0621c8546fa8728289fb4c765e5b67c06f3f8c9e913b29f50","samples":{"macos-x64":[298047,"126571352115"]}},
+    {"rootId":"assertion-b2f6b8cc0c4b155029db7340530b19d47c2e58ec03f5ad64c1b937c8c9797c45","sourceDigest":"8540aefa1f0651bfe834bd13d5529e4a907556cb6dbd266e81bcf792d42c0281","shapeDigest":"eec7bce119abafd9d4f5641d6bfbb4979ee0e4db22594ac1336514e2d656eb74","samples":{"macos-x64":[414139,"126571352115"]}}
+  ]
+});
+Object.freeze(nativePlacementCostsV9.workers);
+Object.freeze(nativePlacementCostsV9.originalAnnotations);
+for (const hint of nativePlacementCostsV9.roots) {
+  Object.values(hint.samples).forEach(Object.freeze);
+  Object.freeze(hint.samples);
+  Object.freeze(hint);
+}
+Object.freeze(nativePlacementCostsV9.roots);
+export const nativePlacementPhasesV9 = Object.freeze({
+  "schemaVersion": 1,
+  "protocol": "native-intel-primary-phases-v1",
+  "sourceRevision": "07c64a0018645abd3d46b690590a353aea6716f3",
+  "runId": "41828352389",
+  "attempt": "1",
+  "node": "24.20.0",
+  "qualification": "exact standalone Intel catalog then retained component isolation hypothesis; no execution credit or predicted latency saving",
+  "target": "macos-x64",
+  "capacity": 14,
+  "shard": "body-0",
+  "phases": [
+    {"name":"regression-catalog","rootId":"assertion-0f5721a6329b2ef16d4f48e70ef01d0f0715e6a4f3cefeedc3449361fa57e8e5","sourceDigest":"f04e8202d5adb8cea8aee41c2910a7d551dfc3732bbc6c46f7768b72253fdb94","shapeDigest":"40b59ccff4ce9caa7d8c65b1450c4862b8770ed7a1e3fdc26e589cf6e03b5a13","minimumSlots":1},
+    {"name":"regression-retained","rootId":"assertion-30a06918b0d6d26eed9773acffe13e64087e7a1ec315a6a5c60d6a026fb52d22","sourceDigest":"dd4e878f1d8d9fc15fc7b167da7edce801d06b6767cbf25f133aa9581e4a07cf","shapeDigest":"8f3e8ad75abca04eb87793bec9b882909d3eaa9b263041d1830a3724b9078951","minimumSlots":4}
+  ]
+});
+nativePlacementPhasesV9.phases.forEach(Object.freeze);
+Object.freeze(nativePlacementPhasesV9.phases);
 export const nativeFrameworkShardProtocols = Object.freeze([
   nativeLegacyFrameworkShardProtocol, nativePlatformUnitFrameworkShardProtocol,
   nativeFourBodyFrameworkShardProtocol, nativeSplitUnitFrameworkShardProtocol,
   nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
-  nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol,
+  nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
+  nativeFrameworkShardProtocol,
 ]);
 function requireNativePlacementLiteral(source, name, adopted) {
   const tokens = declarationTokens(source);
@@ -269,15 +334,20 @@ export function sourceNativeFrameworkShardProtocol(sourceFiles) {
   requireThat(declarations.length === 1 && nativeFrameworkShardProtocols.includes(declarations[0][1]),
     'EVIDENCE', 'Unknown or malformed source-declared native shard protocol');
   if ([nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
-    nativeFrameworkShardProtocol].includes(declarations[0][1]))
+    nativeCatalogIsolationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(declarations[0][1]))
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementCosts', nativePlacementCosts);
-  if ([nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(declarations[0][1])) {
+  if ([nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(declarations[0][1])) {
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementAffinities', nativePlacementAffinities);
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementCostsV7', nativePlacementCostsV7);
   }
-  if (declarations[0][1] === nativeFrameworkShardProtocol) {
+  if ([nativeCatalogIsolationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(declarations[0][1])) {
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementCostsV8', nativePlacementCostsV8);
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementIsolationV8', nativePlacementIsolationV8);
+  }
+  if (declarations[0][1] === nativeFrameworkShardProtocol) {
+    requireNativePlacementLiteral(sources[0].contents, 'nativePlacementCostsV9', nativePlacementCostsV9);
+    requireNativePlacementLiteral(sources[0].contents, 'nativePlacementPhasesV9', nativePlacementPhasesV9);
   }
   return declarations[0][1];
 }
@@ -305,7 +375,8 @@ export function nativeFrameworkShardNames(target, protocol = nativeFrameworkShar
     length: target.startsWith('macos-') ? 3 :
       [nativeFourBodyFrameworkShardProtocol, nativeSplitUnitFrameworkShardProtocol,
         nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
-        nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? 4 : 2,
+        nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
+        nativeFrameworkShardProtocol].includes(protocol) ? 4 : 2,
   },
     (_, index) => `body-${index}`)];
 }
@@ -316,7 +387,7 @@ export function nativeFrameworkUnitShardNames(target, protocol = nativeFramework
   const count = target === 'macos-x64' &&
     [nativeSplitUnitFrameworkShardProtocol, nativeRootComponentFrameworkShardProtocol,
       nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
-      nativeFrameworkShardProtocol].includes(protocol) ? 2 : 1;
+      nativeCatalogIsolationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? 2 : 1;
   return Array.from({ length: count }, (_, index) => index === 0 ? 'units' : `units-${index}`);
 }
 
@@ -584,26 +655,33 @@ function deriveNativeSpecification({ plan, inventory, goSources, target, profile
 function nativePlacementGroups(groups, target, protocol) {
   const byId = new Map(groups.map(group => [group.id, group]));
   return groups.map(group => {
-    const isolated = protocol === nativeFrameworkShardProtocol ?
+    const phased = protocol === nativeFrameworkShardProtocol ?
+      nativePlacementCostsV9.roots.find(hint => hint.rootId === group.rootId && hint.samples[target]) : null;
+    const isolated = [nativeCatalogIsolationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
       nativePlacementCostsV8.roots.find(hint => hint.rootId === group.rootId && hint.samples[target]) : null;
-    const updated = [nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
+    const updated = [nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
+      nativeFrameworkShardProtocol].includes(protocol) ?
       nativePlacementCostsV7.roots.find(hint => hint.rootId === group.rootId && hint.samples[target]) : null;
-    const costs = isolated ? nativePlacementCostsV8 : updated ? nativePlacementCostsV7 : nativePlacementCosts;
-    const hint = isolated ?? updated ?? nativePlacementCosts.roots.find(hint => hint.rootId === group.rootId);
+    const costs = phased ? nativePlacementCostsV9 : isolated ? nativePlacementCostsV8 :
+      updated ? nativePlacementCostsV7 : nativePlacementCosts;
+    const hint = phased ?? isolated ?? updated ?? nativePlacementCosts.roots.find(hint => hint.rootId === group.rootId);
     const sample = hint?.samples[target];
     const shapeDigest = digest({ assertionIds: [...group.assertionIds].sort(), minimumSlots: group.minimumSlots,
       exclusiveResources: [...group.exclusiveResources].sort(),
       dependsOn: group.dependsOn.map(id => byId.get(id)?.rootId).sort() });
     const costStatus = !costs.workers[target] ? 'unknown-target' :
       !sample ? 'unknown-root' : costs.node !== nativeToolchain.node ? 'stale-runtime' :
-        isolated && costs.workers[target] !== nativePlacementIsolationV8.capacity ? 'stale-capacity' :
+        phased && costs.workers[target] !== nativePlacementPhasesV9.capacity ||
+          isolated && costs.workers[target] !== nativePlacementIsolationV8.capacity ? 'stale-capacity' :
         hint.shapeDigest !== shapeDigest ? 'stale-closure-or-resources' :
           hint.sourceDigest === group.sourceDigest ? 'observed-source-lead' : 'historical-source-lead';
     const eligible = costStatus === 'observed-source-lead' || costStatus === 'historical-source-lead';
     return { planningId: `placement-${digest(['native-root-planning-v1', group.file, group.root])}`,
       rootId: group.rootId, shapeDigest, costStatus, durationMs: eligible ? sample[0] : null,
-      ...([nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
-        { costSource: isolated ? 'v8-observed-lead' : updated ? 'v7-observed-lead' : 'v6-historical-lead' } : {}),
+      ...([nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
+        nativeFrameworkShardProtocol].includes(protocol) ?
+        { costSource: phased ? 'v9-observed-lead' : isolated ? 'v8-observed-lead' :
+          updated ? 'v7-observed-lead' : 'v6-historical-lead' } : {}),
       ...(sample ? { observedSourceDigest: hint.sourceDigest, jobId: sample[1] } : {}) };
   });
 }
@@ -647,6 +725,24 @@ function partitionNativeBodyGroups(groups, count, placement = null) {
   const partitions = Array.from({ length: count }, (_, index) => ({ index, assertionIds: [], groups: 0,
     ...(placement ? { observedLeadMs: 0, unknownAssertions: 0 } : {}) }));
   let isolatedComponent = null;
+  let phasedComponents = [];
+  if (placement?.phases) {
+    const rule = nativePlacementPhasesV9;
+    const selected = rule.phases.map(phase => {
+      const root = groups.find(group => group.rootId === phase.rootId);
+      return { phase, root, component: ranked.find(component => component.groups.includes(root)) };
+    });
+    const status = nativeToolchain.node !== rule.node ? 'unsupported-runtime' :
+      nativePlacementCosts.workers[rule.target] !== rule.capacity ? 'unsupported-capacity' :
+        selected.some(({ root }) => !root) ? 'missing-root' :
+          selected.some(({ phase, root }) => planning.get(root.rootId).shapeDigest !== phase.shapeDigest ||
+            root.minimumSlots !== phase.minimumSlots) ? 'changed-closure-or-resources' :
+            selected.some(({ component }) => component.groups.length !== 1) ? 'changed-component' :
+              selected.some(({ phase, root }) => root.sourceDigest !== phase.sourceDigest) ? 'changed-source' :
+                count !== 3 || ranked.length < count + selected.length - 1 ? 'would-empty-body' : 'applied';
+    Object.assign(placement.phases, { status });
+    if (status === 'applied') phasedComponents = selected.map(({ component }) => component);
+  }
   if (placement?.isolation) {
     const rule = nativePlacementIsolationV8;
     const root = groups.find(group => group.rootId === rule.rootId);
@@ -663,7 +759,9 @@ function partitionNativeBodyGroups(groups, count, placement = null) {
     if (status === 'applied') isolatedComponent = component;
   }
   for (const component of ranked) {
-    const available = isolatedComponent ? component === isolatedComponent ? [partitions[0]] : partitions.slice(1) : partitions;
+    const available = phasedComponents.length ? phasedComponents.includes(component) ?
+      [partitions[0]] : partitions.slice(1) :
+      isolatedComponent ? component === isolatedComponent ? [partitions[0]] : partitions.slice(1) : partitions;
     const selected = [...available].sort((left, right) => (placement ?
       component.observedLeadMs > 0 ? left.observedLeadMs - right.observedLeadMs :
         left.unknownAssertions - right.unknownAssertions || left.observedLeadMs - right.observedLeadMs : 0) ||
@@ -741,7 +839,10 @@ function nativeAffinityCapacityMatches(assignment, resources, shard = null) {
     ['applied', 'already-coassigned'].includes(rule.status) && resources?.workerCapacity !== rule.capacity) &&
     !(assignment?.placement?.isolation?.status === 'applied' &&
       (shard === null || shard === assignment.placement.isolation.shard) &&
-      resources?.workerCapacity !== assignment.placement.isolation.capacity);
+      resources?.workerCapacity !== assignment.placement.isolation.capacity) &&
+    !(assignment?.placement?.phases?.status === 'applied' &&
+      (shard === null || shard === assignment.placement.phases.shard) &&
+      resources?.workerCapacity !== assignment.placement.phases.capacity);
 }
 
 export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = nativeFrameworkShardProtocol,
@@ -787,7 +888,7 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
   const bodyFiles = new Set(bodyCases.map(test => test.file));
   const roots = [nativeSplitUnitFrameworkShardProtocol, nativeRootComponentFrameworkShardProtocol,
     nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
-    nativeFrameworkShardProtocol].includes(protocol) ?
+    nativeCatalogIsolationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
     completeGroups : selectedGroups(regression.files, regression.selectorName);
   const bodyCount = nativeFrameworkShardNames(target, protocol).filter(shard => shard.startsWith('body-')).length;
   const bodyIds = new Set(bodyCases.map(test => test.id));
@@ -795,27 +896,38 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
   const { roots: costRoots, ...costConditions } = nativePlacementCosts;
   const { roots: updateRoots, ...updateConditions } = nativePlacementCostsV7;
   const { roots: isolationRoots, ...isolationConditions } = nativePlacementCostsV8;
+  const { roots: phasedRoots, ...phasedConditions } = nativePlacementCostsV9;
   const placement = [nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
-    nativeFrameworkShardProtocol].includes(protocol) ? {
+    nativeCatalogIsolationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? {
     protocol: 'native-stable-component-cost-leads-v1', evidenceCredit: false,
     costs: { ...costConditions, digest: digest(nativePlacementCosts),
-      ...([nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
+      ...([nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
+        nativeFrameworkShardProtocol].includes(protocol) ?
         { updates: { ...updateConditions, digest: digest(nativePlacementCostsV7) } } : {}),
+      ...([nativeCatalogIsolationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
+        { intelUpdates: { ...isolationConditions, digest: digest(nativePlacementCostsV8) } } : {}),
       ...(protocol === nativeFrameworkShardProtocol ?
-        { intelUpdates: { ...isolationConditions, digest: digest(nativePlacementCostsV8) } } : {}) },
+        { phasedUpdates: { ...phasedConditions, digest: digest(nativePlacementCostsV9) } } : {}) },
     groups: nativePlacementGroups(bodyGroups, target, protocol), components: [],
-    ...(protocol === nativeFrameworkShardProtocol && target === nativePlacementIsolationV8.target ? {
+    ...(protocol === nativeCatalogIsolationFrameworkShardProtocol && target === nativePlacementIsolationV8.target ? {
       isolation: { declarationDigest: digest(nativePlacementIsolationV8), evidenceCredit: false, predictedSavingMs: null,
         target, capacity: nativePlacementIsolationV8.capacity, shard: nativePlacementIsolationV8.shard,
         rootId: nativePlacementIsolationV8.rootId },
     } : {}),
+    ...(protocol === nativeFrameworkShardProtocol && target === nativePlacementPhasesV9.target ? {
+      phases: { declarationDigest: digest(nativePlacementPhasesV9), evidenceCredit: false, predictedSavingMs: null,
+        protocol: nativePlacementPhasesV9.protocol, target, capacity: nativePlacementPhasesV9.capacity,
+        shard: nativePlacementPhasesV9.shard, roots: nativePlacementPhasesV9.phases.map(phase => phase.rootId) },
+    } : {}),
   } : null;
   const partitions = [nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
-    nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
+    nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(protocol) ?
     partitionNativeBodyGroups(bodyGroups, bodyCount, placement) :
     partitionValidationInventory({ ...inventory, cases: bodyCases,
       files: inventory.files.filter(file => bodyFiles.has(file.file)) }, bodyCount);
-  if ([nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol))
+  if ([nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(protocol))
     applyNativePlacementAffinities(bodyGroups, partitions, placement, target);
   const procedureFile = 'test/public-readiness-ci.test.mjs';
   const toolRoot = inventory.cases.find(test => test.file === procedureFile && !test.parents.length &&
@@ -826,7 +938,7 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
   const toolShard = `body-${toolPartition.index}`;
   const parts = nativeFrameworkShardNames(target, protocol).map(shard => {
     const unitIndex = unitShards.indexOf(shard);
-    const selected = unitIndex >= 0 ? [
+    let selected = unitIndex >= 0 ? [
       ...(unitIndex === 0 ? stages.filter(stage => stage.name === 'unit') : []),
       { ...extendedUnits, cases: extendedUnits.cases.filter(test =>
         unitPartitions[unitIndex].assertionIds.includes(test.id)) },
@@ -834,10 +946,21 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
       [{ ...regression, cases: shard === 'refresh' ?
         regression.cases.filter(test => refreshIds.has(test.id)) :
         bodyCases.filter(test => partitions[Number(shard.slice(5))].assertionIds.includes(test.id)) }];
+    if (placement?.phases?.status === 'applied' && shard === placement.phases.shard) {
+      selected = nativePlacementPhasesV9.phases.map((phase, index) => {
+        const group = bodyGroups.find(group => group.rootId === phase.rootId);
+        const ids = new Set(group.assertionIds);
+        return { ...regression, name: phase.name, kind: 'regression',
+          cases: regression.cases.filter(test => ids.has(test.id)),
+          phase: { protocol: nativePlacementPhasesV9.protocol, index, rootId: phase.rootId,
+            previous: index === 0 ? null : nativePlacementPhasesV9.phases[index - 1].name } };
+      });
+    }
     const selectedStages = selected.map(stage => {
       const files = stage.files.filter(file => stage.cases.some(test => test.file === file));
       const selectorName = [nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
-        nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) &&
+        nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
+        nativeFrameworkShardProtocol].includes(protocol) &&
         shard.startsWith('body-') ?
         exactPattern(stage.cases.map(test => [...test.parents, test.name].join(' '))) : stage.selectorName;
       requireThat(files.length > 0 && stage.cases.some(test => test.applicability.platforms.includes(target)),
@@ -882,7 +1005,8 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
     ...(placement ? { placement } : {}),
     parts: parts.map(({ stages: selectedStages, ...part }) => ({ ...part,
       stages: selectedStages.map(stage => ({ name: stage.name, files: stage.files,
-        selectorName: stage.selectorName, groups: stage.groups, ...(stage.selection ? { selection: stage.selection } : {}) })),
+        selectorName: stage.selectorName, groups: stage.groups, ...(stage.selection ? { selection: stage.selection } : {}),
+        ...(stage.phase ? { kind: stage.kind, phase: stage.phase } : {}) })),
     })) };
   return { ...identity, digest: digest(identity), parts };
 }
@@ -1430,6 +1554,48 @@ export function nativeTimingDiagnostics(timings, {
   return { terminalGroup: { ...terminalGroup, producerEnvelope }, timingAnnotations };
 }
 
+export function verifyNativePhaseSettlement({ stage, report, command, journal, capacity }) {
+  const phase = nativePlacementPhasesV9.phases[stage.phase?.index];
+  requireThat(stage.kind === 'regression' && stage.phase?.protocol === nativePlacementPhasesV9.protocol &&
+    phase?.name === stage.name && phase.rootId === stage.phase.rootId &&
+    capacity === nativePlacementPhasesV9.capacity, 'EVIDENCE',
+  'Native phase settlement requires its exact source-qualified phase and host allocation');
+  const budget = report?.resources?.budget;
+  const events = typeof journal === 'string' && journal.trim() ?
+    journal.trim().split('\n').map(line => JSON.parse(line)) : [];
+  const starts = events.filter(event => event.kind === 'command-dispatched');
+  const ends = events.filter(event => event.kind === 'command-end');
+  const end = ends[0];
+  const cleanup = end?.cleanup;
+  requireThat(report?.complete === true && command?.complete === true &&
+    Number.isSafeInteger(command.exitCode) && command.exitCode >= 0 &&
+    Number.isSafeInteger(command.pid) && command.pid > 0 &&
+    Number.isFinite(Date.parse(command.startedAt)) && Number.isFinite(Date.parse(command.finishedAt)) &&
+    Date.parse(command.startedAt) <= Date.parse(report.startedAt) &&
+    Date.parse(report.finishedAt) <= Date.parse(command.finishedAt) &&
+    events.every((event, index) => event.sequence === index + 1 &&
+      Number.isFinite(Date.parse(event.observedAt))) &&
+    starts.length === 1 && starts[0].pid === command.pid && ends.length === 1 &&
+    end.complete === true && end.exitCode === command.exitCode &&
+    cleanup?.rootExitObserved === true &&
+    (cleanup.requested === false || cleanup.requested === true && cleanup.survivorsVerified === true) &&
+    command.checkpoint?.journalDurable === true &&
+    command.checkpoint.originalJournalPrefix?.sha256 === digest(Buffer.from(journal)) &&
+    command.checkpoint.originalJournalPrefix?.bytes === Buffer.byteLength(journal) &&
+    budget?.version === 2 && budget.capacity === capacity && budget.admissionStopped === false &&
+    ['activeWorkers', 'residentWorkers', 'pendingParentRestorations', 'controls']
+      .every(field => budget[field] === 0) &&
+    Number.isSafeInteger(budget.producers) && budget.producers >= 0 && budget.producers <= 1 &&
+    Number.isSafeInteger(budget.potentialResidentWorkers) && budget.potentialResidentWorkers >= 0 &&
+    budget.potentialResidentWorkers <= budget.producers,
+  'UNSETTLED_WRITERS', 'Native phase cannot release its successor without original process and worker cleanup settlement');
+  // The reporting producer's own future-resident reservation settles with its observed process close.
+  return { schemaVersion: 1, kind: 'native-primary-phase-settlement', stage: stage.name,
+    phase: stage.phase, contextDigest: digest(command.context),
+    commandDigest: digest(command), reportDigest: digest(report),
+    commandJournalDigest: digest(Buffer.from(journal)), settled: true };
+}
+
 async function collectExecution({ directory, data, inventory, sources, calculatorSources, target, stages, context, specification, startedAt, plan,
   candidate, profile = context.profile.startsWith('r-pre-') ? 'r-pre' : 'pr',
   component = componentFromContext(context, target), shard = shardFromContext(context, target),
@@ -1457,8 +1623,9 @@ async function collectExecution({ directory, data, inventory, sources, calculato
   const frozen = await read('candidate-verification.json');
   if (part) {
     const names = data ? Object.keys(data) : await fs.readdir(directory);
-    const extraStages = nativeWorkflowContract.stages.filter(name => !stages.some(stage => stage.name === name) &&
-      names.some(file => [name + '.json', name + '-command.json'].includes(file)));
+    const extraStages = [...nativeWorkflowContract.stages, ...nativePlacementPhasesV9.phases.map(phase => phase.name)]
+      .filter(name => !stages.some(stage => stage.name === name) &&
+        names.some(file => [name + '.json', name + '-command.json', name + '-settlement.json'].includes(file)));
     const extraProcedures = ['static', 'calculator'].filter(name => !part.procedures.includes(name) &&
       names.includes(`${name}.json`));
     const extraGo = !part.go && (data ? names.some(file => /^tools-[a-f0-9-]+\/go-tests\.json$/u.test(file)) :
@@ -1483,6 +1650,8 @@ async function collectExecution({ directory, data, inventory, sources, calculato
     (before === undefined || Date.parse(command.finishedAt) <= Date.parse(before)) &&
     (after === undefined || Date.parse(command.startedAt) >= Date.parse(after));
   const originalStages = [];
+  const originalCommands = [];
+  const phaseSettlements = [];
   for (const stage of stages) {
     const report = await read(`${stage.name}.json`);
     const command = await read(`${stage.name}-command.json`);
@@ -1500,13 +1669,15 @@ async function collectExecution({ directory, data, inventory, sources, calculato
     }
     const reconciliation = reconcileNodeExecution({ ...inventory, cases: stage.cases }, report,
       { platform: target, files: [...new Set(stage.cases.map(test => test.file))] });
-    const expectedStageContext = stage.name === 'regression' ? context : producerInputs(context, target, shardProtocol);
+    const expectedStageContext = stage.name === 'regression' || stage.kind === 'regression' ?
+      context : producerInputs(context, target, shardProtocol);
     const expectedResources = context.native.toolchain.resources;
     const resources = report.resources;
     const budget = resources?.budget;
     const capacity = expectedResources?.workerCapacity;
     let groupCount = 0;
     let stageTimings = [];
+    let phaseValid = true;
     try {
       const journal = data ? data.texts?.[`${stage.name}.json.journal.ndjson`] :
         await fs.readFile(path.join(directory, `${stage.name}.json.journal.ndjson`), 'utf8');
@@ -1537,6 +1708,24 @@ async function collectExecution({ directory, data, inventory, sources, calculato
         ['peakPotentialResidentWorkers', capacity * 3], ['peakProducers', capacity * 2 + 1],
         ['peakControls', capacity * 2 + 1]].every(([field, limit]) =>
         Number.isSafeInteger(budget[field]) && budget[field] >= 0 && budget[field] <= limit);
+    if (stage.phase) {
+      try {
+        const journal = data ? data.texts?.[`${stage.name}-command.journal.ndjson`] :
+          await fs.readFile(path.join(directory, `${stage.name}-command.journal.ndjson`), 'utf8');
+        const expected = verifyNativePhaseSettlement({ stage, report, command, journal, capacity });
+        const retained = await read(`${stage.name}-settlement.json`);
+        const { observedAt, ...proof } = retained ?? {};
+        requireThat(digest(proof) === digest(expected) &&
+          Number.isFinite(Date.parse(observedAt)) && Date.parse(observedAt) >= Date.parse(command.finishedAt),
+        'EVIDENCE', 'Native phase settlement receipt differs from its original command, report, phase or cleanup');
+        phaseSettlements.push({ stage, observedAt });
+      } catch (error) {
+        phaseValid = false;
+        complete = false;
+        timingCoverageComplete = false;
+        diagnostics.push({ stage: stage.name, code: 'INVALID_NATIVE_PHASE_SETTLEMENT', message: error.message });
+      }
+    }
     if (!resourceMatches) {
       complete = false;
       diagnostics.push({ stage: stage.name, code: 'INVALID_ORIGINAL_RESOURCE_ALLOCATION' });
@@ -1552,9 +1741,10 @@ async function collectExecution({ directory, data, inventory, sources, calculato
       complete = false;
       diagnostics.push({ stage: stage.name, code: 'INVALID_ORIGINAL_STAGE_COMMAND' });
     }
-    if (!invalidStage && resourceMatches) timings.push(...stageTimings);
+    if (!invalidStage && resourceMatches && phaseValid) timings.push(...stageTimings);
     else timingCoverageComplete = false;
     originalStages.push(report);
+    originalCommands.push(command);
     diagnostics.push({ stage: stage.name, status: reconciliation.status, blockers: reconciliation.blockers,
       dispositions: reconciliation.dispositions });
     for (const code of [report.exitCode, command.exitCode]) {
@@ -1579,6 +1769,17 @@ async function collectExecution({ directory, data, inventory, sources, calculato
     timingCoverageComplete = false;
     complete = false;
     diagnostics.push({ stage: 'ordering', code: 'INVALID_UNIT_FIRST_ORDER' });
+  }
+  if (stages.some(stage => stage.phase) &&
+    (phaseSettlements.length !== stages.filter(stage => stage.phase).length ||
+      phaseSettlements.some(({ stage, observedAt }, index) => stage.phase.index !== index ||
+        stage.phase.previous !== (index === 0 ? null : phaseSettlements[index - 1].stage.name) ||
+        index > 0 && !(Date.parse(phaseSettlements[index - 1].observedAt) <=
+          Date.parse(originalCommands[stages.indexOf(stage)]?.startedAt)) ||
+        !Number.isFinite(Date.parse(observedAt))))) {
+    complete = false;
+    timingCoverageComplete = false;
+    diagnostics.push({ stage: 'ordering', code: 'INVALID_NATIVE_PHASE_ORDER' });
   }
   for (const [name, args, expected] of [
     ['go-version', ['version'], context.native.toolchain.go],
@@ -2471,6 +2672,8 @@ export async function runNativeValidation(options, { lifetime = { cleanupSafe: t
       ...(profile === 'r-pre' ? { intentId: process.env.RELEASE_INTENT_ID } : {}),
     });
     const stage = async selected => {
+      if (selected.phase) requireThat(lifetime.cleanupSafe === true,
+        'UNSETTLED_WRITERS', 'Unsettled native work prevents phase admission');
       if (selected.selection) {
         const reference = await writeValidationSelection({ files: selected.files, name: selected.selectorName });
         requireThat(digest(reference) === digest(selected.selection), 'EVIDENCE',
@@ -2478,13 +2681,45 @@ export async function runNativeValidation(options, { lifetime = { cleanupSafe: t
       }
       const command = await runTool({ name: `${selected.name}-command`, command: process.execPath,
         args: ['scripts/test-runner.mjs', ...selected.args],
+        ...(selected.phase ? { verifySettlement: async report => {
+          requireThat(lifetime.cleanupSafe === true, 'UNSETTLED_WRITERS',
+            'Unsettled native work prevents phase completion');
+          try {
+            verifyNativePhaseSettlement({ stage: selected, command: report,
+              report: await readOptional(path.join(directory, `${selected.name}.json`)),
+              journal: await fs.readFile(path.join(directory, `${selected.name}-command.journal.ndjson`), 'utf8'),
+              capacity: resources.workerCapacity });
+          } catch (error) {
+            if (report?.complete === true && report.exitCode !== 0) {
+              const primary = new SdlcError('VALIDATION',
+                `Native ${selected.name} did not complete successfully; original reports are retained`);
+              primary.innerSettlementError = error;
+              throw primary;
+            }
+            throw error;
+          }
+        } } : {}),
         environment: { ...environment, SDLC_TEST_REPORT_FILE: path.join(directory, `${selected.name}.json`) } });
       requireThat(command.complete && command.exitCode === 0, 'VALIDATION',
         `Native ${selected.name} did not complete successfully; original reports are retained`);
+      if (selected.phase) {
+        const report = await readOptional(path.join(directory, `${selected.name}.json`));
+        const journal = await fs.readFile(path.join(directory, `${selected.name}.json.journal.ndjson`), 'utf8');
+        validateNativeGroupReport({ inventory: inputs.inventory, stage: selected, report, journal, target });
+        const reconciliation = reconcileNodeExecution({ ...inputs.inventory, cases: selected.cases }, report,
+          { platform: target, files: selected.files });
+        requireThat(reconciliation.status === 'Passed' && digest(report.context) === digest(context),
+          'EVIDENCE', 'Native phase must pass its entire original source-bound regression closure');
+        const proof = verifyNativePhaseSettlement({ stage: selected, report, command,
+          journal: await fs.readFile(path.join(directory, `${selected.name}-command.journal.ndjson`), 'utf8'),
+          capacity: resources.workerCapacity });
+        await writeJson(path.join(directory, `${selected.name}-settlement.json`),
+          { ...proof, observedAt: new Date().toISOString() });
+      }
     };
     if (component !== 'homebrew' && (part === undefined ||
       nativeFrameworkUnitShardNames(target).includes(shard))) {
-    for (const selected of inputs.stages.filter(stage => stage.name !== 'regression')) {
+    for (const selected of inputs.stages.filter(stage => stage.name !== 'regression' && stage.kind !== 'regression')) {
       if (selected.name === 'unit' || phase === 'validation') await stage(selected);
     }
     if (part === undefined || part.procedures.includes('static')) {
@@ -2556,7 +2791,8 @@ export async function runNativeValidation(options, { lifetime = { cleanupSafe: t
     if (syntheticRelease) {
       environment[syntheticReleaseContextVariable] = JSON.stringify(syntheticRelease);
     }
-    for (const selected of inputs.stages.filter(stage => stage.name === 'regression')) await stage(selected);
+    for (const selected of inputs.stages.filter(stage =>
+      stage.name === 'regression' || stage.kind === 'regression')) await stage(selected);
     if (part === undefined || part.procedures.includes('calculator')) {
     const calculator = await runTool({ name: 'calculator-command', command: process.execPath,
       args: ['scripts/pr-calculator.mjs', '--output', path.join(directory, 'calculator.json')] });

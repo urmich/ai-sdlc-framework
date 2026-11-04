@@ -103,8 +103,8 @@ optional names, owner and reason. Two-worker callbacks reserve both tokens
 before their deadlines begin; missing aggregate allocation cannot be called
 successful overlap. Resource matching is part of source/configuration evidence.
 The versioned native-protocol regression retains its original root and all
-seventeen original complete protocol/bootstrap scenarios, plus the current
-v8/bootstrap scenario as row eighteen. Reserve four root slots before
+seventeen original complete protocol/bootstrap scenarios, plus the historical
+v8/bootstrap eighteenth row and current v9/bootstrap nineteenth row. Reserve four root slots before
 setup, then run whole scenarios in isolated children under the existing shared
 producer budget, bounded to four and the actual caller allocation. Environment
 changes, SDK capabilities, original verification, negative controls, projection,
@@ -1328,8 +1328,10 @@ fixture evidence through the actual API-only observer boundary.
 
 The required delivery limits for each **complete logical native PR lane** are
 Linux, Windows and Apple Silicon **each at most 900 seconds (15m)**, and Intel
-macOS **strictly under 1,200 seconds (20m)**. Intel's former 15-minute target
-remains an optional stretch goal, not an additional acceptance requirement.
+macOS **strictly under 1,500 seconds (25m)**. The owner's revised Intel limit
+replaces the former twenty-minute acceptance target; preserve its original
+execution records rather than relabelling them. Earlier Intel targets do not
+remain additional acceptance requirements.
 The recorded Linux **460 seconds (7m40s)**, Windows **665 seconds (11m05s)** and
 Apple Silicon **627 seconds (10m27s)** are historical lane measurements, not
 current delivery limits or new stretch targets.
@@ -1362,9 +1364,10 @@ publication fault, preserved existing corruption and owned temporary cleanup.
 The complete original root must still pass with every required real write,
 fresh read, proof, durability and tamper check. Focused Windows measurements
 cannot establish a Mac result or replace full native lane acceptance.
-Do not cancel an Intel measurement at the former 16-minute observation cutoff.
-Its revised observation cutoff is 20 minutes; a still-active lane at that
-cutoff cannot pass the strict timing limit. This changes no command watchdog,
+Do not cancel an Intel measurement at a former observation cutoff or merely
+because it exceeds the delivery limit. Its revised delivery observation cutoff
+is 25 minutes; a still-active lane at that cutoff cannot pass the strict timing
+limit, but its original run must settle naturally. This changes no command watchdog,
 owned-process settlement allowance, assertion, iteration or durability boundary.
 
 For the next PR measurement, explicitly request the native hosts' observed
@@ -1677,7 +1680,9 @@ the original subset. A new legitimate test must not erase preservation checks.
    platform's regression shards execute; another platform or attempt cannot
    supply the prerequisite. Include the unit barrier, every part's provisioning,
    evidence retention and cleanup in the whole-lane elapsed time.
-   For current `native-framework-shards-v8-intel-catalog-isolation` and historical
+   For current implementation candidate
+   `native-framework-shards-v9-phased-intel-isolation` and historical
+   `native-framework-shards-v8-intel-catalog-isolation` and
    `native-framework-shards-v7-resource-affinity-components` and
    `native-framework-shards-v4-split-intel-units` and
    `native-framework-shards-v5-root-components` and
@@ -1691,7 +1696,7 @@ the original subset. A new legitimate test must not erase preservation checks.
    unions including descendants, dependencies and exclusive resources. The new
    Intel producer has no unit prerequisite of its own. Every Intel regression
    must wait for both unit jobs, not a borrowed ARM/original-unit result.
-   Current v8 retains v7/v6's complete dependency/exclusive-resource-connected root
+   Current v9 retains v8/v7/v6's complete dependency/exclusive-resource-connected root
    components and places them across the existing bodies using qualified observed
    work costs and stable exact file/root planning identities. Historical source costs are
    explicit scheduling leads only, never current execution credit or predicted
@@ -1702,7 +1707,7 @@ the original subset. A new legitimate test must not erase preservation checks.
    hosts, but descendants and connected components must remain together.
    Body file lists may overlap; exact source-bound escaped full-name selectors
    must preserve the disjoint complete assertion union and reject ambiguity.
-   Keep scheduling policy v9 byte-identical and replay v1-v7 assignments and
+   Keep within-phase scheduling policy v9 byte-identical and replay v1-v8 assignments and
    serialized identities exactly, including v5's original count/hash placement
    and v6's unchanged `nativePlacementCosts` table and SDK reconstruction.
    V7's separate `nativePlacementCostsV7` overlay contains ten completed Intel
@@ -1742,7 +1747,49 @@ the original subset. A new legitimate test must not erase preservation checks.
    Historical v7 replay uses `nativeResourceAffinityFrameworkShardProtocol`
    without v8 data or isolation. Native correctness, catalog isolation service
    and both secondary tails require fresh measurement; no predicted saving
-   establishes the strictly-under-twenty-minute Intel limit.
+   establishes the strictly-under-twenty-five-minute Intel limit.
+   V9 qualifies both the complete catalog and retained-identity components for
+   sequential phases on the existing Intel body-0. Execute catalog alone first;
+   dispatch the entire retained component alone only after actual successful
+   process execution and cleanup settlement. Preserve its existing four-wide
+   children, fourteen-worker body capacity, four-worker units, all twenty-five
+   producers and every assertion. Rebalance the remaining whole components over
+   body-1/body-2 using separate authenticated C66 leads; preserve all v6/v7/v8
+   literals and historical v1-v8 placement and SDK identities.
+   Cover qualified assignment and changed source/runtime/capacity/closure/resource
+   fallback without split components, empty required bodies or fake phases.
+   Separate original phase reports and journals must retain exact source,
+   configuration and full regression context and a disjoint complete producer
+   assertion union. Cover successful phase ordering, failed execution, uncertain
+   process or cleanup settlement, prohibited later-phase dispatch, missing or
+   duplicate assertions and rejection of partial passing producer evidence.
+   SDK requirements derive from the actual combined closures, not catalog-only
+   omissions. Require producer-wide maximum-ten timing notices and truthful
+   global offsets/terminal capsule across phases, without cross-clock ordering
+   assumptions or ten notices for each phase.
+   These network-free owned-fixture controls remain PR-only, maintained by the
+   native-validation maintainer, with no critical promotion. The four exact new
+   roots in `test/public-readiness-native.test.mjs` are:
+   `T-PRD017 native v9 keeps catalog and retained components in qualified isolated primary phases`;
+   `T-PRD017 native v9 falls back safely and authenticates unchanged historical v8`;
+   `T-PRD017 native v9 phase originals require complete disjoint source assertions and settled causal order`;
+   `T-PRD017 native v9 primary waits for owned process settlement and blocks failed or unsafe successors`.
+   The first three require one slot each; the last requires two for its actual
+   owned child. Complete roots execute in isolated processes with owned fixture
+   paths, no shared external resources and no blanket callback concurrency.
+   Authenticate the strict `nativePlacementCostsV9` and
+   `nativePlacementPhasesV9` literals, the historical v8 alias
+   `nativeCatalogIsolationFrameworkShardProtocol`, and phase contract
+   `native-intel-primary-phases-v1`. Verify `regression-catalog` then
+   `regression-retained` through `verifyNativePhaseSettlement` and the separate
+   original report/journal, command/journal and settlement receipt, bound to
+   phase/context/command/report/command-journal identities.
+   V9 Intel timing boundaries must pass 1,499,999ms but reject 1,500,000ms;
+   genuine v1-v8 originals retain their strict 1,200,000ms historical limit.
+   Phase isolation is a measurement candidate: observed service sums can still
+   exceed twenty-five minutes and longer primary allocation may affect secondary
+   queues. Require fresh whole-lane measurement; no local fixture result,
+   historical cost or passing phase grants a native latency pass.
    The three PR-only roots in `test/public-readiness-native.test.mjs` are
    `T-PRD017 native protocol4 retains its exact historical file and assertion assignments`,
    `T-PRD017 native protocol5 spreads independent same-file roots and executes connected complete closures exactly once`,
@@ -1757,7 +1804,7 @@ the original subset. A new legitimate test must not erase preservation checks.
    report/journal union. The native-validation maintainer owns their network-free
    Node fixtures. Their complete roots declare one slot, except the real tiny
    execution control's two-slot prerequisite; no critical member is added.
-   The existing source-bound observer/SDK root also verifies v4/v5/v6/v7/v8 replay,
+   The existing source-bound observer/SDK root also verifies v4/v5/v6/v7/v8/v9 replay,
    old-source rejection and protocol relabel refusal. Fresh complete hosted
    measurements remain required.
    Five additional PR-only, network-free Node fixture roots owned by the
@@ -1776,9 +1823,10 @@ the original subset. A new legitimate test must not erase preservation checks.
    - `T-PRD017 native v8 authenticates current leads and isolation without changing historical identities`.
 
    Preserve their source-declared isolated resources and inherited aggregate
-   allocation, qualified negative cases, complete union, authentic v1-v7
+   allocation, qualified negative cases, complete union, authentic v1-v8
    assignments and strict-literal rejection. The original seventeen protocol
-   rows remain in order, followed by the new current-v8 eighteenth row.
+   rows and the historical-v8 eighteenth row remain in order, followed by the
+   new current-v9 nineteenth row.
 
    Each complete isolated root declares one slot, no prerequisites and no shared
    exclusive resources. They exercise planner/literal/timing contracts without
