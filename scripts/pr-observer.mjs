@@ -365,7 +365,8 @@ function macAdmissionPolicyMatches(document, protocol, priority, homebrewFirst, 
     return digest(copy) === digest(right);
   };
   return [native.nativeSplitUnitFrameworkShardProtocol, native.nativeRootComponentFrameworkShardProtocol,
-    native.nativeStableCostFrameworkShardProtocol, native.nativeFrameworkShardProtocol].includes(protocol) &&
+    native.nativeStableCostFrameworkShardProtocol, native.nativeResourceAffinityFrameworkShardProtocol,
+    native.nativeFrameworkShardProtocol].includes(protocol) &&
     digest(document.jobs?.['mac-admission'] ?? null) ===
       digest(expectedMacAdmissionJob(retainedFirst ? 'arm-bodies' : 'arm-regressions', false, false,
         boundedQueue, false, readyCritical)) &&
@@ -411,7 +412,8 @@ export function inspectWorkflowTrust(workflows) {
       sharded ? native.nativeLegacyFrameworkShardProtocol : null;
     const marker = selected.document.env?.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL;
     const rootComponents = [native.nativeRootComponentFrameworkShardProtocol,
-      native.nativeStableCostFrameworkShardProtocol, native.nativeFrameworkShardProtocol].includes(marker) &&
+      native.nativeStableCostFrameworkShardProtocol, native.nativeResourceAffinityFrameworkShardProtocol,
+      native.nativeFrameworkShardProtocol].includes(marker) &&
       topologyProtocol === native.nativeSplitUnitFrameworkShardProtocol;
     if (marker !== undefined && !rootComponents) {
       result.blockers.push({ file: selected.file, code: 'NATIVE_SHARD_PROTOCOL_DIFFERS' });

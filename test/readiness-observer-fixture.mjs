@@ -20,6 +20,7 @@ import { nativeLegacyPrParts, nativeFrameworkShardPlan, nativeFrameworkShardProt
   nativeLegacyFrameworkShardProtocol, nativeSplitUnitFrameworkShardProtocol,
   nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
   nativePlacementCosts, nativePlacementAffinities, nativePlacementCostsV7,
+  nativeResourceAffinityFrameworkShardProtocol, nativePlacementCostsV8, nativePlacementIsolationV8,
   nativePartJobKey, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
 import { nativeResourceFacts, nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
 import { repositoryRoot, unitFiles } from '../scripts/test-runner.mjs';
@@ -186,14 +187,20 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
     file.endsWith('.yml') ? ci : 'throw new Error("candidate reporter must never execute in the observer");\n']));
   files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
     `export const nativeFrameworkShardProtocol = '${shardProtocol}';\n`);
-  if ([nativeStableCostFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
+  if ([nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementCosts = Object.freeze(${JSON.stringify(nativePlacementCosts)});\n`);
   }
-  if (shardProtocol === nativeFrameworkShardProtocol) {
+  if ([nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementAffinities = Object.freeze(${JSON.stringify(nativePlacementAffinities)});\n` +
       `export const nativePlacementCostsV7 = Object.freeze(${JSON.stringify(nativePlacementCostsV7)});\n`);
+  }
+  if (shardProtocol === nativeFrameworkShardProtocol) {
+    files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
+      `export const nativePlacementCostsV8 = Object.freeze(${JSON.stringify(nativePlacementCostsV8)});\n` +
+      `export const nativePlacementIsolationV8 = Object.freeze(${JSON.stringify(nativePlacementIsolationV8)});\n`);
   }
   files.set('scripts/test-scheduling.mjs', schedulingSource);
   const schedulingPolicy = sourceValidationSchedulingPolicy([{ file: 'scripts/test-scheduling.mjs', contents: schedulingSource }]);
@@ -843,14 +850,17 @@ export async function observerApiFixture(t, options = {}) {
       '    steps:\n      - run: echo "Controlled historical summary; never execute"\n');
   let splitHistoricalCi;
   const splitHistoricalProtocols = [nativeSplitUnitFrameworkShardProtocol, nativeRootComponentFrameworkShardProtocol,
-    nativeStableCostFrameworkShardProtocol];
+    nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol];
   if (options.frameworkShards &&
     splitHistoricalProtocols.includes(shardProtocol)) {
     const historical = parseWorkflow({ file: nativeWorkflowContract.path, contents: currentCi });
-    historical.jobs['native-mi'].needs = ['intent', 'source', 'native-units-mi'];
-    if (shardProtocol === nativeStableCostFrameworkShardProtocol) {
+    if (shardProtocol !== nativeResourceAffinityFrameworkShardProtocol)
+      historical.jobs['native-mi'].needs = ['intent', 'source', 'native-units-mi'];
+    if (shardProtocol === nativeResourceAffinityFrameworkShardProtocol) {
+      historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = shardProtocol;
+    } else if (shardProtocol === nativeStableCostFrameworkShardProtocol) {
       historical.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v9-ready-critical-fairness';
-      historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = nativeStableCostFrameworkShardProtocol;
+      historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = shardProtocol;
     } else {
       historical.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v8-own-platform-critical';
       for (const key of ['native-ma-refresh', 'arm-refresh-admission']) {

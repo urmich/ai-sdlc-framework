@@ -103,7 +103,8 @@ optional names, owner and reason. Two-worker callbacks reserve both tokens
 before their deadlines begin; missing aggregate allocation cannot be called
 successful overlap. Resource matching is part of source/configuration evidence.
 The versioned native-protocol regression retains its original root and all
-seventeen complete protocol/bootstrap scenarios. Reserve four root slots before
+seventeen original complete protocol/bootstrap scenarios, plus the current
+v8/bootstrap scenario as row eighteen. Reserve four root slots before
 setup, then run whole scenarios in isolated children under the existing shared
 producer budget, bounded to four and the actual caller allocation. Environment
 changes, SDK capabilities, original verification, negative controls, projection,
@@ -112,6 +113,13 @@ row exactly once; unknown, duplicate, missing or incomplete outcomes fail.
 Two PR-only controller regressions cover outcome identity, failure stop/drain
 and serial fallback. Preserve actual child/lease overlap and cleanup evidence;
 this changes neither the 27-assertion critical budget nor native acceptance.
+The same PR-only controls accept independent worker epochs in both directions
+through real owned children, while rejecting malformed or reversed local
+intervals, foreign/duplicate/missing/open broker leases, incomplete commands
+and premature command-side inspection. Correlate actual live-to-closed lease
+identity after child exit without cross-process clock ordering or tolerance.
+The coupled owned-writer retention regression preserves every uncertain-writer,
+snapshot-failure, drainage and cleanup path.
 Standalone syntax checks use a bounded ready-work pool up to available CPU
 capacity and the existing 32-slot ceiling. An inherited test allocation keeps
 the checker serial rather than multiplying unregistered work. Preserve every
@@ -297,7 +305,13 @@ credit; process-local spawn instrumentation is always restored. Wrong-source
 proof remains unknown; late affirmative proof can refine a new result without
 mutating the previous unknown snapshot or repeating stop attempts.
 Compilation precedes target creation; only one compiler or one target overlaps
-the worker/observer. Both roots remain outside critical27. New-source local,
+the worker/observer. A separate Windows-only, one-slot PR control advances a
+readiness polling wake past its deadline after proof publication. Require the
+final marker inspection without another wait, and reject missing markers,
+unsettled compiler evidence and wrong-source proof. Its process-local spawn,
+filesystem and clock instrumentation is restored; it launches no real observer
+or compiler and cannot substitute for the original native control.
+All these roots remain outside critical27. New-source local,
 Review and native results remain NotRun until their actual executions; the prior
 24-of-25 native producer pass and recurring Windows failure remain historical,
 not a current completeness or cancellation-fix claim.
@@ -1663,7 +1677,8 @@ the original subset. A new legitimate test must not erase preservation checks.
    platform's regression shards execute; another platform or attempt cannot
    supply the prerequisite. Include the unit barrier, every part's provisioning,
    evidence retention and cleanup in the whole-lane elapsed time.
-   For current `native-framework-shards-v7-resource-affinity-components` and historical
+   For current `native-framework-shards-v8-intel-catalog-isolation` and historical
+   `native-framework-shards-v7-resource-affinity-components` and
    `native-framework-shards-v4-split-intel-units` and
    `native-framework-shards-v5-root-components` and
    `native-framework-shards-v6-stable-cost-components`, require each platform's
@@ -1676,7 +1691,7 @@ the original subset. A new legitimate test must not erase preservation checks.
    unions including descendants, dependencies and exclusive resources. The new
    Intel producer has no unit prerequisite of its own. Every Intel regression
    must wait for both unit jobs, not a borrowed ARM/original-unit result.
-   Current v7 retains v6's complete dependency/exclusive-resource-connected root
+   Current v8 retains v7/v6's complete dependency/exclusive-resource-connected root
    components and places them across the existing bodies using qualified observed
    work costs and stable exact file/root planning identities. Historical source costs are
    explicit scheduling leads only, never current execution credit or predicted
@@ -1687,7 +1702,7 @@ the original subset. A new legitimate test must not erase preservation checks.
    hosts, but descendants and connected components must remain together.
    Body file lists may overlap; exact source-bound escaped full-name selectors
    must preserve the disjoint complete assertion union and reject ambiguity.
-   Keep scheduling policy v9 byte-identical and replay v1-v6 assignments and
+   Keep scheduling policy v9 byte-identical and replay v1-v7 assignments and
    serialized identities exactly, including v5's original count/hash placement
    and v6's unchanged `nativePlacementCosts` table and SDK reconstruction.
    V7's separate `nativePlacementCostsV7` overlay contains ten completed Intel
@@ -1711,6 +1726,23 @@ the original subset. A new legitimate test must not erase preservation checks.
    altered, computed or duplicate declarations without executing captured code.
    Historical v6 requires its original cost literal but neither v7 addition;
    historical v1-v5 requires no cost table. Relabelling an old planner is non-passing.
+   V8 additionally authenticates `nativePlacementCostsV8` and
+   `nativePlacementIsolationV8`, retaining original v6/v7 literals. Its thirty
+   C64 Intel scheduling leads retain source `90ae1e4ae10620e12897a5f79be03b4225d2b928`,
+   run `41817138524`, attempt 1, Node 24.20.0 and fourteen-worker provenance.
+   Qualify target/runtime/capacity/closure/resources; absent v8 leads retain
+   v7/v6 lookup and incompatible or unknown costs remain explicit count fallback.
+   Only the exact qualified standalone catalog component may exclusively occupy
+   existing Intel body-0; place every other complete connected component on
+   body-1/body-2. Source, runtime, capacity, closure or resource mismatches must
+   leave ordinary partitioning, without split components or empty required
+   bodies. Preserve four-worker unit barriers and all twenty-five producers.
+   Verify genuine selected-closure Go/Python omissions on the catalog-only role
+   and retained required SDKs elsewhere, not invented tool success or absence.
+   Historical v7 replay uses `nativeResourceAffinityFrameworkShardProtocol`
+   without v8 data or isolation. Native correctness, catalog isolation service
+   and both secondary tails require fresh measurement; no predicted saving
+   establishes the strictly-under-twenty-minute Intel limit.
    The three PR-only roots in `test/public-readiness-native.test.mjs` are
    `T-PRD017 native protocol4 retains its exact historical file and assertion assignments`,
    `T-PRD017 native protocol5 spreads independent same-file roots and executes connected complete closures exactly once`,
@@ -1725,7 +1757,7 @@ the original subset. A new legitimate test must not erase preservation checks.
    report/journal union. The native-validation maintainer owns their network-free
    Node fixtures. Their complete roots declare one slot, except the real tiny
    execution control's two-slot prerequisite; no critical member is added.
-   The existing source-bound observer/SDK root also verifies v4/v5/v6/v7 replay,
+   The existing source-bound observer/SDK root also verifies v4/v5/v6/v7/v8 replay,
    old-source rejection and protocol relabel refusal. Fresh complete hosted
    measurements remain required.
    Five additional PR-only, network-free Node fixture roots owned by the
@@ -1736,6 +1768,17 @@ the original subset. A new legitimate test must not erase preservation checks.
    - `T-PRD017 native v7 adopts measured Intel leads while preserving published v6 placement`;
    - `T-PRD017 native v7 authenticates all adopted literals without relabelling historical v6`;
    - `T-PRD018 native timing offsets retain the terminal group outside the ten longest notices`.
+
+   Three further PR-only, network-free Node roots owned by the same maintainer are:
+
+   - `T-PRD017 native v8 isolates the authentic Intel catalog and derives genuine SDK omissions`;
+   - `T-PRD017 native v8 rejects incompatible catalog isolation without splitting connected closures`;
+   - `T-PRD017 native v8 authenticates current leads and isolation without changing historical identities`.
+
+   Preserve their source-declared isolated resources and inherited aggregate
+   allocation, qualified negative cases, complete union, authentic v1-v7
+   assignments and strict-literal rejection. The original seventeen protocol
+   rows remain in order, followed by the new current-v8 eighteenth row.
 
    Each complete isolated root declares one slot, no prerequisites and no shared
    exclusive resources. They exercise planner/literal/timing contracts without

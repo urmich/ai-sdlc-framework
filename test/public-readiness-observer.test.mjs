@@ -52,7 +52,7 @@ import { deriveNativeComponentSpecification, nativeComponentSelection,
   projectNativeComponentEvidence, replayNativeComponentEvidence } from '../scripts/native-components.mjs';
 import { compileValidationSourceInventory } from '../scripts/validation-inventory.mjs';
 import { nativeBootstrapProtocol, nativeBodyBootstrapProtocol, nativeUnitBootstrapProtocol } from '../scripts/toolchain-baseline.mjs';
-import { runProtocolPool, reconcileProtocolRows } from './readiness-protocol-pool.mjs';
+import { runProtocolPool, reconcileProtocolRows, validateProtocolExecution } from './readiness-protocol-pool.mjs';
 import { protocolPairs } from './readiness-protocol-row.mjs';
 
 test('T-PRD021 source-bound role bootstrap preserves all producer origins and thirteen independent Mac cleanups', async t => {
@@ -671,7 +671,7 @@ test('T-PRD020 RC66 CI01 current twenty-five-part observer admits Intel 1185s an
 
 test('T-PRD021 versioned twenty-five twenty-four and twenty-part originals require exact closures cleanup and protected SDK replay', async t => {
   const result = await runProtocolPool(t);
-  assert.equal(result.rows.length, 17);
+  assert.equal(result.rows.length, 18);
   t.diagnostic(JSON.stringify({ protocolPool: result }));
 });
 
@@ -684,9 +684,45 @@ test('T-PRD021 protocol row outcomes reject missing duplicate unknown incomplete
       status: 'Passed', cleaned: true, pid: 100 + index, slot,
       lease: { pid: 100 + index, slot, minimumSlots: 1,
         startedAt: '2026-10-22T10:00:00.000Z', finishedAt: null },
+      startedAt: '2026-10-22T10:00:00.500Z',
       finishedAt: '2026-10-22T10:00:01.000Z' };
   });
   assert.deepEqual(reconcileProtocolRows(rows, [...outcomes].reverse(), sourceDigest), outcomes);
+  for (const offset of [-60000, 60000]) {
+    const independent = outcomes.map(outcome => ({ ...outcome,
+      startedAt: new Date(Date.parse(outcome.startedAt) + offset).toISOString(),
+      finishedAt: new Date(Date.parse(outcome.finishedAt) + offset).toISOString() }));
+    assert.deepEqual(reconcileProtocolRows(rows, independent, sourceDigest), independent);
+  }
+  const outcome = outcomes[0];
+  const report = { complete: true, exitCode: 0, pid: outcome.pid,
+    cleanup: { rootExitObserved: true }, startedAt: '2026-10-22T11:00:00.000Z',
+    finishedAt: '2026-10-22T11:00:02.000Z' };
+  const leases = [{ ...outcome.lease, finishedAt: '2026-10-22T10:00:02.000Z' }];
+  const observedAt = '2026-10-22T11:00:03.000Z';
+  validateProtocolExecution(report, outcome, leases, observedAt);
+  for (const mutate of [
+    value => { value.report.complete = false; },
+    value => { value.report.exitCode = 1; },
+    value => { value.report.cleanup.rootExitObserved = false; },
+    value => { value.report.pid++; },
+    value => { value.report.startedAt = observedAt; },
+    value => { value.report.finishedAt = 'not-a-time'; },
+    value => { value.observedAt = report.startedAt; },
+    value => { value.leases.length = 0; },
+    value => { value.leases.push(value.leases[0]); },
+    value => { value.leases[0].pid++; },
+    value => { value.leases[0].slot = 'foreign'; },
+    value => { value.leases[0].minimumSlots = 2; },
+    value => { value.leases[0].startedAt = report.startedAt; },
+    value => { value.leases[0].finishedAt = null; },
+    value => { value.leases[0].finishedAt = 'not-a-time'; },
+    value => { value.leases[0].finishedAt = '2026-10-22T09:59:59.000Z'; },
+  ]) {
+    const changed = structuredClone({ report, leases, observedAt });
+    mutate(changed);
+    assert.throws(() => validateProtocolExecution(changed.report, outcome, changed.leases, changed.observedAt));
+  }
   for (const mutate of [
     values => values.pop(),
     values => { values[1] = values[0]; },
@@ -699,6 +735,9 @@ test('T-PRD021 protocol row outcomes reject missing duplicate unknown incomplete
     values => { values[1].lease.pid++; },
     values => { values[1].lease.slot = values[0].slot; },
     values => { values[1].lease.finishedAt = values[1].finishedAt; },
+    values => { values[1].lease.startedAt = 'incomplete'; },
+    values => { values[1].startedAt = 'incomplete'; },
+    values => { values[1].startedAt = '2026-10-22T10:00:02.000Z'; },
     values => { values[1].finishedAt = 'incomplete'; },
   ]) {
     const changed = structuredClone(outcomes);
@@ -718,7 +757,7 @@ test('T-PRD021 protocol row pool drains failed children stops dispatch and respe
     /owned checkout-local scratch directory/u);
   const budgetUrl = new URL('../scripts/test-budget.mjs', import.meta.url).href;
   const diagnosticsUrl = new URL('../scripts/validation-tools.mjs', import.meta.url).href;
-  const workerSource = fail => `
+  const workerSource = (fail, clockOffset = 0) => `
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
@@ -729,6 +768,8 @@ const [indexText, sourceDigest, scratch, groupId, pairText] = process.argv.slice
 const index = Number(indexText);
 const pair = JSON.parse(pairText);
 const allocation = await acquireTestWorker(1, { groupId });
+const now = () => new Date(Date.now() + ${clockOffset}).toISOString();
+const startedAt = now();
 const parent = path.dirname(scratch);
 const wait = async predicate => {
   const deadline = performance.now() + 10000;
@@ -756,7 +797,7 @@ try {
     const [lease] = await readTestGroupProcesses(groupId);
     console.log(JSON.stringify({ index, pair, sourceDigest, groupId, status: 'Passed',
       cleaned: true, pid: process.pid, slot: allocation.slot, lease,
-      finishedAt: new Date().toISOString() }));
+      startedAt, finishedAt: now() }));
   }
 } finally { allocation.close(); }
 `;
@@ -797,6 +838,18 @@ try {
     assert.ok(allocation.peakResidentWorkers <= allocation.residentLimit);
     assert.ok(allocation.peakProducers <= allocation.producerLimit);
     assert.ok(allocation.peakControls <= allocation.controlLimit);
+  }
+  for (const offset of [-60000, 60000]) {
+    const clockWorker = path.join(root, `clock-${offset}.mjs`);
+    await fs.writeFile(clockWorker, workerSource(false, offset));
+    const independent = await runProtocolPool(t, { workers: 1, worker: pathToFileURL(clockWorker),
+      rows: protocolPairs.slice(0, 2) });
+    assert.equal(independent.rows.length, 2);
+    for (const record of independent.reports) {
+      assert.equal(record.leases.length, 1);
+      assert.equal(record.leases[0].slot, JSON.parse(record.stdout).slot);
+      assert.equal(typeof record.leases[0].finishedAt, 'string');
+    }
   }
   t.diagnostic(JSON.stringify({ protocolControl: { failure: failure.protocolPool, serial } }));
 });

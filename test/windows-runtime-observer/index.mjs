@@ -195,8 +195,14 @@ export async function startWindowsRuntimeObserver({ directory, ownerPid, expecte
       catch (error) {
         if (error.code !== 'ENOENT') throw new Error('observer-invalid-marker');
       }
-      if (closed) return null;
+      if (closed) break;
       await sleep(10);
+    }
+    // A delayed wake must not discard proof published while the probe was pending.
+    // Stop waiting at the deadline, but inspect the marker once before expiring.
+    try { return await smallJson(files[kind], 256); }
+    catch (error) {
+      if (error.code !== 'ENOENT') throw new Error('observer-invalid-marker');
     }
     return null;
   }

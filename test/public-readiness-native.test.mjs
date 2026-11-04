@@ -13,6 +13,9 @@ export const validationDeclarations = {
       "T-PRD017 native v7 falls back for changed affinity closures resources and components",
       "T-PRD017 native v7 adopts measured Intel leads while preserving published v6 placement",
       "T-PRD017 native v7 authenticates all adopted literals without relabelling historical v6",
+      "T-PRD017 native v8 isolates the authentic Intel catalog and derives genuine SDK omissions",
+      "T-PRD017 native v8 rejects incompatible catalog isolation without splitting connected closures",
+      "T-PRD017 native v8 authenticates current leads and isolation without changing historical identities",
       "T-PRD018 native timing offsets retain the terminal group outside the ten longest notices",
       "T-PRD017 native protocol5 and historical4 retain source-bound observer and SDK reconstruction"
     ],
@@ -99,6 +102,12 @@ export const validationDeclarations = {
     {"root": "T-PRD017 native v7 adopts measured Intel leads while preserving published v6 placement",
       "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD017 native v7 authenticates all adopted literals without relabelling historical v6",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD017 native v8 isolates the authentic Intel catalog and derives genuine SDK omissions",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD017 native v8 rejects incompatible catalog isolation without splitting connected closures",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD017 native v8 authenticates current leads and isolation without changing historical identities",
       "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD018 native timing offsets retain the terminal group outside the ten longest notices",
       "minimumSlots": 1, "exclusiveResources": []},
@@ -3673,8 +3682,8 @@ test('T-PRD017 native shard construction derives complete root groups once and p
   assert.equal(groups.find(group => group.root === escapedRoot).minimumSlots, 3);
 });
 
-async function nativeCostFixture(t) {
-  const f = await observerApiFixture(t);
+async function nativeCostFixture(t, options) {
+  const f = await observerApiFixture(t, options);
   const files = [...f.source.files].map(([file, contents]) => ({ file, contents }));
   const roots = [
     ['test/validation-catalog.test.mjs',
@@ -3700,13 +3709,205 @@ async function nativeCostFixture(t) {
   return { files, roots, compile, inventory: compile(files), plan: f.source.plan };
 }
 
-async function nativeAffinityFixture(t) {
-  const f = await nativeCostFixture(t);
+async function nativeAffinityFixture(t, options) {
+  const f = await nativeCostFixture(t, options);
   const file = 'test/github-retained-identity-acceptance.test.mjs';
   f.files.push({ file, contents: await fs.readFile(path.join(repositoryRoot, ...file.split('/')), 'utf8') });
   return { ...f, inventory: f.compile(f.files), retainedFile: file,
     retainedRoot: 'retained identity acceptance through existing public consumers' };
 }
+
+async function nativeIsolationFixture(t) {
+  const f = await nativeAffinityFixture(t, { bootstrapProtocol: nativeCryptoBootstrapProtocol });
+  const catalog = f.files.find(source => source.file === 'test/validation-catalog.test.mjs');
+  catalog.contents = await fs.readFile(path.join(repositoryRoot, 'test', 'validation-catalog.test.mjs'), 'utf8');
+  const file = 'test/github-host-authority.test.mjs';
+  f.files.push({ file, contents: await fs.readFile(path.join(repositoryRoot, ...file.split('/')), 'utf8') });
+  const surface = 'src/github/store-bridge.mjs';
+  f.files.push({ file: surface, contents: await fs.readFile(path.join(repositoryRoot, ...surface.split('/')), 'utf8') });
+  const observer = f.files.find(source => source.file === 'test/public-readiness-observer.test.mjs');
+  observer.contents = await fs.readFile(path.join(repositoryRoot, 'test', 'public-readiness-observer.test.mjs'), 'utf8');
+  for (const file of ['scripts/github-readiness-host.mjs', 'scripts/pr-observer.mjs', 'scripts/read-validation-artifact.py']) {
+    const contents = await fs.readFile(path.join(repositoryRoot, ...file.split('/')), 'utf8');
+    const selected = f.files.find(source => source.file === file);
+    if (selected) selected.contents = contents;
+    else f.files.push({ file, contents });
+  }
+  return { ...f, inventory: f.compile(f.files) };
+}
+
+test('T-PRD017 native v8 isolates the authentic Intel catalog and derives genuine SDK omissions', async t => {
+  const f = await nativeIsolationFixture(t);
+  const options = { inventory: f.inventory, plan: f.plan, target: 'macos-x64' };
+  const historical = 'native-framework-shards-v7-resource-affinity-components';
+  const current = 'native-framework-shards-v8-intel-catalog-isolation';
+  assert.equal(nativeFrameworkShardProtocol, current);
+  const before = nativeFrameworkShardPlan({ ...options, protocol: historical });
+  const after = nativeFrameworkShardPlan(options);
+  const catalog = f.inventory.cases.find(test => test.file === 'test/validation-catalog.test.mjs' &&
+    test.name === f.roots[0][1]);
+  const oldPart = before.parts.find(part => part.assertionIds.includes(catalog.id));
+  assert.ok(oldPart.assertionIds.length > 1, 'Published v7 does not isolate the catalog');
+  const primary = after.parts.find(part => part.shard === 'body-0');
+  assert.deepEqual(primary.assertionIds, [catalog.id]);
+  assert.deepEqual(primary.stages[0].groups.map(group => group.rootId), [catalog.id]);
+  assert.deepEqual(primary.stages[0].files, ['test/validation-catalog.test.mjs']);
+  assert.deepEqual(primary.procedures, []);
+  assert.equal(primary.go, false);
+  assert.equal(after.placement.isolation.status, 'applied');
+  assert.equal(after.placement.isolation.capacity, 14);
+  assert.equal(after.placement.isolation.evidenceCredit, false);
+  assert.equal(after.placement.isolation.predictedSavingMs, null);
+  assert.equal(nativePrPartsForProtocol(current).length, 25);
+  assert.deepEqual(nativeFrameworkShardPlan(options), after);
+  const assigned = after.parts.flatMap(part => part.assertionIds);
+  assert.deepEqual([...assigned].sort(), f.inventory.cases.map(test => test.id).sort());
+  assert.equal(new Set(assigned).size, assigned.length);
+  assert.ok(after.parts.every(part => part.assertionIds.length > 0));
+  assert.deepEqual(after.parts.filter(part => !part.shard.startsWith('body-')),
+    before.parts.filter(part => !part.shard.startsWith('body-')));
+  const capability = nativeBootstrapCapability({ ...options, profile: 'pr', component: 'framework',
+    shard: 'body-0', protocol: nativeCryptoBootstrapProtocol, shardProtocol: current, assignment: after });
+  assert.deepEqual(capability.tools,
+    { go: false, python: false, schema: false, homebrew: false, ownedPrefix: false, crypto: false });
+  assert.equal(nativeSdkContextMatches({}, { ...options, profile: 'pr', component: 'framework',
+    shard: 'body-0', protocol: nativeCryptoBootstrapProtocol, shardProtocol: current, assignment: after }), true);
+  const actualToolPart = after.parts.find(part => part.go);
+  assert.ok(['body-1', 'body-2'].includes(actualToolPart.shard));
+  const needed = nativeBootstrapCapability({ ...options, profile: 'pr', component: 'framework',
+    shard: actualToolPart.shard, protocol: nativeCryptoBootstrapProtocol, shardProtocol: current, assignment: after });
+  assert.equal(needed.tools.go, true);
+  assert.equal(needed.tools.python, true);
+  assert.equal(needed.tools.schema, true);
+  const leads = after.placement.groups.filter(group => group.costSource === 'v8-observed-lead');
+  assert.equal(leads.find(group => group.rootId ===
+    'assertion-b1b032561853815caa7a039f5c020e573a19067118dec177cae55e2d89dc1092').durationMs, 599437);
+  assert.equal(leads.find(group => group.rootId ===
+    'assertion-30a06918b0d6d26eed9773acffe13e64087e7a1ec315a6a5c60d6a026fb52d22').durationMs, 614424);
+  for (const target of ['linux-x64', 'windows-x64', 'macos-arm64']) {
+    const old = nativeFrameworkShardPlan({ ...options, target, protocol: historical });
+    const selected = nativeFrameworkShardPlan({ ...options, target });
+    assert.deepEqual(selected.parts, old.parts, 'Other current platform placement remains unchanged');
+    assert.deepEqual(selected.placement.affinities, old.placement.affinities);
+  }
+});
+
+test('T-PRD017 native v8 rejects incompatible catalog isolation without splitting connected closures', async t => {
+  const f = await nativeIsolationFixture(t);
+  const options = { plan: f.plan, target: 'macos-x64' };
+  const root = f.roots[0][1];
+  const file = f.roots[0][0];
+  for (const [status, mutate] of [
+    ['changed-closure-or-resources', inventory => inventory.groupDeclarations.push({ file, root, minimumSlots: 2 })],
+    ['changed-closure-or-resources', inventory => inventory.groupDeclarations.push({ file, root,
+      exclusiveResources: ['owned-catalog-isolation'] })],
+    ['changed-component', inventory => inventory.groupDeclarations.push({ file,
+      root: f.roots[1][1], dependsOn: [root] })],
+    ['changed-source', inventory => {
+      inventory.cases.filter(test => test.file === file).forEach(test => { test.sourceDigest = 'a'.repeat(64); });
+    }],
+  ]) {
+    const inventory = structuredClone(f.inventory);
+    mutate(inventory);
+    const assignment = nativeFrameworkShardPlan({ ...options, inventory });
+    assert.equal(assignment.placement.isolation.status, status);
+    const ids = assignment.parts.flatMap(part => part.assertionIds);
+    assert.deepEqual([...ids].sort(), inventory.cases.map(test => test.id).sort());
+    assert.equal(new Set(ids).size, ids.length);
+    assert.ok(assignment.parts.every(part => part.assertionIds.length));
+    if (status === 'changed-component') {
+      const owner = name => assignment.parts.find(part => part.stages.some(stage =>
+        stage.groups.some(group => group.root === name))).shard;
+      assert.equal(owner(root), owner(f.roots[1][1]));
+    }
+  }
+  const files = structuredClone(f.files);
+  files.find(source => source.file === file).contents += '\n// Different original catalog bytes.\n';
+  assert.equal(nativeFrameworkShardPlan({ ...options, inventory: f.compile(files) })
+    .placement.isolation.status, 'changed-source');
+  const renamedSources = structuredClone(f.files);
+  const renamed = renamedSources.find(source => source.file === file);
+  renamed.contents = renamed.contents.replace(`test('${root}',`, "test('renamed catalog isolation root',");
+  assert.notEqual(renamed.contents, f.files.find(source => source.file === file).contents);
+  const renamedInventory = f.compile(renamedSources);
+  const unknown = nativeFrameworkShardPlan({ ...options, inventory: renamedInventory });
+  assert.equal(unknown.placement.isolation.status, 'missing-root');
+  const unknownLead = unknown.placement.groups.find(group => group.rootId ===
+    renamedInventory.cases.find(test => test.name === 'renamed catalog isolation root').id);
+  assert.equal(unknownLead.durationMs, null);
+  assert.equal(unknownLead.costStatus, 'unknown-root');
+  const missing = await nativeAffinityFixture(t);
+  assert.notEqual(nativeFrameworkShardPlan({ ...options, inventory: missing.inventory })
+    .placement.isolation.status, 'applied', 'Synthetic same-name source cannot qualify as the authentic catalog');
+  const source = await fs.readFile(path.join(repositoryRoot, 'scripts', 'native-validation.mjs'), 'utf8');
+  const from = source.indexOf('function nativeAffinityCapacityMatches(');
+  const to = source.indexOf('\nexport function nativeFrameworkShardPlan(', from);
+  const capacityMatches = runInContext(`${source.slice(from, to)}\nnativeAffinityCapacityMatches;`, createContext({}));
+  const actual = nativeFrameworkShardPlan({ ...options, inventory: f.inventory });
+  assert.equal(capacityMatches(actual, { workerCapacity: 14 }), true);
+  assert.equal(capacityMatches(actual, { workerCapacity: 13 }), false);
+  assert.equal(capacityMatches(actual, {}), false);
+  assert.equal(capacityMatches(null, {}), true);
+  assert.equal(capacityMatches(actual, { workerCapacity: 14 }, 'body-0'), true);
+  assert.equal(capacityMatches(actual, { workerCapacity: 4 }, 'body-0'), false);
+  assert.equal(capacityMatches(actual, { workerCapacity: 4 }, 'units'), true);
+  assert.equal(capacityMatches(actual, { workerCapacity: 4 }, 'units-1'), true);
+  const partitionFrom = source.indexOf('function partitionNativeBodyGroups(');
+  const partitionTo = source.indexOf('\nfunction applyNativePlacementAffinities(', partitionFrom);
+  const groups = actual.parts.filter(part => part.shard.startsWith('body-'))
+    .flatMap(part => part.stages.flatMap(stage => stage.groups));
+  for (const [status, runtime, capacity] of [
+    ['unsupported-runtime', '24.20.1', 14],
+    ['unsupported-capacity', '24.20.0', 13],
+  ]) {
+    const partition = runInContext(`${source.slice(partitionFrom, partitionTo)}\npartitionNativeBodyGroups;`,
+      createContext({ requireThat, digest, nativeToolchain: { node: runtime },
+        nativePlacementCosts: { workers: { 'macos-x64': capacity } },
+        nativePlacementIsolationV8: nativePass.nativePlacementIsolationV8 }));
+    const placement = structuredClone(actual.placement);
+    placement.components = [];
+    const partitions = partition(groups, 3, placement);
+    assert.equal(placement.isolation.status, status);
+    assert.deepEqual([...partitions.flatMap(part => part.assertionIds)].sort(),
+      groups.flatMap(group => group.assertionIds).sort());
+    assert.ok(partitions.every(part => part.groups > 0));
+  }
+  const childSources = structuredClone(f.files);
+  const catalogSource = childSources.find(source => source.file === file);
+  catalogSource.contents = catalogSource.contents.replace(`test('${root}', async t => {`,
+    `test('${root}', async t => { await t.test('new complete catalog child',()=>{});`);
+  assert.notEqual(catalogSource.contents, f.files.find(source => source.file === file).contents);
+  assert.equal(nativeFrameworkShardPlan({ ...options, inventory: f.compile(childSources) })
+    .placement.isolation.status, 'changed-closure-or-resources');
+});
+
+test('T-PRD017 native v8 authenticates current leads and isolation without changing historical identities', async () => {
+  const source = await fs.readFile(path.join(repositoryRoot, 'scripts', 'native-validation.mjs'), 'utf8');
+  const select = contents => nativePass.sourceNativeFrameworkShardProtocol([
+    { file: 'scripts/native-validation.mjs', contents }]);
+  assert.equal(select(source), 'native-framework-shards-v8-intel-catalog-isolation');
+  const declaration = (name, value) => `export const ${name} = Object.freeze(${JSON.stringify(value)});\n`;
+  for (const name of ['nativePlacementCostsV8', 'nativePlacementIsolationV8']) {
+    const value = nativePass[name];
+    assert.ok(value);
+    assert.throws(() => select(source.replace(`export const ${name} =`, `const ${name} =`)), { code: 'EVIDENCE' });
+    assert.throws(() => select(source.replace(`export const ${name} = Object.freeze({`,
+      `export const ${name} = Object.freeze(loadUntrusted({`)), { code: 'EVIDENCE' });
+    assert.throws(() => select(source + declaration(name, value)), { code: 'EVIDENCE' });
+    const changed = structuredClone(value);
+    changed.runId = '41817138525';
+    const from = source.indexOf(`export const ${name} = Object.freeze({`);
+    const end = source.indexOf('\n});', from) + 4;
+    assert.throws(() => select(source.slice(0, from) + declaration(name, changed) + source.slice(end)),
+      { code: 'EVIDENCE' });
+  }
+  const historical = source.replace("export const nativeFrameworkShardProtocol = 'native-framework-shards-v8-intel-catalog-isolation';",
+    "export const nativeFrameworkShardProtocol = 'native-framework-shards-v7-resource-affinity-components';")
+    .replace(/export const nativePlacement(?:Costs|Isolation)V8 = Object\.freeze\(\{[\s\S]*?\n\}\);/gu, '');
+  assert.equal(select(historical), 'native-framework-shards-v7-resource-affinity-components');
+  assert.throws(() => select(historical.replace("export const nativeFrameworkShardProtocol = 'native-framework-shards-v7-resource-affinity-components';",
+    "export const nativeFrameworkShardProtocol = 'native-framework-shards-v8-intel-catalog-isolation';")), { code: 'EVIDENCE' });
+});
 
 test('T-PRD017 native v7 coassigns only qualified complete ARM affinity components', async t => {
   const f = await nativeAffinityFixture(t);
@@ -4167,14 +4368,15 @@ test('T-PRD017 native protocol5 spreads independent same-file roots and executes
 
 test('T-PRD017 native protocol5 and historical4 retain source-bound observer and SDK reconstruction', async t => {
   const protocols = ['native-framework-shards-v4-split-intel-units', 'native-framework-shards-v5-root-components',
-    'native-framework-shards-v6-stable-cost-components', 'native-framework-shards-v7-resource-affinity-components'];
-  assert.equal(nativeFrameworkShardProtocol, protocols[3]);
+    'native-framework-shards-v6-stable-cost-components', 'native-framework-shards-v7-resource-affinity-components',
+    'native-framework-shards-v8-intel-catalog-isolation'];
+  assert.equal(nativeFrameworkShardProtocol, protocols[4]);
   for (const shardProtocol of protocols) {
     const f = await observerApiFixture(t, { frameworkShards: true, shardProtocol,
       bootstrapProtocol: nativeCryptoBootstrapProtocol, nodeArtifactReader: true });
     const snapshot = await f.connect().host.snapshot();
     const verdict = snapshot.prs[0].verdicts['framework/validation'];
-    assert.equal(verdict.status, 'Passed', JSON.stringify(verdict.blockers));
+    assert.equal(verdict.status, 'Passed', `${shardProtocol}: ${JSON.stringify(verdict.blockers)}`);
     assert.equal(f.parts.size, 25);
     assert.equal(f.cleanupReports.size, 13);
     const part = f.parts.get('macos-arm64-framework-body-1');

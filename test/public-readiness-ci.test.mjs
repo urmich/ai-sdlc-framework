@@ -31,7 +31,8 @@ import { repositoryRoot } from '../scripts/test-runner.mjs';
 import { previousReleasePins } from '../scripts/release-bundle.mjs';
 import { nativePrParts, nativeLegacyPrParts, nativePartJobKey, nativeFrameworkShardPlan,
   nativeResourceFacts, nativePrPartsForProtocol, nativeFrameworkShardProtocols, nativeFrameworkShardProtocol,
-  nativeStableCostFrameworkShardProtocol, nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
+  nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
+  nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
 import { compileValidationInventory } from '../scripts/validation-inventory.mjs';
 import { expectedBodySdkRequirements } from './native-sdk-expectations.mjs';
 import { digest } from '../src/core.mjs';
@@ -2393,7 +2394,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.equal(previousResource.nativeResourcePolicy, 'arm-regression-allocation-v1');
   for (const protocol of nativeFrameworkShardProtocols) {
     const historical = structuredClone(historicalV8);
-    if ([nativeFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
+    if ([nativeFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
       'native-framework-shards-v5-root-components'].includes(protocol)) {
       historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = protocol;
     } else delete historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL;

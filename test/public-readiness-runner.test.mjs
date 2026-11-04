@@ -131,7 +131,7 @@ test('T-PRD010 protocol pool retains uncertain writers and cleans only proven sa
     const failures = [];
     const poolSource = await fs.readFile(new URL('./readiness-protocol-pool.mjs', import.meta.url), 'utf8');
     const validateSource = poolSource.slice(poolSource.indexOf('function validateProtocolOutcome('),
-      poolSource.indexOf('export function reconcileProtocolRows('));
+      poolSource.indexOf('export function reconcileProtocolRows(')).replace(/^export /gmu, '');
     for (const mode of ['incomplete', 'retention-failed', 'incomplete-budget-close-failed',
       'safe', 'safe-retention-failed', 'invalid-json', 'retention-failed-snapshot-close-failed',
       'incomplete-snapshot-close-failed', 'snapshot-only-failed']) {
@@ -155,12 +155,14 @@ test('T-PRD010 protocol pool retains uncertain writers and cleans only proven sa
       let token;
       let reportPath;
       let budgetClosed = false;
+      let closedLease;
       const context = createContext({
         assert, path, os, process, randomUUID, repositoryRoot, protocolPairs, JSON,
         digest: value => digest(typeof value === 'object' ? JSON.parse(JSON.stringify(value)) : value),
         AbortController, AbortSignal, fileURLToPath, processDiagnostic,
         defaultWorker: new URL('./readiness-protocol-worker.mjs', import.meta.url),
         protocolPoolIdentity, resolveValidationWorkers, reconcileProtocolRows,
+        async readTestGroupProcesses() { return [closedLease]; },
         async runValidationReadyPool(groups, options) {
           try { return await runValidationReadyPool(groups, options); }
           catch (error) { rowFailure = error; throw error; }
@@ -226,7 +228,8 @@ test('T-PRD010 protocol pool retains uncertain writers and cleans only proven sa
           const finishedAt = new Date().toISOString();
           const outcome = { index: 0, pair: protocolPairs[0], sourceDigest: operation.args[2],
             groupId: operation.args[4], status: 'Passed', cleaned: true, pid, slot: lease.slot,
-            lease, finishedAt, fixtureRoot: path.join(scratch, `observer-api-${randomUUID()}`) };
+            lease, startedAt, finishedAt, fixtureRoot: path.join(scratch, `observer-api-${randomUUID()}`) };
+          closedLease = { ...lease, finishedAt };
           const report = { complete: !unsafe, exitCode: 0, pid, startedAt, finishedAt,
             stdout: mode === 'invalid-json' ? '{invalid-json' : JSON.stringify(outcome), stderr: '', cleanup };
           await fs.writeFile(reportPath, JSON.stringify(report), { flag: 'wx' });

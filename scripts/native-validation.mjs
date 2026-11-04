@@ -60,7 +60,8 @@ export const nativeFourBodyFrameworkShardProtocol = 'native-framework-shards-v3-
 export const nativeSplitUnitFrameworkShardProtocol = 'native-framework-shards-v4-split-intel-units';
 export const nativeRootComponentFrameworkShardProtocol = 'native-framework-shards-v5-root-components';
 export const nativeStableCostFrameworkShardProtocol = 'native-framework-shards-v6-stable-cost-components';
-export const nativeFrameworkShardProtocol = 'native-framework-shards-v7-resource-affinity-components';
+export const nativeResourceAffinityFrameworkShardProtocol = 'native-framework-shards-v7-resource-affinity-components';
+export const nativeFrameworkShardProtocol = 'native-framework-shards-v8-intel-catalog-isolation';
 // Partial original group timings are placement leads, never current execution evidence.
 export const nativePlacementCosts = Object.freeze({
   "schemaVersion": 1,
@@ -162,10 +163,80 @@ for (const affinity of nativePlacementAffinities.affinities) {
   Object.freeze(affinity);
 }
 Object.freeze(nativePlacementAffinities.affinities);
+export const nativePlacementCostsV8 = Object.freeze({
+  "schemaVersion": 1,
+  "sourceRevision": "90ae1e4ae10620e12897a5f79be03b4225d2b928",
+  "runId": "41817138524",
+  "attempt": "1",
+  "node": "24.20.0",
+  "workers": {"macos-x64": 14},
+  "qualification": "completed original Intel group scheduling leads; exact target/runtime/closure/resources required; no execution credit or predicted lane duration; unknown work uses historical or count fallback",
+  "originalAnnotations": {
+    "126533118430": "dbdd81a08b20c671b1fc43cf7ad3bdf862402db0c7f5433f428e4fc92532866a",
+    "126533553660": "1f36431c69d59b13d0784dc922b64d986597e13f57741adbf2b43320e74d00e3",
+    "126533553913": "0945a8f79de847be90cb10e088022be53b8754dfe506d6625664a8942ef55627"
+  },
+  "roots": [
+    {"rootId":"assertion-9d7eefcaa2392d0f2324467a4c0f159162c675a66c6d7809eb22ab4ddac6d430","sourceDigest":"d9075de57cc81c471ab4ca15ce17d4a9cef2f809051b23dfc425dc62efa4cfc8","shapeDigest":"f2cf20fe3ef19699d29e607dee9ddb7605153c178d30adacdfd44b1fb4773dc0","samples":{"macos-x64":[146444,"126533118430"]}},
+    {"rootId":"assertion-d64083db7e19f24a97764aa257f011ea966d434ebd09b3bd40bad59aaf7bd7c7","sourceDigest":"6e725fdb097e75933a015043eb40090c5d1a2e4ca5ef49dc1915c9a164fbb309","shapeDigest":"a9120a00c85596ba1895440938ba60c5ca867e8552e9c2d4944c16d4a904bbde","samples":{"macos-x64":[172908,"126533118430"]}},
+    {"rootId":"assertion-c88fcc43622cb44b08aea5a9d7adc06253c79aedbfe31a9b43ad19f03e59d63c","sourceDigest":"ddb6e6ffb7d97fb6699679f727e1fc2ae4dda9b42b4d697367e8e8297abe6c1c","shapeDigest":"2827b68451aba014b12a803b2c4129227230e2dcd54449979943fd5164afa2d6","samples":{"macos-x64":[210769,"126533118430"]}},
+    {"rootId":"assertion-3a7922c4722be7913112ec7dd2a54bb21ba4ce6d9960efc7a19f0192ab70d049","sourceDigest":"d9075de57cc81c471ab4ca15ce17d4a9cef2f809051b23dfc425dc62efa4cfc8","shapeDigest":"ca6256578092b38627897dfe1d652f17d00f79face97f9babd04a5d8fc201181","samples":{"macos-x64":[235808,"126533118430"]}},
+    {"rootId":"assertion-b0a14ca74a43eb87fbdece3db7dd5ca468cfef0549f890797206d7671b31afcc","sourceDigest":"04ee07ac02e8de025ffc97755da22ecfb624197d8266d8d718413c2b53c3822f","shapeDigest":"92055d23287b6f60b448820ccde4aca39abd154714033b5d023ee9c0943b9bab","samples":{"macos-x64":[257725,"126533118430"]}},
+    {"rootId":"assertion-67716b485944f5af7e87adc105fb7026085b7f47639e86c6afe1bf330e998305","sourceDigest":"d48a0b74138d1e0bfdf34477d80e0df7062fb636caba2cccbe947165d15beb2a","shapeDigest":"2b331b5fce15957103bd4ccd3cd5f67a30e87b1be82c2cf67021ec547e7bf8d7","samples":{"macos-x64":[284081,"126533118430"]}},
+    {"rootId":"assertion-95ad460a630507970746bfdf4bbec35491dc9749218a5cb6437baaa576c36d34","sourceDigest":"f04e8202d5adb8cea8aee41c2910a7d551dfc3732bbc6c46f7768b72253fdb94","shapeDigest":"b786c72a0cd53cc191e96099ee86c543b481ed56ab683c247fd8321e25494403","samples":{"macos-x64":[309740,"126533118430"]}},
+    {"rootId":"assertion-774b6605ebd531372e319c27028ff9e9f17258323ee112a968fdfe43e3f44a2e","sourceDigest":"b325b2472b65bcfdf642968256d396c1271b6d8abfd950233a369293a604e13c","shapeDigest":"16bcccb024f09e44a788cfa45d6fcd58f8ed1b69555fb1d7907ac1612baceddf","samples":{"macos-x64":[333771,"126533118430"]}},
+    {"rootId":"assertion-b1b032561853815caa7a039f5c020e573a19067118dec177cae55e2d89dc1092","sourceDigest":"59a5009da5588fe408b4837c467d99aa53446d9c6a5ccb704fd114f970105b6a","shapeDigest":"c37a4c9b2a3458f0621c8546fa8728289fb4c765e5b67c06f3f8c9e913b29f50","samples":{"macos-x64":[599437,"126533118430"]}},
+    {"rootId":"assertion-0f5721a6329b2ef16d4f48e70ef01d0f0715e6a4f3cefeedc3449361fa57e8e5","sourceDigest":"f04e8202d5adb8cea8aee41c2910a7d551dfc3732bbc6c46f7768b72253fdb94","shapeDigest":"40b59ccff4ce9caa7d8c65b1450c4862b8770ed7a1e3fdc26e589cf6e03b5a13","samples":{"macos-x64":[991112,"126533118430"]}},
+    {"rootId":"assertion-3d1695596fcc30dd7bce0e6cad7f5afc4d0550ce14e6ea506ae6a627a9ffa84b","sourceDigest":"2780d2ad1567db359976fee01d3c6499dcec116dee139784ea9ca76a2e2d860c","shapeDigest":"7b71e28212ab6a4bda5f3b1761c48dbae7c6f95b0a8bc03db0d08815e3fa5df4","samples":{"macos-x64":[113225,"126533553660"]}},
+    {"rootId":"assertion-6dc65d72b554282f2a61bc2fea9f59193de1503009805e33e4cf2ecc0aa50f01","sourceDigest":"038e3f4c98b0c73431891dafd064a8fee685638c650575ee24c924a79998e8ab","shapeDigest":"c4a857cd9134ca79ba5d86704c3a1fddec5f1dbfe5cdd3b5afecd166924b9276","samples":{"macos-x64":[122201,"126533553660"]}},
+    {"rootId":"assertion-ff45bf92348abb3ee3446f1084f9cfcc45bada03197936aca2981a95ad1d8665","sourceDigest":"f04e8202d5adb8cea8aee41c2910a7d551dfc3732bbc6c46f7768b72253fdb94","shapeDigest":"b6a30ae7ff82844eb8d73c6a1585a69906206588ad1535e775a9ccd608e32808","samples":{"macos-x64":[126585,"126533553660"]}},
+    {"rootId":"assertion-583587077cd3503a4387cce4058358a61651710ff9f49d837189dbfe8c0596af","sourceDigest":"39a2b08b393151cce75ef4771ee57bba99cc468489251813788462541dc3a4a0","shapeDigest":"43387ce30b2f2976f4e8d49d9235127728821909d62a0dde4c5642d1dc26319a","samples":{"macos-x64":[138269,"126533553660"]}},
+    {"rootId":"assertion-170a22b6fc70b1916f2ee09e1de78f6275b1aa46a21259d4e662a6cf3ee8e8f3","sourceDigest":"59a5009da5588fe408b4837c467d99aa53446d9c6a5ccb704fd114f970105b6a","shapeDigest":"f25595cc6dd05161572b94ed4aa2dcebff57e6a775ce9f605c961695bdd0af31","samples":{"macos-x64":[145371,"126533553660"]}},
+    {"rootId":"assertion-f5499e4dc0d5f9a249e2c7556748164af33a9a8717701df2670d9a516fdb52b3","sourceDigest":"1e80c22a797add7e9ac83ada791cca30beda432c264c45e904dc32035614b1d3","shapeDigest":"dc4aed2053e31a862435bea984a28752818f93a88519e6f150b61e2af5b50a9c","samples":{"macos-x64":[151129,"126533553660"]}},
+    {"rootId":"assertion-fbba6948bfbddb931f8ceb750aebddfbcf2f2d4a7432bc539cf7558351d206aa","sourceDigest":"d48a0b74138d1e0bfdf34477d80e0df7062fb636caba2cccbe947165d15beb2a","shapeDigest":"0a0af1c920a2449128d015017c405db236a0734b8a5364a4b65f7545ca08bf3d","samples":{"macos-x64":[221199,"126533553660"]}},
+    {"rootId":"assertion-0ea538f933586c33183708df2824759a052883291fefb6424328a21553cfa543","sourceDigest":"d64c98e670a4fc650881e3ec0f21279858bf0b3d217ccc480fcf93fcc3aab730","shapeDigest":"5e3c09692ad710209995957de63291f64e6fda72b6e91a0dd70ffc71312925a5","samples":{"macos-x64":[232213,"126533553660"]}},
+    {"rootId":"assertion-063b315aa5106b822a0982a0ee26caa7c4d26179ed1a79958a3bc918d786dfde","sourceDigest":"39a2b08b393151cce75ef4771ee57bba99cc468489251813788462541dc3a4a0","shapeDigest":"6871839e5d2760bf9ef8b3d09578bfdb535a49c403dd6c34a3387a609a7571a2","samples":{"macos-x64":[235660,"126533553660"]}},
+    {"rootId":"assertion-b2f6b8cc0c4b155029db7340530b19d47c2e58ec03f5ad64c1b937c8c9797c45","sourceDigest":"8540aefa1f0651bfe834bd13d5529e4a907556cb6dbd266e81bcf792d42c0281","shapeDigest":"eec7bce119abafd9d4f5641d6bfbb4979ee0e4db22594ac1336514e2d656eb74","samples":{"macos-x64":[354188,"126533553660"]}},
+    {"rootId":"assertion-25f11a19aa339e58eae9d1d8ba6a9b7e900de69554b562d15d590ccde6462d29","sourceDigest":"ddb6e6ffb7d97fb6699679f727e1fc2ae4dda9b42b4d697367e8e8297abe6c1c","shapeDigest":"df68c8af78852cf7d0eb1e09cbd0bddb8623ad55138cfe09b095bcf000508d50","samples":{"macos-x64":[104935,"126533553913"]}},
+    {"rootId":"assertion-ae62135c83d676d2db6d13a3b7cdfd189adab6a9145d95a58d51d6113e79a06a","sourceDigest":"59a5009da5588fe408b4837c467d99aa53446d9c6a5ccb704fd114f970105b6a","shapeDigest":"a00a7af10779b6745c12d4ab7f772f499268a1e8f41e9eac589dae087d48d2e8","samples":{"macos-x64":[117095,"126533553913"]}},
+    {"rootId":"assertion-a816a6dcecb801c427135b9347c34058ea1251cdd519e2fc7fe53b5ea9e2dd54","sourceDigest":"617d905e7ae5b7add0ef951c58d95673584d6ce2d2a9b921d5929803ca803a79","shapeDigest":"bbdd3d95e8376bcc6d299d7c9a469af68f80bbea7dc29f130960fc775a03d951","samples":{"macos-x64":[117329,"126533553913"]}},
+    {"rootId":"assertion-c2a43c05e4202501b37d4e84c30eaa04e590c2df67cddbb50735e949c8873e04","sourceDigest":"f1594cc58df26b15fdd252a3e748a46d1d3173f9eaf400fbabef7ab27cba17e4","shapeDigest":"e982bfe54240da4d9b071ff61c98a36f83c30efcd51f475963ddcce7499538a6","samples":{"macos-x64":[123567,"126533553913"]}},
+    {"rootId":"assertion-7a2b10858db982bc67823d06a1d661b264eabcbe60ac8b9f70429c5de728d3ad","sourceDigest":"f04e8202d5adb8cea8aee41c2910a7d551dfc3732bbc6c46f7768b72253fdb94","shapeDigest":"5bea87acd3c60b6b06a6ea55da4c9e70ad1a44b4ab56e6f9a183f888dbbad214","samples":{"macos-x64":[134223,"126533553913"]}},
+    {"rootId":"assertion-867c856a68e6962fca9d8495772ab2ab98ddcfb3c6d0858cae4cfe44ddec7e3c","sourceDigest":"f04e8202d5adb8cea8aee41c2910a7d551dfc3732bbc6c46f7768b72253fdb94","shapeDigest":"9126eca32fece324dacc2b4bd39840a12fbe1f8505b195f5cf5ab7c1475b1b90","samples":{"macos-x64":[146201,"126533553913"]}},
+    {"rootId":"assertion-080e2671f869e26190362df0dcac0349c7a47e03fd497c6a70179489ef478386","sourceDigest":"f04e8202d5adb8cea8aee41c2910a7d551dfc3732bbc6c46f7768b72253fdb94","shapeDigest":"bfcaa88f62ce793e61a1de810faa6328c61530a7f5f48724d22d9bd32d2aa7e5","samples":{"macos-x64":[163295,"126533553913"]}},
+    {"rootId":"assertion-4dda1118e3095dddc78d663d95c3c839b19807c0c4d91e69ca176e40b93df30c","sourceDigest":"977f2c8baeb6343559c3725d089b3b300beb09a11f78592caf59a3fb09c47a5b","shapeDigest":"dd3c0415779ff6a5e3d06a4ca78015b0b6683c58b7c0e2a37ca4356335fcce6c","samples":{"macos-x64":[177728,"126533553913"]}},
+    {"rootId":"assertion-c937700e1f02501d67f93f8500acf29607768a75116ffa5c809237413d2c1505","sourceDigest":"2da5f828958be2bbaa3d5c3b2b7a888fce2c590ef00ed966829deb2416b98ddb","shapeDigest":"3c95ff0985754b08c246c7e638e667d73d649055da9a112a0c0602b76f0e8f61","samples":{"macos-x64":[210050,"126533553913"]}},
+    {"rootId":"assertion-30a06918b0d6d26eed9773acffe13e64087e7a1ec315a6a5c60d6a026fb52d22","sourceDigest":"dd4e878f1d8d9fc15fc7b167da7edce801d06b6767cbf25f133aa9581e4a07cf","shapeDigest":"8f3e8ad75abca04eb87793bec9b882909d3eaa9b263041d1830a3724b9078951","samples":{"macos-x64":[614424,"126533553913"]}}
+  ]
+});
+Object.freeze(nativePlacementCostsV8.workers);
+Object.freeze(nativePlacementCostsV8.originalAnnotations);
+for (const hint of nativePlacementCostsV8.roots) {
+  Object.values(hint.samples).forEach(Object.freeze);
+  Object.freeze(hint.samples);
+  Object.freeze(hint);
+}
+Object.freeze(nativePlacementCostsV8.roots);
+export const nativePlacementIsolationV8 = Object.freeze({
+  "schemaVersion": 1,
+  "sourceRevision": "90ae1e4ae10620e12897a5f79be03b4225d2b928",
+  "runId": "41817138524",
+  "attempt": "1",
+  "node": "24.20.0",
+  "qualification": "exact standalone Intel catalog component isolation hypothesis; no execution credit or predicted latency saving",
+  "target": "macos-x64",
+  "capacity": 14,
+  "shard": "body-0",
+  "rootId": "assertion-0f5721a6329b2ef16d4f48e70ef01d0f0715e6a4f3cefeedc3449361fa57e8e5",
+  "sourceDigest": "f04e8202d5adb8cea8aee41c2910a7d551dfc3732bbc6c46f7768b72253fdb94",
+  "shapeDigest": "40b59ccff4ce9caa7d8c65b1450c4862b8770ed7a1e3fdc26e589cf6e03b5a13",
+  "minimumSlots": 1
+});
 export const nativeFrameworkShardProtocols = Object.freeze([
   nativeLegacyFrameworkShardProtocol, nativePlatformUnitFrameworkShardProtocol,
   nativeFourBodyFrameworkShardProtocol, nativeSplitUnitFrameworkShardProtocol,
-  nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol, nativeFrameworkShardProtocol,
+  nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
+  nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol,
 ]);
 function requireNativePlacementLiteral(source, name, adopted) {
   const tokens = declarationTokens(source);
@@ -197,11 +268,16 @@ export function sourceNativeFrameworkShardProtocol(sourceFiles) {
   const declarations = [...sources[0].contents.matchAll(/export const nativeFrameworkShardProtocol = '([^']+)';/gu)];
   requireThat(declarations.length === 1 && nativeFrameworkShardProtocols.includes(declarations[0][1]),
     'EVIDENCE', 'Unknown or malformed source-declared native shard protocol');
-  if ([nativeStableCostFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(declarations[0][1]))
+  if ([nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(declarations[0][1]))
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementCosts', nativePlacementCosts);
-  if (declarations[0][1] === nativeFrameworkShardProtocol) {
+  if ([nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(declarations[0][1])) {
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementAffinities', nativePlacementAffinities);
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementCostsV7', nativePlacementCostsV7);
+  }
+  if (declarations[0][1] === nativeFrameworkShardProtocol) {
+    requireNativePlacementLiteral(sources[0].contents, 'nativePlacementCostsV8', nativePlacementCostsV8);
+    requireNativePlacementLiteral(sources[0].contents, 'nativePlacementIsolationV8', nativePlacementIsolationV8);
   }
   return declarations[0][1];
 }
@@ -229,7 +305,7 @@ export function nativeFrameworkShardNames(target, protocol = nativeFrameworkShar
     length: target.startsWith('macos-') ? 3 :
       [nativeFourBodyFrameworkShardProtocol, nativeSplitUnitFrameworkShardProtocol,
         nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
-        nativeFrameworkShardProtocol].includes(protocol) ? 4 : 2,
+        nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? 4 : 2,
   },
     (_, index) => `body-${index}`)];
 }
@@ -239,7 +315,8 @@ export function nativeFrameworkUnitShardNames(target, protocol = nativeFramework
     'INPUT', 'Select an exact native unit target and supported protocol');
   const count = target === 'macos-x64' &&
     [nativeSplitUnitFrameworkShardProtocol, nativeRootComponentFrameworkShardProtocol,
-      nativeStableCostFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? 2 : 1;
+      nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
+      nativeFrameworkShardProtocol].includes(protocol) ? 2 : 1;
   return Array.from({ length: count }, (_, index) => index === 0 ? 'units' : `units-${index}`);
 }
 
@@ -507,22 +584,26 @@ function deriveNativeSpecification({ plan, inventory, goSources, target, profile
 function nativePlacementGroups(groups, target, protocol) {
   const byId = new Map(groups.map(group => [group.id, group]));
   return groups.map(group => {
-    const updated = protocol === nativeFrameworkShardProtocol ?
+    const isolated = protocol === nativeFrameworkShardProtocol ?
+      nativePlacementCostsV8.roots.find(hint => hint.rootId === group.rootId && hint.samples[target]) : null;
+    const updated = [nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
       nativePlacementCostsV7.roots.find(hint => hint.rootId === group.rootId && hint.samples[target]) : null;
-    const costs = updated ? nativePlacementCostsV7 : nativePlacementCosts;
-    const hint = updated ?? nativePlacementCosts.roots.find(hint => hint.rootId === group.rootId);
+    const costs = isolated ? nativePlacementCostsV8 : updated ? nativePlacementCostsV7 : nativePlacementCosts;
+    const hint = isolated ?? updated ?? nativePlacementCosts.roots.find(hint => hint.rootId === group.rootId);
     const sample = hint?.samples[target];
     const shapeDigest = digest({ assertionIds: [...group.assertionIds].sort(), minimumSlots: group.minimumSlots,
       exclusiveResources: [...group.exclusiveResources].sort(),
       dependsOn: group.dependsOn.map(id => byId.get(id)?.rootId).sort() });
     const costStatus = !costs.workers[target] ? 'unknown-target' :
       !sample ? 'unknown-root' : costs.node !== nativeToolchain.node ? 'stale-runtime' :
+        isolated && costs.workers[target] !== nativePlacementIsolationV8.capacity ? 'stale-capacity' :
         hint.shapeDigest !== shapeDigest ? 'stale-closure-or-resources' :
           hint.sourceDigest === group.sourceDigest ? 'observed-source-lead' : 'historical-source-lead';
     const eligible = costStatus === 'observed-source-lead' || costStatus === 'historical-source-lead';
     return { planningId: `placement-${digest(['native-root-planning-v1', group.file, group.root])}`,
       rootId: group.rootId, shapeDigest, costStatus, durationMs: eligible ? sample[0] : null,
-      ...(protocol === nativeFrameworkShardProtocol ? { costSource: updated ? 'v7-observed-lead' : 'v6-historical-lead' } : {}),
+      ...([nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
+        { costSource: isolated ? 'v8-observed-lead' : updated ? 'v7-observed-lead' : 'v6-historical-lead' } : {}),
       ...(sample ? { observedSourceDigest: hint.sourceDigest, jobId: sample[1] } : {}) };
   });
 }
@@ -565,8 +646,25 @@ function partitionNativeBodyGroups(groups, count, placement = null) {
     right.groups.length - left.groups.length || left.key.localeCompare(right.key, 'en'));
   const partitions = Array.from({ length: count }, (_, index) => ({ index, assertionIds: [], groups: 0,
     ...(placement ? { observedLeadMs: 0, unknownAssertions: 0 } : {}) }));
+  let isolatedComponent = null;
+  if (placement?.isolation) {
+    const rule = nativePlacementIsolationV8;
+    const root = groups.find(group => group.rootId === rule.rootId);
+    const component = ranked.find(component => component.groups.some(group => group === root));
+    const status = nativeToolchain.node !== rule.node ? 'unsupported-runtime' :
+      nativePlacementCosts.workers[rule.target] !== rule.capacity ? 'unsupported-capacity' :
+        !root ? 'missing-root' :
+          planning.get(root.rootId).shapeDigest !== rule.shapeDigest ||
+            root.minimumSlots !== rule.minimumSlots ? 'changed-closure-or-resources' :
+            component.groups.length !== 1 ? 'changed-component' :
+              root.sourceDigest !== rule.sourceDigest ? 'changed-source' :
+                count !== 3 || ranked.length < count ? 'would-empty-body' : 'applied';
+    Object.assign(placement.isolation, { status });
+    if (status === 'applied') isolatedComponent = component;
+  }
   for (const component of ranked) {
-    const selected = [...partitions].sort((left, right) => (placement ?
+    const available = isolatedComponent ? component === isolatedComponent ? [partitions[0]] : partitions.slice(1) : partitions;
+    const selected = [...available].sort((left, right) => (placement ?
       component.observedLeadMs > 0 ? left.observedLeadMs - right.observedLeadMs :
         left.unknownAssertions - right.unknownAssertions || left.observedLeadMs - right.observedLeadMs : 0) ||
       left.assertionIds.length - right.assertionIds.length || left.groups - right.groups || left.index - right.index)[0];
@@ -638,9 +736,12 @@ function applyNativePlacementAffinities(groups, partitions, placement, target) {
   placement.partitions = partitions.map(({ assertionIds, ...partition }) => partition);
 }
 
-function nativeAffinityCapacityMatches(assignment, resources) {
+function nativeAffinityCapacityMatches(assignment, resources, shard = null) {
   return !assignment?.placement?.affinities?.rules.some(rule =>
-    ['applied', 'already-coassigned'].includes(rule.status) && resources?.workerCapacity !== rule.capacity);
+    ['applied', 'already-coassigned'].includes(rule.status) && resources?.workerCapacity !== rule.capacity) &&
+    !(assignment?.placement?.isolation?.status === 'applied' &&
+      (shard === null || shard === assignment.placement.isolation.shard) &&
+      resources?.workerCapacity !== assignment.placement.isolation.capacity);
 }
 
 export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = nativeFrameworkShardProtocol,
@@ -685,26 +786,36 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
   const bodyCases = regression.cases.filter(test => !refreshIds.has(test.id));
   const bodyFiles = new Set(bodyCases.map(test => test.file));
   const roots = [nativeSplitUnitFrameworkShardProtocol, nativeRootComponentFrameworkShardProtocol,
-    nativeStableCostFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
+    nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(protocol) ?
     completeGroups : selectedGroups(regression.files, regression.selectorName);
   const bodyCount = nativeFrameworkShardNames(target, protocol).filter(shard => shard.startsWith('body-')).length;
   const bodyIds = new Set(bodyCases.map(test => test.id));
   const bodyGroups = roots.filter(group => bodyIds.has(group.rootId));
   const { roots: costRoots, ...costConditions } = nativePlacementCosts;
   const { roots: updateRoots, ...updateConditions } = nativePlacementCostsV7;
-  const placement = [nativeStableCostFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? {
+  const { roots: isolationRoots, ...isolationConditions } = nativePlacementCostsV8;
+  const placement = [nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(protocol) ? {
     protocol: 'native-stable-component-cost-leads-v1', evidenceCredit: false,
     costs: { ...costConditions, digest: digest(nativePlacementCosts),
+      ...([nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
+        { updates: { ...updateConditions, digest: digest(nativePlacementCostsV7) } } : {}),
       ...(protocol === nativeFrameworkShardProtocol ?
-        { updates: { ...updateConditions, digest: digest(nativePlacementCostsV7) } } : {}) },
+        { intelUpdates: { ...isolationConditions, digest: digest(nativePlacementCostsV8) } } : {}) },
     groups: nativePlacementGroups(bodyGroups, target, protocol), components: [],
+    ...(protocol === nativeFrameworkShardProtocol && target === nativePlacementIsolationV8.target ? {
+      isolation: { declarationDigest: digest(nativePlacementIsolationV8), evidenceCredit: false, predictedSavingMs: null,
+        target, capacity: nativePlacementIsolationV8.capacity, shard: nativePlacementIsolationV8.shard,
+        rootId: nativePlacementIsolationV8.rootId },
+    } : {}),
   } : null;
   const partitions = [nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
-    nativeFrameworkShardProtocol].includes(protocol) ?
+    nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
     partitionNativeBodyGroups(bodyGroups, bodyCount, placement) :
     partitionValidationInventory({ ...inventory, cases: bodyCases,
       files: inventory.files.filter(file => bodyFiles.has(file.file)) }, bodyCount);
-  if (protocol === nativeFrameworkShardProtocol)
+  if ([nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol))
     applyNativePlacementAffinities(bodyGroups, partitions, placement, target);
   const procedureFile = 'test/public-readiness-ci.test.mjs';
   const toolRoot = inventory.cases.find(test => test.file === procedureFile && !test.parents.length &&
@@ -726,7 +837,7 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
     const selectedStages = selected.map(stage => {
       const files = stage.files.filter(file => stage.cases.some(test => test.file === file));
       const selectorName = [nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
-        nativeFrameworkShardProtocol].includes(protocol) &&
+        nativeResourceAffinityFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) &&
         shard.startsWith('body-') ?
         exactPattern(stage.cases.map(test => [...test.parents, test.name].join(' '))) : stage.selectorName;
       requireThat(files.length > 0 && stage.cases.some(test => test.applicability.platforms.includes(target)),
@@ -838,7 +949,7 @@ function nativeContextMatches(context, { inventory, plan, target, profile, sourc
     try { validResources = digest(resources) === digest(nativeResourceFacts(resources, schedulingPolicy)); }
     catch (error) { if (!['INPUT', 'BUDGET', 'INVENTORY'].includes(error.code)) throw error; }
   }
-  return validResources && nativeAffinityCapacityMatches(assignment, resources) &&
+  return validResources && nativeAffinityCapacityMatches(assignment, resources, shard) &&
     context.profile === nativeProfile(profile, target, component, shard) &&
     context.sources.length === 1 && context.sources[0].revision === sourceRevision &&
     context.native.kind === 'native' && context.native.platform === platforms[target] &&
@@ -1413,7 +1524,7 @@ async function collectExecution({ directory, data, inventory, sources, calculato
     }
     const fileConcurrency = Math.min(capacity, Math.max(1, groupCount));
     const resourceMatches = expectedResources && resources && budget &&
-      nativeAffinityCapacityMatches(assignment, expectedResources) &&
+      nativeAffinityCapacityMatches(assignment, expectedResources, shard) &&
       resources.availableParallelism === expectedResources.availableParallelism &&
       resources.totalMemoryBytes === expectedResources.totalMemoryBytes &&
       resources.fileConcurrency === fileConcurrency && report.selection?.concurrency === fileConcurrency &&
@@ -2303,7 +2414,7 @@ export async function runNativeValidation(options, { lifetime = { cleanupSafe: t
       bootstrap.native.node === process.versions.node && bootstrap.native.platform === process.platform &&
       bootstrap.native.architecture === process.arch &&
       bootstrap.native.resources && digest(bootstrap.native.resources) === digest(resources) &&
-      nativeAffinityCapacityMatches(assignment, resources),
+      nativeAffinityCapacityMatches(assignment, resources, shard),
     'HOST', 'Required native toolchain bootstrap did not establish this actual host/resource allocation');
     if (shard !== null) Object.assign(commandContext, {
       configDigest: nativeConfigurationDigest({ inventory: inputs.inventory, plan: inputs.plan, assignment, profile, target, component, shard,

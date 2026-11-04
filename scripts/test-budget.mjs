@@ -504,9 +504,9 @@ export async function readTestBudget({ signal } = {}) {
   finally { client.close(); if (signal) await client.closed; }
 }
 
-export async function readTestGroupProcesses(groupId) {
-  const client = await connect(process.env.SDLC_TEST_BUDGET);
+export async function readTestGroupProcesses(groupId, environment = process.env) {
+  const client = await connect(environment.SDLC_TEST_BUDGET);
   try { return (await client.request({ op: 'group', groupId,
-    producer: process.env.SDLC_TEST_BUDGET_PRODUCER })).processes; }
+    producer: environment.SDLC_TEST_BUDGET_PRODUCER })).processes; }
   finally { client.close(); }
 }

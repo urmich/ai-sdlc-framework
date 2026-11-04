@@ -405,7 +405,7 @@ observed part results. Require source-, platform-, job-, run- and attempt-bound
 unit evidence before regression shards execute. Independently verify every
 part's SDK context, complete assertion union and allocated-prefix cleanup;
 missing, duplicated, overlapping or swapped parts cannot produce completeness.
-The source-adopted `native-framework-shards-v7-resource-affinity-components` protocol retains
+The source-adopted `native-framework-shards-v8-intel-catalog-isolation` protocol retains
 v4's four
 explicit platform-specific unit-to-regression job groups. A platform's unit
 producers must all complete successfully, including retention and cleanup, before
@@ -419,8 +419,8 @@ nonempty extended-unit subset. Both Intel unit jobs share `native-units-mi`'s
 standard runner matrix, each with its own four-worker budget and prefix. No waiting
 regression host is started early merely to overlap provisioning.
 For body placement, derive complete root groups from the existing scheduler,
-then join dependency and shared-exclusive-resource edges transitively. V7 retains
-v6's qualified observed root costs to place whole connected components, with a
+then join dependency and shared-exclusive-resource edges transitively. V8 retains
+v7/v6's qualified observed root costs to place whole connected components, with a
 separate stable planning identity derived from exact file/root identities rather
 than whole-file source hashes. Preserve actual source-bound assertion, group,
 configuration and execution identities independently of planning keys.
@@ -444,6 +444,13 @@ source changes transfer no passing execution credit. Roots without a v7
 target sample retain v6 cost lookup; incompatible or unknown leads retain
 explicit count-based fallback. Neither summed weights nor overlapping original
 group durations predict a concurrent lane duration.
+V8 adds the separate strict `nativePlacementCostsV8` literal containing thirty
+completed Intel body observations from source
+`90ae1e4ae10620e12897a5f79be03b4225d2b928`, run `41817138524`, attempt 1,
+Node 24.20.0 and fourteen workers. Preserve the v6/v7 literals unchanged.
+Qualify target, runtime, capacity, complete closure and resources before using
+these historical leads; missing v8 samples retain v7/v6 lookup, and incompatible
+or unknown leads retain explicit count fallback without execution credit.
 After cost placement, v7's `nativePlacementAffinities` may move only the qualified
 standalone ARM retained-identity component to the existing standalone catalog
 component's host. Require the declared ARM target, runtime, seven-slot capacity and complete
@@ -453,6 +460,18 @@ groups, not a merged callback or dependency chain. Record source qualification
 and explicit nonapplication for incompatible inputs or an emptied source body.
 No Intel affinity or new host is introduced. This is a source-qualified placement
 hypothesis, not a predicted saving, actual overlap or latency pass.
+V8 separately qualifies `nativePlacementIsolationV8` against the exact
+source-bound standalone Intel catalog component, Node 24.20.0 and fourteen-slot
+body capacity. If qualified, reserve existing body-0 exclusively for that
+complete component and partition all remaining connected components across
+existing body-1/body-2. Incompatible source, closure, resource, runtime or
+capacity leaves ordinary component partitioning; never split a component or
+empty a required body. Four-worker unit producers retain their existing capacity
+validation and barriers. Derive catalog-only Go/Python omissions from the actual
+selected closure through existing bootstrap requirements, retaining genuine
+absence/nonallocation evidence and all required tool assertions elsewhere.
+Isolation is a measurement hypothesis: fresh native results must establish
+both the catalog service and non-starved secondary tails within the lane limit.
 Derive the complete validated root-group inventory once per planning invocation,
 index it by file and project each shard's exact complete selection in original
 file order. Check the assertion union and prerequisites for each projection.
@@ -462,16 +481,21 @@ identical inputs reproduce its deterministic component placement.
 This changes cross-host assignment only: within-host scheduling policy v9
 remains byte-identical. Verify the workflow's selected protocol against the
 captured native planner and SDK reconstruction; old source cannot be relabelled
-as v7. Keep v4's exact historical file assignments and v5's original count/hash
+as v7 or v8. Keep v4's exact historical file assignments and v5's original count/hash
 component assignments and serialized identities, each with its twenty-five-part
 topology. Replay `native-framework-shards-v6-stable-cost-components` with its exact
 original cost table, assignments, serialized identities and SDK source without
 borrowing v7 overlays or affinities.
+Replay historical v7 through `nativeResourceAffinityFrameworkShardProtocol`
+with its original assignments, serialized identities, literals and SDK source,
+without borrowing v8 leads or isolation.
 Captured v6 planner source must carry the authentic adopted `nativePlacementCosts`
 literal. V7 additionally requires authentic `nativePlacementAffinities` and
 `nativePlacementCostsV7` strict JSON literals. Reject missing, computed, duplicate
-or altered declarations without executing captured code. Historical v1-v5 replay
-requires no v6 table; v6 requires neither v7 declaration.
+or altered declarations without executing captured code. V8 additionally
+requires authentic `nativePlacementCostsV8` and `nativePlacementIsolationV8`
+strict literals. Historical v7 requires neither v8 addition; historical v1-v5
+replay requires no v6 table, and v6 requires neither v7 declaration.
 Preserve the original `native-framework-shards-v1` global-barrier and
 `native-framework-shards-v2-platform-units` twenty-part proof and archive
 semantics, and the `native-framework-shards-v3-four-body-platform-units`
@@ -1075,7 +1099,7 @@ The dedicated history regression proves representative fixture/beforehook
 execution without the old object or alternates and guards an owned visible
 untracked canary against filesystem access and copying.
 
-The seventeen versioned protocol/bootstrap scenarios stay within their existing
+The eighteen versioned protocol/bootstrap scenarios stay within their existing
 logical root but execute as whole isolated Node children. Its four-slot
 reservation precedes setup; one existing shared producer and ready pool bound
 dispatch to the smaller of four and the actual caller/broker allocation.
@@ -1084,8 +1108,15 @@ scratch, including temporary-environment changes. Only source-bound scalar
 completion and actual process/lease identity cross the boundary. Reject
 incomplete or mismatched row closures, stop new dispatch on observed failure,
 drain all started siblings, report the source-order primary error and await
-scratch cleanup before restoring the parent budget. Retain all seventeen rows,
-all original assertions and historical protocol semantics.
+scratch cleanup before restoring the parent budget. Retain all original
+seventeen rows in order and append the current v8/bootstrap scenario as row
+eighteen, preserving every assertion and historical protocol semantic.
+Match each child's live lease with the same authoritative closed broker lease
+after actual owned process exit, using the explicit producer environment rather
+than changing the controller's process-global environment. Worker, command
+observer and broker each validate their own finite, nonreversed interval;
+never order timestamps across these independent clocks or add a skew tolerance.
+Retain the closed lease and command-side inspection timestamp with each report.
 
 The standalone syntax checker uses one common bounded ready-work policy across
 hosts, limited by available CPUs and the existing 32-slot ceiling. It remains
@@ -1648,7 +1679,11 @@ The repository-local observer uses stock Windows PowerShell 5.1 `Add-Type`,
 with only its own TEMP/TMP and assembly output redirected into its new owned
 compiler directory. Compilation completes before readiness and command creation;
 compiler/policy failures remain unavailable without an alternate compiler or
-policy workaround. Pin each supplied owner/target .NET `Process.Handle` once.
+policy workaround. If a readiness polling wake crosses its deadline, inspect
+the marker once more without adding another wait or extending the deadline.
+Published readiness still requires the unchanged schema, pinned-owner and
+source-bound compiler-settlement proofs; absence or invalid proof fails closed.
+Pin each supplied owner/target .NET `Process.Handle` once.
 Subsequent reads use that saved handle through `QueryFullProcessImageNameW`,
 `GetProcessTimes`, `WaitForSingleObject(handle, 0)` and `GetExitCodeProcess`.
 Do not refresh PID-backed .NET properties or enumerate threads. Retain only the

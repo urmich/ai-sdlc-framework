@@ -5,7 +5,7 @@ import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { digest } from '../src/core.mjs';
-import { enterTestBudget } from '../scripts/test-budget.mjs';
+import { enterTestBudget, readTestGroupProcesses } from '../scripts/test-budget.mjs';
 import { resolveValidationWorkers, runValidationReadyPool } from '../scripts/test-scheduling.mjs';
 import { executeValidationCommand, processDiagnostic } from '../scripts/validation-tools.mjs';
 import { protocolPairs } from './readiness-protocol-row.mjs';
@@ -35,7 +35,31 @@ function validateProtocolOutcome(outcome, pair, index, sourceDigest) {
   assert.equal(outcome.lease.slot, outcome.slot);
   assert.equal(outcome.lease.minimumSlots, 1);
   assert.equal(outcome.lease.finishedAt, null, 'Capture the actual lease while the child holds it');
-  assert.ok(Date.parse(outcome.finishedAt) >= Date.parse(outcome.lease.startedAt));
+  for (const value of [outcome.startedAt, outcome.finishedAt, outcome.lease.startedAt]) {
+    assert.equal(typeof value, 'string');
+    assert.ok(Number.isFinite(Date.parse(value)), 'Missing protocol execution time');
+  }
+  assert.ok(Date.parse(outcome.startedAt) <= Date.parse(outcome.finishedAt), 'Protocol worker interval is reversed');
+}
+
+export function validateProtocolExecution(report, outcome, leases, observedAt) {
+  assert.equal(report.complete, true, 'Protocol row process was incomplete');
+  assert.equal(report.exitCode, 0, 'Protocol row child failed');
+  assert.equal(report.cleanup.rootExitObserved, true, 'Drain the actual owned protocol child');
+  assert.equal(report.pid, outcome.pid, 'Protocol outcome must identify the owned process');
+  assert.equal(leases.length, 1, 'Exactly one actual protocol worker lease is required');
+  const { finishedAt, ...closed } = leases[0];
+  const { finishedAt: liveFinishedAt, ...live } = outcome.lease;
+  assert.equal(liveFinishedAt, null, 'Capture the actual lease while the child holds it');
+  assert.deepEqual(closed, live, 'The closed broker lease must match the child live lease');
+  for (const value of [report.startedAt, report.finishedAt, observedAt, live.startedAt, finishedAt]) {
+    assert.equal(typeof value, 'string');
+    assert.ok(Number.isFinite(Date.parse(value)), 'Missing protocol observer time');
+  }
+  // Correlate owned broker states and exit, not timestamps from independent processes.
+  assert.ok(Date.parse(report.startedAt) <= Date.parse(report.finishedAt), 'Protocol command interval is reversed');
+  assert.ok(Date.parse(report.finishedAt) <= Date.parse(observedAt), 'Inspect the lease after command completion');
+  assert.ok(Date.parse(live.startedAt) <= Date.parse(finishedAt), 'Protocol broker interval is reversed');
 }
 
 export function reconcileProtocolRows(rows, outcomes, sourceDigest) {
@@ -107,7 +131,8 @@ export async function runProtocolPool(t, { workers, worker = defaultWorker, rows
                 TMPDIR: scratch, TMP: scratch, TEMP: scratch },
               signal: budget.signal, lifetime,
             });
-            reports.push({ index: group.index, ...report });
+            const retainedReport = { index: group.index, ...report };
+            reports.push(retainedReport);
             assert.equal(report.complete, true, `Protocol row ${group.index} process was incomplete`);
             assert.equal(report.exitCode, 0,
               `Protocol row ${group.index} child failed: ${processDiagnostic({ message: report.stderr }).message}`);
@@ -115,9 +140,11 @@ export async function runProtocolPool(t, { workers, worker = defaultWorker, rows
             const outcome = JSON.parse(report.stdout);
             assert.equal(outcome.pid, report.pid, 'Child outcome must identify the owned process');
             validateProtocolOutcome(outcome, group.pair, group.index, sourceDigest);
-            assert.ok(Date.parse(outcome.lease.startedAt) >= Date.parse(report.startedAt) &&
-              Date.parse(outcome.finishedAt) <= Date.parse(report.finishedAt),
-            'The live lease and completed row must belong to the actual child execution interval');
+            const leases = await readTestGroupProcesses(group.id, budget.environment);
+            const leaseObservedAt = new Date().toISOString();
+            retainedReport.leases = leases;
+            retainedReport.leaseObservedAt = leaseObservedAt;
+            validateProtocolExecution(report, outcome, leases, leaseObservedAt);
             if (worker.href === defaultWorker.href) {
               assert.equal(typeof outcome.fixtureRoot, 'string', 'A complete whole row must identify its cleaned fixture');
             }

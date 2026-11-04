@@ -48,6 +48,12 @@ export const validationDeclarations = {
     "reason": "PR-only live/exit259/image-mismatch native facts plus isolated injected startup/cleanup boundaries; original child/compiler uncertainty stays unknown. No critical promotion or cancellation-success credit; process-local spawn instrumentation is restored.",
     "prerequisites": ["Node; stock Windows PowerShell 5.1 and .NET Framework compiler; three aggregate slots and new owned repository-local directories"]
   }, {
+    "names": ["T-PRD018 Windows observer readiness retains published proof when its polling wake crosses the deadline"],
+    "platforms": ["windows-x64"],
+    "owner": "runner-termination-evidence-contract",
+    "reason": "PR-only deterministic controller regression: delayed polling must inspect published readiness without accepting missing, unsettled or wrong-source compiler proof. Process-local spawn, filesystem and monotonic-clock instrumentation is restored; no real compiler, process or critical promotion.",
+    "prerequisites": ["Node; independent process-isolated root and owned repository-local marker fixtures"]
+  }, {
     "names": ["T-PRD018 capture admission reserves its complete process tree while independent peers progress"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "runner-resource-contract",
@@ -111,6 +117,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import fsPromises from 'node:fs/promises';
+import { performance } from 'node:perf_hooks';
 import { PassThrough } from 'node:stream';
 import { createContext, runInContext } from 'node:vm';
 import { atomicWrite } from '../src/files.mjs';
@@ -557,6 +565,92 @@ setTimeout(()=>{clearInterval(barrier);process.exitCode=91;},8000).unref();
       } finally {
         childProcess.spawn = originalSpawn;
         syncBuiltinESMExports();
+      }
+    }
+  });
+
+test('T-PRD018 Windows observer readiness retains published proof when its polling wake crosses the deadline',
+  { timeout: 10000, skip: process.platform !== 'win32' }, async t => {
+    const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'native-runtime-poll-'));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const proof = {
+      schema: 1, compilerSettled: true,
+      observerSha256: digest(await fs.readFile(path.resolve('test', 'windows-runtime-observer', 'observer.ps1'))),
+      bridgeSha256: digest(await fs.readFile(path.resolve('test', 'windows-runtime-observer', 'bridge.cs'))),
+    };
+    for (const mode of ['published', 'unsettled', 'wrong-source', 'missing']) {
+      const originalSpawn = childProcess.spawn;
+      const originalStat = fsPromises.stat;
+      const originalNow = performance.now;
+      const probed = Promise.withResolvers();
+      const releaseProbe = Promise.withResolvers();
+      const child = new EventEmitter();
+      child.pid = 900001;
+      child.kill = () => { throw new Error('An injected observer must not be signaled'); };
+      child.unref = () => {};
+      let firstProbe = true;
+      let now = 0;
+      let observer;
+      let readiness;
+      let dispatched = false;
+      childProcess.spawn = () => { dispatched = true; return child; };
+      fsPromises.stat = async filename => {
+        if (firstProbe && filename.endsWith('.ready.json')) {
+          firstProbe = false;
+          probed.resolve();
+          await releaseProbe.promise;
+          throw Object.assign(new Error('Injected first absent marker probe'), { code: 'ENOENT' });
+        }
+        return originalStat(filename);
+      };
+      performance.now = () => now;
+      syncBuiltinESMExports();
+      try {
+        const { startWindowsRuntimeObserver: start } =
+          await import(new URL(`./windows-runtime-observer/index.mjs?poll-${mode}`, import.meta.url));
+        observer = await start({
+          directory: path.join(directory, mode), ownerPid: process.pid, expectedImage: 'node',
+        });
+        assert.equal(dispatched, true, 'The regression must never launch a real compiler or observer');
+        readiness = observer.ready.then(value => ({ value }), error => ({ error }));
+        child.emit('spawn');
+        await probed.promise;
+        if (mode === 'published' || mode === 'wrong-source') {
+          await atomicWrite(observer.files.compilerSettled, JSON.stringify({
+            ...proof, ...(mode === 'wrong-source' ? { observerSha256: '0'.repeat(64) } : {}),
+          }));
+        }
+        if (mode !== 'missing') {
+          await atomicWrite(observer.files.ready, JSON.stringify({
+            schema: 2, ownerHandlePinned: true, compilerSandboxed: true,
+          }));
+        }
+        // The markers precede the deadline; only delivery of the absent probe is late.
+        now = 5001;
+        releaseProbe.resolve();
+        const result = await readiness;
+        if (mode === 'published') {
+          assert.deepEqual(result.value, {
+            ready: true, ownerHandlePinned: true, compilerSandboxed: true, compilerSettled: true,
+          }, 'A delayed polling wake must not discard already-published affirmative proof');
+        } else {
+          assert.equal(result.error?.message, 'observer-not-ready', `${mode}: fail closed`);
+        }
+      } finally {
+        releaseProbe.resolve();
+        child.emit('close', 0, null);
+        await readiness;
+        childProcess.spawn = originalSpawn;
+        fsPromises.stat = originalStat;
+        performance.now = originalNow;
+        syncBuiltinESMExports();
+        if (observer) {
+          const result = await observer.finalize();
+          assert.equal(result.compilerSettled, mode === 'published');
+          assert.equal(result.cleanup, mode === 'published' ? 'awaited' : 'unknown');
+          assert.equal(result.forcedObserverStop, false);
+          assert.equal(result.observation, null, 'Injected markers supply no native observation credit');
+        }
       }
     }
   });
