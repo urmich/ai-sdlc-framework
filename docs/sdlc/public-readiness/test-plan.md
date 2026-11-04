@@ -345,6 +345,13 @@ the original functional capture, mandatory real native-positive and isolated
 fail-stop controls remain required separately. This corrects diagnostic
 visibility, not fallback behavior or the unknown hosted startup cause, and
 supplies no native timing or compiler-lifetime credit.
+The mandatory native-positive root also settles a rejected readiness attempt
+before rethrowing its original error. Extend the existing one-slot modeled
+control to verify final facts precede rejection, unknown lifetime still stops
+admission, and a concurrent stop failure preserves both original errors.
+Successful readiness does not finalize early or change the real target lifetime;
+all native-positive assertions, compiler proof and deadlines remain unchanged.
+This closes the mandatory-path diagnostic gap, not the unexplained startup cause.
 All these roots remain outside critical27. New-source local,
 Review and native results remain NotRun until their actual executions; the prior
 24-of-25 native producer pass and recurring Windows failure remain historical,
@@ -880,13 +887,17 @@ shared serialized reservation and preserves ordered authority` in
 `test/public-readiness-evidence.test.mjs` includes a controlled initial proof-read
 failure. Require the exact original rejection rather than a later barrier
 timeout, and reject replay completion before its required read barrier.
-Complete and verify the original normalized import before starting the
-five-second concurrent-read watchdog. Bound that real setup separately at
-thirty seconds, observed through the first original assertion read closing;
+Complete and verify the original normalized import and later parent preparation
+before starting the five-second concurrent-read watchdog. Bound that real setup
+separately at thirty seconds, requiring both the first original assertion read
+to close and the first expected child read to open;
 neither preload a context nor bypass any retained dependency validation.
-A controlled original-import read and mocked five-second clock advance must
-not consume the later overlap deadline; restore real timers before releasing
-that read so the overlap watchdog remains active. Preserve all fifteen original modes,
+A controlled original-import read and a controlled large-parent read in the
+existing reservation mode each advance the mocked clock past five seconds
+without consuming the later overlap deadline. Restore real timers before
+releasing each setup read so the overlap watchdog remains active. Failure
+diagnostics distinguish the unchanged thirty-second and five-second watchdogs.
+Preserve all fifteen original modes,
 every overlap, four-handle, reservation, ordered-failure, cache, staged-read and
 alias assertion, and add this deterministic slow-setup mode. The
 maintainer owns this process-isolated, network-free fixture on the existing
@@ -1187,8 +1198,34 @@ before its isolated timed root; six sequential owned fixture stages retain all
 twelve real inner groups and borrow the same broker, not a second allowance.
 Compare notice IDs and durations with original runner/journal fields, enforce
 the ten-notice/closed-output bounds, reject mismatched source/command and invalid
-durations, and verify actual start/end offsets and the last-finishing group's
-closed source identity without summing concurrent work into a serial estimate.
+durations, and verify original start/end offsets without summing concurrent work
+into a serial estimate. The finalizer's version-one `numeric-rle-v1` projection
+also covers every independently declared group on failed producers, preserving
+the original Failed outcome, unchanged runner reports and owned cleanup.
+Bind the ordered vector to source, selection, scheduling-policy and group-order
+digests; never obtain identities from encoded coordinates. Reconstruct the
+selection independently from public repository/commit/tree, run/attempt, exact
+job name and source-declared target/component/shard/stage selections. Changing
+only private bootstrap prefixes, executable or frozen-artifact facts must not
+change this diagnostic selection; changing a public identity or stage must.
+Keep full-context validation independent: mismatched private expected facts
+still reject original evidence/coordinates rather than gain acceptance.
+The existing control verifies both full and body-1 role reconstruction without
+reading execution payloads. Distinguish unknown,
+explicitly unstarted, started-without-end and complete reported Passed, Failed
+or NotRun intervals. None of these diagnostic states grants assertion credit.
+Require at most ten notices, total UTF-8 bytes strictly below 4096, the first
+notice below 1024 and every later notice below 400. Adaptive power-of-two
+`quantumMs` encodes conservative coordinate intervals, not reconstructed exact
+timestamps or exact non-longest durations. Retain the ten longest observed
+durations exactly in the closed header, and the actual terminal group only when
+all declared group intervals are complete. Invalid, missing, reordered or
+unbounded original inputs become explicit unknown coordinates, not fabricated
+clocks; a presentation fallback cannot change readiness, failure or settlement.
+Extend the existing timing-offset control with all six states, complete ordered
+numeric-run decoding, declared bounds, source/order rejection and an explicitly
+synthetic 1462-group formatting-capacity case. This adds no root or descendant,
+native measurement or original evidence-payload transfer.
 Missing clocks remain unavailable. Preserve partial readiness and verify fixture cleanup. It has no
 provider access, shared resources or prerequisite roots. Neither new root
 expands critical27, changes native role membership or grants native timing,
@@ -1800,8 +1837,11 @@ the original subset. A new legitimate test must not erase preservation checks.
    duplicate assertions and rejection of partial passing producer evidence.
    SDK requirements derive from the actual combined closures, not catalog-only
    omissions. Require producer-wide maximum-ten timing notices and truthful
-   global offsets/terminal capsule across phases, without cross-clock ordering
-   assumptions or ten notices for each phase.
+   global coordinates/terminal capsule across phases, including original failed
+   producers, without cross-clock ordering assumptions or ten notices for each
+   phase. Version-one coordinate intervals retain their explicit precision and
+   unknown states; they do not upgrade partial evidence or change historical
+   placement, SDK, phase authentication or any of the twenty causal rows.
    These network-free owned-fixture controls remain PR-only, maintained by the
    native-validation maintainer, with no critical promotion. The four exact new
    roots in `test/public-readiness-native.test.mjs` are:

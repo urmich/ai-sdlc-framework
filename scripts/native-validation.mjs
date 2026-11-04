@@ -1550,6 +1550,177 @@ function nativeGroupTimings(groups, report, startedAt, stage) {
   });
 }
 
+const nativeTimingLimitMs = 7 * 24 * 60 * 60 * 1000;
+
+function nativeGroupCoordinates(inventory, groups, report, journal, startedAt, stage, schedulingPolicy) {
+  const retained = report.groupExecution;
+  const fields = ['id', 'rootId', 'root', 'file', 'sourceDigest', 'assertionIds', 'name',
+    'minimumSlots', 'exclusiveResources', 'dependsOn'];
+  requireThat(groups.length <= 2048 && retained?.schemaVersion === 1 &&
+    retained.protocol === validationGroupProtocol &&
+    retained.policyDigest === validationSchedulingPolicyDigest(schedulingPolicy) &&
+    retained.selectionDigest === digest(groups) && retained.groups?.length === groups.length &&
+    Array.isArray(report.executions) && report.executions.length <= 8192 &&
+    typeof journal === 'string' && Buffer.byteLength(journal) <= 8 * 1024 * 1024,
+  'EVIDENCE', 'Timing coordinates require bounded original source, policy, selection and journal');
+  const lines = journal.trim().split('\n');
+  requireThat(lines.length <= 32768, 'EVIDENCE', 'Timing journal exceeds the diagnostic bound');
+  const events = lines.map(line => JSON.parse(line));
+  const ids = new Set(groups.map(group => group.id));
+  const starts = events.filter(event => event.kind === 'execution-start');
+  const ends = events.filter(event => event.kind === 'execution-end');
+  requireThat(report.executions.every(row => ids.has(row.groupId)) &&
+    typeof report.complete === 'boolean' &&
+    starts.length === 1 && starts[0].sequence === 1 &&
+    ['files', 'selection', 'context'].every(field =>
+      digest(starts[0][field] ?? null) === digest(report[field] ?? null)) &&
+    ends.length <= 1 && ends.every(end => end.complete === report.complete &&
+      end.exitCode === report.exitCode && digest(end.summary) === digest(report.summary)) &&
+    events.every((event, index) => event.sequence === index + 1 &&
+    Number.isFinite(Date.parse(event.observedAt)) &&
+    (!['group-start', 'group-end', 'completion'].includes(event.kind) || ids.has(event.groupId))),
+  'EVIDENCE', 'Timing journal has an invalid sequence or undeclared group');
+  const offset = value => {
+    if (value === null) return null;
+    const result = Date.parse(value) - Date.parse(startedAt);
+    requireThat(typeof value === 'string' && Number.isSafeInteger(result) &&
+      result >= 0 && result <= nativeTimingLimitMs,
+    'EVIDENCE', 'Timing coordinate is not an observed bounded clock');
+    return result;
+  };
+  return groups.map((group, index) => {
+    const original = retained.groups[index];
+    requireThat(original && fields.every(field => digest(original[field]) === digest(group[field])) &&
+      ['Passed', 'Failed', 'NotRun'].includes(original.status) &&
+      Array.isArray(original.processIds),
+    'EVIDENCE', 'Timing group order or source declaration differs');
+    const starts = events.filter(event => event.kind === 'group-start' && event.groupId === group.id);
+    const ends = events.filter(event => event.kind === 'group-end' && event.groupId === group.id);
+    const rows = report.executions.filter(row => row.groupId === group.id);
+    const completions = events.filter(event => event.kind === 'completion' && event.groupId === group.id);
+    const definitions = inventory.cases.filter(test => group.assertionIds.includes(test.id));
+    const startOffsetMs = offset(original.startedAt), endOffsetMs = offset(original.finishedAt);
+    requireThat(rows.length === completions.length &&
+      new Set(rows.map(row => digest([row.file, row.name, row.parents]))).size === rows.length &&
+      rows.every(row => {
+        const completion = completions.find(event => event.sequence === row.sequence);
+        return completion && ['file', 'name', 'parents', 'status', 'observedAt', 'sequence', 'durationMs']
+          .every(field => digest(row[field]) === digest(completion[field])) &&
+          row.file === group.file && Array.isArray(row.parents) &&
+          definitions.some(test => test.file === row.file && test.name === row.name &&
+            digest(test.parents) === digest(row.parents)) &&
+          ['Passed', 'Failed', 'NotRun', 'Skipped', 'Cancelled'].includes(row.status) &&
+          Number.isFinite(row.durationMs) && row.durationMs >= 0 && row.durationMs <= nativeTimingLimitMs;
+      }), 'EVIDENCE', 'Timing completions differ from the original journal or contain invalid durations');
+    if (startOffsetMs === null) {
+      requireThat(endOffsetMs === null && original.status === 'NotRun' && original.summary === null &&
+        original.processIds.length === 0 && starts.length === 0 && ends.length === 0,
+      'EVIDENCE', 'An unavailable process start cannot have a retained process end');
+      return { groupId: group.id, rootId: group.rootId, sourceDigest: group.sourceDigest,
+        state: rows.length ? 0 : 1, startOffsetMs: null, endOffsetMs: null };
+    }
+    requireThat(starts.length === 1 && starts[0].rootId === group.rootId &&
+      starts[0].startedAt === original.startedAt &&
+      digest(starts[0].processIds) === digest(original.processIds) &&
+      original.processIds.length > 0 &&
+      original.processIds.every(pid => Number.isSafeInteger(pid) && pid > 0) &&
+      startOffsetMs >= offset(report.startedAt) && ends.length <= 1 &&
+      ends.every(end => end.sequence > starts[0].sequence &&
+        end.rootId === group.rootId && end.finishedAt === original.finishedAt &&
+        end.status === original.status && digest(end.processIds) === digest(original.processIds) &&
+        digest(end.summary) === digest(original.summary)),
+    'EVIDENCE', 'Timing process boundaries differ from the original journal');
+    if (endOffsetMs === null) return {
+      groupId: group.id, rootId: group.rootId, sourceDigest: group.sourceDigest,
+      state: 2, startOffsetMs, endOffsetMs: null,
+    };
+    const root = rows.filter(row => row.file === group.file && row.name === group.root && row.parents.length === 0);
+    requireThat(ends.length === 1 && endOffsetMs >= startOffsetMs && original.summary !== null &&
+      root.length === 1 &&
+      (original.status !== 'Passed' || rows.every(row => row.status !== 'Failed')) &&
+      (original.status !== 'Failed' || rows.some(row => row.status === 'Failed')) &&
+      (report.finishedAt === null || endOffsetMs <= offset(report.finishedAt)),
+    'EVIDENCE', 'Completed timing coordinates require original process and root completion');
+    return { groupId: group.id, rootId: group.rootId, sourceDigest: group.sourceDigest,
+      state: { Passed: 3, Failed: 4, NotRun: 5 }[original.status],
+      startOffsetMs, endOffsetMs, groupMs: endOffsetMs - startOffsetMs, rootMs: root[0].durationMs,
+      stage, startedAt: original.startedAt, finishedAt: original.finishedAt };
+  });
+}
+
+export function nativeTimingSelectionDigest({ source, runId, attempt, target, component, shard, jobRef, stages }) {
+  return digest({ kind: 'native-timing-selection-v1', source,
+    runId: String(runId), attempt: String(attempt), target, component, shard, jobRef,
+    stages: stages.map(stage =>
+      [stage.name, stage.files, stage.name === 'unit' ? [] : [stage.selectorName]]) });
+}
+
+export function nativeTimingCoordinateDiagnostics(rows, {
+  source, selection, policy, producer = 'partial', startedAt = null, finishedAt = null,
+} = {}) {
+  requireThat(rows.length > 0 && rows.length <= 2048 &&
+    [source, selection, policy].every(value => /^[a-f0-9]{64}$/u.test(value)) &&
+    new Set(rows.map(row => row.groupId)).size === rows.length &&
+    rows.every(row => /^[a-f0-9]{64}$/u.test(row.groupId) &&
+      /^assertion-[a-f0-9]{64}$/u.test(row.rootId) && /^[a-f0-9]{64}$/u.test(row.sourceDigest) &&
+      Number.isInteger(row.state) && row.state >= 0 && row.state <= 5 &&
+      [row.startOffsetMs, row.endOffsetMs].every(value => value === null ||
+        Number.isSafeInteger(value) && value >= 0 && value <= nativeTimingLimitMs) &&
+      (row.state < 2 ? row.startOffsetMs === null && row.endOffsetMs === null :
+        row.state === 2 ? row.startOffsetMs !== null && row.endOffsetMs === null :
+          row.startOffsetMs !== null && row.endOffsetMs !== null && row.endOffsetMs >= row.startOffsetMs &&
+          Number.isFinite(row.groupMs) && row.groupMs === row.endOffsetMs - row.startOffsetMs &&
+          Number.isFinite(row.rootMs) && row.rootMs >= 0 && row.rootMs <= nativeTimingLimitMs)),
+  'EVIDENCE', 'Timing projection requires closed bounded numeric coordinates');
+  const observed = rows.filter(row => row.state >= 3);
+  const timing = nativeTimingDiagnostics(observed, {
+    complete: observed.length === rows.length, producer, startedAt, finishedAt,
+  });
+  const longest = [...observed].sort((a, b) => b.groupMs - a.groupMs || a.groupId.localeCompare(b.groupId))
+    .slice(0, 10).map(row => [rows.indexOf(row), row.groupMs, row.rootMs]);
+  const terminal = timing.terminalGroup.availability === 'available' ?
+    [rows.findIndex(row => row.groupId === timing.terminalGroup.groupId),
+      timing.terminalGroup.startOffsetMs, timing.terminalGroup.endOffsetMs, timing.terminalGroup.tiedGroups] : null;
+  const prefix = '::notice title=Native group timing::';
+  const maximum = Math.max(0, ...rows.flatMap(row => [row.startOffsetMs ?? 0, row.endOffsetMs ?? 0]));
+  // A tick denotes a conservative [tick*q, (tick+1)*q) interval, never a reconstructed timestamp.
+  for (let quantumMs = 1; quantumMs <= 2 ** 30; quantumMs *= 2) {
+    const base = Math.floor(maximum / quantumMs) + 2;
+    const coordinates = rows.map(row =>
+      ((row.startOffsetMs === null ? 0 : Math.floor(row.startOffsetMs / quantumMs) + 1) * base +
+        (row.endOffsetMs === null ? 0 : Math.floor(row.endOffsetMs / quantumMs) + 1)) * 6 + row.state);
+    if (!coordinates.every(Number.isSafeInteger)) continue;
+    const header = { version: 1, source, selection, policy,
+      order: digest(rows.map(row => [row.groupId, row.rootId, row.sourceDigest])),
+      origin: 'producer.startedAt', producer: producer === 'completed' ? 'completed' : 'partial',
+      count: rows.length, encoding: 'numeric-rle-v1', quantumMs, base, longest, terminal };
+    const annotations = [prefix + JSON.stringify(header)];
+    requireThat(Buffer.byteLength(annotations[0]) < 1024,
+      'EVIDENCE', 'Timing identity and longest-group header exceeds its diagnostic bound');
+    let chunk = [], start = 0, expanded = 0;
+    for (let index = 0; index < coordinates.length;) {
+      const code = coordinates[index];
+      let count = 1;
+      while (coordinates[index + count] === code) count++;
+      const run = count >= 3 ? [code, 1 - count] : Array(count).fill(code);
+      const next = [...chunk, ...run];
+      if (Buffer.byteLength(prefix + JSON.stringify({ start, coordinates: next })) >= 400) {
+        annotations.push(prefix + JSON.stringify({ start, coordinates: chunk }));
+        start = expanded;
+        chunk = run;
+      } else chunk = next;
+      expanded += count;
+      index += count;
+    }
+    if (chunk.length) annotations.push(prefix + JSON.stringify({ start, coordinates: chunk }));
+    if (annotations.length <= 10 && annotations.reduce((sum, line) => sum + Buffer.byteLength(line), 0) < 4096) {
+      return { terminalGroup: timing.terminalGroup,
+        timingProjection: { ...header, coordinates }, timingAnnotations: annotations };
+    }
+  }
+  requireThat(false, 'EVIDENCE', 'Complete timing coordinates exceed the bounded diagnostic policy');
+}
+
 export function nativeTimingDiagnostics(timings, {
   complete = true, producer = 'partial', startedAt = null, finishedAt = null,
 } = {}) {
@@ -1641,6 +1812,7 @@ async function collectExecution({ directory, data, inventory, sources, calculato
   const observations = [];
   const diagnostics = [];
   const timings = [];
+  const coordinateTimings = [];
   let timingCoverageComplete = true;
   let complete = true;
   let exitCode = 0;
@@ -1691,6 +1863,19 @@ async function collectExecution({ directory, data, inventory, sources, calculato
   const originalCommands = [];
   const phaseSettlements = [];
   for (const stage of stages) {
+    let declaredGroups = [];
+    try {
+      declaredGroups = validationExecutionGroups(inventory, {
+        files: stage.files, pattern: stage.name === 'unit' ? undefined : stage.selectorName, preserveOrder: true,
+      });
+    } catch {
+      diagnostics.push({ stage: stage.name, code: 'UNAVAILABLE_NATIVE_TIMING_DECLARATIONS' });
+    }
+    const coordinateStart = coordinateTimings.length;
+    coordinateTimings.push(...declaredGroups.map(group => ({
+      groupId: group.id, rootId: group.rootId, sourceDigest: group.sourceDigest,
+      state: 0, startOffsetMs: null, endOffsetMs: null,
+    })));
     const report = await read(`${stage.name}.json`);
     const command = await read(`${stage.name}-command.json`);
     if (!report || !command) {
@@ -1731,8 +1916,9 @@ async function collectExecution({ directory, data, inventory, sources, calculato
       complete = false;
       diagnostics.push({ stage: stage.name, code: error.code ?? 'INVALID_ORIGINAL_GROUP_EXECUTION', message: error.message });
     }
-    const fileConcurrency = Math.min(capacity, Math.max(1, groupCount));
-    const resourceMatches = expectedResources && resources && budget &&
+    const resourcesMatch = count => {
+      const fileConcurrency = Math.min(capacity, Math.max(1, count));
+      return expectedResources && resources && budget &&
       nativeAffinityCapacityMatches(assignment, expectedResources, shard) &&
       resources.availableParallelism === expectedResources.availableParallelism &&
       resources.totalMemoryBytes === expectedResources.totalMemoryBytes &&
@@ -1746,6 +1932,35 @@ async function collectExecution({ directory, data, inventory, sources, calculato
         ['peakPotentialResidentWorkers', capacity * 3], ['peakProducers', capacity * 2 + 1],
         ['peakControls', capacity * 2 + 1]].every(([field, limit]) =>
         Number.isSafeInteger(budget[field]) && budget[field] >= 0 && budget[field] <= limit);
+    };
+    const resourceMatches = resourcesMatch(groupCount);
+    try {
+      requireThat(resourcesMatch(declaredGroups.length) &&
+        // Check the original envelope independently of success; this never admits evidence or releases a phase.
+        commandMatches({ ...command, complete: true, exitCode: 0 },
+          ['scripts/test-runner.mjs', ...stage.args], expectedStageContext) &&
+        typeof command.complete === 'boolean' &&
+        Number.isSafeInteger(command.exitCode) && command.exitCode >= 0 && command.exitCode <= 255 &&
+        (report.finishedAt === null || report.exitCode === command.exitCode) &&
+        report.node === `v${nativeToolchain.node}` && report.platform === platforms[target] &&
+        report.architecture === context.native.architecture &&
+        digest(report.context ?? null) === digest(expectedStageContext) &&
+        digest(report.files) === digest(stage.files) &&
+        digest(report.selection?.namePatterns) === digest(stage.name === 'unit' ? [] : [stage.selectorName]) &&
+        digest(report.selection?.skipPatterns ?? []) === digest([]) && report.selection?.coverage !== true &&
+        Number.isFinite(Date.parse(report.startedAt)) &&
+        Date.parse(report.startedAt) >= Date.parse(command.startedAt) &&
+        (report.finishedAt === null || Number.isFinite(Date.parse(report.finishedAt)) &&
+          Date.parse(report.finishedAt) >= Date.parse(report.startedAt) &&
+          Date.parse(report.finishedAt) <= Date.parse(command.finishedAt)),
+      'EVIDENCE', 'Diagnostic original command, selection, resource or source binding differs');
+      const journal = data ? data.texts?.[`${stage.name}.json.journal.ndjson`] :
+        await fs.readFile(path.join(directory, `${stage.name}.json.journal.ndjson`), 'utf8');
+      const coordinates = nativeGroupCoordinates(inventory, declaredGroups, report, journal, startedAt, stage.name, schedulingPolicy);
+      coordinateTimings.splice(coordinateStart, declaredGroups.length, ...coordinates);
+    } catch {
+      diagnostics.push({ stage: stage.name, code: 'UNAVAILABLE_NATIVE_TIMING_COORDINATES' });
+    }
     if (stage.phase) {
       try {
         const journal = data ? data.texts?.[`${stage.name}-command.journal.ndjson`] :
@@ -1994,7 +2209,7 @@ async function collectExecution({ directory, data, inventory, sources, calculato
   const raw = { schemaVersion: 1, kind: 'test-execution', context, startedAt,
     finishedAt: complete ? observedAt : null, observedAt, sequence: 1, complete,
     exitCode: complete ? exitCode : exitCode || 2, results };
-  return { raw, diagnostics, timings, timingCoverageComplete };
+  return { raw, diagnostics, timings, timingCoverageComplete, coordinateTimings };
 }
 
 export function reconcileNativeEvidenceData(options) {
@@ -2487,8 +2702,28 @@ export async function finalizeNativeEvidence({ directory, inventory, sources, ca
     renderReadinessReport(evaluation, { completeReportRef });
   await fs.writeFile(path.join(directory, 'readiness.md'), markdown, { flag: 'wx' });
   const producer = collected.raw.complete ? 'completed' : 'partial';
-  const timing = nativeTimingDiagnostics(collected.timings, { producer, complete: collected.timingCoverageComplete,
+  let timing = nativeTimingDiagnostics(collected.timings, { producer, complete: collected.timingCoverageComplete,
     startedAt: retainedRaw.startedAt, finishedAt: retainedRaw.finishedAt });
+  const timingOptions = {
+    source: digest(context.sources),
+    selection: nativeTimingSelectionDigest({ source: digest(context.sources),
+      runId: context.producer.executionRef, attempt: context.producer.attemptRef,
+      target, component: componentFromContext(context, target), shard: shardFromContext(context, target),
+      jobRef: context.jobRef, stages }),
+    policy: validationSchedulingPolicyDigest(), producer,
+    startedAt: retainedRaw.startedAt, finishedAt: retainedRaw.finishedAt,
+  };
+  try {
+    timing = nativeTimingCoordinateDiagnostics(collected.coordinateTimings, timingOptions);
+  } catch {
+    collected.diagnostics.push({ stage: 'presentation', code: 'UNAVAILABLE_NATIVE_TIMING_PROJECTION' });
+    try {
+      timing = nativeTimingCoordinateDiagnostics(collected.coordinateTimings.map(row => ({
+        groupId: row.groupId, rootId: row.rootId, sourceDigest: row.sourceDigest,
+        state: 0, startOffsetMs: null, endOffsetMs: null,
+      })), timingOptions);
+    } catch { timing.timingAnnotations = []; }
+  }
   return { evaluation, diagnostics: collected.diagnostics, markdown, ...timing };
 }
 

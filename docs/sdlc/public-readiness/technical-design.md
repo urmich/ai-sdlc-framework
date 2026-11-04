@@ -1566,13 +1566,17 @@ barrier and the actual replay outcome. An early replay rejection preserves its
 original cause instead of becoming a misleading barrier timeout; successful
 completion before the required barrier fails explicitly. The first original
 assertion read closes only after the common normalized import is fully verified.
-Wait for this real setup with a separate thirty-second watchdog before arming
-the unchanged five-second concurrent-read deadline; do not preload or reuse a
-previous context. A controlled import read and mocked clock advance reproduce
-the old premature deadline without waiting on wall-clock latency. All fifteen
+The later reservation batch must also prepare its genuine large parents before
+its expected child reads can open. Wait for both the original read to close and
+the first expected child read to open under the same thirty-second setup
+watchdog before arming the unchanged five-second concurrent-read deadline.
+Do not preload or reuse a previous context. Controlled import and large-parent
+reads with mocked clock advances reproduce premature deadline consumption
+without waiting on wall-clock latency; report the expired watchdog duration
+without attributing an unmeasured native CPU or filesystem cause. All fifteen
 original modes and the four-handle ceiling, serialized reservation, ordered
 authority, failure-drain, cache and alias checks remain, alongside this new
-slow-setup mode. Restore real timers before releasing the controlled import so
+slow-setup mode. Restore real timers before releasing each controlled setup read so
 the subsequent overlap watchdog remains live. No native command watchdog or
 whole-lane limit changes.
 
@@ -1767,11 +1771,15 @@ bounded elapsed/UTC observations and enumerated failures. Capture the return
 from synchronous `Add-Type` separately from later receipt/ready publication.
 Readiness failures include a closed diagnostic snapshot in the failure message
 itself, so existing sanitized provider failure annotations expose it without
-requiring log or artifact payload access. On optional startup failure, append a
+requiring log or artifact payload access. On either optional or mandatory startup failure, append a
 separate closed post-finalization snapshot to that same error before requesting
 aggregate admission stop. If admission stop also fails, preserve the enriched
 original message and both original errors in the aggregate failure. These facts
 may establish later settlement but cannot change the earlier failed decision.
+The mandatory native-positive path settles before rethrowing and never falls
+back to passing execution; successful readiness leaves its original target
+creation, observations and cleanup unchanged. The existing one-slot modeled
+readiness control verifies this error boundary without a compiler or target.
 Affirmatively settled optional unavailability already permits the original
 functional capture assertions; this is not a fallback-policy correction or a
 waiver of the separate mandatory real native-observation control.
@@ -1868,20 +1876,78 @@ exercises the actual fixture and activation source with controlled slow staging;
 it does not replace native distribution acceptance or alter production locking,
 timeouts, critical membership or whole-lane delivery limits.
 
-After existing source, original journal, command, context and resource checks,
-native framework producers emit at most ten slowest group timing notices.
-Retain only closed group/root/source identities, actual group wall intervals and
-root durations, and explicit completed-group/partial-or-completed-producer labels.
-Expose actual start/end offsets and the source-bound last-finishing group within
-that bounded output, not inferred serial phases obtained by summing overlapping
-durations. Missing clocks remain unavailable. A long root's duration alone
-cannot identify when it started or prove that the surrounding Execute envelope
-is avoidable.
-Unbound or unfinished stages supply no timings. Timing-only formatting rejection
-adds a presentation diagnostic without changing readiness; existing evidence
-validation remains authoritative. Notices contain no names, paths or raw output
-and neither establish speedup nor replace original SDK/cleanup reconciliation
-or the unchanged whole-lane delivery limits.
+Native timing publication is diagnostic scheduling metadata, not another evidence
+ledger or an assertion-acceptance input. Keep the existing maximum of ten notices,
+strictly below 4096 total UTF-8 bytes, with the first notice below 1024 bytes and
+each later notice below 400. The production finalizer evolves those notices to
+version-one `numeric-rle-v1`; the low-level legacy formatter remains available
+unchanged. No placement, SDK, phase-authentication or typed admission protocol is
+relabelled.
+
+Derive ordered groups independently from the actual stage declarations.
+Verify the original command envelope, runtime, context, selected source and
+resources independently of command success, then bind report group order and
+clocks to its original ordered runner journal. This diagnostic path never admits
+evidence or releases a later phase. Retain coordinates on original failed
+producers without changing their failed decision or cleanup.
+Bound inputs to 2048 declared groups, 8192 executions, 32768 journal events,
+8 MiB of journal text and seven days for each original offset/root duration.
+Missing, rejected or unbound observations become unknown, never reconstructed.
+
+The closed JSON header contains `version`, `source`, `selection`, `policy`,
+`order`, `origin`, `producer`, `count`, `encoding`, `quantumMs`, `base`, `longest`
+and `terminal`. Bind `source` to the context source-map digest, `selection` to
+the public preimage below, `policy` to the scheduling-policy digest and `order`
+to the ordered group/root/source identities.
+Coordinates never supply their own identities. State 0 means unknown; 1 means
+explicitly unstarted; 2 means observed start without end; 3, 4 and 5 mean complete
+original process/root intervals with reported Passed, Failed and NotRun outcomes.
+These states describe original observations, not accepted evidence or cleanup
+proof. Producer partial/completed status remains separate.
+
+Independently reconstruct the normalized source map from public repository ID,
+the exact selected producer commit and its Git tree:
+`[{repositoryId: "repository-" + repository.id, revision, contentDigest: digest(treeSha)}]`.
+Use that map's digest as `source`. For PR merge validation, resolve the exact
+merge revision selected for the observed producer; do not blindly substitute
+`run.head_sha`, current branch HEAD or a later PR merge SHA.
+The diagnostic selection preimage is
+`{kind: "native-timing-selection-v1", source, runId: String(run.id), attempt: String(run.run_attempt), target, component, shard, jobRef: job.name, stages}`.
+Derive target/component/shard from the pinned source part matched to the actual
+attempt job; absent shard is null. Derive ordered `stages` from that same source
+as `[stage.name, stage.files, stage.name === "unit" ? [] : [stage.selectorName]]`.
+No execution payload, private bootstrap prefix, executable identity or
+frozen-artifact fact enters this diagnostic hash. The existing independent
+full-context/runtime/resource/evidence/SDK validation retains all those checks;
+a stable public diagnostic selection cannot make a mismatched original valid.
+
+Use origin `producer.startedAt`. For a known original offset, encode
+`tick = floor(offsetMs / quantumMs) + 1`; zero denotes an unavailable clock.
+Encode each row as `((startTick * base + endTick) * 6) + state`.
+Start at one-millisecond precision and double the quantum only until the entire
+vector fits the unchanged notice budget. A decoded nonnegative tick after
+subtracting one bounds the original offset in
+`[tick * quantumMs, (tick + 1) * quantumMs)`; it is not an exact timestamp.
+Duration bounds must account for both intervals, not treat tick subtraction as
+a measured duration.
+
+Later closed JSON notices carry `start` and `coordinates`. A nonnegative integer
+appends one code; a negative `-n` repeats the preceding code `n` additional times
+and cannot begin a chunk. Preserve whole runs within chunks. A consumer must
+validate consecutive expanded indices, exact count, bounded safe integers,
+valid states/ticks and independently matching header digests before using them.
+Keep up to ten longest observed group/root durations exactly in `longest`;
+publish an exact indexed terminal-group capsule only when all declared intervals
+are complete. Never silently truncate a vector. Formatting rejection first
+attempts the independently declared all-unknown vector, then emits no unsafe
+notice if that also exceeds bounds; retain a closed presentation diagnostic
+without changing readiness or the original failure.
+
+No names, paths, commands, error bodies or original report payloads are encoded.
+Coarse coordinates and synthetic formatting-capacity controls neither prove a
+native speedup nor replace original SDK/cleanup reconciliation or the unchanged
+whole-lane delivery limits. The earlier failed placement models remain
+insufficient; this publication correction supplies no timing acceptance.
 
 The entry consumer treats absent or non-array optional timing metadata as no
 notices, including legacy partial and blocked finalizer responses. Preserve the

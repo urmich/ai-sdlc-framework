@@ -144,6 +144,18 @@ async function settleRuntimeObserver(observer, t, startupFailure) {
   return result;
 }
 
+async function requireRuntimeObserverReady(observer, t) {
+  try { return await observer.ready; }
+  catch (error) {
+    try { await settleRuntimeObserver(observer, t, error); }
+    catch (settlementError) {
+      throw new AggregateError([error, settlementError],
+        `Native runtime startup and admission stop failed; ${error.message}`);
+    }
+    throw error;
+  }
+}
+
 function specification() {
   return {
     repositoryId: 'consumer',
@@ -423,7 +435,7 @@ test('T-PRD018 Windows native runtime observations retain original handle facts 
         expectedImage: mode === 'mismatch' ? 'taskkill' : path.basename(process.execPath, '.exe').toLowerCase(),
       });
       observers.push(observer);
-      assert.equal((await observer.ready).compilerSettled, true);
+      assert.equal((await requireRuntimeObserverReady(observer, t)).compilerSettled, true);
       const marker = path.join(current, 'ready.json');
       const release = path.join(current, 'release');
       const source = path.join(current, 'target.mjs');
@@ -739,7 +751,8 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
         calls.push('stop');
         if (mode === 'stop-failed') throw originalStopError;
       } });
-      runInContext(`${helper}\nglobalThis.settle = settleRuntimeObserver;`, context);
+      runInContext(`${helper}\nglobalThis.settle = settleRuntimeObserver;
+globalThis.requireReady = requireRuntimeObserverReady;`, context);
       const failure = new Error('observer-not-ready; startup={"observerClosed":false,"compilerSettled":false}');
       const initialMessage = failure.message;
       const settling = context.settle({
@@ -757,6 +770,24 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
         message: failure.message,
       }))).message, failure.message, `${mode}: final facts survive failure annotation sanitization`);
       assert.ok(!failure.message.includes(originalStopError.message));
+      calls.length = 0;
+      const mandatoryFailure = new Error(initialMessage);
+      const mandatory = context.requireReady({
+        ready: Promise.reject(mandatoryFailure),
+        finalize: async () => { calls.push('finalize'); return result; },
+        startupFacts: async () => { calls.push('facts'); return startup; },
+      }, { diagnostic: () => { calls.push('diagnostic'); } });
+      await assert.rejects(mandatory, error => mode === 'stop-failed'
+        ? error.name === 'AggregateError' && error.errors[0] === mandatoryFailure &&
+          error.errors[1] === originalStopError && error.message.includes(mandatoryFailure.message)
+        : error === mandatoryFailure);
+      assert.ok(mandatoryFailure.message.startsWith(`${initialMessage}; startupFinal=`),
+        'Mandatory readiness failure must retain post-finalization facts before it escapes');
+      assert.deepEqual(calls, mode === 'settled'
+        ? ['finalize', 'facts', 'diagnostic'] : ['finalize', 'facts', 'diagnostic', 'stop']);
+      assert.equal(sanitizeExecutionPayload(Buffer.from(JSON.stringify({
+        message: mandatoryFailure.message,
+      }))).message, mandatoryFailure.message);
     }
   });
 

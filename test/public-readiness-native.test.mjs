@@ -177,7 +177,7 @@ import { observerApiFixture, laneData as nativeLaneFixture,
   sourceTree as nativeSourceTreeFixture } from './readiness-observer-fixture.mjs';
 import * as nativePass from '../scripts/native-validation.mjs';
 import { verifyOriginalNativeRows } from '../scripts/pr-observer.mjs';
-import { sourceValidationSchedulingPolicy, validationSchedulingPolicy,
+import { sourceValidationSchedulingPolicy, validationSchedulingPolicy, validationSchedulingPolicyDigest,
   validationExecutionGroups } from '../scripts/test-scheduling.mjs';
 import { validateBootstrapRequest, bootstrapNativeToolchain, nativeBootstrapEnvironment,
   nativeBootstrapExports, portableRubyBootstrapEnvironment, requireHomebrewBottlePlan,
@@ -2479,7 +2479,8 @@ test('T-PRD018 native timing notices retain only ten source-bound actual group a
   });
   const file = 'test/timing-contract.test.mjs';
   const source = 'import test from "node:test";\n' +
-    Array.from({ length: 12 }, (_, index) => `test("timing ${index}",()=>{});`).join('\n');
+    Array.from({ length: 12 }, (_, index) => `test("timing ${index}",()=>{` +
+      `if(${index}===11&&process.env.SDLC_OWNED_TIMING_FAIL==="1")throw Error("owned failure");});`).join('\n');
   await fs.writeFile(path.join(root, 'test', 'timing-contract.test.mjs'), source);
   const declared = discoverDeclarations(source, file);
   const selectedInventory = { complete: true, unresolved: [], files: [{ file }], cases: declared.cases,
@@ -2489,6 +2490,13 @@ test('T-PRD018 native timing notices retain only ten source-bound actual group a
   const specification = nativeSpecification({ plan, inventory: selectedInventory,
     goSources: sources, target, profile: 'pr' });
   const context = structuredClone(fixture().lanes.find(lane => lane.target === target).context);
+  const metadata = { repository: { id: 123 }, run: { id: 12345, run_attempt: 1 },
+    commit: { sha: sourceRevision, tree: { sha: '6'.repeat(40) } },
+    job: { name: `native-${target}` } };
+  context.sources[0].contentDigest = digest(metadata.commit.tree.sha);
+  context.candidateDigest = digest({ revision: metadata.commit.sha, tree: metadata.commit.tree.sha });
+  context.native.toolchain.bootstrap = { homebrew: { prefix: path.join(root, 'owned-prefix-a') },
+    executables: { node: process.execPath } };
   context.inventoryDigest = validationInventoryDigest(specification);
   const allocation = await readTestBudget();
   context.native.toolchain.resources = nativeResourceFacts({
@@ -2506,10 +2514,12 @@ test('T-PRD018 native timing notices retain only ten source-bound actual group a
     const pattern = `^(?:timing ${offset}|timing ${offset + 1})$`;
     const stage = { name: `required-units-${offset / 2}`, files: [file],
       cases: declared.cases.slice(offset, offset + 2), selectorName: pattern,
+      ...(offset === 10 ? { kind: 'regression' } : {}),
       args: ['targeted', '--workers', '2', '--name', pattern, file] };
     const selected = await createPlan(parseOptions(['targeted', '--workers', '2', '--name', pattern,
       path.join(root, 'test', 'timing-contract.test.mjs')]), root);
-    selected.environment = { SDLC_TEST_REPORT_CONTEXT: JSON.stringify(producer) };
+    const stageContext = stage.kind === 'regression' ? context : producer;
+    selected.environment = { SDLC_TEST_REPORT_CONTEXT: JSON.stringify(stageContext) };
     const output = path.join(root, `${stage.name}.json`);
     assert.equal(await runTests(selected, { reportPath: output }), 0);
     const report = JSON.parse(await fs.readFile(output, 'utf8'));
@@ -2518,7 +2528,7 @@ test('T-PRD018 native timing notices retain only ten source-bound actual group a
     const journal = await fs.readFile(`${output}.journal.ndjson`, 'utf8');
     const command = { kind: 'validation-command', complete: true, exitCode: 0,
       node: process.version, platform: process.platform, architecture: process.arch,
-      command: [process.execPath, 'scripts/test-runner.mjs', ...stage.args], context: producer,
+      command: [process.execPath, 'scripts/test-runner.mjs', ...stage.args], context: stageContext,
       startedAt: report.startedAt, finishedAt: report.finishedAt };
     await fs.writeFile(path.join(root, `${stage.name}-command.json`), JSON.stringify(command));
     stages.push(stage);
@@ -2531,7 +2541,7 @@ test('T-PRD018 native timing notices retain only ten source-bound actual group a
     context, specification, startedAt: reports[0].startedAt, plan, candidate,
     completeReportRef: 'https://github.com/fixture/repo/actions/runs/1/attempts/1' };
   const finalized = await finalizeNativeEvidence(options);
-  assert.equal(finalized.timingAnnotations.length, 10);
+  assert.ok(finalized.timingAnnotations.length <= 10);
   assert.notEqual(finalized.evaluation.status, 'Passed', 'Timing metadata cannot pass missing native procedures');
   const expected = reports.flatMap(report => report.groupExecution.groups.map(group => ({
     groupId: group.id, rootId: group.rootId, sourceDigest: group.sourceDigest,
@@ -2545,45 +2555,231 @@ test('T-PRD018 native timing notices retain only ten source-bound actual group a
   const terminal = [...expected].sort((left, right) => Date.parse(right.finishedAt) -
     Date.parse(left.finishedAt) || left.groupId.localeCompare(right.groupId))[0];
   assert.equal(finalized.terminalGroup.groupId, terminal.groupId);
-  const last = row => row.finishedAt === terminal.finishedAt;
-  const terminalNotice = { group: terminal.groupId, root: terminal.rootId, source: terminal.sourceDigest,
-    startMs: terminal.startOffsetMs, endMs: terminal.endOffsetMs, ties: expected.filter(last).length };
-  const expectedAnnotations = expected.slice(0, 10).map((row, index) =>
-    `::notice title=Native group timing::group=${row.groupId} root=${row.rootId} source=${row.sourceDigest} ` +
-    `groupMs=${row.groupMs} rootMs=${row.rootMs} group=completed producer=partial ` +
-    `startMs=${row.startOffsetMs} endMs=${row.endOffsetMs} last=${last(row)}` +
-    (index === 0 ? ` envelopeMs=NA terminal=${JSON.stringify(terminalNotice)}` : ''));
-  for (const [index, actual] of finalized.timingAnnotations.entries()) {
-    const [prefix, capsule] = actual.split(' terminal=');
-    const [expectedPrefix, expectedCapsule] = expectedAnnotations[index].split(' terminal=');
-    assert.equal(prefix, expectedPrefix, `Exact timing notice ${index}`);
-    if (index === 0) {
-      const actualTerminal = JSON.parse(capsule);
-      for (const [key, value] of Object.entries(terminalNotice))
-        assert.equal(actualTerminal[key], value, `Exact terminal ${key}`);
-      assert.equal(digest(capsule), digest(expectedCapsule), 'Exact bounded terminal encoding');
+  const declaredGroups = stages.flatMap(stage => validationExecutionGroups(selectedInventory, {
+    files: stage.files, pattern: stage.selectorName, preserveOrder: true,
+  }));
+  const checkProjection = (result, originals, states) => {
+    const projection = result.timingProjection;
+    assert.equal(projection.version, 1);
+    assert.equal(projection.order, digest(declaredGroups.map(group =>
+      [group.id, group.rootId, group.sourceDigest])));
+    assert.equal(projection.policy, validationSchedulingPolicyDigest());
+    assert.equal(projection.count, 12);
+    assert.equal(projection.coordinates.length, 12);
+    assert.ok(Number.isSafeInteger(projection.quantumMs) && projection.quantumMs >= 1);
+    const numeric = result.timingAnnotations.map(line => JSON.parse(line.split('::').at(-1)));
+    const expanded = [];
+    for (const row of numeric.slice(1)) {
+      assert.equal(row.start, expanded.length);
+      for (const code of row.coordinates) {
+        if (code >= 0) expanded.push(code);
+        else expanded.push(...Array(-code).fill(expanded.at(-1)));
+      }
     }
+    assert.deepEqual(expanded, projection.coordinates);
+    assert.deepEqual(numeric[0].longest, projection.longest);
+    for (const [index, code] of projection.coordinates.entries()) {
+      assert.equal(code % 6, states[index]);
+      const packed = Math.floor(code / 6);
+      const end = packed % projection.base - 1;
+      const start = Math.floor(packed / projection.base) - 1;
+      const group = originals.flatMap(report => report.groupExecution.groups)[index];
+      for (const [tick, timestamp] of [[start, group.startedAt], [end, group.finishedAt]]) {
+        if (timestamp === null) assert.equal(tick, -1);
+        else {
+          const offset = Date.parse(timestamp) - Date.parse(options.startedAt);
+          assert.ok(tick * projection.quantumMs <= offset &&
+            offset < (tick + 1) * projection.quantumMs, 'Coordinates bound original clocks; they never invent exact timestamps');
+        }
+      }
+    }
+    const longest = [...expected].sort((a, b) => b.groupMs - a.groupMs || a.groupId.localeCompare(b.groupId))
+      .slice(0, 10).map(row => [declaredGroups.findIndex(group => group.id === row.groupId), row.groupMs, row.rootMs]);
+    if (states.every(state => state === 3)) assert.deepEqual(projection.longest, longest);
+    assert.ok(result.timingAnnotations.length <= 10);
+    assert.ok(result.timingAnnotations.every((line, index) => Buffer.byteLength(line) < (index === 0 ? 1024 : 400) &&
+      !/[\r\n]/u.test(line) && !line.includes('timing-contract') && !line.includes(root)));
+    assert.ok(result.timingAnnotations.reduce((bytes, line) => bytes + Buffer.byteLength(line), 0) < 4096);
+  };
+  const failedRoot = path.join(root, 'failed');
+  await fs.mkdir(failedRoot);
+  const failedStage = stages.at(-1);
+  const selected = await createPlan(parseOptions(failedStage.args.map(arg => arg === file ?
+    path.join(root, file) : arg)), root);
+  selected.environment = { SDLC_TEST_REPORT_CONTEXT: JSON.stringify(context), SDLC_OWNED_TIMING_FAIL: '1' };
+  const failedOutput = path.join(failedRoot, `${failedStage.name}.json`);
+  assert.notEqual(await runTests(selected, { reportPath: failedOutput }), 0);
+  const failedReport = JSON.parse(await fs.readFile(failedOutput, 'utf8'));
+  const failedCommand = { ...data[`${failedStage.name}-command.json`],
+    exitCode: failedReport.exitCode, startedAt: failedReport.startedAt, finishedAt: failedReport.finishedAt };
+  for (const stage of stages) {
+    if (stage !== failedStage) {
+      await fs.copyFile(path.join(root, `${stage.name}.json`), path.join(failedRoot, `${stage.name}.json`));
+      await fs.copyFile(path.join(root, `${stage.name}.json.journal.ndjson`),
+        path.join(failedRoot, `${stage.name}.json.journal.ndjson`));
+    }
+    await fs.writeFile(path.join(failedRoot, `${stage.name}-command.json`),
+      JSON.stringify(stage === failedStage ? failedCommand : data[`${stage.name}-command.json`]));
   }
-  assert.ok(finalized.timingAnnotations.every((line, index) => Buffer.byteLength(line) < (index === 0 ? 1024 : 400) &&
-    !/[\r\n]/u.test(line) && !line.includes('timing-contract') && !line.includes(root)));
-  assert.ok(finalized.timingAnnotations.reduce((bytes, line) => bytes + Buffer.byteLength(line), 0) < 4096);
+  const originalFailure = { code: 'OWNED_ORIGINAL_FAILURE' };
+  const failed = await finalizeNativeEvidence({ ...options, directory: failedRoot, failure: originalFailure });
+  assert.equal(failed.evaluation.status, 'Failed');
+  assert.equal(JSON.parse(await fs.readFile(path.join(failedRoot, 'execution.json'))).complete, false);
+  const failedTerminal = [...failedReport.groupExecution.groups].sort((a, b) =>
+    Date.parse(b.finishedAt) - Date.parse(a.finishedAt) || a.id.localeCompare(b.id))[0];
+  assert.equal(failed.terminalGroup.groupId, failedTerminal.id,
+    'Failed original producers must retain their observed terminal group');
+  assert.ok(finalized.timingProjection, 'Every original group needs closed diagnostic coordinates, not only the longest ten');
+  checkProjection(finalized, reports, Array(12).fill(3));
+  checkProjection(failed, [...reports.slice(0, -1), failedReport], [...Array(11).fill(3), 4]);
+  assert.deepEqual(JSON.parse(await fs.readFile(failedOutput, 'utf8')), failedReport);
+  const publication = runNativeValidation.toString();
+  const start = publication.indexOf('  const details = ');
+  const end = publication.indexOf('  const status = ', start);
+  for (const result of [finalized, failed]) {
+    const notices = [];
+    const vm = createContext({
+      process: { env: {} }, context: {}, phase: 'validation', directory: root,
+      inputs: {}, target, startedAt: options.startedAt, candidate: {},
+      failure: originalFailure, cancellation: { signal: { aborted: false } },
+      console: { error: line => notices.push(line) },
+      finalizeNativeEvidence: async input => {
+        assert.equal(input.failure, originalFailure);
+        return result;
+      },
+    });
+    const consumed = await runInContext(`(async()=>{let evaluation; ${publication.slice(start, end)}
+      return {evaluation,diagnostics,markdown,failure};})`, vm)();
+    assert.equal(consumed.evaluation, result.evaluation);
+    assert.equal(consumed.failure, originalFailure);
+    assert.deepEqual(notices, result.timingAnnotations, 'Actual entry publication retains every bounded notice even on failure');
+  }
+  const partialData = structuredClone(data);
+  const partial = partialData[`${failedStage.name}.json`];
+  const originalEvents = data.texts[`${failedStage.name}.json.journal.ndjson`].trim().split('\n').map(JSON.parse);
+  const firstStart = originalEvents.findIndex(event => event.kind === 'group-start');
+  const active = originalEvents[firstStart].groupId;
+  partial.finishedAt = null;
+  partial.complete = false;
+  partial.summary = null;
+  partial.exitCode = 2;
+  partial.executions = partial.executions.filter(row => row.sequence <= originalEvents[firstStart].sequence);
+  for (const group of partial.groupExecution.groups) {
+    if (group.id !== active) { group.startedAt = null; group.processIds = []; }
+    group.finishedAt = null;
+    group.status = 'NotRun';
+    group.summary = null;
+  }
+  partialData.texts[`${failedStage.name}.json.journal.ndjson`] =
+    originalEvents.slice(0, firstStart + 1).map(event => JSON.stringify(event)).join('\n') + '\n';
+  const partialResult = await nativePass.reconcileNativeEvidenceData({ ...options, data: partialData });
+  assert.notEqual(partialResult.raw.exitCode, 0);
+  assert.deepEqual(partialResult.coordinateTimings.slice(-2).map(row => row.state),
+    partial.groupExecution.groups.map(group => group.id === active ? 2 :
+      partial.executions.some(row => row.groupId === group.id) ? 0 : 1));
+  const partialTiming = nativePass.nativeTimingCoordinateDiagnostics(partialResult.coordinateTimings, {
+    source: failed.timingProjection.source, selection: failed.timingProjection.selection,
+    policy: failed.timingProjection.policy,
+  });
+  assert.equal(partialTiming.terminalGroup.availability, 'unavailable');
+  assert.ok(partialTiming.timingProjection.coordinates.length === 12);
   for (const mutate of [
     (report, command) => { report.groupExecution.groups[0].sourceDigest = 'f'.repeat(64); },
     (report, command) => { command.context.sourceCommit = 'f'.repeat(40); },
     (report, command) => { report.executions[0].durationMs = -1; },
     (report, command) => { report.executions[0].durationMs = Infinity; },
     (report, command) => { report.executions[0].durationMs = 'secret\n::error::'; },
+    (report, command) => { report.groupExecution.policyDigest = 'f'.repeat(64); },
+    (report, command) => { report.groupExecution.groups.push(...Array(2049).fill(report.groupExecution.groups[0])); },
   ]) {
     const changed = structuredClone(data);
     for (const stage of stages) mutate(changed[`${stage.name}.json`], changed[`${stage.name}-command.json`]);
     const rejected = await nativePass.reconcileNativeEvidenceData({ ...options, data: changed });
     assert.deepEqual(rejected.timings, []);
     assert.equal(rejected.raw.complete, false);
+    assert.ok(rejected.coordinateTimings.every(row => row.state === 0),
+      'Invalid original metadata is unknown, never reconstructed');
   }
+  const reordered = structuredClone(data);
+  for (const stage of stages) reordered[`${stage.name}.json`].groupExecution.groups.reverse();
+  const unmapped = await nativePass.reconcileNativeEvidenceData({ ...options, data: reordered });
+  assert.ok(unmapped.coordinateTimings.every(row => row.state === 0),
+    'Diagnostic order binding rejects reordered records without changing evidence validation');
   for (const [index, stage] of stages.entries()) {
     assert.deepEqual(JSON.parse(await fs.readFile(path.join(root, `${stage.name}.json`), 'utf8')), reports[index],
       'Original runner fields remain unchanged by timing retention');
   }
+  const privateRoot = path.join(root, 'private-context');
+  await fs.mkdir(privateRoot);
+  for (const stage of stages) {
+    for (const suffix of ['.json', '.json.journal.ndjson', '-command.json'])
+      await fs.copyFile(path.join(root, stage.name + suffix), path.join(privateRoot, stage.name + suffix));
+  }
+  const privateContext = structuredClone(context);
+  privateContext.native.toolchain.bootstrap.homebrew.prefix = path.join(root, 'owned-prefix-b');
+  privateContext.native.toolchain.bootstrap.executables.node = path.join(root, 'other-owned-node');
+  privateContext.artifacts[0].sha256 = 'f'.repeat(64);
+  const privateResult = await finalizeNativeEvidence({ ...options, directory: privateRoot, context: privateContext });
+  assert.equal(privateResult.timingProjection.selection, finalized.timingProjection.selection,
+    'Private bootstrap prefix, actual executable and frozen facts cannot change the public diagnostic selection');
+  assert.equal(privateResult.timingProjection.source, finalized.timingProjection.source);
+  assert.deepEqual(privateResult.timingProjection.coordinates.slice(-2).map(code => code % 6), [0, 0],
+    'Unchanged full-context validation still rejects reports from the other private context');
+  assert.ok(privateResult.diagnostics.some(row =>
+    row.stage === failedStage.name && row.code === 'INVALID_ORIGINAL_STAGE_COMMAND'));
+  const declarations = stages.map(stage =>
+    [stage.name, [...stage.files], stage.name === 'unit' ? [] : [stage.selectorName]]);
+  const publicParts = new Map(Object.entries(nativePass.nativeWorkflowContract.jobs).map(([target, jobRef]) =>
+    [jobRef, { target, component: 'full', shard: null, jobRef }]));
+  for (const part of nativePass.nativePrPartsForProtocol(nativePass.nativeFrameworkShardProtocol)) {
+    const jobRef = `native-${part.role}`;
+    publicParts.set(jobRef, { target: part.target, component: part.component, shard: part.shard ?? null, jobRef });
+  }
+  const consumer = createContext({ metadata, declarations, parts: [...publicParts.values()],
+    digest: value => digest(JSON.parse(JSON.stringify(value))) });
+  const consumeMetadata = `(() => {
+    const part = parts.find(part => part.jobRef === metadata.job.name);
+    if (!part) throw Error('Unknown source-declared native job');
+    const source = digest([{ repositoryId: 'repository-' + metadata.repository.id,
+      revision: metadata.commit.sha, contentDigest: digest(metadata.commit.tree.sha) }]);
+    return { source, selection: digest({ kind: 'native-timing-selection-v1', source,
+      runId: String(metadata.run.id), attempt: String(metadata.run.run_attempt),
+      target: part.target, component: part.component, shard: part.shard,
+      jobRef: metadata.job.name, stages: declarations }) };
+  })()`;
+  const independent = runInContext(consumeMetadata, consumer);
+  for (const result of [finalized, failed, privateResult]) {
+    const header = JSON.parse(result.timingAnnotations[0].split('::').at(-1));
+    assert.equal(header.source, independent.source);
+    assert.equal(header.selection, independent.selection,
+      'A data-only consumer derives the public preimage without producer context, bootstrap or payloads');
+  }
+  const publicInput = { source: independent.source, runId: metadata.run.id, attempt: metadata.run.run_attempt,
+    target, component: 'full', shard: null, jobRef: metadata.job.name, stages };
+  assert.equal(nativePass.nativeTimingSelectionDigest(publicInput), independent.selection);
+  assert.equal(nativePass.nativeTimingSelectionDigest({ ...publicInput,
+    runId: String(metadata.run.id), attempt: String(metadata.run.run_attempt) }), independent.selection);
+  const shardedPart = [...publicParts.values()].find(part => part.target === target && part.shard === 'body-1');
+  consumer.metadata = { ...metadata, job: { name: shardedPart.jobRef } };
+  const sharded = runInContext(consumeMetadata, consumer);
+  assert.equal(nativePass.nativeTimingSelectionDigest({ ...publicInput, ...shardedPart }), sharded.selection,
+    'Source-declared target/component/shard come from actual provider job names, not producer context');
+  for (const change of [
+    { source: digest([{ repositoryId: 'repository-124', revision: metadata.commit.sha,
+      contentDigest: digest(metadata.commit.tree.sha) }]) },
+    { source: digest([{ repositoryId: 'repository-123', revision: 'f'.repeat(40),
+      contentDigest: digest(metadata.commit.tree.sha) }]) },
+    { source: digest([{ repositoryId: 'repository-123', revision: metadata.commit.sha,
+      contentDigest: digest('f'.repeat(40)) }]) },
+    { runId: 12346 }, { attempt: 2 },
+    { target: target === 'macos-x64' ? 'linux-x64' : 'macos-x64' },
+    { component: 'framework', shard: 'body-1', jobRef: `native-${target}-framework-body-1` },
+    { shard: 'body-2' }, { jobRef: `native-${target}-framework-body-2` },
+    { stages: [...stages].reverse() },
+    { stages: [{ ...stages[0], name: 'other-stage' }, ...stages.slice(1)] },
+    { stages: [{ ...stages[0], files: [...stages[0].files, 'test/other.test.mjs'] }, ...stages.slice(1)] },
+    { stages: [{ ...stages[0], selectorName: '^different$' }, ...stages.slice(1)] },
+  ]) assert.notEqual(nativePass.nativeTimingSelectionDigest({ ...publicInput, ...change }), independent.selection);
 });
 
 test('T-PRD016 private Linux library fixtures preserve frozen published bytes without adding a Linux distribution', async () => {
@@ -4741,6 +4937,60 @@ test('T-PRD018 native timing offsets retain the terminal group outside the ten l
   assert.equal(nativePass.nativeTimingDiagnostics([]).terminalGroup.availability, 'unavailable');
   const unsafe = [{ ...rows[0], sourceDigest: 'secret\n::error::' }];
   assert.deepEqual(nativePass.nativeTimingDiagnostics(unsafe).timingAnnotations, []);
+  const coordinates = Array.from({ length: 1462 }, (_, index) => {
+    const startOffsetMs = index * 2053, groupMs = 1000 + index * 17;
+    return { ...rows[0], groupId: digest(['coordinate', index]), state: 3,
+      startOffsetMs, endOffsetMs: startOffsetMs + groupMs, groupMs, rootMs: groupMs - 0.125,
+      startedAt: new Date(epoch + startOffsetMs).toISOString(),
+      finishedAt: new Date(epoch + startOffsetMs + groupMs).toISOString() };
+  });
+  Object.assign(coordinates[0], { state: 0, startOffsetMs: null, endOffsetMs: null });
+  Object.assign(coordinates[1], { state: 1, startOffsetMs: null, endOffsetMs: null });
+  Object.assign(coordinates[2], { state: 2, endOffsetMs: null });
+  coordinates[3].state = 4;
+  coordinates[4].state = 5;
+  const bindings = { source: digest(['source']), selection: digest(['selection']),
+    policy: validationSchedulingPolicyDigest(), producer: 'partial' };
+  const projected = nativePass.nativeTimingCoordinateDiagnostics(coordinates, bindings);
+  const p = projected.timingProjection;
+  assert.equal(p.coordinates.length, coordinates.length);
+  assert.ok(p.quantumMs > 1, 'The bounded coordinate policy explicitly coarsens intervals, never silently truncates groups');
+  for (const [index, code] of p.coordinates.entries()) {
+    assert.equal(code % 6, coordinates[index].state);
+    const packed = Math.floor(code / 6);
+    for (const [tick, original] of [
+      [Math.floor(packed / p.base) - 1, coordinates[index].startOffsetMs],
+      [packed % p.base - 1, coordinates[index].endOffsetMs],
+    ]) {
+      if (original === null) assert.equal(tick, -1);
+      else assert.ok(tick * p.quantumMs <= original && original < (tick + 1) * p.quantumMs);
+    }
+  }
+  const notices = projected.timingAnnotations.map(line => JSON.parse(line.split('::').at(-1)));
+  const expanded = [];
+  for (const notice of notices.slice(1)) {
+    assert.equal(notice.start, expanded.length);
+    for (const code of notice.coordinates) {
+      if (code >= 0) expanded.push(code);
+      else expanded.push(...Array(-code).fill(expanded.at(-1)));
+    }
+  }
+  assert.equal(p.encoding, 'numeric-rle-v1');
+  assert.deepEqual(expanded, p.coordinates);
+  assert.deepEqual(p.longest, coordinates.slice(3).sort((a, b) => b.groupMs - a.groupMs)
+    .slice(0, 10).map(row => [coordinates.indexOf(row), row.groupMs, row.rootMs]));
+  assert.equal(projected.terminalGroup.availability, 'unavailable');
+  assert.ok(projected.timingAnnotations.length <= 10 &&
+    projected.timingAnnotations.every((line, index) => Buffer.byteLength(line) < (index ? 400 : 1024)) &&
+    projected.timingAnnotations.reduce((sum, line) => sum + Buffer.byteLength(line), 0) < 4096);
+  assert.notEqual(nativePass.nativeTimingCoordinateDiagnostics([...coordinates].reverse(), bindings).timingProjection.order,
+    p.order, 'The original declaration order is independently bound');
+  for (const bad of [
+    [{ ...coordinates[5], endOffsetMs: null }],
+    [{ ...coordinates[5], rootMs: 'secret\n::error::' }],
+    [{ ...coordinates[5], startOffsetMs: -1 }],
+    Array(2049).fill(coordinates[5]),
+  ]) assert.throws(() => nativePass.nativeTimingCoordinateDiagnostics(bad, bindings), { code: 'EVIDENCE' });
   assert.deepEqual(rows, before, 'Timing presentation cannot mutate original validated rows');
 });
 
