@@ -51,7 +51,7 @@ export const validationDeclarations = {
     "names": ["T-PRD018 Windows observer readiness retains published proof when its polling wake crosses the deadline"],
     "platforms": ["windows-x64"],
     "owner": "runner-termination-evidence-contract",
-    "reason": "PR-only deterministic controller regression: delayed polling must inspect published readiness without accepting missing, unsettled or wrong-source compiler proof. Process-local spawn, filesystem and monotonic-clock instrumentation is restored; no real compiler, process or critical promotion.",
+    "reason": "PR-only deterministic controller regression: delayed polling retains valid proof, rejects missing/unsettled/wrong-source proof and emits only closed startup facts for pending compilation, bridge failure and owner rejection. Process-local instrumentation is restored; no real compiler, process or critical promotion.",
     "prerequisites": ["Node; independent process-isolated root and owned repository-local marker fixtures"]
   }, {
     "names": ["T-PRD018 capture admission reserves its complete process tree while independent peers progress"],
@@ -132,8 +132,9 @@ import { startWindowsRuntimeObserver, validateObservation } from './windows-runt
 import { compileCoverage, prepareCoverage, renderCoverageSection, readCoverageSection,
   replaceCoverageSection, inspectCoverage } from '../src/coverage.mjs';
 
-async function settleRuntimeObserver(observer) {
+async function settleRuntimeObserver(observer, t) {
   const result = await observer.finalize();
+  t?.diagnostic(JSON.stringify({ nativeObserverStartup: await observer.startupFacts() }));
   if (result.cleanup !== 'awaited' || result.compilerSettled !== true) await stopTestAdmission();
   return result;
 }
@@ -394,7 +395,7 @@ test('T-PRD018 Windows native runtime observations retain original handle facts 
     const observers = [];
     t.after(async () => {
       for (const observer of observers) {
-        assert.equal((await settleRuntimeObserver(observer)).cleanup, 'awaited');
+        assert.equal((await settleRuntimeObserver(observer, t)).cleanup, 'awaited');
       }
       await fs.rm(directory, { recursive: true, force: true });
     });
@@ -487,7 +488,7 @@ setTimeout(()=>{clearInterval(barrier);process.exitCode=91;},8000).unref();
         }
       } finally {
         try {
-          const result = await settleRuntimeObserver(observer);
+          const result = await settleRuntimeObserver(observer, t);
           assert.equal(result.cleanup, 'awaited');
           assert.equal(result.compilerSettled, true);
           assert.equal(result.forcedObserverStop, false);
@@ -578,7 +579,8 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
       observerSha256: digest(await fs.readFile(path.resolve('test', 'windows-runtime-observer', 'observer.ps1'))),
       bridgeSha256: digest(await fs.readFile(path.resolve('test', 'windows-runtime-observer', 'bridge.cs'))),
     };
-    for (const mode of ['published', 'unsettled', 'wrong-source', 'missing']) {
+    for (const mode of ['published', 'unsettled', 'wrong-source', 'missing',
+      'pending-compiler', 'compile-failure', 'owner-rejected', 'private-failure']) {
       const originalSpawn = childProcess.spawn;
       const originalStat = fsPromises.stat;
       const originalNow = performance.now;
@@ -615,12 +617,29 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
         readiness = observer.ready.then(value => ({ value }), error => ({ error }));
         child.emit('spawn');
         await probed.promise;
-        if (mode === 'published' || mode === 'wrong-source') {
+        if (['pending-compiler', 'compile-failure', 'owner-rejected', 'private-failure'].includes(mode)) {
+          const phase = {
+            schema: 1, phase: 'entered', reason: 'none', elapsedMs: 1, utcMs: 1,
+            observerSha256: proof.observerSha256, bridgeSha256: proof.bridgeSha256,
+          };
+          await atomicWrite(observer.files.startupEntered, JSON.stringify(phase));
+          await atomicWrite(observer.files.startupCompiling, JSON.stringify({
+            ...phase, phase: 'compiling', elapsedMs: 2,
+          }));
+          if (mode !== 'pending-compiler') {
+            await atomicWrite(observer.files.startupFailed, JSON.stringify({
+              ...phase, phase: mode === 'owner-rejected' ? 'ownerBinding' : 'compile',
+              reason: mode === 'owner-rejected' ? 'imageMismatch' : 'bridgeUnavailable',
+              ...(mode === 'private-failure' ? { reason: 'caller-private-startup-value', rawPath: directory } : {}),
+            }));
+          }
+        }
+        if (['published', 'wrong-source', 'owner-rejected'].includes(mode)) {
           await atomicWrite(observer.files.compilerSettled, JSON.stringify({
             ...proof, ...(mode === 'wrong-source' ? { observerSha256: '0'.repeat(64) } : {}),
           }));
         }
-        if (mode !== 'missing') {
+        if (['published', 'unsettled', 'wrong-source'].includes(mode)) {
           await atomicWrite(observer.files.ready, JSON.stringify({
             schema: 2, ownerHandlePinned: true, compilerSandboxed: true,
           }));
@@ -634,8 +653,49 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
             ready: true, ownerHandlePinned: true, compilerSandboxed: true, compilerSettled: true,
           }, 'A delayed polling wake must not discard already-published affirmative proof');
         } else {
-          assert.equal(result.error?.message, 'observer-not-ready', `${mode}: fail closed`);
+          const prefix = 'observer-not-ready; startup=';
+          assert.ok(result.error?.message.startsWith(prefix), `${mode}: retain closed facts in the failure itself`);
+          const retained = JSON.parse(result.error.message.slice(prefix.length));
+          assert.equal(retained.scope, 'diagnostic-only');
+          assert.equal(retained.readiness.status,
+            ['unsettled', 'wrong-source'].includes(mode) ? 'rejected' : 'missing');
+          assert.ok(Buffer.byteLength(result.error.message) <= 4096);
+          assert.ok(!result.error.message.includes(directory));
+          assert.ok(!result.error.message.includes('caller-private-startup-value'));
+          const { sanitizeExecutionPayload } = await import('../src/validation-evidence.mjs');
+          assert.equal(sanitizeExecutionPayload(Buffer.from(JSON.stringify({
+            message: result.error.message,
+          }))).message, result.error.message, 'Provider annotations must retain the closed diagnostic message');
         }
+        const facts = await observer.startupFacts();
+        assert.equal(facts.scope, 'diagnostic-only');
+        assert.equal(facts.readiness.status, mode === 'published' ? 'verified' :
+          ['unsettled', 'wrong-source'].includes(mode) ? 'rejected' : 'missing');
+        assert.equal(facts.compilerReceipt, ['published', 'owner-rejected'].includes(mode) ? 'verified' :
+          mode === 'wrong-source' ? 'wrongSource' : 'missing');
+        if (mode === 'pending-compiler') {
+          assert.equal(facts.compiling.status, 'verified');
+          assert.equal(facts.failed.status, 'missing');
+          assert.equal(facts.compilerSettled, false, 'A compiling diagnostic is not compiler settlement');
+          await atomicWrite(observer.files.compilerSettled, JSON.stringify(proof));
+          await atomicWrite(observer.files.startupCompiled, JSON.stringify({
+            schema: 1, phase: 'compiled', reason: 'none', elapsedMs: 6000, utcMs: Date.now(),
+            observerSha256: proof.observerSha256, bridgeSha256: proof.bridgeSha256,
+          }));
+          const later = await observer.startupFacts();
+          assert.equal(later.compiled.status, 'verified');
+          assert.equal(later.compilerSettled, true);
+          assert.equal(facts.compilerSettled, false, 'Later proof cannot rewrite earlier diagnostic snapshots');
+          assert.equal(later.readiness.status, 'missing', 'Late compiler proof cannot manufacture readiness');
+        }
+        if (['compile-failure', 'owner-rejected'].includes(mode)) {
+          assert.equal(facts.failed.status, 'verified');
+          assert.equal(facts.failed.phase, mode === 'owner-rejected' ? 'ownerBinding' : 'compile');
+          assert.equal(facts.failed.reason, mode === 'owner-rejected' ? 'imageMismatch' : 'bridgeUnavailable');
+        }
+        if (mode === 'private-failure') assert.deepEqual(facts.failed, { status: 'invalid' });
+        assert.ok(!JSON.stringify(facts).includes(directory));
+        assert.ok(!JSON.stringify(facts).includes('caller-private-startup-value'));
       } finally {
         releaseProbe.resolve();
         child.emit('close', 0, null);
@@ -646,8 +706,9 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
         syncBuiltinESMExports();
         if (observer) {
           const result = await observer.finalize();
-          assert.equal(result.compilerSettled, mode === 'published');
-          assert.equal(result.cleanup, mode === 'published' ? 'awaited' : 'unknown');
+          const settled = ['published', 'owner-rejected', 'pending-compiler'].includes(mode);
+          assert.equal(result.compilerSettled, settled);
+          assert.equal(result.cleanup, settled ? 'awaited' : 'unknown');
           assert.equal(result.forcedObserverStop, false);
           assert.equal(result.observation, null, 'Injected markers supply no native observation credit');
         }
@@ -779,7 +840,7 @@ test('T-PRD018 command capture durably retains dispatched identity and sanitized
     const observers = [];
     t.after(async () => {
       for (const observer of observers) {
-        assert.equal((await settleRuntimeObserver(observer)).cleanup, 'awaited',
+        assert.equal((await settleRuntimeObserver(observer, t)).cleanup, 'awaited',
           'An unsettled native observer prevents fixture removal');
       }
       await fs.rm(directory, { recursive: true, force: true });
@@ -805,7 +866,7 @@ test('T-PRD018 command capture durably retains dispatched identity and sanitized
         } catch (error) {
           if (observer) {
             let startup;
-            try { startup = await settleRuntimeObserver(observer); }
+            try { startup = await settleRuntimeObserver(observer, t); }
             catch (settlementError) {
               throw new AggregateError([error, settlementError], 'Native startup and admission stop failed');
             }
@@ -956,7 +1017,7 @@ if(process.connected)process.disconnect();
           failure = failure ? new AggregateError([failure, error], 'Capture assertion and cleanup failed') : error;
         } finally {
           if (observer) {
-            try { nativeRuntime = await settleRuntimeObserver(observer); }
+            try { nativeRuntime = await settleRuntimeObserver(observer, t); }
             catch (error) {
               failure = failure ? new AggregateError([failure, error], 'Capture assertion and admission stop failed') : error;
             }

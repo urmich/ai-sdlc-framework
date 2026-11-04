@@ -1727,6 +1727,15 @@ policy workaround. If a readiness polling wake crosses its deadline, inspect
 the marker once more without adding another wait or extending the deadline.
 Published readiness still requires the unchanged schema, pinned-owner and
 source-bound compiler-settlement proofs; absence or invalid proof fails closed.
+Best-effort nonce-owned startup markers retain only source-bound closed phases,
+bounded elapsed/UTC observations and enumerated failures. Capture the return
+from synchronous `Add-Type` separately from later receipt/ready publication.
+Readiness failures include a closed diagnostic snapshot in the failure message
+itself, so existing sanitized provider failure annotations expose it without
+requiring log or artifact payload access. Later post-finalization diagnostics
+may retain additional proof but cannot change the earlier failed decision.
+These markers never establish readiness, compiler settlement, CPU/scheduling
+attribution or a correction of the unexplained hosted startup failure.
 Pin each supplied owner/target .NET `Process.Handle` once.
 Subsequent reads use that saved handle through `QueryFullProcessImageNameW`,
 `GetProcessTimes`, `WaitForSingleObject(handle, 0)` and `GetExitCodeProcess`.
@@ -1768,6 +1777,13 @@ four-slot PR-only broker regression models uncertain cleanup with owned stock
 Node roots; it checks queued/fresh rejection across failing-worker closure,
 original failure retention and independent peer completion. This fail-stop
 contains uncertainty but does not resolve it or fix native cancellation.
+Keep the original worker socket referenced while its admission-stop request
+awaits acknowledgement, restoring its idle unreferenced state after settlement.
+Otherwise the preload's `beforeExit` cleanup can close that same connection
+before the response arrives. A separate two-slot, process-isolated PR regression
+delays delivery of the real broker response and requires acknowledged stop on
+the original worker. This correction does not establish why a hosted native
+observer failed readiness or relax compiler-settlement requirements.
 Reserve five slots for the original root and three for the separate Windows
 native-fact regression, with compilation and target lifetime non-overlapping.
 The six-slot admission regression preserves independent peer reuse and refusal

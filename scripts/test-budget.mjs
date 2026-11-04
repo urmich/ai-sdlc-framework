@@ -493,9 +493,14 @@ export async function acquireTestWorker(slots = 1, { groupId = null, exclusiveRe
 export async function stopTestAdmission() {
   requireThat(workerClient && !workerClient.socket.destroyed,
     'BUDGET', 'Stopping test admission requires the original active worker allocation');
-  const result = await workerClient.request({ op: 'stop-admission' });
-  requireThat(result.admissionStopped === true, 'BUDGET', 'Test admission stop was not acknowledged');
-  return result;
+  const client = workerClient;
+  // The idle worker socket is unreferenced; retain it until fail-stop is acknowledged.
+  client.socket.ref();
+  try {
+    const result = await client.request({ op: 'stop-admission' });
+    requireThat(result.admissionStopped === true, 'BUDGET', 'Test admission stop was not acknowledged');
+    return result;
+  } finally { client.socket.unref(); }
 }
 
 export async function readTestBudget({ signal } = {}) {

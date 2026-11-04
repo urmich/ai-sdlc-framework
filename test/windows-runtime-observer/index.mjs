@@ -162,6 +162,17 @@ export async function startWindowsRuntimeObserver({ directory, ownerPid, expecte
   files.compilerDirectory = compilerDirectory;
   files.bridgeAssembly = path.join(compilerDirectory, `${nonce}.bridge.dll`);
   files.compilerSettled = path.join(resolved, `${nonce}.compiler-settled.json`);
+  files.startupEntered = path.join(resolved, `${nonce}.startup-entered.json`);
+  files.startupCompiling = path.join(resolved, `${nonce}.startup-compiling.json`);
+  files.startupCompiled = path.join(resolved, `${nonce}.startup-compiled.json`);
+  files.startupFailed = path.join(resolved, `${nonce}.startup-failed.json`);
+  const startedAt = performance.now();
+  const startedUtcMs = Date.now();
+  let readiness = { status: 'pending', elapsedMs: null, compilerReceipt: 'uninspected' };
+  let compilerReceipt = 'uninspected';
+  let spawnErrorCode = null;
+  let exitFact = null;
+  let resultReason = 'unavailable';
   const child = spawn(powershell, [
     '-NoLogo', '-NoProfile', '-NonInteractive', '-File', path.join(home, 'observer.ps1'),
     '-Directory', resolved, '-Nonce', nonce, '-OwnerPid', String(ownerPid),
@@ -177,6 +188,7 @@ export async function startWindowsRuntimeObserver({ directory, ownerPid, expecte
   let stopAttempted = false;
   child.once('spawn', () => { observerCreated = true; });
   child.on('error', error => {
+    spawnErrorCode = ['ENOENT', 'EACCES', 'EPERM', 'ENOEXEC'].includes(error?.code) ? error.code : 'other';
     if (!observerCreated && child.pid === undefined && !stopAttempted
       && ['ENOENT', 'EACCES', 'EPERM', 'ENOEXEC'].includes(error?.code)
       && error.syscall === `spawn ${powershell}` && error.path === powershell) {
@@ -186,6 +198,10 @@ export async function startWindowsRuntimeObserver({ directory, ownerPid, expecte
   });
   const exited = new Promise(resolve => child.once('close', (code, signal) => {
     closed = true;
+    exitFact = {
+      code: Number.isInteger(code) ? code : null,
+      signal: signal === null || ['SIGTERM', 'SIGKILL', 'SIGINT'].includes(signal) ? signal : 'other',
+    };
     resolve({ code, signal, spawnFailed });
   }));
   async function marker(kind, timeoutMs) {
@@ -220,29 +236,76 @@ export async function startWindowsRuntimeObserver({ directory, ownerPid, expecte
     try {
       const value = await smallJson(files.compilerSettled, 256);
       if (exactKeys(value, ['schema', 'compilerSettled', 'observerSha256', 'bridgeSha256'])
-        && value.schema === 1 && value.compilerSettled === true
-        && value.observerSha256 === compilerSources.observerSha256
-        && value.bridgeSha256 === compilerSources.bridgeSha256) compilerSettled = true;
-    } catch {}
+        && value.schema === 1 && value.compilerSettled === true) {
+        compilerReceipt = value.observerSha256 === compilerSources.observerSha256
+          && value.bridgeSha256 === compilerSources.bridgeSha256 ? 'verified' : 'wrongSource';
+        if (compilerReceipt === 'verified') compilerSettled = true;
+      } else compilerReceipt = 'invalid';
+    } catch (error) {
+      compilerReceipt = error.code === 'ENOENT' ? 'missing' : 'unreadable';
+    }
     return compilerSettled;
+  }
+  async function startupPhase(file, expected) {
+    try {
+      const value = await smallJson(file, 512);
+      if (!exactKeys(value, ['schema', 'phase', 'reason', 'elapsedMs', 'utcMs', 'observerSha256', 'bridgeSha256'])
+        || value.schema !== 1 || !number(value.elapsedMs) || !number(value.utcMs)
+        || !['entered', 'compiling', 'compiled', 'compilerScope', 'compile', 'settlementPublish',
+          'assemblyLoad', 'precisionProbe', 'ownerBinding', 'ownerWait', 'readyPublish'].includes(value.phase)
+        || !['none', 'bridgeUnavailable', 'unsupportedRuntime', 'captureUnavailable',
+          'creationAmbiguous', 'imageUnavailable', 'imageMismatch', 'ownerExited', 'ownerUnknown'].includes(value.reason)
+        || (expected !== 'failed' && (value.phase !== expected || value.reason !== 'none'))
+        || (expected === 'failed' && value.reason === 'none')) return { status: 'invalid' };
+      if (value.observerSha256 !== compilerSources.observerSha256
+        || value.bridgeSha256 !== compilerSources.bridgeSha256) return { status: 'wrongSource' };
+      return { status: 'verified', phase: value.phase, reason: value.reason,
+        elapsedMs: value.elapsedMs, utcMs: value.utcMs };
+    } catch (error) { return { status: error.code === 'ENOENT' ? 'missing' : 'unreadable' }; }
+  }
+  async function startupFacts() {
+    await refreshCompilerSettlement();
+    const [entered, compiling, compiled, failed] = await Promise.all([
+      startupPhase(files.startupEntered, 'entered'),
+      startupPhase(files.startupCompiling, 'compiling'),
+      startupPhase(files.startupCompiled, 'compiled'),
+      startupPhase(files.startupFailed, 'failed'),
+    ]);
+    return {
+      schema: 1, scope: 'diagnostic-only', startedUtcMs, readiness: { ...readiness },
+      compilerReceipt, compilerSettled, observerClosed: closed, observerExit: exitFact,
+      spawnErrorCode, resultReason, entered, compiling, compiled, failed,
+    };
   }
   const completed = exited.then(async observerExit => {
     let observation = null;
     try {
       const value = await smallJson(files.result);
-      if (validateObservation(value)) observation = value;
+      if (validateObservation(value)) {
+        observation = value;
+        resultReason = value.reason;
+      }
     } catch {}
     return { observation, observerExit, compilerSettled: await refreshCompilerSettlement() };
   });
   let isReady = false;
   const ready = marker('ready', 5000).then(async value => {
-    if (!exactKeys(value, ['schema', 'ownerHandlePinned', 'compilerSandboxed'])
-      || value.schema !== 2 || value.ownerHandlePinned !== true || value.compilerSandboxed !== true
-      || !await refreshCompilerSettlement()) {
-      throw new Error('observer-not-ready');
+    const valid = exactKeys(value, ['schema', 'ownerHandlePinned', 'compilerSandboxed'])
+      && value.schema === 2 && value.ownerHandlePinned === true && value.compilerSandboxed === true;
+    const settled = valid && await refreshCompilerSettlement();
+    readiness = {
+      status: value === null ? 'missing' : !valid ? 'invalid' : !settled ? 'rejected' : 'verified',
+      elapsedMs: Math.max(0, performance.now() - startedAt), compilerReceipt,
+      observedUtcMs: Date.now(),
+    };
+    if (!valid || !settled) {
+      throw new Error(`observer-not-ready; startup=${JSON.stringify(await startupFacts())}`);
     }
     isReady = true;
     return { ready: true, ownerHandlePinned: true, compilerSandboxed: true, compilerSettled: true };
+  }, error => {
+    readiness = { status: 'unreadable', elapsedMs: Math.max(0, performance.now() - startedAt), compilerReceipt };
+    throw error;
   });
   let requested = false;
   let finalization;
@@ -256,6 +319,7 @@ export async function startWindowsRuntimeObserver({ directory, ownerPid, expecte
     files,
     ready,
     completed,
+    startupFacts,
     async request({ pid, createdBeforeMs }) {
       if (!isReady || requested || closed || !Number.isInteger(pid) || pid <= 0 || pid === ownerPid
         || !Number.isSafeInteger(createdBeforeMs) || createdBeforeMs <= 0) {

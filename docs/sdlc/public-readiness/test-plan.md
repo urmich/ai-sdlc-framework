@@ -290,6 +290,17 @@ reject queued/fresh admission before and after its closure, preserve unknown
 cleanup, and let an already-running peer finish without signals. It creates no
 native compiler or observed target and cannot poison the enclosing test broker.
 
+The separate all-four-platform, two-slot PR-only root
+`T-PRD010 admission stop retains its original worker until delayed acknowledgement`
+uses a real owned broker and original preloaded Node worker. Delay delivery of
+the authenticated stop response with process-local socket instrumentation, then
+require acknowledgement and persistent stopped admission before worker exit.
+Restore instrumentation and settle the child and broker before owned cleanup.
+This runner-resource-contract regression has no prerequisite roots or shared
+external resources, creates no native compiler/target and does not enter
+critical27. Preserve its original-source failure and corrected-source pass;
+neither result explains the separate hosted `observer-not-ready` failure.
+
 Conservatively reserve five capture-root slots (worker, controller, command,
 taskkill and observer); the compiler finishes before target creation. The
 all-four-platform admission regression models this reservation in a six-slot
@@ -311,6 +322,16 @@ final marker inspection without another wait, and reject missing markers,
 unsettled compiler evidence and wrong-source proof. Its process-local spawn,
 filesystem and clock instrumentation is restored; it launches no real observer
 or compiler and cannot substitute for the original native control.
+Extend that same one-slot control with pending compilation, late affirmative
+compiler proof, compile failure, owner rejection and private/unknown input.
+Require only closed, source-validated startup phases and bounded numeric facts;
+reject arbitrary fields/reasons and exclude paths and caller values. The actual
+readiness failure message must retain its closed decision snapshot unchanged
+through the public sanitizer, for existing provider failure annotations rather
+than diagnostic-log-only visibility. Preserve the failed readiness decision
+after later settlement proof and keep all original deadlines and positive native
+assertions. These additions are diagnostic only: hosted startup cause remains
+unproven until an applicable original observation establishes it.
 All these roots remain outside critical27. New-source local,
 Review and native results remain NotRun until their actual executions; the prior
 24-of-25 native producer pass and recurring Windows failure remain historical,

@@ -22,6 +22,10 @@ export const validationDeclarations = {
     "root": "T-PRD010 uncertain native cleanup stops aggregate admission after its original worker closes",
     "minimumSlots": 4,
     "exclusiveResources": []
+  }, {
+    "root": "T-PRD010 admission stop retains its original worker until delayed acknowledgement",
+    "minimumSlots": 2,
+    "exclusiveResources": []
   }],
   "applicability": [{
     "names": ["T-PRD011 exclusive ready clocks exclude the previous holder capture without hiding eligible failures"],
@@ -47,6 +51,12 @@ export const validationDeclarations = {
     "owner": "runner-resource-contract",
     "reason": "PR-only authenticated aggregate fail-stop regression with an isolated broker, original failing worker, running peer and queued stock Node worker; modeled uncertainty creates no compiler or native target.",
     "prerequisites": ["Node and four aggregate worker slots; owned repository-local fixtures"]
+  }, {
+    "names": ["T-PRD010 admission stop retains its original worker until delayed acknowledgement"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "PR-only original worker/preload regression with a real isolated broker and delayed delivery of its authenticated stop response; no native compiler or critical promotion.",
+    "prerequisites": ["Node and two aggregate worker slots; owned repository-local process fixture"]
   }, {
     "names": [
       "T-PRD010 independent file workers overlap without sharing environment, module patches or fixture ownership",
@@ -75,6 +85,7 @@ export const validationDeclarations = {
   "plannedCases": [
     {"id": "T-PRD010", "selectors": [
       {"name": "T-PRD010 PR-description priority admits its isolated closure before queued work while the retained guard is live", "parents": []},
+      {"name": "T-PRD010 admission stop retains its original worker until delayed acknowledgement", "parents": []},
       {"name": "T-PRD010 uncertain native cleanup stops aggregate admission after its original worker closes", "parents": []}
     ]},
     {"id": "T-PRD011", "selectors": [
@@ -926,6 +937,57 @@ test('T-PRD010 impossible four-level resident lineage rejects before yielding an
     }
   }
 });
+
+test('T-PRD010 admission stop retains its original worker until delayed acknowledgement',
+  { timeout: 10000 }, async t => {
+    const root = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'admission-stop-ack-'));
+    const owner = await enterTestBudget({ workers: 1, fileCount: 1, inherited: null, parent: null, slot: null });
+    let child;
+    let completed;
+    t.after(async () => {
+      if (child?.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      await completed;
+      await owner.close();
+      await fs.rm(root, { recursive: true });
+    });
+    const script = path.join(root, 'worker.mjs');
+    await fs.writeFile(script, `
+import net from 'node:net';
+import assert from 'node:assert/strict';
+import {stopTestAdmission} from ${JSON.stringify(new URL('../scripts/test-budget.mjs', import.meta.url).href)};
+const originalEmit=net.Socket.prototype.emit;
+let delayed=false;
+net.Socket.prototype.emit=function(kind,...args){
+  if(kind==='data'&&!delayed&&String(args[0]).includes('"admissionStopped":true')){
+    delayed=true;
+    setTimeout(()=>originalEmit.call(this,kind,...args),200).unref();
+    return true;
+  }
+  return originalEmit.call(this,kind,...args);
+};
+try{
+  const result=await stopTestAdmission();
+  assert.equal(delayed,true);
+  assert.equal(result.complete,true);
+  assert.equal(result.admissionStopped,true);
+  console.log('owned-stop-acknowledged');
+}finally{net.Socket.prototype.emit=originalEmit;}
+`);
+    const environment = { ...process.env, ...owner.environment, NODE_OPTIONS: '', NODE_PATH: '' };
+    delete environment.NODE_TEST_CONTEXT;
+    const result = await new Promise((resolve, reject) => {
+      child = execFile(process.execPath, [
+        '--import', new URL('../scripts/test-budget-worker.mjs', import.meta.url).href, script,
+      ], { cwd: repositoryRoot, env: environment, windowsHide: true }, (error, stdout, stderr) => {
+        resolve({ code: error?.code ?? 0, stdout, stderr });
+      });
+      child.once('error', reject);
+      completed = new Promise(resolve => child.once('close', resolve));
+    });
+    assert.equal(result.code, 0, result.stdout + result.stderr);
+    assert.equal(result.stdout.trim(), 'owned-stop-acknowledged');
+    assert.equal((await owner.snapshot()).admissionStopped, true);
+  });
 
 test('T-PRD010 uncertain native cleanup stops aggregate admission after its original worker closes',
   { timeout: 30000 }, async t => {

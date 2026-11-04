@@ -47,6 +47,17 @@ function SourceHash([byte[]]$Bytes) {
     finally { $sha.Dispose() }
 }
 
+function Startup([string]$Kind, [string]$Phase, [string]$Reason,
+    [double]$ElapsedMs = -1, [long]$Utc = -1) {
+    if ($ElapsedMs -lt 0) { $ElapsedMs = $clock.Elapsed.TotalMilliseconds }
+    if ($Utc -lt 0) { $Utc = UtcMs }
+    Publish "startup-$Kind" ([ordered]@{
+        schema=1; phase=$Phase; reason=$Reason
+        elapsedMs=[Math]::Round($ElapsedMs, 3); utcMs=$Utc
+        observerSha256=$observerSha256; bridgeSha256=$bridgeSha256
+    })
+}
+
 function Released {
     return [IO.File]::Exists([IO.Path]::Combine($Directory, "$Nonce.release.json"))
 }
@@ -134,6 +145,7 @@ try {
         $result.reason = 'unsupportedRuntime'
         return
     }
+    $startupPhase = 'compilerScope'
     try {
         $compiler = [IO.Path]::GetFullPath([IO.Path]::Combine($Directory, 'compiler'))
         $temp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
@@ -144,14 +156,23 @@ try {
         $source = $utf8.GetString($sourceBytes)
         $bridgeSha256 = SourceHash $sourceBytes
         $observerSha256 = SourceHash ([IO.File]::ReadAllBytes($PSCommandPath))
+        try { Startup 'entered' 'entered' 'none' } catch {}
+        $startupPhase = 'compile'
+        try { Startup 'compiling' 'compiling' 'none' } catch {}
         Add-Type -TypeDefinition $source -Language CSharp -OutputAssembly $assembly -ErrorAction Stop
+        $compilerReturnedElapsedMs = $clock.Elapsed.TotalMilliseconds
+        $compilerReturnedUtcMs = UtcMs
         # CodeDom has returned from its synchronous compiler invocation. Nothing
         # after this marker launches another compiler; loading the DLL is separate.
+        $startupPhase = 'settlementPublish'
         Publish 'compiler-settled' ([ordered]@{
             schema=1; compilerSettled=$true
             observerSha256=$observerSha256; bridgeSha256=$bridgeSha256
         })
+        try { Startup 'compiled' 'compiled' 'none' $compilerReturnedElapsedMs $compilerReturnedUtcMs } catch {}
+        $startupPhase = 'assemblyLoad'
         Add-Type -Path $assembly -ErrorAction Stop
+        $startupPhase = 'precisionProbe'
         $precisionProbe = New-Object ObserverNativeSample
         $precisionProbe.CreationTicks = '116444736001234567'
         if ([ObserverNative]::CreatedBefore($precisionProbe, 123) -or
@@ -159,13 +180,22 @@ try {
         $result.compilerSandboxed = $true
     } catch {
         $result.reason = 'bridgeUnavailable'
+        try { Startup 'failed' $startupPhase 'bridgeUnavailable' } catch {}
         return
     }
     $ownerRecord = Identity
     $owner = Binding $OwnerPid $OwnerCreatedBeforeMs @('node', 'node24') $ownerRecord
-    if ($null -eq $owner) { $result.reason = 'ownerUnverified'; return }
+    if ($null -eq $owner) {
+        $result.reason = 'ownerUnverified'
+        try { Startup 'failed' 'ownerBinding' $ownerRecord.reason } catch {}
+        return
+    }
     $result.ownerHandlePinned = $true
-    if (-not (OwnerAlive)) { return }
+    if (-not (OwnerAlive)) {
+        try { Startup 'failed' 'ownerWait' $result.reason } catch {}
+        return
+    }
+    $startupPhase = 'readyPublish'
     Publish 'ready' ([ordered]@{schema=2; ownerHandlePinned=$true; compilerSandboxed=$true})
     $requestPath = [IO.Path]::Combine($Directory, "$Nonce.request.json")
     $readyAt = $clock.Elapsed.TotalMilliseconds
