@@ -332,6 +332,18 @@ than diagnostic-log-only visibility. Preserve the failed readiness decision
 after later settlement proof and keep all original deadlines and positive native
 assertions. These additions are diagnostic only: hosted startup cause remains
 unproven until an applicable original observation establishes it.
+Extend the same one-slot control by evaluating the actual settlement helper with
+modeled observer and admission boundaries. Check settled cleanup, unknown
+compiler lifetime, unknown observer cleanup and a rejected admission-stop request.
+Require the closed post-finalization snapshot on the original failure before
+admission stop, exact sanitizer preservation and the original stop error when it
+rejects. This control creates no new descendant, compiler, socket or timer and
+does not wrap the functional root in another runner or infer subtree settlement
+from runner closure. The original helper fails for missing final error facts;
+the original functional capture, mandatory real native-positive and isolated
+fail-stop controls remain required separately. This corrects diagnostic
+visibility, not fallback behavior or the unknown hosted startup cause, and
+supplies no native timing or compiler-lifetime credit.
 All these roots remain outside critical27. New-source local,
 Review and native results remain NotRun until their actual executions; the prior
 24-of-25 native producer pass and recurring Windows failure remain historical,

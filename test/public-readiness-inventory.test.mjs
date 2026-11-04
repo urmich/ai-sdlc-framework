@@ -51,7 +51,7 @@ export const validationDeclarations = {
     "names": ["T-PRD018 Windows observer readiness retains published proof when its polling wake crosses the deadline"],
     "platforms": ["windows-x64"],
     "owner": "runner-termination-evidence-contract",
-    "reason": "PR-only deterministic controller regression: delayed polling retains valid proof, rejects missing/unsettled/wrong-source proof and emits only closed startup facts for pending compilation, bridge failure and owner rejection. Process-local instrumentation is restored; no real compiler, process or critical promotion.",
+    "reason": "PR-only deterministic controller regression: delayed polling retains valid proof and rejects missing/unsettled/wrong-source proof. The actual settlement helper is evaluated with controlled observer/admission boundaries to retain final error facts before fail-stop, including stop failure. No real descendant, compiler or critical promotion.",
     "prerequisites": ["Node; independent process-isolated root and owned repository-local marker fixtures"]
   }, {
     "names": ["T-PRD018 capture admission reserves its complete process tree while independent peers progress"],
@@ -132,9 +132,14 @@ import { startWindowsRuntimeObserver, validateObservation } from './windows-runt
 import { compileCoverage, prepareCoverage, renderCoverageSection, readCoverageSection,
   replaceCoverageSection, inspectCoverage } from '../src/coverage.mjs';
 
-async function settleRuntimeObserver(observer, t) {
+async function settleRuntimeObserver(observer, t, startupFailure) {
   const result = await observer.finalize();
-  t?.diagnostic(JSON.stringify({ nativeObserverStartup: await observer.startupFacts() }));
+  const startup = await observer.startupFacts();
+  if (startupFailure) startupFailure.message += `; startupFinal=${JSON.stringify({
+    cleanup: result.cleanup, compilerSettled: result.compilerSettled,
+    forcedObserverStop: result.forcedObserverStop, releasePublished: result.releasePublished, startup,
+  })}`;
+  t?.diagnostic(JSON.stringify({ nativeObserverStartup: startup }));
   if (result.cleanup !== 'awaited' || result.compilerSettled !== true) await stopTestAdmission();
   return result;
 }
@@ -714,6 +719,45 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
         }
       }
     }
+    const source = await fs.readFile(fileURLToPath(import.meta.url), 'utf8');
+    const helper = source.slice(source.indexOf('async function settleRuntimeObserver('),
+      source.indexOf('function specification()'));
+    for (const mode of ['settled', 'compiler-unknown', 'observer-unknown', 'stop-failed']) {
+      const calls = [];
+      const originalStopError = new Error('Owned admission stop failed');
+      const result = {
+        cleanup: ['observer-unknown', 'stop-failed'].includes(mode) ? 'unknown' : 'awaited',
+        compilerSettled: mode !== 'compiler-unknown',
+        forcedObserverStop: false, releasePublished: true,
+      };
+      const startup = {
+        schema: 1, scope: 'diagnostic-only', observerClosed: mode !== 'observer-unknown',
+        compilerSettled: result.compilerSettled,
+        compilerReceipt: result.compilerSettled ? 'verified' : 'missing',
+      };
+      const context = createContext({ stopTestAdmission: async () => {
+        calls.push('stop');
+        if (mode === 'stop-failed') throw originalStopError;
+      } });
+      runInContext(`${helper}\nglobalThis.settle = settleRuntimeObserver;`, context);
+      const failure = new Error('observer-not-ready; startup={"observerClosed":false,"compilerSettled":false}');
+      const initialMessage = failure.message;
+      const settling = context.settle({
+        finalize: async () => { calls.push('finalize'); return result; },
+        startupFacts: async () => { calls.push('facts'); return startup; },
+      }, { diagnostic: () => { calls.push('diagnostic'); } }, failure);
+      if (mode === 'stop-failed') await assert.rejects(settling, error => error === originalStopError);
+      else assert.equal(await settling, result);
+      assert.deepEqual(calls, mode === 'settled'
+        ? ['finalize', 'facts', 'diagnostic'] : ['finalize', 'facts', 'diagnostic', 'stop']);
+      assert.ok(failure.message.startsWith(`${initialMessage}; startupFinal=`));
+      const retained = JSON.parse(failure.message.slice(`${initialMessage}; startupFinal=`.length));
+      assert.deepEqual(retained, { ...result, startup });
+      assert.equal(sanitizeExecutionPayload(Buffer.from(JSON.stringify({
+        message: failure.message,
+      }))).message, failure.message, `${mode}: final facts survive failure annotation sanitization`);
+      assert.ok(!failure.message.includes(originalStopError.message));
+    }
   });
 
 test('T-PRD018 capture admission reserves its complete process tree while independent peers progress',
@@ -866,9 +910,10 @@ test('T-PRD018 command capture durably retains dispatched identity and sanitized
         } catch (error) {
           if (observer) {
             let startup;
-            try { startup = await settleRuntimeObserver(observer, t); }
+            try { startup = await settleRuntimeObserver(observer, t, error); }
             catch (settlementError) {
-              throw new AggregateError([error, settlementError], 'Native startup and admission stop failed');
+              throw new AggregateError([error, settlementError],
+                `Native startup and admission stop failed; ${error.message}`);
             }
             if (startup.cleanup !== 'awaited' || startup.compilerSettled !== true) throw error;
           }

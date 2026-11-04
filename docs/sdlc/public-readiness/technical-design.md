@@ -1732,8 +1732,14 @@ bounded elapsed/UTC observations and enumerated failures. Capture the return
 from synchronous `Add-Type` separately from later receipt/ready publication.
 Readiness failures include a closed diagnostic snapshot in the failure message
 itself, so existing sanitized provider failure annotations expose it without
-requiring log or artifact payload access. Later post-finalization diagnostics
-may retain additional proof but cannot change the earlier failed decision.
+requiring log or artifact payload access. On optional startup failure, append a
+separate closed post-finalization snapshot to that same error before requesting
+aggregate admission stop. If admission stop also fails, preserve the enriched
+original message and both original errors in the aggregate failure. These facts
+may establish later settlement but cannot change the earlier failed decision.
+Affirmatively settled optional unavailability already permits the original
+functional capture assertions; this is not a fallback-policy correction or a
+waiver of the separate mandatory real native-observation control.
 These markers never establish readiness, compiler settlement, CPU/scheduling
 attribution or a correction of the unexplained hosted startup failure.
 Pin each supplied owner/target .NET `Process.Handle` once.
