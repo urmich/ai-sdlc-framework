@@ -14,10 +14,11 @@ MAX_FILE = 4 * 1024 * 1024
 MAX_NATIVE_JOURNAL = 16 * 1024 * 1024
 NATIVE_STAGE_JOURNALS = frozenset(
     f"{stage}.json.journal.ndjson"
-    for stage in ("unit", "required-units", "regression", "regression-catalog", "regression-retained")
+    for stage in ("unit", "required-units", "regression", "regression-catalog",
+                  "regression-retained", "regression-observer")
 ) | frozenset(
     f"{stage}-command.journal.ndjson"
-    for stage in ("regression-catalog", "regression-retained")
+    for stage in ("regression-catalog", "regression-retained", "regression-observer")
 )
 
 

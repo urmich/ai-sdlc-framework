@@ -32,7 +32,7 @@ import { previousReleasePins } from '../scripts/release-bundle.mjs';
 import { nativePrParts, nativeLegacyPrParts, nativePartJobKey, nativeFrameworkShardPlan,
   nativeResourceFacts, nativePrPartsForProtocol, nativeFrameworkShardProtocols, nativeFrameworkShardProtocol,
   nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
-  nativeCatalogIsolationFrameworkShardProtocol,
+  nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
   nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
 import { compileValidationInventory } from '../scripts/validation-inventory.mjs';
 import { expectedBodySdkRequirements } from './native-sdk-expectations.mjs';
@@ -2395,7 +2395,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.equal(previousResource.nativeResourcePolicy, 'arm-regression-allocation-v1');
   for (const protocol of nativeFrameworkShardProtocols) {
     const historical = structuredClone(historicalV8);
-    if ([nativeFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
+    if ([nativeFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
       nativeResourceAffinityFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
       'native-framework-shards-v5-root-components'].includes(protocol)) {
       historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = protocol;
@@ -2544,7 +2544,11 @@ with zipfile.ZipFile(sys.argv[2],"w",compression=zipfile.ZIP_DEFLATED) as bundle
     ['prefix-free-missing-request', [nonallocation[0]], { kind: 'cleanup', ownedPrefix: false }],
     ['valid-stage-journal', [...good, { name: 'regression.json.journal.ndjson',
       text: '{"kind":"diagnostic","text":"' + 'x'.repeat(1000) + '"}\n', repeat: 5000 }]],
-    ['valid-phase-journals', [...good, ...['regression-catalog', 'regression-retained'].flatMap(stage =>
+    ['valid-phase-journals', [...good,
+      { name: 'regression-observer.json', text: '{"kind":"synthetic-observer-report","complete":true}\n' },
+      { name: 'regression-observer-command.json', text: '{"kind":"synthetic-observer-command","complete":true}\n' },
+      { name: 'regression-observer-settlement.json', text: '{"kind":"synthetic-observer-settlement","settled":true}\n' },
+      ...['regression-catalog', 'regression-retained', 'regression-observer'].flatMap(stage =>
       [`${stage}.json.journal.ndjson`, `${stage}-command.journal.ndjson`].map(name =>
         ({ name, text: '{"kind":"diagnostic","text":"' + 'x'.repeat(1000) + '"}\n', repeat: 5000 })))]],
     ['oversized-other', [...good, { name: 'other.log', text: 'x', repeat: 4 * 1024 * 1024 + 1 }]],
@@ -2556,6 +2560,16 @@ with zipfile.ZipFile(sys.argv[2],"w",compression=zipfile.ZIP_DEFLATED) as bundle
       repeat: 16 * 1024 * 1024 + 1 }]],
     ['oversized-phase-journal', [...good, { name: 'regression-retained-command.journal.ndjson', text: 'x',
       repeat: 16 * 1024 * 1024 + 1 }]],
+    ['oversized-observer-report-journal', [...good, { name: 'regression-observer.json.journal.ndjson', text: 'x',
+      repeat: 16 * 1024 * 1024 + 1 }]],
+    ['oversized-observer-command-journal', [...good, { name: 'regression-observer-command.journal.ndjson', text: 'x',
+      repeat: 16 * 1024 * 1024 + 1 }]],
+    ['unknown-observer-journal', [...good, { name: 'regression-observer-extra.json.journal.ndjson', text: 'x',
+      repeat: 4 * 1024 * 1024 + 1 }]],
+    ['nested-observer-journal', [...good, { name: 'nested/regression-observer.json.journal.ndjson', text: 'x',
+      repeat: 4 * 1024 * 1024 + 1 }]],
+    ['executable-observer-journal', [...good,
+      { name: 'regression-observer-command.journal.ndjson', text: '{}\n', mode: 0o100755 }]],
     ['aggregate-journals', [good[0], { name: 'readiness-bundle.json', text: ' ', repeat: 16 * 1024 * 1024 },
       ...['unit', 'required-units', 'regression'].map(stage => ({
         name: `${stage}.json.journal.ndjson`, text: 'x', repeat: 16 * 1024 * 1024,
@@ -2584,6 +2598,14 @@ with zipfile.ZipFile(sys.argv[2],"w",compression=zipfile.ZIP_DEFLATED) as bundle
       assert.deepEqual(result['execution.json'], { kind: 'original-data' });
       assert.equal(result.texts['execution.json'], good[0].text);
       assert.equal(result.files.find(file => file.filename === 'execution.json').sha256, digest(good[0].text));
+      for (const entry of entries.filter(entry => entry.name.startsWith('regression-observer') &&
+        entry.name.endsWith('.json'))) {
+        assert.deepEqual(result[entry.name], JSON.parse(entry.text));
+        assert.equal(result.texts[entry.name], entry.text);
+        assert.deepEqual(result.files.find(file => file.filename === entry.name), {
+          filename: entry.name, size: Buffer.byteLength(entry.text), sha256: digest(entry.text),
+        });
+      }
       for (const entry of entries.filter(entry => entry.name.endsWith('.journal.ndjson'))) {
         const original = entry.text.repeat(entry.repeat);
         const journal = entry.name;

@@ -367,7 +367,8 @@ function macAdmissionPolicyMatches(document, protocol, priority, homebrewFirst, 
   };
   return [native.nativeSplitUnitFrameworkShardProtocol, native.nativeRootComponentFrameworkShardProtocol,
     native.nativeStableCostFrameworkShardProtocol, native.nativeResourceAffinityFrameworkShardProtocol,
-    native.nativeCatalogIsolationFrameworkShardProtocol, native.nativeFrameworkShardProtocol].includes(protocol) &&
+    native.nativeCatalogIsolationFrameworkShardProtocol, native.nativePhasedIsolationFrameworkShardProtocol,
+    native.nativeFrameworkShardProtocol].includes(protocol) &&
     digest(document.jobs?.['mac-admission'] ?? null) ===
       digest(expectedMacAdmissionJob(retainedFirst ? 'arm-bodies' : 'arm-regressions', false, false,
         boundedQueue, false, readyCritical)) &&
@@ -414,7 +415,8 @@ export function inspectWorkflowTrust(workflows) {
     const marker = selected.document.env?.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL;
     const rootComponents = [native.nativeRootComponentFrameworkShardProtocol,
       native.nativeStableCostFrameworkShardProtocol, native.nativeResourceAffinityFrameworkShardProtocol,
-      native.nativeCatalogIsolationFrameworkShardProtocol, native.nativeFrameworkShardProtocol].includes(marker) &&
+      native.nativeCatalogIsolationFrameworkShardProtocol, native.nativePhasedIsolationFrameworkShardProtocol,
+      native.nativeFrameworkShardProtocol].includes(marker) &&
       topologyProtocol === native.nativeSplitUnitFrameworkShardProtocol;
     if (marker !== undefined && !rootComponents) {
       result.blockers.push({ file: selected.file, code: 'NATIVE_SHARD_PROTOCOL_DIFFERS' });
@@ -644,7 +646,8 @@ export function nativeLaneTimings(parts, { frameworkShards = true,
     const completedAt = new Date(Math.max(...selected.map(({ job }) => Date.parse(job.completed_at)))).toISOString();
     const durationMs = Date.parse(completedAt) - Date.parse(startedAt);
     const { maximumMs, maximumInclusive } = frameworkShards &&
-      shardProtocol === native.nativeFrameworkShardProtocol && target === 'macos-x64' ?
+      [native.nativePhasedIsolationFrameworkShardProtocol, native.nativeFrameworkShardProtocol].includes(shardProtocol) &&
+        target === 'macos-x64' ?
       nativePhasedIntelLaneLimit : nativeLaneLimits[target];
     return { target, startedAt, completedAt, durationMs, maximumMs, maximumInclusive,
       withinBudget: durationMs < maximumMs || maximumInclusive && durationMs === maximumMs,

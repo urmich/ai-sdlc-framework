@@ -406,7 +406,7 @@ unit evidence before regression shards execute. Independently verify every
 part's SDK context, complete assertion union and allocated-prefix cleanup;
 missing, duplicated, overlapping or swapped parts cannot produce completeness.
 The current implementation candidate
-`native-framework-shards-v9-phased-intel-isolation` retains
+`native-framework-shards-v10-phased-intel-component-rebalance` retains
 v4's four
 explicit platform-specific unit-to-regression job groups. A platform's unit
 producers must all complete successfully, including retention and cleanup, before
@@ -473,7 +473,7 @@ selected closure through existing bootstrap requirements, retaining genuine
 absence/nonallocation evidence and all required tool assertions elsewhere.
 Isolation is a measurement hypothesis: fresh native results must establish
 both the catalog service and non-starved secondary tails within the lane limit.
-V9 replaces permanent catalog-only primary ownership with a qualified,
+Historical v9 replaces permanent catalog-only primary ownership with a qualified,
 two-phase assignment on the same existing Intel body-0. The first phase executes
 the complete catalog component alone. Only after its successful owned process
 execution and verified cleanup settlement may the second phase execute the
@@ -530,6 +530,41 @@ original report, report journal, command, command journal and settlement receipt
 `verifyNativePhaseSettlement` binds the phase, context, command, report and
 command-journal digests to actual successful owned-process settlement before
 the successor can start. Missing or borrowed originals cannot establish it.
+V10 preserves v9 through `nativePhasedIsolationFrameworkShardProtocol` and adds
+the strict `nativePlacementPhasesV10` literal and
+`native-intel-primary-phases-v2` contract. Its source-qualified third phase,
+`regression-observer`, moves only the complete standalone observer component
+from an existing secondary onto the same primary after retained-phase success
+and verified owned-process/worker/cleanup settlement. Authenticate the C70
+source/run/attempt, exact observer source and full assertion/resource/component
+shape, Intel target, Node 24.20.0 and fourteen-slot capacity. The component has
+one root, one assertion, minimum one slot and no dependency or exclusive-resource
+edges; a changed source, descendant, resource or connected component prevents
+the qualified phase assignment and retains explicit safe fallback.
+The unrelated protocol-row count changes the observer file's current digest:
+authenticate that exact current file separately from C70's observed source
+digest and retain the byte-identical selected callback digest as provenance.
+This count-only maintenance transfers no historical passing or timing credit.
+Repartition the remaining whole components across the existing secondaries.
+No producer, worker allowance, original assertion or within-phase scheduling
+policy changes. Preserve v1-v9 assignments, serialized identities and literals;
+captured v9 requires neither the v10 phase literal nor its third phase.
+Derive SDK requirements from all three selected closures: the qualified observer
+requires Python, so the primary cannot retain the former Python omission.
+Keep separate original reports/journals, command journals and settlement receipts
+for every phase, with the same disjoint complete producer union, failure barriers
+and producer-wide ten-notice bound. The bounded data-only artifact reader must
+admit the observer report and command journals through its closed stage allowlist,
+without accepting arbitrary names or changing byte/path/content limits.
+Preserve all nineteen existing protocol/bootstrap scenarios, including historical
+v9, and append the current v10 twentieth scenario rather than replacing a row.
+The source-qualified move is a placement hypothesis motivated by C70's observed
+primary/secondary imbalance, not a predicted saving or native timing pass.
+Require fresh complete native correctness and the unchanged whole-lane limits.
+The independent v9/v10 phase-settlement controls bind selection writers to each
+existing per-mode owned fixture root. Check descriptor bytes below that root
+after actual commands settle; cleanup removes only the owned fixture after
+verified process settlement, never checkout-global paths inferred absent earlier.
 Captured v6 planner source must carry the authentic adopted `nativePlacementCosts`
 literal. V7 additionally requires authentic `nativePlacementAffinities` and
 `nativePlacementCostsV7` strict JSON literals. Reject missing, computed, duplicate

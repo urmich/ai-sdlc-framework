@@ -22,6 +22,7 @@ import { nativeLegacyPrParts, nativeFrameworkShardPlan, nativeFrameworkShardProt
   nativePlacementCosts, nativePlacementAffinities, nativePlacementCostsV7,
   nativeResourceAffinityFrameworkShardProtocol, nativePlacementCostsV8, nativePlacementIsolationV8,
   nativeCatalogIsolationFrameworkShardProtocol, nativePlacementCostsV9, nativePlacementPhasesV9,
+  nativePhasedIsolationFrameworkShardProtocol, nativePlacementPhasesV10,
   verifyNativePhaseSettlement,
   nativePartJobKey, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
 import { nativeResourceFacts, nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
@@ -190,25 +191,31 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
   files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
     `export const nativeFrameworkShardProtocol = '${shardProtocol}';\n`);
   if ([nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
-    nativeCatalogIsolationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
+    nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementCosts = Object.freeze(${JSON.stringify(nativePlacementCosts)});\n`);
   }
   if ([nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
-    nativeFrameworkShardProtocol].includes(shardProtocol)) {
+    nativePhasedIsolationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementAffinities = Object.freeze(${JSON.stringify(nativePlacementAffinities)});\n` +
       `export const nativePlacementCostsV7 = Object.freeze(${JSON.stringify(nativePlacementCostsV7)});\n`);
   }
-  if ([nativeCatalogIsolationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
+  if ([nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementCostsV8 = Object.freeze(${JSON.stringify(nativePlacementCostsV8)});\n` +
       `export const nativePlacementIsolationV8 = Object.freeze(${JSON.stringify(nativePlacementIsolationV8)});\n`);
   }
-  if (shardProtocol === nativeFrameworkShardProtocol) {
+  if ([nativePhasedIsolationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementCostsV9 = Object.freeze(${JSON.stringify(nativePlacementCostsV9)});\n` +
       `export const nativePlacementPhasesV9 = Object.freeze(${JSON.stringify(nativePlacementPhasesV9)});\n`);
+  }
+  if (shardProtocol === nativeFrameworkShardProtocol) {
+    files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
+      `export const nativePlacementPhasesV10 = Object.freeze(${JSON.stringify(nativePlacementPhasesV10)});\n`);
   }
   files.set('scripts/test-scheduling.mjs', schedulingSource);
   const schedulingPolicy = sourceValidationSchedulingPolicy([{ file: 'scripts/test-scheduling.mjs', contents: schedulingSource }]);
@@ -554,7 +561,10 @@ export function laneData(source, candidate, revisions, target, { prNumber = 1, e
         assertion.file === test.file && assertion.name === test.name));
     const { files, args, selectorName } = selectedStage;
     const pattern = stage === 'unit' ? undefined : selectorName;
-    const [start, finish] = selectedStage.phase ? selectedStage.phase.index === 0 ? [15, 30] : [31, 50] :
+    const [start, finish] = selectedStage.phase ?
+      selectedStage.phase.protocol === nativePlacementPhasesV10.protocol ?
+        [[15, 26], [27, 38], [39, 50]][selectedStage.phase.index] :
+        selectedStage.phase.index === 0 ? [15, 30] : [31, 50] :
       [[7, 10], [11, 14], [15, 50]][index];
     const expectedGroups = validationExecutionGroups(source.inventory, { files, pattern, preserveOrder: true });
     const concurrency = Math.min(resources.workerCapacity, expectedGroups.length);
@@ -744,7 +754,7 @@ export function laneData(source, candidate, revisions, target, { prNumber = 1, e
   data.set('readiness.md', '# Controlled provider fixture\nNot actual native acceptance.\n');
   for (const [file, report] of [...data]) {
     if (file.endsWith('.json') && report.kind === 'validation-command' &&
-      !nativePlacementPhasesV9.phases.some(phase => file === `${phase.name}-command.json`)) {
+      !selectedStages.some(stage => stage.phase && file === `${stage.name}-command.json`)) {
       data.set(`${file.slice(0, -5)}.journal.ndjson`, [
         { sequence: 1, observedAt: report.startedAt, kind: 'command-start',
           command: report.command, cwd: report.cwd, context: report.context },
@@ -913,6 +923,8 @@ export async function observerApiFixture(t, options = {}) {
       .map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n';
   }
   const ci = options.frameworkShards ? shardProtocol === nativeFrameworkShardProtocol ? currentCi :
+    shardProtocol === nativePhasedIsolationFrameworkShardProtocol ? currentCi.replaceAll(
+      nativeFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol) :
     shardProtocol === nativeCatalogIsolationFrameworkShardProtocol ? currentCi.replace(
       nativeFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol) :
     splitHistoricalProtocols.includes(shardProtocol) ?

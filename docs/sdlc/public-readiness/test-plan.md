@@ -104,7 +104,8 @@ before their deadlines begin; missing aggregate allocation cannot be called
 successful overlap. Resource matching is part of source/configuration evidence.
 The versioned native-protocol regression retains its original root and all
 seventeen original complete protocol/bootstrap scenarios, plus the historical
-v8/bootstrap eighteenth row and current v9/bootstrap nineteenth row. Reserve four root slots before
+v8/bootstrap eighteenth row, historical v9/bootstrap nineteenth row and current
+v10/bootstrap twentieth row. Reserve four root slots before
 setup, then run whole scenarios in isolated children under the existing shared
 producer budget, bounded to four and the actual caller allocation. Environment
 changes, SDK capabilities, original verification, negative controls, projection,
@@ -1714,7 +1715,8 @@ the original subset. A new legitimate test must not erase preservation checks.
    supply the prerequisite. Include the unit barrier, every part's provisioning,
    evidence retention and cleanup in the whole-lane elapsed time.
    For current implementation candidate
-   `native-framework-shards-v9-phased-intel-isolation` and historical
+   `native-framework-shards-v10-phased-intel-component-rebalance` and historical
+   `native-framework-shards-v9-phased-intel-isolation` and
    `native-framework-shards-v8-intel-catalog-isolation` and
    `native-framework-shards-v7-resource-affinity-components` and
    `native-framework-shards-v4-split-intel-units` and
@@ -1729,7 +1731,7 @@ the original subset. A new legitimate test must not erase preservation checks.
    unions including descendants, dependencies and exclusive resources. The new
    Intel producer has no unit prerequisite of its own. Every Intel regression
    must wait for both unit jobs, not a borrowed ARM/original-unit result.
-   Current v9 retains v8/v7/v6's complete dependency/exclusive-resource-connected root
+   Current v10 retains v9/v8/v7/v6's complete dependency/exclusive-resource-connected root
    components and places them across the existing bodies using qualified observed
    work costs and stable exact file/root planning identities. Historical source costs are
    explicit scheduling leads only, never current execution credit or predicted
@@ -1740,7 +1742,7 @@ the original subset. A new legitimate test must not erase preservation checks.
    hosts, but descendants and connected components must remain together.
    Body file lists may overlap; exact source-bound escaped full-name selectors
    must preserve the disjoint complete assertion union and reject ambiguity.
-   Keep within-phase scheduling policy v9 byte-identical and replay v1-v8 assignments and
+   Keep within-phase scheduling policy v9 byte-identical and replay v1-v9 assignments and
    serialized identities exactly, including v5's original count/hash placement
    and v6's unchanged `nativePlacementCosts` table and SDK reconstruction.
    V7's separate `nativePlacementCostsV7` overlay contains ten completed Intel
@@ -1817,12 +1819,56 @@ the original subset. A new legitimate test must not erase preservation checks.
    `regression-retained` through `verifyNativePhaseSettlement` and the separate
    original report/journal, command/journal and settlement receipt, bound to
    phase/context/command/report/command-journal identities.
-   V9 Intel timing boundaries must pass 1,499,999ms but reject 1,500,000ms;
+   V9/V10 Intel timing boundaries must pass 1,499,999ms but reject 1,500,000ms;
    genuine v1-v8 originals retain their strict 1,200,000ms historical limit.
    Phase isolation is a measurement candidate: observed service sums can still
    exceed twenty-five minutes and longer primary allocation may affect secondary
    queues. Require fresh whole-lane measurement; no local fixture result,
    historical cost or passing phase grants a native latency pass.
+   V10 adds the source-qualified `regression-observer` third phase on the same
+   Intel primary after both earlier phases successfully settle their owned
+   processes, workers and cleanup. Move only the entire standalone observer
+   component identified by original C70 source/run/attempt and exact source,
+   closure and resource shape; preserve its one-root/one-assertion, one-slot
+   selection and absence of dependency/exclusive-resource edges. Reject changed
+   source, descendants, resources, connected components, runtime or capacity
+   without splitting a closure, emptying a body or inventing a phase.
+   The unrelated protocol-count edit must authenticate its exact new current
+   file digest while preserving the original C70 observed digest separately;
+   verify that the selected callback remains byte-identical rather than
+   relabelling changed source as an observed execution.
+   Repartition remaining whole components across the two existing secondaries.
+   Keep all twenty-five producers, fourteen-slot bodies, four-worker units and
+   within-phase scheduling unchanged. Authenticate `nativePlacementPhasesV10`
+   and `native-intel-primary-phases-v2`; historical v9 uses
+   `nativePhasedIsolationFrameworkShardProtocol`, its original v1 phase contract,
+   assignments and literals without requiring v10 additions.
+   The three new PR-only roots in `test/public-readiness-native.test.mjs` are:
+   `T-PRD017 native v10 moves only the qualified complete observer component into a settled primary phase`;
+   `T-PRD017 native v10 rejects changed observer qualification and preserves historical v9`;
+   `T-PRD017 native v10 primary settles every owned phase and blocks failed observer successors`.
+   The first two require one slot each; the last requires two for owned children.
+   The native-validation maintainer owns their network-free, process-isolated
+   fixtures; no critical promotion, shared external resources or callback
+   concurrency is introduced. Preserve original-source failure and corrected
+   local proof separately from the fresh complete local gate, Review and native
+   execution, whose current statuses remain NotRun until actual results exist.
+   Verify all three separate phase originals and their complete disjoint source
+   assertions, genuine combined Python requirement, exact settlement identities,
+   failed/uncertain predecessor rejection and absent successor dispatch.
+   Run both independent v9/v10 phase controls concurrently with their declared
+   two slots each. Bind each VM's selection writer to its existing per-mode
+   owned fixture root and verify descriptor bytes there after command settlement.
+   Never infer ownership of checkout-global selections from an earlier absence
+   check or remove another root's descriptors. Preserve all mode/failure/cleanup
+   assertions; this ownership regression extends existing PR-only roots.
+   Extend the existing bounded data-only artifact-acquisition control to admit
+   the observer report/command journals while retaining all unknown-name,
+   traversal, executable-content and byte-bound rejections. Preserve all original
+   nineteen complete causal protocol/bootstrap rows and append v10 as row twenty;
+   no historical row or required descendant may disappear. These controls supply
+   no native timing credit: the qualified move still requires fresh whole-lane
+   correctness and strict Intel under-twenty-five-minute acceptance.
    The three PR-only roots in `test/public-readiness-native.test.mjs` are
    `T-PRD017 native protocol4 retains its exact historical file and assertion assignments`,
    `T-PRD017 native protocol5 spreads independent same-file roots and executes connected complete closures exactly once`,
