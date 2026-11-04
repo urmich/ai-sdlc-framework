@@ -11,8 +11,8 @@ permissions:
   contents: read
 
 env:
-  SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL: native-framework-shards-v6-stable-cost-components
-  SDLC_MAC_ADMISSION_POLICY: arm-regression-allocation-v9-ready-critical-fairness
+  SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL: native-framework-shards-v7-resource-affinity-components
+  SDLC_MAC_ADMISSION_POLICY: arm-regression-allocation-v10-intel-primary-first
   # Representative public regression input, not an installer version-support whitelist.
   SUPPORTED_PREVIOUS_REPOSITORY: urmich/ai-sdlc-framework
   SUPPORTED_PREVIOUS_VERSION: '0.3.1'
@@ -1432,7 +1432,7 @@ jobs:
           retention-days: 90
 
   native-mi:
-    needs: [intent, source, native-units-mi]
+    needs: [intent, source, native-units-mi, intel-retained-admission]
     if: ${{ needs.intent.outputs.requires-native == 'true' }}
     name: native-${{ matrix.role }}
     strategy:

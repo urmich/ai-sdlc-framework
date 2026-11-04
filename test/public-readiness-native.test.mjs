@@ -9,6 +9,11 @@ export const validationDeclarations = {
       "T-PRD017 unrelated source edits preserve planning ownership but invalidate native execution identity",
       "T-PRD017 native cost fallback retains connected closures and rejects malformed inventories",
       "T-PRD017 native placement v6 requires adopted literal cost source and preserves v1 through v5 mappings",
+      "T-PRD017 native v7 coassigns only qualified complete ARM affinity components",
+      "T-PRD017 native v7 falls back for changed affinity closures resources and components",
+      "T-PRD017 native v7 adopts measured Intel leads while preserving published v6 placement",
+      "T-PRD017 native v7 authenticates all adopted literals without relabelling historical v6",
+      "T-PRD018 native timing offsets retain the terminal group outside the ten longest notices",
       "T-PRD017 native protocol5 and historical4 retain source-bound observer and SDK reconstruction"
     ],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
@@ -86,6 +91,16 @@ export const validationDeclarations = {
     {"root": "T-PRD017 native cost fallback retains connected closures and rejects malformed inventories",
       "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD017 native placement v6 requires adopted literal cost source and preserves v1 through v5 mappings",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD017 native v7 coassigns only qualified complete ARM affinity components",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD017 native v7 falls back for changed affinity closures resources and components",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD017 native v7 adopts measured Intel leads while preserving published v6 placement",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD017 native v7 authenticates all adopted literals without relabelling historical v6",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD018 native timing offsets retain the terminal group outside the ten longest notices",
       "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD017 native protocol5 spreads independent same-file roots and executes connected complete closures exactly once",
       "minimumSlots": 2, "exclusiveResources": []},
@@ -234,9 +249,15 @@ requireShortHomebrewPrefix = value => value;
   beginHomebrewPrefixChild: typeof beginHomebrewPrefixChild === 'function' ? beginHomebrewPrefixChild : undefined});`, context);
 }
 
+function unshardedNativeAffinityCapacityMatches(assignment) {
+  assert.equal(assignment, null, 'Controlled native lifecycle fixtures must remain unsharded');
+  return true;
+}
+
 test('TOOL03 actual native child boundary quarantines a surviving detached writer before outer cleanup',
   { timeout: 45000 }, async t => {
-    for (const mode of ['settled-failure', 'pre-lifecycle-failure', 'controller-exit', 'controller-cancel']) {
+    for (const mode of ['settled-failure', 'pre-lifecycle-failure', 'controller-exit', 'controller-cancel',
+      'controller-exit-before-first-stream']) {
       const settledFailure = mode === 'settled-failure' || mode === 'pre-lifecycle-failure';
       const directory = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'tool06-boundary-'));
       const checkout = path.join(directory, 'workspace', 'source');
@@ -290,11 +311,26 @@ const env=process.env;const directory=env.SDLC_BOUNDARY_DIRECTORY;const control=
 const token=env.SDLC_BOUNDARY_TOKEN;const sourceSha=digest(await fs.readFile(import.meta.filename));
 if(process.argv[2]==='writer'){
  const identity={pid:process.pid,parentPid:process.ppid,token,creation:performance.timeOrigin,sourceSha};
+ for(const file of [path.join(env.SDLC_BOUNDARY_AMBIENT,'writer-stream'),path.join(env.SDLC_BOUNDARY_PREFIX,'tap','writer-stream')]){
+  await fs.appendFile(file,'owned\\n');
+ }
  await atomicWrite(path.join(control,'writer-ready.json'),JSON.stringify(identity));
  const deadline=Date.now()+30000;let answered='';
  while(Date.now()<deadline){
   const request=await fs.readFile(path.join(control,'decision.json'),'utf8').then(JSON.parse,e=>{if(e.code!=='ENOENT')throw e;return null;});
-  if(request&&request.id!==answered){answered=request.id;await atomicWrite(path.join(control,'ack-'+request.id+'.json'),JSON.stringify({...identity,challenge:request.id}));}
+  if(env.SDLC_BOUNDARY_MODE==='controller-exit-before-first-stream'&&!request){
+   if(await fs.stat(path.join(control,'release')).catch(e=>{if(e.code!=='ENOENT')throw e;return null;}))break;
+   await pause(10);continue;
+  }
+  if(request&&request.id!==answered){
+   answered=request.id;await atomicWrite(path.join(control,'ack-'+request.id+'.json'),JSON.stringify({...identity,challenge:request.id}));
+   if(env.SDLC_BOUNDARY_MODE==='controller-exit-before-first-stream'){
+    while(!await fs.stat(path.join(control,'stream-observed')).catch(e=>{if(e.code!=='ENOENT')throw e;return null;})){
+     if(await fs.stat(path.join(control,'release')).catch(e=>{if(e.code!=='ENOENT')throw e;return null;}))break;
+     await pause(10);
+    }
+   }
+  }
   if(await fs.stat(path.join(control,'release')).catch(e=>{if(e.code!=='ENOENT')throw e;return null;}))break;
   for(const file of [path.join(env.SDLC_BOUNDARY_AMBIENT,'writer-stream'),path.join(env.SDLC_BOUNDARY_PREFIX,'tap','writer-stream')]){
    await fs.appendFile(file,'owned\\n').catch(e=>{if(e.code!=='ENOENT')throw e;});
@@ -402,6 +438,7 @@ if(process.argv[2]==='writer'){
         allocateAmbientDirectory: async () => ({ directory: ambient, dispose: () => fs.rm(ambient, { recursive: true }) }),
         fs, syntheticReleaseContextVariable: 'SDLC_OWNED_FIXTURE', readOptional: async () => bootstrapReport,
         requireNativeBootstrapCapability: () => ({}), requireNativeCryptoEnvironment() {}, nativeResourceFacts: () => ({}),
+        nativeAffinityCapacityMatches: unshardedNativeAffinityCapacityMatches,
         writeJson: async (file, value) => fs.writeFile(file, JSON.stringify(value)),
         probeNativeSdk: async () => ({}), nativeConfigurationDigest: () => digest('config'),
         testSpecificationDigest: () => digest('spec'), validationInventoryDigest: () => digest('inventory'),
@@ -438,7 +475,9 @@ if(process.argv[2]==='writer'){
           assert.equal(await fs.readFile(path.join(ambient, 'lease'), 'utf8'), 'original ambient lease');
           assert.equal(await fs.readFile(path.join(prefix, 'lease'), 'utf8'), 'original prefix lease');
           assert.equal(await fs.readFile(path.join(nativeDirectory, 'lease'), 'utf8'), 'original native evidence lease');
+          await fs.access(path.join(ambient, 'writer-stream'));
           await fs.access(path.join(prefix, 'tap', 'writer-stream'));
+          if (mode === 'controller-exit-before-first-stream') await fs.writeFile(path.join(control, 'stream-observed'), token);
           await assert.rejects(api.cleanupHomebrewPrefix({ ...options, run: async () => fs.rmdir(prefix) }));
         }
       } finally {
@@ -1517,6 +1556,7 @@ requireShortHomebrewPrefix = value => value;
           readOptional: async () => bootstrapped.report,
           requireNativeBootstrapCapability: () => ({}), requireNativeCryptoEnvironment() {},
           nativeResourceFacts: () => ({}), beginHomebrewPrefixStage: begin,
+          nativeAffinityCapacityMatches: unshardedNativeAffinityCapacityMatches,
           writeJson: async (file, value) => {
             if (mode === 'native-retention' && path.basename(file) === 'producer.json') throw primary;
             return fs.writeFile(file, JSON.stringify(value));
@@ -1625,6 +1665,7 @@ test('TOOL03 native failure retains exact ambient workspace and lease for unsett
         node: nativeToolchain.node, platform: 'win32', architecture: 'x64', resources: {} } }),
       requireNativeBootstrapCapability: () => ({}), requireNativeCryptoEnvironment() {},
       nativeResourceFacts: () => ({}), writeJson: async (file, value) => fs.writeFile(file, JSON.stringify(value)),
+      nativeAffinityCapacityMatches: unshardedNativeAffinityCapacityMatches,
       probeNativeSdk: async (_, run) => {
         await run({ name: 'owned-command', command: process.execPath, args: [] });
         throw primary;
@@ -2464,13 +2505,36 @@ test('T-PRD018 native timing notices retain only ten source-bound actual group a
     groupId: group.id, rootId: group.rootId, sourceDigest: group.sourceDigest,
     groupMs: Date.parse(group.finishedAt) - Date.parse(group.startedAt),
     rootMs: report.executions.find(row => row.groupId === group.id).durationMs,
+    stage: stages[reports.indexOf(report)].name, startedAt: group.startedAt, finishedAt: group.finishedAt,
+    startOffsetMs: Date.parse(group.startedAt) - Date.parse(options.startedAt),
+    endOffsetMs: Date.parse(group.finishedAt) - Date.parse(options.startedAt),
   }))).sort((left, right) => right.groupMs - left.groupMs ||
-    left.groupId.localeCompare(right.groupId)).slice(0, 10);
-  assert.deepEqual(finalized.timingAnnotations, expected.map(row =>
+    left.groupId.localeCompare(right.groupId));
+  const terminal = [...expected].sort((left, right) => Date.parse(right.finishedAt) -
+    Date.parse(left.finishedAt) || left.groupId.localeCompare(right.groupId))[0];
+  assert.equal(finalized.terminalGroup.groupId, terminal.groupId);
+  const last = row => row.finishedAt === terminal.finishedAt;
+  const terminalNotice = { group: terminal.groupId, root: terminal.rootId, source: terminal.sourceDigest,
+    startMs: terminal.startOffsetMs, endMs: terminal.endOffsetMs, ties: expected.filter(last).length };
+  const expectedAnnotations = expected.slice(0, 10).map((row, index) =>
     `::notice title=Native group timing::group=${row.groupId} root=${row.rootId} source=${row.sourceDigest} ` +
-    `groupMs=${row.groupMs} rootMs=${row.rootMs} group=completed producer=partial`));
-  assert.ok(finalized.timingAnnotations.every(line => Buffer.byteLength(line) < 400 &&
+    `groupMs=${row.groupMs} rootMs=${row.rootMs} group=completed producer=partial ` +
+    `startMs=${row.startOffsetMs} endMs=${row.endOffsetMs} last=${last(row)}` +
+    (index === 0 ? ` envelopeMs=NA terminal=${JSON.stringify(terminalNotice)}` : ''));
+  for (const [index, actual] of finalized.timingAnnotations.entries()) {
+    const [prefix, capsule] = actual.split(' terminal=');
+    const [expectedPrefix, expectedCapsule] = expectedAnnotations[index].split(' terminal=');
+    assert.equal(prefix, expectedPrefix, `Exact timing notice ${index}`);
+    if (index === 0) {
+      const actualTerminal = JSON.parse(capsule);
+      for (const [key, value] of Object.entries(terminalNotice))
+        assert.equal(actualTerminal[key], value, `Exact terminal ${key}`);
+      assert.equal(digest(capsule), digest(expectedCapsule), 'Exact bounded terminal encoding');
+    }
+  }
+  assert.ok(finalized.timingAnnotations.every((line, index) => Buffer.byteLength(line) < (index === 0 ? 1024 : 400) &&
     !/[\r\n]/u.test(line) && !line.includes('timing-contract') && !line.includes(root)));
+  assert.ok(finalized.timingAnnotations.reduce((bytes, line) => bytes + Buffer.byteLength(line), 0) < 4096);
   for (const mutate of [
     (report, command) => { report.groupExecution.groups[0].sourceDigest = 'f'.repeat(64); },
     (report, command) => { command.context.sourceCommit = 'f'.repeat(40); },
@@ -3636,13 +3700,236 @@ async function nativeCostFixture(t) {
   return { files, roots, compile, inventory: compile(files), plan: f.source.plan };
 }
 
+async function nativeAffinityFixture(t) {
+  const f = await nativeCostFixture(t);
+  const file = 'test/github-retained-identity-acceptance.test.mjs';
+  f.files.push({ file, contents: await fs.readFile(path.join(repositoryRoot, ...file.split('/')), 'utf8') });
+  return { ...f, inventory: f.compile(f.files), retainedFile: file,
+    retainedRoot: 'retained identity acceptance through existing public consumers' };
+}
+
+test('T-PRD017 native v7 coassigns only qualified complete ARM affinity components', async t => {
+  const f = await nativeAffinityFixture(t);
+  const request = { inventory: f.inventory, plan: f.plan, target: 'macos-arm64' };
+  const before = nativeFrameworkShardPlan({ ...request, protocol: 'native-framework-shards-v6-stable-cost-components' });
+  const after = nativeFrameworkShardPlan({ ...request, protocol: 'native-framework-shards-v7-resource-affinity-components' });
+  const retained = after.parts.flatMap(part => part.stages.flatMap(stage => stage.groups))
+    .find(group => group.root === f.retainedRoot);
+  const catalogue = after.parts.flatMap(part => part.stages.flatMap(stage => stage.groups))
+    .find(group => group.root === f.roots[0][1]);
+  const owner = assignment => new Map(assignment.parts.flatMap(part =>
+    part.assertionIds.map(id => [id, part.shard])));
+  const oldOwners = owner(before), newOwners = owner(after);
+  assert.notEqual(oldOwners.get(retained.rootId), oldOwners.get(catalogue.rootId));
+  assert.equal(newOwners.get(retained.rootId), newOwners.get(catalogue.rootId));
+  assert.equal(retained.assertionIds.length, 38);
+  assert.equal(retained.minimumSlots, 4);
+  assert.equal(catalogue.minimumSlots, 1);
+  assert.deepEqual(retained.dependsOn, []);
+  assert.deepEqual(retained.exclusiveResources, []);
+  assert.equal(after.placement.affinities.rules[0].status, 'applied');
+  assert.equal(after.placement.affinities.rules[0].minimumSlots, 5);
+  assert.equal(after.placement.affinities.rules[0].capacity, 7);
+  assert.equal(after.placement.affinities.evidenceCredit, false);
+  assert.equal(after.placement.affinities.predictedSavingMs, null);
+  for (const test of f.inventory.cases) {
+    if (!retained.assertionIds.includes(test.id)) assert.equal(newOwners.get(test.id), oldOwners.get(test.id));
+  }
+  const assigned = after.parts.flatMap(part => part.assertionIds);
+  assert.equal(new Set(assigned).size, assigned.length);
+  assert.deepEqual([...assigned].sort(), f.inventory.cases.map(test => test.id).sort());
+  assert.equal(nativePrPartsForProtocol(after.protocol).length, 25);
+  for (const target of ['linux-x64', 'windows-x64']) {
+    const historical = nativeFrameworkShardPlan({ ...request, target, protocol: before.protocol });
+    const current = nativeFrameworkShardPlan({ ...request, target, protocol: after.protocol });
+    assert.deepEqual(current.parts, historical.parts);
+    assert.equal(current.placement.affinities.rules[0].status, 'unsupported-target');
+  }
+});
+
+test('T-PRD017 native v7 falls back for changed affinity closures resources and components', async t => {
+  const f = await nativeAffinityFixture(t);
+  const request = { plan: f.plan, target: 'macos-arm64',
+    protocol: 'native-framework-shards-v7-resource-affinity-components' };
+  for (const field of ['minimumSlots', 'exclusiveResources']) {
+    const inventory = structuredClone(f.inventory);
+    const declaration = inventory.groupDeclarations.find(group => group.file === f.retainedFile);
+    declaration[field] = field === 'minimumSlots' ? 3 : ['owned-affinity-fixture'];
+    const assignment = nativeFrameworkShardPlan({ ...request, inventory });
+    assert.equal(assignment.placement.affinities.rules[0].status, 'changed-closure-or-resources');
+  }
+  const extended = structuredClone(f.files);
+  const source = extended.find(source => source.file === f.retainedFile);
+  source.contents += "\nnodeTest('incoming affinity prerequisite',()=>{});\n";
+  const connected = f.compile(extended);
+  connected.groupDeclarations.push({ file: f.retainedFile, root: 'incoming affinity prerequisite',
+    dependsOn: [f.retainedRoot] });
+  const assignment = nativeFrameworkShardPlan({ ...request, inventory: connected });
+  assert.equal(assignment.placement.affinities.rules[0].status, 'changed-component');
+  const retained = connected.cases.find(test => test.file === f.retainedFile && test.name === f.retainedRoot);
+  const dependent = connected.cases.find(test => test.name === 'incoming affinity prerequisite');
+  const owners = new Map(assignment.parts.flatMap(part => part.assertionIds.map(id => [id, part.shard])));
+  assert.equal(owners.get(retained.id), owners.get(dependent.id));
+  const childSources = structuredClone(f.files);
+  const childSource = childSources.find(source => source.file === f.retainedFile);
+  childSource.contents += "\ntest('new retained closure member',()=>{});\n";
+  const childInventory = f.compile(childSources);
+  assert.equal(childInventory.cases.filter(test => test.file === f.retainedFile).length, 39);
+  const changed = nativeFrameworkShardPlan({ ...request, inventory: childInventory });
+  assert.equal(changed.placement.affinities.rules[0].status, 'changed-closure-or-resources');
+  const missing = await nativeCostFixture(t);
+  assert.equal(nativeFrameworkShardPlan({ ...request, inventory: missing.inventory, plan: missing.plan })
+    .placement.affinities.rules[0].status, 'missing-root');
+});
+
+test('T-PRD017 native v7 adopts measured Intel leads while preserving published v6 placement', async t => {
+  const f = await nativeCostFixture(t);
+  const additional = [
+    ['test/public-readiness-ci.test.mjs',
+      'T-PRD020 actual CI schedules twenty-five producer parts behind both Intel unit jobs and distinguishes edited base retargets'],
+    ['test/public-readiness-runner.test.mjs',
+      'T-PRD006 critical failure is non-passing and a failed unit prerequisite never starts later critical work'],
+    ['test/public-readiness-docs.test.mjs',
+      'T-PRD088 professional structure rejects broken public contracts and source-only policy leaks'],
+    ['test/public-readiness-observer.test.mjs',
+      'T-PRD085 actual coverage diagnostics survive API verdict reconciliation retention and bounded normal UI'],
+    ['test/public-readiness-evidence.test.mjs',
+      'referenced case payload preparation overlaps four reads without publishing or reordering proof failures'],
+    ['test/package.test.mjs', 'T-36 package is reproducible, integrity-bound and installable in isolation'],
+    ['test/recovery-gate.test.mjs',
+      'T-18 completed operations retire beyond the unresolved limit and archived IDs remain idempotent'],
+    ['test/public-readiness-native.test.mjs',
+      'T-PRD015 genuine Homebrew bootstrap records its capability and installs the complete native bottle closure'],
+  ];
+  for (const [file, name] of additional) {
+    let source = f.files.find(source => source.file === file);
+    if (!source) f.files.push(source = { file, contents: "import test from 'node:test';\n" });
+    source.contents += `\ntest(${JSON.stringify(name)},()=>{});\n`;
+  }
+  const authorityFile = 'test/github-host-authority.test.mjs';
+  f.files.push({ file: authorityFile,
+    contents: await fs.readFile(path.join(repositoryRoot, ...authorityFile.split('/')), 'utf8') });
+  const authoritySurface = 'src/github/store-bridge.mjs';
+  f.files.push({ file: authoritySurface,
+    contents: await fs.readFile(path.join(repositoryRoot, ...authoritySurface.split('/')), 'utf8') });
+  const inventory = f.compile(f.files);
+  const options = { inventory, plan: f.plan, target: 'macos-x64' };
+  const before = nativeFrameworkShardPlan({ ...options, protocol: 'native-framework-shards-v6-stable-cost-components' });
+  const after = nativeFrameworkShardPlan({ ...options, protocol: 'native-framework-shards-v7-resource-affinity-components' });
+  assert.equal(after.placement.costs.updates.workers['macos-x64'], 14);
+  assert.equal(after.placement.costs.updates.runId, '41803553551');
+  assert.equal(after.placement.costs.updates.sourceRevision, '6cc595a1a12cc71a6e7fbba2ae72f3696303acea');
+  const updated = after.placement.groups.filter(group => group.costSource === 'v7-observed-lead');
+  assert.equal(updated.length, 10);
+  assert.equal(updated.filter(group => before.placement.groups.find(old => old.rootId === group.rootId)
+    .durationMs === null).length, 9);
+  assert.deepEqual(updated.map(group => group.durationMs).sort((a, b) => a - b),
+    [166413, 168414, 174645, 182475, 186656, 192657, 318242, 338507, 361150, 1049416]);
+  const owning = (assignment, id) => assignment.parts.find(part => part.assertionIds.includes(id)).shard;
+  assert.ok(new Set(updated.map(group => owning(after, group.rootId))).size > 1);
+  assert.equal(after.placement.affinities.rules[0].status, 'unsupported-target');
+  assert.equal(before.placement.costs.updates, undefined);
+  assert.ok(before.placement.groups.every(group => group.costSource === undefined));
+  assert.deepEqual([...after.parts.flatMap(part => part.assertionIds)].sort(),
+    [...before.parts.flatMap(part => part.assertionIds)].sort());
+});
+
+test('T-PRD017 native v7 authenticates all adopted literals without relabelling historical v6', () => {
+  const historical = 'native-framework-shards-v6-stable-cost-components';
+  const current = 'native-framework-shards-v7-resource-affinity-components';
+  const declaration = (name, value) => `export const ${name} = Object.freeze(${JSON.stringify(value)});\n`;
+  const costs = declaration('nativePlacementCosts', nativePass.nativePlacementCosts);
+  const oldSource = `export const nativeFrameworkShardProtocol = '${historical}';\n${costs}`;
+  const select = contents => nativePass.sourceNativeFrameworkShardProtocol([
+    { file: 'scripts/native-validation.mjs', contents }]);
+  assert.equal(select(oldSource), historical);
+  assert.throws(() => select(oldSource.replace(historical, current)), { code: 'EVIDENCE' });
+  const affinities = declaration('nativePlacementAffinities', nativePass.nativePlacementAffinities);
+  const updates = declaration('nativePlacementCostsV7', nativePass.nativePlacementCostsV7);
+  const source = `export const nativeFrameworkShardProtocol = '${current}';\n${costs}${affinities}${updates}`;
+  assert.equal(select(source), current);
+  for (const [name, literal] of [['nativePlacementAffinities', affinities], ['nativePlacementCostsV7', updates]]) {
+    for (const changed of [
+      source.replace(literal, ''),
+      source + literal,
+      source.replace(`export const ${name} = Object.freeze(`, `export const ${name} = loadUntrusted(`),
+      source.replace(literal, `function spoof(){${literal}}\n`),
+      source.replace(literal, `// ${literal}`),
+    ]) assert.throws(() => select(changed), { code: 'EVIDENCE' });
+  }
+  for (const mutate of [
+    value => { value.node = '26.13.0'; },
+    value => { value.affinities[0].target = 'macos-x64'; },
+    value => { value.affinities[0].capacity = 6; },
+    value => { value.affinities[0].companion.minimumSlots = 3; },
+    value => { value.affinities[0].companion.shapeDigest = 'f'.repeat(64); },
+    value => { value.affinities.push(value.affinities[0]); },
+  ]) {
+    const changed = structuredClone(nativePass.nativePlacementAffinities);
+    mutate(changed);
+    assert.throws(() => select(source.replace(affinities, declaration('nativePlacementAffinities', changed))),
+      { code: 'EVIDENCE' });
+  }
+  const changed = structuredClone(nativePass.nativePlacementCostsV7);
+  changed.roots[0].samples['macos-x64'][0]++;
+  assert.throws(() => select(source.replace(updates, declaration('nativePlacementCostsV7', changed))),
+    { code: 'EVIDENCE' });
+});
+
+test('T-PRD018 native timing offsets retain the terminal group outside the ten longest notices', () => {
+  const epoch = Date.parse('2026-11-04T09:00:00.000Z');
+  const rows = Array.from({ length: 12 }, (_, index) => {
+    const startOffsetMs = index * 1000, groupMs = 120 - index;
+    return { groupId: digest(['timing-group', index]), rootId: `assertion-${digest(['timing-root', index])}`,
+      sourceDigest: digest(['timing-source', index]), stage: 'regression', groupMs, rootMs: groupMs - 0.25,
+      startedAt: new Date(epoch + startOffsetMs).toISOString(),
+      finishedAt: new Date(epoch + startOffsetMs + groupMs).toISOString(),
+      startOffsetMs, endOffsetMs: startOffsetMs + groupMs };
+  });
+  const before = structuredClone(rows);
+  const envelope = { startedAt: new Date(epoch).toISOString(),
+    finishedAt: new Date(epoch + 12000).toISOString() };
+  const result = nativePass.nativeTimingDiagnostics(rows, { producer: 'completed', ...envelope });
+  assert.equal(result.timingAnnotations.length, 10);
+  assert.deepEqual(result.timingAnnotations.map(line => /group=([a-f0-9]{64}) /.exec(line)[1]),
+    rows.slice(0, 10).map(row => row.groupId));
+  assert.ok(result.timingAnnotations.every((line, index) => /last=false(?: |$)/u.test(line) &&
+    Buffer.byteLength(line) < (index === 0 ? 1024 : 400)));
+  assert.deepEqual(result.terminalGroup, { availability: 'available', ...rows[11],
+    offsetOrigin: 'producer.startedAt', tiedGroups: 1,
+    producerEnvelope: { scope: 'native-execution-report', ...envelope, durationMs: 12000 } });
+  const capsule = JSON.parse(result.timingAnnotations[0].split(' terminal=')[1]);
+  assert.equal(capsule.group, rows[11].groupId);
+  assert.equal(capsule.source, rows[11].sourceDigest);
+  assert.ok(result.timingAnnotations[0].includes('envelopeMs=12000'));
+  assert.ok(result.timingAnnotations.slice(1).every(line => !line.includes(' terminal=')));
+  assert.ok(result.timingAnnotations.reduce((sum, line) => sum + Buffer.byteLength(line), 0) < 4096);
+  assert.ok(result.timingAnnotations.every((line, index) =>
+    line.includes(`startMs=${rows[index].startOffsetMs} endMs=${rows[index].endOffsetMs}`)));
+  const incomplete = nativePass.nativeTimingDiagnostics(rows, { complete: false });
+  assert.equal(incomplete.terminalGroup.availability, 'unavailable');
+  assert.ok(incomplete.timingAnnotations.every(line => /last=NA(?: |$)/u.test(line)));
+  const unknown = structuredClone(rows);
+  unknown[11].endOffsetMs = null;
+  assert.equal(nativePass.nativeTimingDiagnostics(unknown).terminalGroup.availability, 'unavailable');
+  const tied = structuredClone(rows);
+  tied[10].finishedAt = tied[11].finishedAt;
+  tied[10].endOffsetMs = tied[11].endOffsetMs;
+  assert.equal(nativePass.nativeTimingDiagnostics(tied).terminalGroup.tiedGroups, 2);
+  assert.equal(nativePass.nativeTimingDiagnostics([]).terminalGroup.availability, 'unavailable');
+  const unsafe = [{ ...rows[0], sourceDigest: 'secret\n::error::' }];
+  assert.deepEqual(nativePass.nativeTimingDiagnostics(unsafe).timingAnnotations, []);
+  assert.deepEqual(rows, before, 'Timing presentation cannot mutate original validated rows');
+});
+
 test('T-PRD017 stable native cost placement balances observed whole roots without borrowing evidence', async t => {
   const f = await nativeCostFixture(t);
   for (const [target, durations, knownRoots, workers] of [
     ['macos-x64', f.roots.map(([, , ms]) => ms), 4, 14],
     ['macos-arm64', [286836, 25626, 112554, 111436], 5, 7],
   ]) {
-    const assignment = nativeFrameworkShardPlan({ inventory: f.inventory, plan: f.plan, target });
+    const assignment = nativeFrameworkShardPlan({ inventory: f.inventory, plan: f.plan, target,
+      protocol: 'native-framework-shards-v6-stable-cost-components' });
     const measured = assignment.parts.filter(part => part.shard.startsWith('body-')).map(part =>
       f.roots.reduce((sum, [file, name], index) => sum + (part.stages.some(stage =>
         stage.cases.some(test => test.file === file && test.name === name)) ? durations[index] : 0), 0));
@@ -3801,7 +4088,8 @@ test('T-PRD017 native placement v6 requires adopted literal cost source and pres
 });
 
 test('T-PRD017 native protocol5 spreads independent same-file roots and executes connected complete closures exactly once', async t => {
-  const protocols = ['native-framework-shards-v5-root-components', nativeFrameworkShardProtocol];
+  const protocols = ['native-framework-shards-v5-root-components',
+    'native-framework-shards-v6-stable-cost-components', nativeFrameworkShardProtocol];
   const f = await observerApiFixture(t);
   const files = [...f.source.files].map(([file, contents]) => ({ file,
     contents: f.source.names.some(test => test.file === file && test.stage === 'regression') ?
@@ -3879,8 +4167,8 @@ test('T-PRD017 native protocol5 spreads independent same-file roots and executes
 
 test('T-PRD017 native protocol5 and historical4 retain source-bound observer and SDK reconstruction', async t => {
   const protocols = ['native-framework-shards-v4-split-intel-units', 'native-framework-shards-v5-root-components',
-    'native-framework-shards-v6-stable-cost-components'];
-  assert.equal(nativeFrameworkShardProtocol, protocols[2]);
+    'native-framework-shards-v6-stable-cost-components', 'native-framework-shards-v7-resource-affinity-components'];
+  assert.equal(nativeFrameworkShardProtocol, protocols[3]);
   for (const shardProtocol of protocols) {
     const f = await observerApiFixture(t, { frameworkShards: true, shardProtocol,
       bootstrapProtocol: nativeCryptoBootstrapProtocol, nodeArtifactReader: true });
@@ -3920,7 +4208,7 @@ test('T-PRD017 native protocol5 and historical4 retain source-bound observer and
       'Stable placement never admits an old source execution as current proof');
     await assert.rejects(replay({ definition: { ...definition,
       frameworkShards: protocols.find(protocol => protocol !== shardProtocol) } }), { code: 'EVIDENCE' },
-    'Captured v4/v5/v6 source cannot be relabelled as another placement protocol');
+    'Captured v4/v5/v6/v7 source cannot be relabelled as another placement protocol');
   }
 });
 

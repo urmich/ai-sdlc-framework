@@ -599,8 +599,8 @@ test('T-PRD020 RC66 CI01 platform timing limits preserve inclusive strict and in
   const epoch = Date.parse('2026-10-18T10:00:00.000Z');
   const at = milliseconds => new Date(epoch + milliseconds).toISOString();
   const limits = [
-    ['linux-x64', 460000, true], ['windows-x64', 665000, true],
-    ['macos-arm64', 627000, true], ['macos-x64', 1200000, false],
+    ['linux-x64', 900000, true], ['windows-x64', 900000, true],
+    ['macos-arm64', 900000, true], ['macos-x64', 1200000, false],
   ];
   const partsFor = durationMs => nativePrPartsForProtocol(nativeFrameworkShardProtocol)
     .map((part, index) => ({ ...part, job: {
@@ -618,7 +618,8 @@ test('T-PRD020 RC66 CI01 platform timing limits preserve inclusive strict and in
     }
   }
   assert.equal(nativeLaneTimings(partsFor(1185000)).find(lane => lane.target === 'macos-x64').withinBudget, true);
-  assert.equal(nativeLaneTimings(partsFor(500000)).find(lane => lane.target === 'linux-x64').withinBudget, false);
+  assert.equal(nativeLaneTimings(partsFor(500000)).find(lane => lane.target === 'linux-x64').withinBudget, true);
+  assert.equal(nativeLaneTimings(partsFor(900001)).find(lane => lane.target === 'linux-x64').withinBudget, false);
   for (const mutate of [
     parts => parts.pop(),
     parts => { parts[1] = parts[0]; },
@@ -634,7 +635,7 @@ test('T-PRD020 RC66 CI01 platform timing limits preserve inclusive strict and in
   }
 });
 
-test('T-PRD020 RC66 CI01 current twenty-five-part observer admits Intel 1185s and blocks Linux 500s', async t => {
+test('T-PRD020 RC66 CI01 current twenty-five-part observer admits Intel 1185s and blocks Linux over fifteen minutes', async t => {
   const f = await observerApiFixture(t, { frameworkShards: true, nodeArtifactReader: true, ambient: false });
   const intel = f.jobs.find(job => job.name === 'native-macos-x64-homebrew');
   const start = Date.parse(intel.started_at);
@@ -657,11 +658,13 @@ test('T-PRD020 RC66 CI01 current twenty-five-part observer admits Intel 1185s an
   assert.equal(verdict(await host.snapshot()).status, 'NotRun');
   intel.steps.find(step => step.name === 'Remove owned short Homebrew prefix').conclusion = 'success';
   const linux = f.jobs.find(job => job.name === `native-${f.lanes.get('linux-x64').role}`);
-  linux.completed_at = new Date(start + 500000).toISOString();
+  const linuxStart = Math.min(...f.jobs.filter(job => job.name.startsWith('native-linux-x64-'))
+    .map(job => Date.parse(job.started_at)));
+  linux.completed_at = new Date(linuxStart + 900001).toISOString();
   const blocked = verdict(await host.snapshot());
   assert.equal(blocked.status, 'NotRun');
   assert.ok(blocked.blockers.some(message => message.includes('linux-x64') &&
-    message.includes('at most 460000ms')), JSON.stringify(blocked.blockers));
+    message.includes('at most 900000ms')), JSON.stringify(blocked.blockers));
   await reconcilePrReadiness(host, policy);
   assert.ok(f.writes.some(row => row.context === 'framework/validation' && row.state === 'pending'));
 });

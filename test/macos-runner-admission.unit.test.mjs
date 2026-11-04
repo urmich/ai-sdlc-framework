@@ -2,6 +2,8 @@ export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [{"coverage": "direct", "paths": ["scripts/macos-runner-admission.mjs"]}],
   "groups": [
+    {"root": "T-MACADM023 Intel secondary requests wait only for actual own-unit-ready primary allocation", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-MACADM024 primary-first admission preserves authentic v9 graphs and rejects v9 v10 relabels", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-MACADM019 Intel auxiliaries yield to ready critical bodies across architectures without waiting for future units", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-MACADM020 mandatory ARM refresh takes a bounded fair turn without the full body allocation chain", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-MACADM021 readiness fairness cannot relabel historical source admission graphs", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
@@ -322,15 +324,18 @@ test('T-MACADM020 mandatory ARM refresh takes a bounded fair turn without the fu
     assert.deepEqual(ci.jobs[key].needs, ['intent', 'source', 'native-units-mi']);
     assert.match(ci.jobs[key].steps[4].run, /--group intel-auxiliaries-ready /u);
   }
-  for (const key of ['native-mi', 'native-mi-retained']) {
-    assert.deepEqual(ci.jobs[key].needs, ['intent', 'source', 'native-units-mi']);
-  }
+  assert.deepEqual(ci.jobs['native-mi-retained'].needs, ['intent', 'source', 'native-units-mi']);
+  assert.deepEqual(ci.jobs['native-mi'].needs,
+    ['intent', 'source', 'native-units-mi', 'intel-retained-admission']);
   assert.deepEqual(ci.jobs['native-ma'].needs, ['intent', 'source', 'native-units-ma']);
 });
 
 test('T-MACADM021 readiness fairness cannot relabel historical source admission graphs', async () => {
   const contents = await fs.readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
   const ci = parseWorkflow({ file: '.github/workflows/ci.yml', contents });
+  ci.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v9-ready-critical-fairness';
+  ci.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = 'native-framework-shards-v6-stable-cost-components';
+  ci.jobs['native-mi'].needs = ['intent', 'source', 'native-units-mi'];
   const inspect = document => inspectWorkflowTrust([{ file: '.github/workflows/ci.yml',
     contents: Object.entries(document).map(([key, value]) =>
       `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n' }]);
@@ -413,6 +418,92 @@ test('T-MACADM022 readiness observations retain changing critical cohorts alloca
   }
 });
 
+// PR-only: native-validation maintainer; one-slot Node/source and synthetic metadata, no shared resources.
+test('T-MACADM023 Intel secondary requests wait only for actual own-unit-ready primary allocation', async () => {
+  const contents = await fs.readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const ci = parseWorkflow({ file: '.github/workflows/ci.yml', contents });
+  const results = new Map([['intent', 'success'], ['source', 'success'], ['native-units-mi', 'success']]);
+  const eligible = key => ci.jobs[key].needs.every(dep => results.get(dep) === 'success');
+  assert.equal(eligible('native-mi-retained'), true);
+  assert.equal(eligible('intel-retained-admission'), true);
+  assert.equal(eligible('native-mi'), false,
+    'Simultaneous secondary requests must not compete with the unallocated primary');
+  assert.deepEqual(ci.jobs['native-mi'].strategy.matrix.include.map(part => part.shard), ['body-1', 'body-2']);
+  const group = /--group ([a-z-]+)/u.exec(ci.jobs['intel-retained-admission'].steps[4].run)[1];
+  const records = criticalJobs();
+  Object.assign(records[0], { status: 'queued', conclusion: null, runner_name: '', steps: [] });
+  allocate(records.find(record => record.name.endsWith('x64-framework-body-1')));
+  const identity = { ...expected, group };
+  const admitted = () => evaluateMacAdmission(observation(records), identity);
+  assert.equal(admitted().admitted, false,
+    'Queued primary timestamps and an allocated secondary cannot release the secondary matrix');
+  const primary = records.find(record => record.name.endsWith('x64-framework-body-0'));
+  Object.assign(primary, { status: 'in_progress', runner_name: '',
+    steps: [{ name: 'Set up job', status: 'in_progress', started_at: startedAt }] });
+  const allocation = admitted();
+  assert.equal(allocation.admitted, true);
+  assert.deepEqual(allocation.parts.map(part => [part.name, part.proof, part.conclusion]),
+    [['native-macos-x64-framework-body-0', 'started-step', null]]);
+  const transport = adapter({ selectedJobs: records });
+  assert.equal((await waitForMacAdmission(identity, transport.options)).admitted, true);
+  assert.deepEqual(transport.calls, [prefix, `${prefix}/jobs?per_page=100&page=1`]);
+  results.set('intel-retained-admission', 'success');
+  assert.equal(eligible('native-mi'), true,
+    'Primary allocation releases secondaries while primary and foreign units remain unfinished');
+  assert.equal(eligible('native-homebrew-mi'), false);
+  assert.equal(eligible('native-mi-refresh'), false);
+  for (const result of ['failure', undefined]) {
+    results.set('native-units-mi', result);
+    for (const key of ['native-mi-retained', 'intel-retained-admission', 'native-mi']) {
+      assert.equal(eligible(key), false, 'Both actual own-unit origins remain prerequisites');
+    }
+  }
+  const coordinators = Object.values(ci.jobs).filter(job =>
+    job.steps?.some(step => /scripts\/macos-runner-admission\.mjs/u.test(step.run ?? '')));
+  assert.equal(coordinators.length, 5);
+  assert.ok(coordinators.every(job => job['runs-on'] === 'ubuntu-24.04' && job['timeout-minutes'] === 22));
+  assert.equal(Object.values(ci.jobs).reduce((count, job) =>
+    count + (job.strategy?.matrix?.include?.length ?? 1), 0), 34);
+});
+
+test('T-MACADM024 primary-first admission preserves authentic v9 graphs and rejects v9 v10 relabels', async () => {
+  const contents = await fs.readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const current = parseWorkflow({ file: '.github/workflows/ci.yml', contents });
+  const inspect = document => inspectWorkflowTrust([{ file: '.github/workflows/ci.yml',
+    contents: Object.entries(document).map(([key, value]) =>
+      `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n' }]);
+  const v10 = structuredClone(current);
+  v10.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v10-intel-primary-first';
+  v10.jobs['native-mi'].needs = ['intent', 'source', 'native-units-mi', 'intel-retained-admission'];
+  assert.equal(inspect(v10).complete, true, JSON.stringify(inspect(v10).blockers));
+  const v9 = structuredClone(v10);
+  v9.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v9-ready-critical-fairness';
+  v9.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = 'native-framework-shards-v6-stable-cost-components';
+  v9.jobs['native-mi'].needs = ['intent', 'source', 'native-units-mi'];
+  assert.equal(inspect(v9).complete, true, JSON.stringify(inspect(v9).blockers));
+  for (const [graph, policy] of [[v9, v10.env.SDLC_MAC_ADMISSION_POLICY],
+    [v10, v9.env.SDLC_MAC_ADMISSION_POLICY]]) {
+    const relabeled = structuredClone(graph);
+    relabeled.env.SDLC_MAC_ADMISSION_POLICY = policy;
+    assert.ok(inspect(relabeled).blockers.some(blocker => blocker.code === 'NATIVE_COMPONENT_MATRIX_DIFFERS'),
+      'The two source request graphs cannot borrow each other’s protocol identity');
+  }
+  for (const [key, dependency] of [['native-mi', 'native-mi-retained'],
+    ['native-mi-retained', 'native-mi'], ['intel-retained-admission', 'native-mi']]) {
+    const completionWait = structuredClone(v10);
+    if (key === 'native-mi') completionWait.jobs[key].needs =
+      completionWait.jobs[key].needs.filter(dep => dep !== 'intel-retained-admission');
+    completionWait.jobs[key].needs.push(dependency);
+    assert.equal(inspect(completionWait).complete, false,
+      'Primary completion waits and observed-producer dependency cycles are not v10');
+  }
+  const wrongGroup = structuredClone(v10);
+  wrongGroup.jobs['intel-retained-admission'].steps[4].run =
+    wrongGroup.jobs['intel-retained-admission'].steps[4].run.replace('--group intel-primary-body', '--group intel-bodies');
+  assert.equal(inspect(wrongGroup).complete, false,
+    'The gate cannot observe its own downstream secondary matrix');
+});
+
 // PR-only: native-validation maintainer; Node-only, isolated read-only workflow and synthetic metadata.
 test('T-MACADM018 queued ARM allocation cannot suppress own-unit-ready Intel critical requests', async () => {
   const contents = await fs.readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
@@ -421,7 +512,7 @@ test('T-MACADM018 queued ARM allocation cannot suppress own-unit-ready Intel cri
   const eligible = key => ci.jobs[key].needs.every(dep => results.get(dep) === 'success');
   const arm = evaluateMacAdmission(observation(jobs()), { ...expected, group: 'arm-bodies' });
   assert.equal(arm.admitted, false, 'Queued timestamp placeholders remain unverified allocation');
-  for (const key of ['native-mi-retained', 'native-mi', 'intel-retained-admission',
+  for (const key of ['native-mi-retained', 'intel-retained-admission',
     'intel-admission', 'intel-homebrew-admission']) {
     assert.equal(eligible(key), true, `${key} must not wait for queued ARM bodies or refresh`);
     for (const unitResult of ['failure', undefined]) {
@@ -430,6 +521,7 @@ test('T-MACADM018 queued ARM allocation cannot suppress own-unit-ready Intel cri
     }
     results.set('native-units-mi', 'success');
   }
+  assert.equal(eligible('native-mi'), false, 'Only primary allocation, not ARM, still gates secondaries');
   assert.equal(ci.jobs['native-units-mi'].strategy.matrix.include.length, 2);
   assert.equal(eligible('native-homebrew-mi'), false);
   assert.equal(eligible('native-mi-refresh'), false);
@@ -437,6 +529,10 @@ test('T-MACADM018 queued ARM allocation cannot suppress own-unit-ready Intel cri
     name: `native-macos-x64-framework-body-${index}` }));
   const allocated = () => evaluateMacAdmission(observation(intel), { ...expected, group: 'intel-bodies' });
   assert.equal(allocated().admitted, false);
+  allocate(intel[0]);
+  assert.equal(evaluateMacAdmission(observation(intel), { ...expected, group: 'intel-primary-body' }).admitted, true);
+  results.set('intel-retained-admission', 'success');
+  assert.equal(eligible('native-mi'), true, 'Queued ARM work cannot block primary-allocated Intel secondaries');
   for (const record of intel) Object.assign(record, { status: 'in_progress', runner_name: 'synthetic-intel' });
   assert.equal(allocated().admitted, true, 'Actual allocation, not ARM completion, releases opportunistic work');
   results.set('intel-admission', 'success');
@@ -536,7 +632,8 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   assert.equal(coordinator.strategy, undefined);
   assert.deepEqual(coordinator.permissions, { actions: 'read', contents: 'read' });
   assert.deepEqual(coordinator.needs, ['intent', 'source', 'native-units-ma']);
-  assert.deepEqual(ci.jobs['native-mi'].needs, ['intent', 'source', 'native-units-mi']);
+  assert.deepEqual(ci.jobs['native-mi'].needs,
+    ['intent', 'source', 'native-units-mi', 'intel-retained-admission']);
   assert.deepEqual(ci.jobs['native-ma'].needs, ['intent', 'source', 'native-units-ma']);
   assert.deepEqual(ci.jobs['native-units-ma'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-units-mi'].needs, ['intent', 'source']);

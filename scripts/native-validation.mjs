@@ -59,7 +59,8 @@ export const nativePlatformUnitFrameworkShardProtocol = 'native-framework-shards
 export const nativeFourBodyFrameworkShardProtocol = 'native-framework-shards-v3-four-body-platform-units';
 export const nativeSplitUnitFrameworkShardProtocol = 'native-framework-shards-v4-split-intel-units';
 export const nativeRootComponentFrameworkShardProtocol = 'native-framework-shards-v5-root-components';
-export const nativeFrameworkShardProtocol = 'native-framework-shards-v6-stable-cost-components';
+export const nativeStableCostFrameworkShardProtocol = 'native-framework-shards-v6-stable-cost-components';
+export const nativeFrameworkShardProtocol = 'native-framework-shards-v7-resource-affinity-components';
 // Partial original group timings are placement leads, never current execution evidence.
 export const nativePlacementCosts = Object.freeze({
   "schemaVersion": 1,
@@ -99,40 +100,108 @@ for (const hint of nativePlacementCosts.roots) {
   Object.freeze(hint);
 }
 Object.freeze(nativePlacementCosts.roots);
+export const nativePlacementCostsV7 = Object.freeze({
+  "schemaVersion": 1,
+  "sourceRevision": "6cc595a1a12cc71a6e7fbba2ae72f3696303acea",
+  "runId": "41803553551",
+  "attempt": "1",
+  "node": "24.20.0",
+  "workers": {"macos-x64": 14},
+  "qualification": "completed original Intel body-0 group leads; source changes transfer no passing credit; unknown work uses historical or count fallback",
+  "roots": [
+    {"rootId":"assertion-583587077cd3503a4387cce4058358a61651710ff9f49d837189dbfe8c0596af","sourceDigest":"5a7834240b7cd297d45f214097b11151541f84784fdac7bfbc67be08eb20cbd5","shapeDigest":"43387ce30b2f2976f4e8d49d9235127728821909d62a0dde4c5642d1dc26319a","samples":{"macos-x64":[166413,"126488065391"]}},
+    {"rootId":"assertion-25f11a19aa339e58eae9d1d8ba6a9b7e900de69554b562d15d590ccde6462d29","sourceDigest":"ddb6e6ffb7d97fb6699679f727e1fc2ae4dda9b42b4d697367e8e8297abe6c1c","shapeDigest":"df68c8af78852cf7d0eb1e09cbd0bddb8623ad55138cfe09b095bcf000508d50","samples":{"macos-x64":[168414,"126488065391"]}},
+    {"rootId":"assertion-d64083db7e19f24a97764aa257f011ea966d434ebd09b3bd40bad59aaf7bd7c7","sourceDigest":"6e725fdb097e75933a015043eb40090c5d1a2e4ca5ef49dc1915c9a164fbb309","shapeDigest":"a9120a00c85596ba1895440938ba60c5ca867e8552e9c2d4944c16d4a904bbde","samples":{"macos-x64":[174645,"126488065391"]}},
+    {"rootId":"assertion-170a22b6fc70b1916f2ee09e1de78f6275b1aa46a21259d4e662a6cf3ee8e8f3","sourceDigest":"40fc9df1dc0f5a31f8c4820fca47e75478c64806565e365380af8591c2862342","shapeDigest":"f25595cc6dd05161572b94ed4aa2dcebff57e6a775ce9f605c961695bdd0af31","samples":{"macos-x64":[182475,"126488065391"]}},
+    {"rootId":"assertion-05d343ab6e9f0d6aa6d7418b94901fdd4d501d22a5043da8e47129b7cecf5e85","sourceDigest":"d48a0b74138d1e0bfdf34477d80e0df7062fb636caba2cccbe947165d15beb2a","shapeDigest":"bd9d28223157479cfaa61fa662739770a11714bde8437236959cfb08f1b8d6a3","samples":{"macos-x64":[186656,"126488065391"]}},
+    {"rootId":"assertion-f5499e4dc0d5f9a249e2c7556748164af33a9a8717701df2670d9a516fdb52b3","sourceDigest":"1e80c22a797add7e9ac83ada791cca30beda432c264c45e904dc32035614b1d3","shapeDigest":"dc4aed2053e31a862435bea984a28752818f93a88519e6f150b61e2af5b50a9c","samples":{"macos-x64":[192657,"126488065391"]}},
+    {"rootId":"assertion-0ea538f933586c33183708df2824759a052883291fefb6424328a21553cfa543","sourceDigest":"d64c98e670a4fc650881e3ec0f21279858bf0b3d217ccc480fcf93fcc3aab730","shapeDigest":"5e3c09692ad710209995957de63291f64e6fda72b6e91a0dd70ffc71312925a5","samples":{"macos-x64":[318242,"126488065391"]}},
+    {"rootId":"assertion-c937700e1f02501d67f93f8500acf29607768a75116ffa5c809237413d2c1505","sourceDigest":"2da5f828958be2bbaa3d5c3b2b7a888fce2c590ef00ed966829deb2416b98ddb","shapeDigest":"3c95ff0985754b08c246c7e638e667d73d649055da9a112a0c0602b76f0e8f61","samples":{"macos-x64":[338507,"126488065391"]}},
+    {"rootId":"assertion-4dda1118e3095dddc78d663d95c3c839b19807c0c4d91e69ca176e40b93df30c","sourceDigest":"89d387cd34f3bb94d7961f5885e8452307ff36c95c60b91333f1a08be8eecbd6","shapeDigest":"dd3c0415779ff6a5e3d06a4ca78015b0b6683c58b7c0e2a37ca4356335fcce6c","samples":{"macos-x64":[361150,"126488065391"]}},
+    {"rootId":"assertion-0f5721a6329b2ef16d4f48e70ef01d0f0715e6a4f3cefeedc3449361fa57e8e5","sourceDigest":"f04e8202d5adb8cea8aee41c2910a7d551dfc3732bbc6c46f7768b72253fdb94","shapeDigest":"40b59ccff4ce9caa7d8c65b1450c4862b8770ed7a1e3fdc26e589cf6e03b5a13","samples":{"macos-x64":[1049416,"126488065391"]}}
+  ]
+});
+Object.freeze(nativePlacementCostsV7.workers);
+for (const hint of nativePlacementCostsV7.roots) {
+  Object.values(hint.samples).forEach(Object.freeze);
+  Object.freeze(hint.samples);
+  Object.freeze(hint);
+}
+Object.freeze(nativePlacementCostsV7.roots);
+export const nativePlacementAffinities = Object.freeze({
+  "schemaVersion": 1,
+  "sourceRevision": "6cc595a1a12cc71a6e7fbba2ae72f3696303acea",
+  "runId": "41803553551",
+  "attempt": "1",
+  "node": "24.20.0",
+  "qualification": "source-qualified resource-compatible placement hypothesis; no execution credit or predicted latency saving",
+  "affinities": [{
+    "id": "arm-retained-catalogue",
+    "target": "macos-arm64",
+    "capacity": 7,
+    "anchor": {
+      "rootId": "assertion-0f5721a6329b2ef16d4f48e70ef01d0f0715e6a4f3cefeedc3449361fa57e8e5",
+      "sourceDigest": "f04e8202d5adb8cea8aee41c2910a7d551dfc3732bbc6c46f7768b72253fdb94",
+      "shapeDigest": "40b59ccff4ce9caa7d8c65b1450c4862b8770ed7a1e3fdc26e589cf6e03b5a13",
+      "minimumSlots": 1
+    },
+    "companion": {
+      "rootId": "assertion-30a06918b0d6d26eed9773acffe13e64087e7a1ec315a6a5c60d6a026fb52d22",
+      "sourceDigest": "dd4e878f1d8d9fc15fc7b167da7edce801d06b6767cbf25f133aa9581e4a07cf",
+      "shapeDigest": "8f3e8ad75abca04eb87793bec9b882909d3eaa9b263041d1830a3724b9078951",
+      "minimumSlots": 4
+    },
+    "anchorJob": "126486725289",
+    "companionJob": "126486725360",
+    "observedEarlierCompletionMs": 145000
+  }]
+});
+for (const affinity of nativePlacementAffinities.affinities) {
+  Object.freeze(affinity.anchor);
+  Object.freeze(affinity.companion);
+  Object.freeze(affinity);
+}
+Object.freeze(nativePlacementAffinities.affinities);
 export const nativeFrameworkShardProtocols = Object.freeze([
   nativeLegacyFrameworkShardProtocol, nativePlatformUnitFrameworkShardProtocol,
   nativeFourBodyFrameworkShardProtocol, nativeSplitUnitFrameworkShardProtocol,
-  nativeRootComponentFrameworkShardProtocol, nativeFrameworkShardProtocol,
+  nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol, nativeFrameworkShardProtocol,
 ]);
+function requireNativePlacementLiteral(source, name, adopted) {
+  const tokens = declarationTokens(source);
+  const declarations = [];
+  let depth = 0;
+  for (const [index, token] of tokens.entries()) {
+    if (depth === 0 && token.kind === 'identifier' && token.value === 'export' &&
+      tokens[index + 1]?.value === 'const' && tokens[index + 2]?.value === name) declarations.push(index);
+    if (token.kind === 'punctuation' && ['(', '[', '{'].includes(token.value)) depth++;
+    if (token.kind === 'punctuation' && [')', ']', '}'].includes(token.value)) depth--;
+  }
+  requireThat(declarations.length === 1, 'EVIDENCE', `Native placement needs its exact source-declared ${name}`);
+  const start = declarations[0];
+  requireThat(tokens.slice(start + 3, start + 9).map(token => token.value).join('') === '=Object.freeze({',
+    'EVIDENCE', 'Native placement data must be the adopted literal, not executable source');
+  const end = tokens.findIndex((token, index) =>
+    index > start + 8 && token.kind === 'punctuation' && token.value === ';');
+  requireThat(end > start + 7 && tokens[end - 1]?.value === ')' && tokens[end - 2]?.value === '}',
+    'EVIDENCE', 'Native placement data must be one closed literal');
+  let value;
+  try { value = JSON.parse(source.slice(tokens[start + 8].start, tokens[end - 2].end)); }
+  catch { requireThat(false, 'EVIDENCE', 'Native placement data must preserve exact JSON source data'); }
+  requireThat(digest(value) === digest(adopted),
+    'EVIDENCE', 'Captured placement data is not the adopted native protocol version');
+}
 export function sourceNativeFrameworkShardProtocol(sourceFiles) {
   const sources = sourceFiles.filter(source => source.file === 'scripts/native-validation.mjs');
   requireThat(sources.length === 1, 'EVIDENCE', 'Shard assignment needs the exact original native planner source');
   const declarations = [...sources[0].contents.matchAll(/export const nativeFrameworkShardProtocol = '([^']+)';/gu)];
   requireThat(declarations.length === 1 && nativeFrameworkShardProtocols.includes(declarations[0][1]),
     'EVIDENCE', 'Unknown or malformed source-declared native shard protocol');
+  if ([nativeStableCostFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(declarations[0][1]))
+    requireNativePlacementLiteral(sources[0].contents, 'nativePlacementCosts', nativePlacementCosts);
   if (declarations[0][1] === nativeFrameworkShardProtocol) {
-    const tokens = declarationTokens(sources[0].contents);
-    const declarations = [];
-    let depth = 0;
-    for (const [index, token] of tokens.entries()) {
-      if (depth === 0 && token.kind === 'identifier' && token.value === 'export' &&
-        tokens[index + 1]?.value === 'const' && tokens[index + 2]?.value === 'nativePlacementCosts') declarations.push(index);
-      if (token.kind === 'punctuation' && ['(', '[', '{'].includes(token.value)) depth++;
-      if (token.kind === 'punctuation' && [')', ']', '}'].includes(token.value)) depth--;
-    }
-    requireThat(declarations.length === 1, 'EVIDENCE', 'Native v6 needs its exact source-declared cost leads');
-    const start = declarations[0];
-    requireThat(tokens.slice(start + 3, start + 9).map(token => token.value).join('') === '=Object.freeze({',
-      'EVIDENCE', 'Native placement costs must be the adopted literal, not executable source');
-    const end = tokens.findIndex((token, index) =>
-      index > start + 8 && token.kind === 'punctuation' && token.value === ';');
-    requireThat(end > start + 7 && tokens[end - 1]?.value === ')' && tokens[end - 2]?.value === '}',
-      'EVIDENCE', 'Native placement costs must be one closed literal');
-    let costs;
-    try { costs = JSON.parse(sources[0].contents.slice(tokens[start + 8].start, tokens[end - 2].end)); }
-    catch { requireThat(false, 'EVIDENCE', 'Native placement costs must preserve exact JSON source data'); }
-    requireThat(digest(costs) === digest(nativePlacementCosts),
-      'EVIDENCE', 'Captured placement costs are not the adopted native protocol version');
+    requireNativePlacementLiteral(sources[0].contents, 'nativePlacementAffinities', nativePlacementAffinities);
+    requireNativePlacementLiteral(sources[0].contents, 'nativePlacementCostsV7', nativePlacementCostsV7);
   }
   return declarations[0][1];
 }
@@ -159,7 +228,8 @@ export function nativeFrameworkShardNames(target, protocol = nativeFrameworkShar
   return [...nativeFrameworkUnitShardNames(target, protocol), 'refresh', ...Array.from({
     length: target.startsWith('macos-') ? 3 :
       [nativeFourBodyFrameworkShardProtocol, nativeSplitUnitFrameworkShardProtocol,
-        nativeRootComponentFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? 4 : 2,
+        nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
+        nativeFrameworkShardProtocol].includes(protocol) ? 4 : 2,
   },
     (_, index) => `body-${index}`)];
 }
@@ -169,7 +239,7 @@ export function nativeFrameworkUnitShardNames(target, protocol = nativeFramework
     'INPUT', 'Select an exact native unit target and supported protocol');
   const count = target === 'macos-x64' &&
     [nativeSplitUnitFrameworkShardProtocol, nativeRootComponentFrameworkShardProtocol,
-      nativeFrameworkShardProtocol].includes(protocol) ? 2 : 1;
+      nativeStableCostFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? 2 : 1;
   return Array.from({ length: count }, (_, index) => index === 0 ? 'units' : `units-${index}`);
 }
 
@@ -434,21 +504,25 @@ function deriveNativeSpecification({ plan, inventory, goSources, target, profile
   }) };
 }
 
-function nativePlacementGroups(groups, target) {
+function nativePlacementGroups(groups, target, protocol) {
   const byId = new Map(groups.map(group => [group.id, group]));
   return groups.map(group => {
-    const hint = nativePlacementCosts.roots.find(hint => hint.rootId === group.rootId);
+    const updated = protocol === nativeFrameworkShardProtocol ?
+      nativePlacementCostsV7.roots.find(hint => hint.rootId === group.rootId && hint.samples[target]) : null;
+    const costs = updated ? nativePlacementCostsV7 : nativePlacementCosts;
+    const hint = updated ?? nativePlacementCosts.roots.find(hint => hint.rootId === group.rootId);
     const sample = hint?.samples[target];
     const shapeDigest = digest({ assertionIds: [...group.assertionIds].sort(), minimumSlots: group.minimumSlots,
       exclusiveResources: [...group.exclusiveResources].sort(),
       dependsOn: group.dependsOn.map(id => byId.get(id)?.rootId).sort() });
-    const costStatus = !nativePlacementCosts.workers[target] ? 'unknown-target' :
-      !sample ? 'unknown-root' : nativePlacementCosts.node !== nativeToolchain.node ? 'stale-runtime' :
+    const costStatus = !costs.workers[target] ? 'unknown-target' :
+      !sample ? 'unknown-root' : costs.node !== nativeToolchain.node ? 'stale-runtime' :
         hint.shapeDigest !== shapeDigest ? 'stale-closure-or-resources' :
           hint.sourceDigest === group.sourceDigest ? 'observed-source-lead' : 'historical-source-lead';
     const eligible = costStatus === 'observed-source-lead' || costStatus === 'historical-source-lead';
     return { planningId: `placement-${digest(['native-root-planning-v1', group.file, group.root])}`,
       rootId: group.rootId, shapeDigest, costStatus, durationMs: eligible ? sample[0] : null,
+      ...(protocol === nativeFrameworkShardProtocol ? { costSource: updated ? 'v7-observed-lead' : 'v6-historical-lead' } : {}),
       ...(sample ? { observedSourceDigest: hint.sourceDigest, jobId: sample[1] } : {}) };
   });
 }
@@ -510,6 +584,65 @@ function partitionNativeBodyGroups(groups, count, placement = null) {
   return partitions;
 }
 
+function applyNativePlacementAffinities(groups, partitions, placement, target) {
+  const planning = new Map(placement.groups.map(group => [group.rootId, group]));
+  placement.affinities = { declarationDigest: digest(nativePlacementAffinities),
+    evidenceCredit: false, predictedSavingMs: null, rules: [] };
+  for (const affinity of nativePlacementAffinities.affinities) {
+    const roots = [affinity.anchor, affinity.companion];
+    const selected = roots.map(root => groups.find(group => group.rootId === root.rootId));
+    const components = roots.map(root => placement.components.find(component =>
+      component.roots.includes(planning.get(root.rootId)?.planningId)));
+    const status = target !== affinity.target ? 'unsupported-target' :
+      nativeToolchain.node !== nativePlacementAffinities.node ? 'unsupported-runtime' :
+        nativePlacementCosts.workers[target] !== affinity.capacity ? 'unsupported-capacity' :
+          selected.some(group => !group) ? 'missing-root' :
+            roots.some((root, index) => root.shapeDigest !== planning.get(root.rootId).shapeDigest ||
+              root.minimumSlots !== selected[index].minimumSlots) ? 'changed-closure-or-resources' :
+              components.some(component => !component || component.roots.length !== 1) ? 'changed-component' :
+                selected.reduce((sum, group) => sum + group.minimumSlots, 0) > affinity.capacity ?
+                  'insufficient-capacity' : 'qualified';
+    const record = { id: affinity.id, status, target: affinity.target, capacity: affinity.capacity,
+      roots: roots.map(root => root.rootId) };
+    placement.affinities.rules.push(record);
+    if (status !== 'qualified') continue;
+    const [anchor, companion] = components;
+    record.fromShard = companion.shard;
+    record.toShard = anchor.shard;
+    record.minimumSlots = selected.reduce((sum, group) => sum + group.minimumSlots, 0);
+    record.sourceStatus = roots.every((root, index) => root.sourceDigest === selected[index].sourceDigest) ?
+      'observed-source-affinity' : 'historical-source-affinity';
+    if (anchor.shard === companion.shard) {
+      record.status = 'already-coassigned';
+      continue;
+    }
+    // Affinity changes ownership only; these remain independent ready-pool groups.
+    const from = partitions[Number(companion.shard.slice(5))];
+    const to = partitions[Number(anchor.shard.slice(5))];
+    if (from.groups === 1) {
+      record.status = 'would-empty-body';
+      continue;
+    }
+    const moved = new Set(selected[1].assertionIds);
+    from.assertionIds = from.assertionIds.filter(id => !moved.has(id));
+    to.assertionIds.push(...selected[1].assertionIds);
+    from.groups--;
+    to.groups++;
+    from.observedLeadMs -= companion.observedLeadMs;
+    to.observedLeadMs += companion.observedLeadMs;
+    from.unknownAssertions -= companion.unknownAssertions;
+    to.unknownAssertions += companion.unknownAssertions;
+    companion.shard = anchor.shard;
+    record.status = 'applied';
+  }
+  placement.partitions = partitions.map(({ assertionIds, ...partition }) => partition);
+}
+
+function nativeAffinityCapacityMatches(assignment, resources) {
+  return !assignment?.placement?.affinities?.rules.some(rule =>
+    ['applied', 'already-coassigned'].includes(rule.status) && resources?.workerCapacity !== rule.capacity);
+}
+
 export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = nativeFrameworkShardProtocol,
   schedulingPolicy = validationSchedulingPolicy }) {
   requireThat(inventory.complete && validationPlatforms.includes(target),
@@ -552,21 +685,27 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
   const bodyCases = regression.cases.filter(test => !refreshIds.has(test.id));
   const bodyFiles = new Set(bodyCases.map(test => test.file));
   const roots = [nativeSplitUnitFrameworkShardProtocol, nativeRootComponentFrameworkShardProtocol,
-    nativeFrameworkShardProtocol].includes(protocol) ?
+    nativeStableCostFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
     completeGroups : selectedGroups(regression.files, regression.selectorName);
   const bodyCount = nativeFrameworkShardNames(target, protocol).filter(shard => shard.startsWith('body-')).length;
   const bodyIds = new Set(bodyCases.map(test => test.id));
   const bodyGroups = roots.filter(group => bodyIds.has(group.rootId));
   const { roots: costRoots, ...costConditions } = nativePlacementCosts;
-  const placement = protocol === nativeFrameworkShardProtocol ? {
+  const { roots: updateRoots, ...updateConditions } = nativePlacementCostsV7;
+  const placement = [nativeStableCostFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? {
     protocol: 'native-stable-component-cost-leads-v1', evidenceCredit: false,
-    costs: { ...costConditions, digest: digest(nativePlacementCosts) },
-    groups: nativePlacementGroups(bodyGroups, target), components: [],
+    costs: { ...costConditions, digest: digest(nativePlacementCosts),
+      ...(protocol === nativeFrameworkShardProtocol ?
+        { updates: { ...updateConditions, digest: digest(nativePlacementCostsV7) } } : {}) },
+    groups: nativePlacementGroups(bodyGroups, target, protocol), components: [],
   } : null;
-  const partitions = [nativeRootComponentFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
+  const partitions = [nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(protocol) ?
     partitionNativeBodyGroups(bodyGroups, bodyCount, placement) :
     partitionValidationInventory({ ...inventory, cases: bodyCases,
       files: inventory.files.filter(file => bodyFiles.has(file.file)) }, bodyCount);
+  if (protocol === nativeFrameworkShardProtocol)
+    applyNativePlacementAffinities(bodyGroups, partitions, placement, target);
   const procedureFile = 'test/public-readiness-ci.test.mjs';
   const toolRoot = inventory.cases.find(test => test.file === procedureFile && !test.parents.length &&
     test.name === 'T-PRD015 actual pinned Go, Python schema and static validators execute valid and invalid owned inputs');
@@ -586,7 +725,8 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
         bodyCases.filter(test => partitions[Number(shard.slice(5))].assertionIds.includes(test.id)) }];
     const selectedStages = selected.map(stage => {
       const files = stage.files.filter(file => stage.cases.some(test => test.file === file));
-      const selectorName = [nativeRootComponentFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) &&
+      const selectorName = [nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
+        nativeFrameworkShardProtocol].includes(protocol) &&
         shard.startsWith('body-') ?
         exactPattern(stage.cases.map(test => [...test.parents, test.name].join(' '))) : stage.selectorName;
       requireThat(files.length > 0 && stage.cases.some(test => test.applicability.platforms.includes(target)),
@@ -698,7 +838,8 @@ function nativeContextMatches(context, { inventory, plan, target, profile, sourc
     try { validResources = digest(resources) === digest(nativeResourceFacts(resources, schedulingPolicy)); }
     catch (error) { if (!['INPUT', 'BUDGET', 'INVENTORY'].includes(error.code)) throw error; }
   }
-  return validResources && context.profile === nativeProfile(profile, target, component, shard) &&
+  return validResources && nativeAffinityCapacityMatches(assignment, resources) &&
+    context.profile === nativeProfile(profile, target, component, shard) &&
     context.sources.length === 1 && context.sources[0].revision === sourceRevision &&
     context.native.kind === 'native' && context.native.platform === platforms[target] &&
     context.native.architecture === (target === 'macos-arm64' ? 'arm64' : 'x64') &&
@@ -1119,7 +1260,7 @@ async function retainedToolReports(directory) {
   return found.filter(Boolean);
 }
 
-function nativeGroupTimings(groups, report) {
+function nativeGroupTimings(groups, report, startedAt, stage) {
   return groups.map(group => {
     const original = report.groupExecution.groups.find(row => row.id === group.id);
     const root = report.executions.find(row => row.groupId === group.id &&
@@ -1131,9 +1272,51 @@ function nativeGroupTimings(groups, report) {
       Number.isFinite(groupMs) && groupMs >= 0 &&
       Number.isFinite(root?.durationMs) && root.durationMs >= 0,
     'EVIDENCE', 'Native timing diagnostics require closed source identities and actual bounded durations');
+    const startOffsetMs = Date.parse(original.startedAt) - Date.parse(startedAt);
+    const endOffsetMs = Date.parse(original.finishedAt) - Date.parse(startedAt);
+    const offsetsAvailable = Number.isFinite(startOffsetMs) && startOffsetMs >= 0 &&
+      Number.isFinite(endOffsetMs) && endOffsetMs >= startOffsetMs;
     return { groupId: group.id, rootId: group.rootId, sourceDigest: group.sourceDigest,
-      groupMs, rootMs: root.durationMs };
+      groupMs, rootMs: root.durationMs, stage, startedAt: original.startedAt, finishedAt: original.finishedAt,
+      startOffsetMs: offsetsAvailable ? startOffsetMs : null, endOffsetMs: offsetsAvailable ? endOffsetMs : null };
   });
+}
+
+export function nativeTimingDiagnostics(timings, {
+  complete = true, producer = 'partial', startedAt = null, finishedAt = null,
+} = {}) {
+  const rows = timings.filter(row => /^[a-f0-9]{64}$/u.test(row.groupId) &&
+    /^assertion-[a-f0-9]{64}$/u.test(row.rootId) && /^[a-f0-9]{64}$/u.test(row.sourceDigest) &&
+    Number.isFinite(row.groupMs) && row.groupMs >= 0 && Number.isFinite(row.rootMs) && row.rootMs >= 0);
+  const closed = complete && rows.length === timings.length && rows.length > 0 &&
+    rows.every(row => Number.isFinite(Date.parse(row.finishedAt)) &&
+      Number.isFinite(Date.parse(row.startedAt)) && Date.parse(row.finishedAt) >= Date.parse(row.startedAt) &&
+      Number.isFinite(row.startOffsetMs) && row.startOffsetMs >= 0 &&
+      Number.isFinite(row.endOffsetMs) && row.endOffsetMs >= row.startOffsetMs);
+  const latest = closed ? Math.max(...rows.map(row => Date.parse(row.finishedAt))) : null;
+  const terminal = closed ? rows.filter(row => Date.parse(row.finishedAt) === latest)
+    .sort((left, right) => left.groupId.localeCompare(right.groupId)) : [];
+  const terminalGroup = closed ? { availability: 'available', ...terminal[0],
+    offsetOrigin: 'producer.startedAt', tiedGroups: terminal.length } :
+    { availability: 'unavailable', reason: rows.length ? 'incomplete-or-unavailable-group-timestamps' : 'no-group-timings',
+      offsetOrigin: 'producer.startedAt' };
+  const durationMs = Date.parse(finishedAt) - Date.parse(startedAt);
+  const producerEnvelope = { scope: 'native-execution-report',
+    startedAt: Number.isFinite(Date.parse(startedAt)) ? new Date(startedAt).toISOString() : null,
+    finishedAt: Number.isFinite(Date.parse(finishedAt)) ? new Date(finishedAt).toISOString() : null,
+    durationMs: Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : null };
+  const terminalNotice = closed ? { group: terminal[0].groupId, root: terminal[0].rootId,
+    source: terminal[0].sourceDigest, startMs: terminal[0].startOffsetMs,
+    endMs: terminal[0].endOffsetMs, ties: terminal.length } : { availability: 'unavailable' };
+  const timingAnnotations = [...rows].sort((left, right) =>
+    right.groupMs - left.groupMs || left.groupId.localeCompare(right.groupId)).slice(0, 10).map((row, index) =>
+    `::notice title=Native group timing::group=${row.groupId} root=${row.rootId} source=${row.sourceDigest} ` +
+    `groupMs=${row.groupMs} rootMs=${row.rootMs} group=completed producer=${producer === 'completed' ? 'completed' : 'partial'} ` +
+    `startMs=${Number.isFinite(row.startOffsetMs) && row.startOffsetMs >= 0 ? row.startOffsetMs : 'NA'} ` +
+    `endMs=${Number.isFinite(row.endOffsetMs) && row.endOffsetMs >= 0 ? row.endOffsetMs : 'NA'} ` +
+    `last=${closed ? Date.parse(row.finishedAt) === latest : 'NA'}` +
+    (index === 0 ? ` envelopeMs=${producerEnvelope.durationMs ?? 'NA'} terminal=${JSON.stringify(terminalNotice)}` : ''));
+  return { terminalGroup: { ...terminalGroup, producerEnvelope }, timingAnnotations };
 }
 
 async function collectExecution({ directory, data, inventory, sources, calculatorSources, target, stages, context, specification, startedAt, plan,
@@ -1145,6 +1328,7 @@ async function collectExecution({ directory, data, inventory, sources, calculato
   const observations = [];
   const diagnostics = [];
   const timings = [];
+  let timingCoverageComplete = true;
   let complete = true;
   let exitCode = 0;
   const read = name => data ? Promise.resolve(data[name] ?? null) : readOptional(path.join(directory, name));
@@ -1192,11 +1376,13 @@ async function collectExecution({ directory, data, inventory, sources, calculato
     const report = await read(`${stage.name}.json`);
     const command = await read(`${stage.name}-command.json`);
     if (!report || !command) {
+      timingCoverageComplete = false;
       complete = false;
       diagnostics.push({ stage: stage.name, code: 'MISSING_STAGE_REPORT' });
       continue;
     }
     if (!Array.isArray(report.executions) || !Array.isArray(command.command)) {
+      timingCoverageComplete = false;
       complete = false;
       diagnostics.push({ stage: stage.name, code: 'INVALID_PARTIAL_STAGE_REPORT' });
       continue;
@@ -1215,16 +1401,19 @@ async function collectExecution({ directory, data, inventory, sources, calculato
         await fs.readFile(path.join(directory, `${stage.name}.json.journal.ndjson`), 'utf8');
       const groups = validateNativeGroupReport({ inventory, stage, report, journal, target, schedulingPolicy });
       groupCount = groups.length;
-      try { stageTimings = nativeGroupTimings(groups, report); }
+      try { stageTimings = nativeGroupTimings(groups, report, startedAt, stage.name); }
       catch {
+        timingCoverageComplete = false;
         diagnostics.push({ stage: stage.name, code: 'INVALID_NATIVE_TIMING_METADATA' });
       }
     } catch (error) {
+      timingCoverageComplete = false;
       complete = false;
       diagnostics.push({ stage: stage.name, code: error.code ?? 'INVALID_ORIGINAL_GROUP_EXECUTION', message: error.message });
     }
     const fileConcurrency = Math.min(capacity, Math.max(1, groupCount));
     const resourceMatches = expectedResources && resources && budget &&
+      nativeAffinityCapacityMatches(assignment, expectedResources) &&
       resources.availableParallelism === expectedResources.availableParallelism &&
       resources.totalMemoryBytes === expectedResources.totalMemoryBytes &&
       resources.fileConcurrency === fileConcurrency && report.selection?.concurrency === fileConcurrency &&
@@ -1253,6 +1442,7 @@ async function collectExecution({ directory, data, inventory, sources, calculato
       diagnostics.push({ stage: stage.name, code: 'INVALID_ORIGINAL_STAGE_COMMAND' });
     }
     if (!invalidStage && resourceMatches) timings.push(...stageTimings);
+    else timingCoverageComplete = false;
     originalStages.push(report);
     diagnostics.push({ stage: stage.name, status: reconciliation.status, blockers: reconciliation.blockers,
       dispositions: reconciliation.dispositions });
@@ -1275,6 +1465,7 @@ async function collectExecution({ directory, data, inventory, sources, calculato
   }
   if (originalStages.length !== stages.length || originalStages.some((report, index) =>
     index > 0 && !(Date.parse(originalStages[index - 1].finishedAt) <= Date.parse(report.startedAt)))) {
+    timingCoverageComplete = false;
     complete = false;
     diagnostics.push({ stage: 'ordering', code: 'INVALID_UNIT_FIRST_ORDER' });
   }
@@ -1453,7 +1644,7 @@ async function collectExecution({ directory, data, inventory, sources, calculato
   const raw = { schemaVersion: 1, kind: 'test-execution', context, startedAt,
     finishedAt: complete ? observedAt : null, observedAt, sequence: 1, complete,
     exitCode: complete ? exitCode : exitCode || 2, results };
-  return { raw, diagnostics, timings };
+  return { raw, diagnostics, timings, timingCoverageComplete };
 }
 
 export function reconcileNativeEvidenceData(options) {
@@ -1946,11 +2137,9 @@ export async function finalizeNativeEvidence({ directory, inventory, sources, ca
     renderReadinessReport(evaluation, { completeReportRef });
   await fs.writeFile(path.join(directory, 'readiness.md'), markdown, { flag: 'wx' });
   const producer = collected.raw.complete ? 'completed' : 'partial';
-  const timingAnnotations = collected.timings.sort((left, right) =>
-    right.groupMs - left.groupMs || left.groupId.localeCompare(right.groupId)).slice(0, 10).map(row =>
-    `::notice title=Native group timing::group=${row.groupId} root=${row.rootId} source=${row.sourceDigest} ` +
-    `groupMs=${row.groupMs} rootMs=${row.rootMs} group=completed producer=${producer}`);
-  return { evaluation, diagnostics: collected.diagnostics, markdown, timingAnnotations };
+  const timing = nativeTimingDiagnostics(collected.timings, { producer, complete: collected.timingCoverageComplete,
+    startedAt: retainedRaw.startedAt, finishedAt: retainedRaw.finishedAt });
+  return { evaluation, diagnostics: collected.diagnostics, markdown, ...timing };
 }
 
 export function nativeFailureAnnotations(evaluation) {
@@ -2113,7 +2302,8 @@ export async function runNativeValidation(options, { lifetime = { cleanupSafe: t
     requireThat(bootstrap?.status === 'Passed' && bootstrap.target === target &&
       bootstrap.native.node === process.versions.node && bootstrap.native.platform === process.platform &&
       bootstrap.native.architecture === process.arch &&
-      bootstrap.native.resources && digest(bootstrap.native.resources) === digest(resources),
+      bootstrap.native.resources && digest(bootstrap.native.resources) === digest(resources) &&
+      nativeAffinityCapacityMatches(assignment, resources),
     'HOST', 'Required native toolchain bootstrap did not establish this actual host/resource allocation');
     if (shard !== null) Object.assign(commandContext, {
       configDigest: nativeConfigurationDigest({ inventory: inputs.inventory, plan: inputs.plan, assignment, profile, target, component, shard,
@@ -2342,11 +2532,14 @@ export async function runNativeValidation(options, { lifetime = { cleanupSafe: t
   const details = `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}/attempts/${process.env.GITHUB_RUN_ATTEMPT}`;
   let diagnostics = [];
   let markdown;
+  let terminalGroup = { availability: 'unavailable', reason: 'native-validation-not-entered',
+    offsetOrigin: 'producer.startedAt' };
   if (context && phase === 'validation') {
     const finalized = await finalizeNativeEvidence({ directory, ...inputs, target, context, startedAt, candidate,
       failure, cancelled: cancellation.signal.aborted, completeReportRef: details });
     evaluation = finalized.evaluation;
     diagnostics = finalized.diagnostics;
+    if (finalized.terminalGroup) terminalGroup = finalized.terminalGroup;
     markdown = finalized.markdown;
     for (const annotation of Array.isArray(finalized.timingAnnotations) ? finalized.timingAnnotations : []) {
       console.error(annotation);
@@ -2371,7 +2564,7 @@ export async function runNativeValidation(options, { lifetime = { cleanupSafe: t
     !cancellation.signal.aborted, context: phase === 'validation' ? context ?? null : null, sourceCommit: revision,
     descriptorSha256: candidate?.context.identity.descriptorSha256 ?? null,
     checksumsSha256: candidate?.context.identity.checksumsSha256 ?? null,
-    artifacts: context?.artifacts ?? [], diagnostics, failure, presentationDiagnostic,
+    artifacts: context?.artifacts ?? [], diagnostics, terminalGroup, failure, presentationDiagnostic,
     workspaceCleanup: lifetime, cleanupDiagnostic,
     complete: status === 'Passed', cancelled: cancellation.signal.aborted, startedAt, finishedAt: new Date().toISOString() };
   try {

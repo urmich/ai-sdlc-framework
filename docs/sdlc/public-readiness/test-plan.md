@@ -1139,7 +1139,9 @@ before its isolated timed root; six sequential owned fixture stages retain all
 twelve real inner groups and borrow the same broker, not a second allowance.
 Compare notice IDs and durations with original runner/journal fields, enforce
 the ten-notice/closed-output bounds, reject mismatched source/command and invalid
-durations, preserve partial readiness and verify fixture cleanup. It has no
+durations, and verify actual start/end offsets and the last-finishing group's
+closed source identity without summing concurrent work into a serial estimate.
+Missing clocks remain unavailable. Preserve partial readiness and verify fixture cleanup. It has no
 provider access, shared resources or prerequisite roots. Neither new root
 expands critical27, changes native role membership or grants native timing,
 original SDK reconciliation or release-readiness credit.
@@ -1150,9 +1152,18 @@ existing native lanes. Its isolated VM uses the actual entry consumer with one
 slot, no dependencies or shared resources. Cover absent, null, empty-array and
 malformed non-array metadata for Passed, Failed and blocked NotRun responses;
 preserve the original evaluation, diagnostics, primary failure and cancellation
-inputs, and rethrow original finalizer errors. Retain the unchanged `TOOL03
+inputs, and rethrow original finalizer errors. Retain the `TOOL03
 actual native child boundary quarantines a surviving detached writer before
-outer cleanup` regression and its real child teardown. No critical-profile,
+outer cleanup` regression and its real child teardown. Its writer must complete
+the first real ambient and prefix stream writes before publishing readiness.
+Keep all four original modes and add a deterministic controller-exit mode that
+holds periodic writes until the exact original cleanup decision and the parent's
+stream observation. Original source must fail the missing-stream assertion;
+the correction must preserve the identity challenge, quarantine, leases, real
+writer liveness, release/drain and exact owned-directory cleanup. This remains
+one PR-only, Node-only, process-isolated root under its existing resource and
+45-second timeout declaration; no sleeps are substituted for its barriers.
+The native-validation maintainer owns it on all existing native lanes. No critical-profile,
 native-role, deadline or evidence-validation change is implied.
 
 `T-PRD011 exclusive ready clocks exclude the previous holder capture without
@@ -1302,9 +1313,12 @@ fixture evidence through the actual API-only observer boundary.
 ## 6. Comparable benchmark procedure
 
 The required delivery limits for each **complete logical native PR lane** are
-Linux **at most 460 seconds (7m40s)**, Windows **at most 665 seconds (11m05s)**,
-Apple Silicon **at most 627 seconds (10m27s)** and Intel macOS **strictly under
-1,200 seconds (20m)**. Intel's former 15-minute target remains a stretch goal.
+Linux, Windows and Apple Silicon **each at most 900 seconds (15m)**, and Intel
+macOS **strictly under 1,200 seconds (20m)**. Intel's former 15-minute target
+remains an optional stretch goal, not an additional acceptance requirement.
+The recorded Linux **460 seconds (7m40s)**, Windows **665 seconds (11m05s)** and
+Apple Silicon **627 seconds (10m27s)** are historical lane measurements, not
+current delivery limits or new stretch targets.
 Include job-specific toolchain provisioning, every required
 test/procedure, evidence retention and owned-resource cleanup. For a lane with
 parallel required parts, use the earliest part's actual worker start and the
@@ -1346,6 +1360,14 @@ regression hosts. Keep the two-unit topology, case union and all other selected
 allocations unchanged for this comparison: the four-slot regression trial did
 not complete before the cutoff. Do not claim a whole-lane speedup before complete
 hosted results.
+Treat v7 cost overlays and ARM resource affinity as scheduling hypotheses, not
+matched current measurements. Preserve original root closures, the seven-slot
+ARM allocation and the retained-minimum-four/catalog-minimum-one demands; no
+projected saving or sum of overlapping group durations can satisfy a lane cap.
+V10 primary-first admission corrects request eligibility and arrival priority,
+not the catalog's service duration. New-source local, Review and native
+acceptance remain NotRun until complete applicable executions; prior focused
+or historical results cannot supply current whole-candidate credit.
 Preserve initial observation refresh/regression and observer priorities, then
 prioritize the unchanged CI-input and retained-evidence families under implicit
 policy v9, preserving v8's existing higher-priority prefix. Next prioritize provider consumers, reproducible packaging,
@@ -1641,9 +1663,10 @@ the original subset. A new legitimate test must not erase preservation checks.
    platform's regression shards execute; another platform or attempt cannot
    supply the prerequisite. Include the unit barrier, every part's provisioning,
    evidence retention and cleanup in the whole-lane elapsed time.
-   For current `native-framework-shards-v6-stable-cost-components` and historical
+   For current `native-framework-shards-v7-resource-affinity-components` and historical
    `native-framework-shards-v4-split-intel-units` and
-   `native-framework-shards-v5-root-components`, require each platform's
+   `native-framework-shards-v5-root-components` and
+   `native-framework-shards-v6-stable-cost-components`, require each platform's
    actual unit jobs to finish successfully, including evidence and cleanup,
    before its own regression jobs start. Other platforms' unit jobs may finish
    later; all twenty-five successful parts still remain mandatory for completeness.
@@ -1653,9 +1676,9 @@ the original subset. A new legitimate test must not erase preservation checks.
    unions including descendants, dependencies and exclusive resources. The new
    Intel producer has no unit prerequisite of its own. Every Intel regression
    must wait for both unit jobs, not a borrowed ARM/original-unit result.
-   Current v6 assigns complete dependency/exclusive-resource-connected root
-   components across the existing bodies using qualified observed work costs
-   and stable exact file/root planning identities. Historical source costs are
+   Current v7 retains v6's complete dependency/exclusive-resource-connected root
+   components and places them across the existing bodies using qualified observed
+   work costs and stable exact file/root planning identities. Historical source costs are
    explicit scheduling leads only, never current execution credit or predicted
    concurrent lane duration. Unknown or incompatible target/runtime/closure/
    resource costs use explicit count-based fallback with stable planning ties.
@@ -1664,12 +1687,30 @@ the original subset. A new legitimate test must not erase preservation checks.
    hosts, but descendants and connected components must remain together.
    Body file lists may overlap; exact source-bound escaped full-name selectors
    must preserve the disjoint complete assertion union and reject ambiguity.
-   Keep scheduling policy v9 byte-identical and replay v1-v5 assignments and
-   serialized identities exactly, including v5's original count/hash placement.
-   A v6 workflow label must match the captured planner, adopted literal cost
-   table and archived SDK source. Reject missing, altered, computed or duplicate
-   table declarations without executing captured code; historical v1-v5 needs
-   no v6 table. Relabelling an old planner is non-passing.
+   Keep scheduling policy v9 byte-identical and replay v1-v6 assignments and
+   serialized identities exactly, including v5's original count/hash placement
+   and v6's unchanged `nativePlacementCosts` table and SDK reconstruction.
+   V7's separate `nativePlacementCostsV7` overlay contains ten completed Intel
+   body-0 group leads from source `6cc595a1a12cc71a6e7fbba2ae72f3696303acea`,
+   run `41803553551`, attempt 1, Node 24.20.0 and fourteen Intel workers.
+   Qualify target/runtime/closure/resource shape before using a lead. Changed
+   source transfers no passing credit; absent v7 samples retain v6 lookup and
+   unknown or incompatible costs remain explicit count-based fallback.
+   V7's ARM-only `nativePlacementAffinities` may coassign the standalone
+   retained-identity component, minimum four slots, with the existing standalone catalog
+   component, minimum one, within the unchanged seven-slot host allocation.
+   Require matching runtime/capacity and complete closure/resource/component
+   shape; retain source qualification, nonempty bodies and explicit incompatible
+   fallback diagnostics. Preserve both independent groups and every descendant,
+   not a merged callback, dependency cycle or Intel affinity. Treat this as a
+   resource-compatible placement hypothesis, not measured overlap or projected
+   savings. No physical producer, worker allowance or exhaustion boundary changes.
+   A v7 workflow label must match the captured planner, archived SDK source and
+   all three authentic strict JSON literals: `nativePlacementCosts`,
+   `nativePlacementAffinities` and `nativePlacementCostsV7`. Reject missing,
+   altered, computed or duplicate declarations without executing captured code.
+   Historical v6 requires its original cost literal but neither v7 addition;
+   historical v1-v5 requires no cost table. Relabelling an old planner is non-passing.
    The three PR-only roots in `test/public-readiness-native.test.mjs` are
    `T-PRD017 native protocol4 retains its exact historical file and assertion assignments`,
    `T-PRD017 native protocol5 spreads independent same-file roots and executes connected complete closures exactly once`,
@@ -1684,14 +1725,32 @@ the original subset. A new legitimate test must not erase preservation checks.
    report/journal union. The native-validation maintainer owns their network-free
    Node fixtures. Their complete roots declare one slot, except the real tiny
    execution control's two-slot prerequisite; no critical member is added.
-   The existing source-bound observer/SDK root also verifies v4/v5/v6 replay,
+   The existing source-bound observer/SDK root also verifies v4/v5/v6/v7 replay,
    old-source rejection and protocol relabel refusal. Fresh complete hosted
    measurements remain required.
-   Under `arm-regression-allocation-v9-ready-critical-fairness`, require all three
-   Intel critical bodies and their allocation observers to become eligible
-   after both successful Intel unit jobs without waiting for queued ARM bodies
-   or refresh. T-MACADM018 covers this boundary, failed/missing own-unit
-   prerequisites, actual allocation and preserved opportunistic-work priority.
+   Five additional PR-only, network-free Node fixture roots owned by the
+   native-validation maintainer are:
+
+   - `T-PRD017 native v7 coassigns only qualified complete ARM affinity components`;
+   - `T-PRD017 native v7 falls back for changed affinity closures resources and components`;
+   - `T-PRD017 native v7 adopts measured Intel leads while preserving published v6 placement`;
+   - `T-PRD017 native v7 authenticates all adopted literals without relabelling historical v6`;
+   - `T-PRD018 native timing offsets retain the terminal group outside the ten longest notices`.
+
+   Each complete isolated root declares one slot, no prerequisites and no shared
+   exclusive resources. They exercise planner/literal/timing contracts without
+   executing original heavy roots. No root enters critical27; both critical
+   root/assertion caps remain 27. Current new-source local, Review and native
+   results remain NotRun.
+   Under `arm-regression-allocation-v10-intel-primary-first`, require Intel
+   primary/body-0 and existing `intel-retained-admission` to become eligible
+   after both successful Intel unit jobs without waiting for ARM bodies,
+   refresh or future foreign units. Gate only the existing `native-mi`
+   secondary body-1/body-2 matrix on that observer's actual primary allocation,
+   never primary completion. Do not rely on provider matrix allocation order.
+   T-MACADM018 covers failed/missing own-unit prerequisites and independent
+   primary and primary-allocated secondary requests despite queued ARM work,
+   plus preserved opportunistic-work priority.
    It is PR-only, Node-only and network-free; the native-validation maintainer
    owns its isolated complete root and synthetic read-only metadata, with no
    shared resources, new capacity or critical-profile membership.
@@ -1701,9 +1760,9 @@ the original subset. A new legitimate test must not erase preservation checks.
    barrier; remove the coordination-only Intel-primary/all-ARM-body chain.
    A foreign architecture with missing, queued or incomplete units cannot
    reserve future capacity. Reevaluate readiness from complete same-attempt
-   metadata. `intel-retained-admission` still independently observes body-0
-   for completeness but no longer gates refresh. Its historical job/artifact
-   identifier remains; `intel-primary-body` receipts must identify body-0,
+   metadata. `intel-retained-admission` observes body-0 to release only Intel
+   secondaries and for completeness, not to gate ARM refresh. Its historical
+   job/artifact identifier remains; `intel-primary-body` receipts must identify body-0,
    not a relabelled body-1.
    Require `arm-refresh-admission` to observe that refresh worker for producer
    completeness without gating independent Intel critical bodies. Keep ARM
@@ -1716,8 +1775,8 @@ the original subset. A new legitimate test must not erase preservation checks.
    controls must prove waiting ready ARM bodies receive priority too, queued timestamp
    placeholders do not release Homebrew, and all bodies still running suffice:
    no body or Homebrew completion dependency, added VM, or dependency cycle.
-   No coordinator may wait for
-   a command or producer completion, create an observed-producer dependency
+   No allocation gate may wait for
+   its observed command or producer completion, create an observed-producer dependency
    cycle, or hold a waiting Mac VM. Require the closed helper group selection,
    exact new job identities and all five coordinator results in completeness.
    Reject queued placeholder timestamps, duplicates, mismatched
@@ -1725,7 +1784,8 @@ the original subset. A new legitimate test must not erase preservation checks.
    without allocation. Admission must not wait for allocated ARM parts to
    complete, consume a waiting Mac VM, add a native part or supply passing
    assertion credit. Exercise bounded timeout/cancellation without a passing
-   fallback. V9 retains v7/v8's twenty-minute allocation
+   fallback. V10 retains v9's fairness groups, helper algorithm and receipt
+   semantics and v7/v8/v9's twenty-minute allocation
    observation budget, five-second polling and twenty-two-minute coordinator
    watchdogs. Keep historical v1-v6's original ten-minute watchdogs authentic.
    The PR-only T-MACADM017 regression uses a private injected clock and synthetic
@@ -1737,16 +1797,20 @@ the original subset. A new legitimate test must not erase preservation checks.
    Neither longer observation nor allocation success satisfies the unchanged
    whole-lane delivery limits; queued time inside a running lane still counts.
    Preserve ARM's own unit barrier, both Intel units and all
-   twenty-five native parts and worker limits; verify real overlap and queues
+   twenty-five native parts, thirty-four expanded jobs and all five Linux
+   coordinators. Keep seven ARM and fourteen Intel regression workers and four
+   on each Intel unit host; verify real overlap and queues
    again on the next frozen candidate. Verify the split ARM refresh and Intel
    primary body cleanup receipts bind their actual `GITHUB_JOB` identities,
    alongside the existing split Intel refresh/Homebrew bindings. Reject stale
    aliases. Preserve v4's original `intel-retained-body`/body-1 receipt semantics;
    retain v5's original Homebrew-first dependencies only as v5 and reject a
-   label-only or hybrid v5-to-v6 substitution. Reject v7/v8/v9 graphs under
-   another protocol's label. Replay the exact v1-v8
-   resource graphs and unmarked historical
-   native graphs without borrowing new dependency or origin proof.
+   label-only or hybrid v5-to-v6 substitution. Reject v7/v8/v9/v10 graphs under
+   another protocol's label, including v9/v10 relabelling in either direction.
+   Replay the exact v1-v9 resource graphs, including historical
+   `arm-regression-allocation-v9-ready-critical-fairness` with simultaneous
+   own-unit-ready Intel critical requests, and unmarked historical native graphs
+   without borrowing new dependency or origin proof.
    T-MACADM019 through T-MACADM022 are PR-only Node-only, network-free
    maintainer-owned roots using synthetic attempt-scoped metadata and owned
    source fixtures. They prove ready-body priority versus future-unit blocking,
@@ -1754,6 +1818,14 @@ the original subset. A new legitimate test must not erase preservation checks.
    changing readiness/allocation observations with bounded failures. Each
    complete isolated root declares one slot and no shared resources; neither
    critical cap grows.
+   T-MACADM023 and T-MACADM024 in
+   `test/macos-runner-admission.unit.test.mjs` add PR-only, Node-only,
+   network-free maintainer-owned controls for actual primary allocation and
+   secondary eligibility, unfinished primary/future-unit independence, authentic
+   published v9 restoration and v9/v10 label rejection. Their complete isolated
+   roots declare one slot, no prerequisites and no shared exclusive resources.
+   Preserve the queued-placeholder, completion-wait, wrong-group and cycle
+   negatives; no new critical member, producer or coordinator is introduced.
    Configured priority is only a lead; provider allocation gaps remain in the
    measured whole-lane span and cannot be converted into a passing estimate.
    Keep `native-framework-shards-v1` global-barrier and

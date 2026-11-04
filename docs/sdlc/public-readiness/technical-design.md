@@ -405,7 +405,7 @@ observed part results. Require source-, platform-, job-, run- and attempt-bound
 unit evidence before regression shards execute. Independently verify every
 part's SDK context, complete assertion union and allocated-prefix cleanup;
 missing, duplicated, overlapping or swapped parts cannot produce completeness.
-The source-adopted `native-framework-shards-v6-stable-cost-components` protocol retains
+The source-adopted `native-framework-shards-v7-resource-affinity-components` protocol retains
 v4's four
 explicit platform-specific unit-to-regression job groups. A platform's unit
 producers must all complete successfully, including retention and cleanup, before
@@ -419,8 +419,8 @@ nonempty extended-unit subset. Both Intel unit jobs share `native-units-mi`'s
 standard runner matrix, each with its own four-worker budget and prefix. No waiting
 regression host is started early merely to overlap provisioning.
 For body placement, derive complete root groups from the existing scheduler,
-then join dependency and shared-exclusive-resource edges transitively. V6 uses
-qualified observed root costs to place whole connected components, with a
+then join dependency and shared-exclusive-resource edges transitively. V7 retains
+v6's qualified observed root costs to place whole connected components, with a
 separate stable planning identity derived from exact file/root identities rather
 than whole-file source hashes. Preserve actual source-bound assertion, group,
 configuration and execution identities independently of planning keys.
@@ -435,20 +435,43 @@ from one file may execute on different hosts; a root's descendants and connected
 components may not. Body file lists may overlap, but source-bound escaped
 full-name selectors must execute each assigned assertion exactly once.
 Ambiguous selectors fail rather than executing an unassigned closure.
+Preserve the published v6 `nativePlacementCosts` table unchanged. V7 adds the
+separate `nativePlacementCostsV7` overlay for ten completed Intel body-0 group
+observations from source `6cc595a1a12cc71a6e7fbba2ae72f3696303acea`,
+run `41803553551`, attempt 1, Node 24.20.0 and fourteen Intel workers.
+Qualified target/runtime/closure/resource matches supply scheduling leads only;
+source changes transfer no passing execution credit. Roots without a v7
+target sample retain v6 cost lookup; incompatible or unknown leads retain
+explicit count-based fallback. Neither summed weights nor overlapping original
+group durations predict a concurrent lane duration.
+After cost placement, v7's `nativePlacementAffinities` may move only the qualified
+standalone ARM retained-identity component to the existing standalone catalog
+component's host. Require the declared ARM target, runtime, seven-slot capacity and complete
+closure/resource/component shape. Preserve retained minimum four plus catalog
+minimum one within those seven slots; these remain independent ready-pool
+groups, not a merged callback or dependency chain. Record source qualification
+and explicit nonapplication for incompatible inputs or an emptied source body.
+No Intel affinity or new host is introduced. This is a source-qualified placement
+hypothesis, not a predicted saving, actual overlap or latency pass.
 Derive the complete validated root-group inventory once per planning invocation,
 index it by file and project each shard's exact complete selection in original
 file order. Check the assertion union and prerequisites for each projection.
 Reuse never crosses an invocation or caches mutable inventory inputs; a later
-call must observe changed resource declarations. Historical protocols and
-current component placement remain unchanged for identical inputs.
+call must observe changed resource declarations. Within each authentic protocol,
+identical inputs reproduce its deterministic component placement.
 This changes cross-host assignment only: within-host scheduling policy v9
 remains byte-identical. Verify the workflow's selected protocol against the
 captured native planner and SDK reconstruction; old source cannot be relabelled
-as v6. Keep v4's exact historical file assignments and v5's original count/hash
+as v7. Keep v4's exact historical file assignments and v5's original count/hash
 component assignments and serialized identities, each with its twenty-five-part
-topology. Captured v6 planner source must carry the authentic adopted literal
-cost declaration; reject missing, computed, duplicate or altered declarations
-without executing captured code. Historical v1-v5 replay requires no v6 table.
+topology. Replay `native-framework-shards-v6-stable-cost-components` with its exact
+original cost table, assignments, serialized identities and SDK source without
+borrowing v7 overlays or affinities.
+Captured v6 planner source must carry the authentic adopted `nativePlacementCosts`
+literal. V7 additionally requires authentic `nativePlacementAffinities` and
+`nativePlacementCostsV7` strict JSON literals. Reject missing, computed, duplicate
+or altered declarations without executing captured code. Historical v1-v5 replay
+requires no v6 table; v6 requires neither v7 declaration.
 Preserve the original `native-framework-shards-v1` global-barrier and
 `native-framework-shards-v2-platform-units` twenty-part proof and archive
 semantics, and the `native-framework-shards-v3-four-body-platform-units`
@@ -466,13 +489,15 @@ diagnostic artifacts, as specified below; no producer may borrow another's recei
 Bootstrap v5 requires two genuine Homebrew owners and eleven source-bound
 nonallocation proofs, retaining all thirteen diagnostic artifacts and steps.
 Keep default whole-native execution and release prepublication compatible.
-The required logical lane span is at most 460 seconds on Linux, 665 seconds on
-Windows and 627 seconds on Apple Silicon, and strictly under 1,200 seconds on
-Intel macOS. Measure from the earliest required unit/framework/Homebrew worker
-start through the last evidence/cleanup completion, including unit barriers,
+The required logical lane span is at most 900 seconds (15 minutes) on each of
+Linux, Windows and Apple Silicon, and strictly under 1,200 seconds (20 minutes)
+on Intel macOS. Shorter recorded durations are historical measurements, not
+acceptance limits. Measure from the earliest required unit/framework/Homebrew
+worker start through the last evidence/cleanup completion, including unit barriers,
 repeated provisioning and internal queues. Intel's former fifteen-minute target
-is a stretch goal. Its observation cutoff moves from sixteen to twenty minutes,
-without changing command watchdogs, owned-process settlement or other limits.
+is an optional stretch goal, not an acceptance requirement. Its observation
+cutoff moves from sixteen to twenty minutes, without changing command watchdogs,
+owned-process settlement or other limits.
 Configured host fan-out, an isolated shard time or an elapsed-work estimate is
 not a passing latency result; fresh complete hosted measurements are required.
 Keep the existing observation refresh/regression and observer priorities first.
@@ -512,10 +537,18 @@ Historical v2-v8 identities and captured-source replay remain unchanged.
 It does not cache cold Go builds, prune lifecycle/failure probes or alter assertions.
 
 The PR workflow uses five Linux read-only allocation coordinators under
-`arm-regression-allocation-v9-ready-critical-fairness`. All three Intel critical
-bodies become eligible after both Intel unit jobs, independently of queued
-ARM body or refresh allocations. This removes coordination-only cross-platform
-request blocking, not either platform's own complete unit barrier.
+`arm-regression-allocation-v10-intel-primary-first`. Intel primary/body-0 and
+the existing `intel-retained-admission` observer remain eligible after both
+successful Intel unit jobs. Only the existing `native-mi` secondary body-1/body-2
+matrix additionally waits for that observer's actual primary allocation.
+It never waits for primary completion, ARM allocation or future foreign units.
+This makes primary request priority source-controlled rather than assuming
+which matrix entry a provider allocates first. Preserve the existing job
+separation, all twenty-five producers and thirty-four expanded jobs, including
+the five coordinators. Keep seven ARM and fourteen Intel regression workers
+and four workers on each Intel unit host.
+V10 otherwise preserves v9's readiness fairness and both platforms' own complete
+unit barriers.
 After ARM's own unit barrier, `mac-admission` selects `arm-refresh-ready`:
 the mandatory short refresh receives a fair turn after the first actual body
 allocation on each currently-ready architecture, rather than after the entire
@@ -523,8 +556,8 @@ ARM body and Intel-primary allocation chain. Preserve real own-unit/data
 prerequisites. A foreign architecture whose units are not yet complete does not
 reserve future capacity. Readiness is reevaluated from complete attempt-scoped
 metadata, not a queued timestamp placeholder.
-The independent `intel-retained-admission` coordinator still observes Intel's
-actual body-0 worker for completeness, but no longer gates ARM refresh.
+The `intel-retained-admission` coordinator observes Intel's actual body-0 worker
+to release only Intel secondaries and for completeness, not to gate ARM refresh.
 Its historical job/artifact identifier and closed `intel-primary-body` group
 retain their authentic meaning.
 `arm-refresh-admission` still observes the refresh worker and is required for
@@ -535,27 +568,33 @@ The existing `intel-homebrew-admission` and `intel-admission` coordinators selec
 short refresh yield to all three actual body allocations on every
 currently-ready architecture. The finite ready-body cohort prevents auxiliary
 work overtaking already-ready ARM bodies without blocking independent Intel
-critical requests, waiting for future units or waiting for body completion.
+primary requests or primary-allocated secondaries, waiting for future units or
+waiting for body completion.
 No coordinator reserves a waiting Mac VM. Native part names, recipes,
 assertions, retention and cleanup remain unchanged.
 A queued `started_at` placeholder is not allocation evidence; a runner or
 started step is required. Completed allocated parts also satisfy admission; no stage
 waits for its allocated parts to finish. Each helper invocation selects only
-its closed role group. V9 adds `arm-refresh-ready` and
+its closed role group. V10 retains v9's `arm-refresh-ready` and
 `intel-auxiliaries-ready` while retaining `arm-bodies`, `intel-primary-body`,
 `arm-refresh`, `intel-homebrew` and `intel-bodies`. The historical `arm-regressions`
-group remains the default for existing callers. Current v9 and historical v5-v8
+group remains the default for existing callers. Current v10 and historical v5-v9
 use `intel-primary-body`; historical v4 retains `intel-retained-body` and its
 original body-1 receipt semantics. Preserve v5's original Homebrew-allocation
-dependency only as historical v5, never relabel it as current v6.
-Retain the exact historical v1-v7 resource graphs, v8's own-platform critical graph and unmarked native v1-v4 replay rather than
-silently adopting new dependencies.
+dependency only as historical v5, never relabel it as admission v6 or newer.
+Retain the exact historical v1-v9 resource graphs and receipts, including v8's
+own-platform critical graph and `arm-regression-allocation-v9-ready-critical-fairness`
+with simultaneous own-unit-ready Intel critical requests.
+Reject v9/v10 label substitution in either direction and preserve
+unmarked native v1-v4 replay rather than silently adopting new dependencies.
+The helper's v9 readiness algorithm and receipt semantics remain unchanged;
+v10 identifies the distinct source request graph.
 No coordinator occupies a Mac VM while waiting or adds a native producer
 part. The policy does not change the twenty-five-part assertion union,
 architecture coverage, resource allowances or native command watchdogs. V8
 retains v7's twenty-minute allocation observation budget,
 with five-second polling and a twenty-two-minute coordinator
-job watchdog for setup and receipt retention; v9 preserves those bounds.
+job watchdog for setup and receipt retention; v9/v10 preserve those bounds.
 The previous eight-minute cutoff
 failed before the measured eleven-minute provider allocation and suppressed
 mandatory downstream roles. This observation budget is not a delivery limit:
@@ -579,6 +618,9 @@ observations distinguish source eligibility from provider worker availability.
 Observed concurrency and historical five-job planning assumptions do not
 establish an exact provider quota. Fairness configuration or an unchanged-source
 lucky rerun is not a performance pass.
+Primary-first eligibility cannot establish that the long catalog service fits
+the strict Intel delivery limit. New-source local, Review and native acceptance
+remain NotRun until their applicable complete executions.
 The existing Homebrew command trace also records a monotonic `elapsedMs` for
 each awaited subprocess, including rejected commands. This measures service
 time, not surrounding snapshot checks, bootstrap, evidence retention or cleanup.
@@ -1694,6 +1736,11 @@ After existing source, original journal, command, context and resource checks,
 native framework producers emit at most ten slowest group timing notices.
 Retain only closed group/root/source identities, actual group wall intervals and
 root durations, and explicit completed-group/partial-or-completed-producer labels.
+Expose actual start/end offsets and the source-bound last-finishing group within
+that bounded output, not inferred serial phases obtained by summing overlapping
+durations. Missing clocks remain unavailable. A long root's duration alone
+cannot identify when it started or prove that the surrounding Execute envelope
+is avoidable.
 Unbound or unfinished stages supply no timings. Timing-only formatting rejection
 adds a presentation diagnostic without changing readiness; existing evidence
 validation remains authoritative. Notices contain no names, paths or raw output
@@ -1704,6 +1751,16 @@ The entry consumer treats absent or non-array optional timing metadata as no
 notices, including legacy partial and blocked finalizer responses. Preserve the
 original evaluation, diagnostics and Markdown, and propagate actual finalizer
 errors unchanged; presentation cannot mask the primary result.
+
+The detached-writer boundary fixture publishes readiness only after its first
+real writes to both owned ambient and prefix streams succeed. Preserve its four
+original failure/cancellation scenarios and exact cleanup-decision identity
+challenge. A fifth controller-exit scenario holds periodic writing before the
+decision and after its acknowledgement until the parent observes both streams.
+This proves readiness without relying on child scheduling, an fsync finishing
+after acknowledgement visibility, or a grace period. Quarantine, original
+leases, exact writer liveness, release/drain and owned cleanup remain required;
+the fixture does not relax production cleanup decisions or deadlines.
 
 GitHub renders Markdown summaries, not arbitrary result JSON automatically.
 Reuse the runner records and generic report projection for this small adapter;
