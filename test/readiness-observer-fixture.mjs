@@ -18,6 +18,7 @@ import { nativeSpecification, nativeConfigurationDigest, nativeArtifacts, native
   nativeWorkflowContract, nativeStageSelections, nativeProducerRole } from '../scripts/native-validation.mjs';
 import { nativeLegacyPrParts, nativeFrameworkShardPlan, nativeFrameworkShardProtocol,
   nativeLegacyFrameworkShardProtocol, nativeSplitUnitFrameworkShardProtocol,
+  nativeRootComponentFrameworkShardProtocol, nativePlacementCosts,
   nativePartJobKey, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
 import { nativeResourceFacts, nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
 import { repositoryRoot, unitFiles } from '../scripts/test-runner.mjs';
@@ -184,6 +185,10 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
     file.endsWith('.yml') ? ci : 'throw new Error("candidate reporter must never execute in the observer");\n']));
   files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
     `export const nativeFrameworkShardProtocol = '${shardProtocol}';\n`);
+  if (shardProtocol === nativeFrameworkShardProtocol) {
+    files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
+      `export const nativePlacementCosts = Object.freeze(${JSON.stringify(nativePlacementCosts)});\n`);
+  }
   files.set('scripts/test-scheduling.mjs', schedulingSource);
   const schedulingPolicy = sourceValidationSchedulingPolicy([{ file: 'scripts/test-scheduling.mjs', contents: schedulingSource }]);
   assert.ok(['source', 'missing', 'mutated'].includes(admissionHelper));
@@ -191,7 +196,8 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
   if (['arm-regression-allocation-v1', 'arm-regression-allocation-v2-priority-intel-bodies',
     'arm-regression-allocation-v3-intel-homebrew-first', 'arm-regression-allocation-v4-retained-first',
     'arm-regression-allocation-v5-critical-body-first', 'arm-regression-allocation-v6-all-critical-bodies-first',
-    'arm-regression-allocation-v7-bounded-queue-wait', 'arm-regression-allocation-v8-own-platform-critical']
+    'arm-regression-allocation-v7-bounded-queue-wait', 'arm-regression-allocation-v8-own-platform-critical',
+    'arm-regression-allocation-v9-ready-critical-fairness']
     .includes(workflow.env?.SDLC_MAC_ADMISSION_POLICY) && admissionHelper !== 'missing') {
     const macAdmissionHelper = readFileSync(
       new URL('../scripts/macos-runner-admission.mjs', import.meta.url), 'utf8');
@@ -829,9 +835,31 @@ export async function observerApiFixture(t, options = {}) {
     }).join('') + (shardProtocol === nativeLegacyFrameworkShardProtocol ? '' :
       `  producer-summary:\n    permissions: {}\n    needs: ${JSON.stringify(['intent', 'minimum-node', 'source', ...protocolKeys])}\n` +
       '    steps:\n      - run: echo "Controlled historical summary; never execute"\n');
+  let splitHistoricalCi;
+  if (options.frameworkShards &&
+    [nativeSplitUnitFrameworkShardProtocol, nativeRootComponentFrameworkShardProtocol].includes(shardProtocol)) {
+    const historical = parseWorkflow({ file: nativeWorkflowContract.path, contents: currentCi });
+    historical.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v8-own-platform-critical';
+    for (const key of ['native-ma-refresh', 'arm-refresh-admission']) {
+      historical.jobs[key].needs = ['intent', 'source', 'native-units-ma', 'intel-retained-admission', 'mac-admission'];
+    }
+    historical.jobs['mac-admission'].steps[4].name = 'Wait for actual ARM body worker allocation';
+    historical.jobs['mac-admission'].steps[4].run =
+      historical.jobs['mac-admission'].steps[4].run.replace('--group arm-refresh-ready', '--group arm-bodies');
+    for (const key of ['intel-admission', 'intel-homebrew-admission']) {
+      const step = historical.jobs[key].steps[4];
+      step.name = `Wait for actual Intel ${key === 'intel-admission' ? '' : 'critical '}body worker allocation`;
+      step.run = step.run.replace('--group intel-auxiliaries-ready', '--group intel-bodies');
+    }
+    if (shardProtocol === nativeRootComponentFrameworkShardProtocol) {
+      historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = nativeRootComponentFrameworkShardProtocol;
+    } else delete historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL;
+    splitHistoricalCi = Object.entries(historical)
+      .map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n';
+  }
   const ci = options.frameworkShards ? shardProtocol === nativeFrameworkShardProtocol ? currentCi :
-    shardProtocol === nativeSplitUnitFrameworkShardProtocol ?
-      currentCi.replace(/^  SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL:.*\r?\n/mu, '') : historicalCi : `name: CI
+    [nativeSplitUnitFrameworkShardProtocol, nativeRootComponentFrameworkShardProtocol].includes(shardProtocol) ?
+      splitHistoricalCi : historicalCi : `name: CI
 on: pull_request
 permissions:
   contents: read

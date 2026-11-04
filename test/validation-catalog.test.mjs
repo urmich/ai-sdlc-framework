@@ -12,6 +12,8 @@ export const validationDeclarations = {
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
+import fsPromises from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { artifact, cli, coding, completeReview, fixture, fixtureArtifact, fixtureBuild,
@@ -20,7 +22,7 @@ import { artifact, cli, coding, completeReview, fixture, fixtureArtifact, fixtur
 import { registerArtifact, parseTestPlan, resolveTestSpecification } from '../src/artifacts.mjs';
 import { startCycle, recordReadiness, recordTest, recordTests, stagingHandoff } from '../src/validation.mjs';
 import { applicableOverride, currentCycle, currentTestEvidence, hasStagingCompletion, stagePassed } from '../src/authority.mjs';
-import { cycleTests, readValidationObject, stageValidationObject, validationObjectPath } from '../src/validation-catalog.mjs';
+import { cycleTests, flushValidationObjects, readValidationObject, stageValidationObject, validationObjectPath } from '../src/validation-catalog.mjs';
 import { appendTestObservation, testHistory, cycleResultIds, readTestEvidence, testResetDigest, retainTestEvidence } from '../src/validation-evidence.mjs';
 import { claimOperationDispatch, prepareOperation, markDispatching, recordOperation, pruneWork } from '../src/operations.mjs';
 import { status, resume } from '../src/recovery.mjs';
@@ -556,6 +558,104 @@ test('published references are fresh-checked after cache use and missing/corrupt
   await f.store.load(f.workItemId);
   await fs.unlink(file);
   await assert.rejects(f.store.load(f.workItemId), { code: 'ENOENT' });
+});
+
+test('immutable validation publication bounds overlap and drains ordered failures before later batches', async t => {
+  const f = await fixture(t);
+  const originalOpen = fsPromises.open;
+  t.after(() => { fsPromises.open = originalOpen; syncBuiltinESMExports(); });
+  for (const failure of ['none', 'flush', 'readback', 'fault', 'corrupt']) {
+    const directory = path.join(f.root, `publication-${failure}`);
+    const context = { validationObjects: new Map() };
+    const refs = Array.from({ length: 9 }, (_, index) =>
+      stageValidationObject(context, { kind: 'publication-fixture', workItemId: f.workItemId, index }));
+    let active = 0;
+    let maximum = 0;
+    const entered = [];
+    const completed = [];
+    const faults = [];
+    const flushed = [];
+    let directoryFlushes = 0;
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    let ready;
+    const allEntered = new Promise(resolve => { ready = resolve; });
+    const store = { workPath: () => directory, fault: async point => {
+      assert.equal(point, 'validation:object');
+      assert.equal(active, 0, 'Every dispatched publication must settle before ordered fault replay');
+      faults.push(point);
+      if (failure === 'fault') throw new Error('First ordered publication fault');
+    } };
+    if (failure === 'corrupt') {
+      const file = validationObjectPath(store, f.workItemId, refs[0]);
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.writeFile(file, 'corrupt-existing-object');
+    }
+    fsPromises.open = async (file, ...args) => {
+      if (String(file) === path.join(directory, 'validation', 'objects')) directoryFlushes++;
+      const handle = await originalOpen(file, ...args);
+      const index = refs.findIndex(ref => path.basename(String(file)).startsWith(`.${ref.sha256}.json.`));
+      if (index < 0) return handle;
+      const originalSync = handle.sync.bind(handle);
+      const originalClose = handle.close.bind(handle);
+      const originalWrite = handle.writeFile.bind(handle);
+      handle.writeFile = (contents, ...options) => originalWrite(
+        failure === 'readback' && index === 1 ? 'corrupt-new-object' : contents, ...options);
+      handle.sync = async () => {
+        active++;
+        maximum = Math.max(maximum, active);
+        entered.push(index);
+        if (entered.length === (failure === 'corrupt' ? 3 : 4)) ready();
+        await gate;
+        await originalSync();
+        flushed.push(index);
+        if (failure === 'flush' && [1, 2].includes(index)) throw new Error(`Flush failure ${index}`);
+      };
+      handle.close = async () => {
+        try { return await originalClose(); }
+        finally { if (!completed.includes(index)) { completed.push(index); active--; } }
+      };
+      return handle;
+    };
+    syncBuiltinESMExports();
+    const pending = flushValidationObjects(store, f.workItemId, context);
+    pending.catch(() => {});
+    let timer;
+    try {
+      await Promise.race([allEntered, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Independent publications did not overlap')), 5000);
+      })]);
+    } finally {
+      clearTimeout(timer);
+      release();
+      await pending.catch(() => {});
+      fsPromises.open = originalOpen;
+      syncBuiltinESMExports();
+    }
+    assert.equal(maximum, failure === 'corrupt' ? 3 : 4);
+    assert.equal(active, 0);
+    assert.deepEqual(new Set(completed), new Set(entered));
+    assert.deepEqual(new Set(flushed), new Set(entered), 'Every owned file reaches its real durability flush');
+    assert.equal(directoryFlushes, failure === 'flush' ? 2 : entered.length);
+    if (failure === 'none') {
+      await pending;
+      assert.equal(entered.length, 9);
+      assert.equal(faults.length, 9);
+      for (const ref of refs) {
+        assert.deepEqual(await fs.readFile(validationObjectPath(store, f.workItemId, ref)),
+          context.validationObjects.get(ref.sha256));
+      }
+    } else {
+      await assert.rejects(pending, failure === 'flush' ? /Flush failure 1/u :
+        failure === 'fault' ? /First ordered publication fault/u : { code: 'DIGEST' });
+      assert.equal(entered.length, failure === 'corrupt' ? 3 : 4);
+      assert.equal(faults.length, ['flush', 'readback', 'fault'].includes(failure) ? 1 : 0);
+      if (failure === 'corrupt') assert.equal(await fs.readFile(
+        validationObjectPath(store, f.workItemId, refs[0]), 'utf8'), 'corrupt-existing-object');
+    }
+    assert.ok((await fs.readdir(path.join(directory, 'validation', 'objects')))
+      .every(name => /^[a-f0-9]{64}\.json$/u.test(name)), 'All owned atomic-write temporaries are cleaned');
+  }
 });
 
 test('retained execution payload persists no environment-secret or Cookie sentinel bytes', async t => {

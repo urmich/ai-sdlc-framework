@@ -3,6 +3,19 @@ export const validationDeclarations = {
   "surfaces": [
     {"coverage": "direct", "paths": ["scripts/native-validation.mjs", "scripts/native-source-dummy-values.mjs", "scripts/native-toolchain.mjs", "scripts/native-homebrew-prefix.mjs", "scripts/validation-tools.mjs", "scripts/accept-release.mjs", "scripts/homebrew-lifecycle.mjs", "scripts/homebrew-switch.mjs", "packaging/homebrew/switch-state.mjs", "scripts/toolchain-baseline.mjs", "scripts/native-bootstrap-capability.mjs", "scripts/pr-capabilities.mjs", "scripts/pr-calculator.mjs", "scripts/pr-calculator-reporter.mjs", "scripts/native-components.mjs"]}
   ],
+  "applicability": [{
+    "names": [
+      "T-PRD017 stable native cost placement balances observed whole roots without borrowing evidence",
+      "T-PRD017 unrelated source edits preserve planning ownership but invalidate native execution identity",
+      "T-PRD017 native cost fallback retains connected closures and rejects malformed inventories",
+      "T-PRD017 native placement v6 requires adopted literal cost source and preserves v1 through v5 mappings",
+      "T-PRD017 native protocol5 and historical4 retain source-bound observer and SDK reconstruction"
+    ],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "native-validation-maintainer",
+    "reason": "PR-only network-free native placement units and exact SDK source replay; historical durations are leads, not current credit. No critical promotion, shared mutable resources or provider calls.",
+    "prerequisites": ["Node and owned repository-local source/report fixtures; complete causal roots remain sequential"]
+  }],
   "groups": [
     {"root": "T-PRD074 exact typed native source retains code and credential-negative fixtures without becoming sanitized log text",
       "minimumSlots": 1, "exclusiveResources": []},
@@ -65,6 +78,18 @@ export const validationDeclarations = {
     {"root": "T-PRD018 optional timing consumer preserves legacy partial and blocked outcomes and finalizer errors",
       "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD014 bootstrap CLI failures retain safe annotations before bootstrap evidence exists",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD017 stable native cost placement balances observed whole roots without borrowing evidence",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD017 unrelated source edits preserve planning ownership but invalidate native execution identity",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD017 native cost fallback retains connected closures and rejects malformed inventories",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD017 native placement v6 requires adopted literal cost source and preserves v1 through v5 mappings",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD017 native protocol5 spreads independent same-file roots and executes connected complete closures exactly once",
+      "minimumSlots": 2, "exclusiveResources": []},
+    {"root": "T-PRD017 native protocol5 and historical4 retain source-bound observer and SDK reconstruction",
       "minimumSlots": 1, "exclusiveResources": []}
   ]
 };
@@ -3584,6 +3609,133 @@ test('T-PRD017 native shard construction derives complete root groups once and p
   assert.equal(groups.find(group => group.root === escapedRoot).minimumSlots, 3);
 });
 
+async function nativeCostFixture(t) {
+  const f = await observerApiFixture(t);
+  const files = [...f.source.files].map(([file, contents]) => ({ file, contents }));
+  const roots = [
+    ['test/validation-catalog.test.mjs',
+      'complete synthetic per-case reports obey all 2066 unit prerequisites and full aggregate coverage', 933534],
+    ['test/validation-catalog.test.mjs',
+      'F02 audited superseded STAGING receipt proof survives pruning and historical reads without current credit', 202036],
+    ['test/public-readiness-observer.test.mjs',
+      'T-PRD020 RC66 CI01 current twenty-five-part observer admits Intel 1185s and blocks Linux 500s', 553385],
+    ['test/workflow.test.mjs', 'T-18 superseded current-cycle evidence is pruned from the active working set', 481534],
+  ];
+  for (const file of new Set(roots.map(([file]) => file))) files.push({ file, contents:
+    `import test from 'node:test';\n` + roots.filter(([selected]) => selected === file)
+      .map(([, name]) => `test(${JSON.stringify(name)},()=>{});\n`).join('') });
+  files.find(source => source.file === 'test/observer-shard-body.test.mjs').contents +=
+    Array.from({ length: 12 }, (_, index) => `test('unknown cost ${index}',()=>{});\n`).join('');
+  const compile = selected => {
+    const paths = new Set(validationSourcePaths(selected.map(source => source.file)));
+    const result = compileValidationSourceInventory({ files: selected.filter(source => paths.has(source.file)),
+      surfacePaths: selected.map(source => source.file) });
+    assert.equal(result.complete, true, JSON.stringify(result.unresolved));
+    return result;
+  };
+  return { files, roots, compile, inventory: compile(files), plan: f.source.plan };
+}
+
+test('T-PRD017 stable native cost placement balances observed whole roots without borrowing evidence', async t => {
+  const f = await nativeCostFixture(t);
+  for (const [target, durations, knownRoots, workers] of [
+    ['macos-x64', f.roots.map(([, , ms]) => ms), 4, 14],
+    ['macos-arm64', [286836, 25626, 112554, 111436], 5, 7],
+  ]) {
+    const assignment = nativeFrameworkShardPlan({ inventory: f.inventory, plan: f.plan, target });
+    const measured = assignment.parts.filter(part => part.shard.startsWith('body-')).map(part =>
+      f.roots.reduce((sum, [file, name], index) => sum + (part.stages.some(stage =>
+        stage.cases.some(test => test.file === file && test.name === name)) ? durations[index] : 0), 0));
+    assert.equal(Math.max(...measured), durations[0],
+      'Count-balanced bins must not place another observed long root beside the 2066-unit causal root');
+    assert.equal(Math.max(...assignment.placement.partitions.map(part => part.observedLeadMs)), durations[0]);
+    assert.equal(assignment.placement.evidenceCredit, false);
+    assert.equal(assignment.placement.costs.runId, '41712341373');
+    assert.equal(assignment.placement.costs.attempt, '1');
+    assert.equal(assignment.placement.costs.workers[target], workers);
+    assert.equal(assignment.placement.groups.filter(group => group.durationMs !== null).length, knownRoots);
+    assert.ok(assignment.placement.groups.filter(group => group.durationMs !== null)
+      .every(group => group.costStatus === 'historical-source-lead'));
+    const ids = assignment.parts.flatMap(part => part.assertionIds);
+    assert.deepEqual([...ids].sort(), f.inventory.cases.map(test => test.id).sort());
+    assert.equal(new Set(ids).size, ids.length);
+    assert.equal(nativePrPartsForProtocol(assignment.protocol).length, 25);
+  }
+});
+
+test('T-PRD017 unrelated source edits preserve planning ownership but invalidate native execution identity', async t => {
+  const f = await nativeCostFixture(t);
+  const request = { plan: f.plan, target: 'macos-x64' };
+  const before = nativeFrameworkShardPlan({ ...request, inventory: f.inventory });
+  const edited = structuredClone(f.files);
+  for (const source of edited.filter(source => source.file.endsWith('.test.mjs'))) {
+    source.contents += '\n// Unrelated module comment; no root, descendant or resource changed.\n';
+  }
+  const inventory = f.compile(edited);
+  const after = nativeFrameworkShardPlan({ ...request, inventory });
+  const ownership = assignment => assignment.parts.map(part => [part.shard, [...part.assertionIds].sort()]);
+  assert.deepEqual(ownership(after), ownership(before),
+    'Whole-file source hashes are evidence identities, not placement tie breakers');
+  assert.deepEqual(after.placement.groups.map(group => group.planningId),
+    before.placement.groups.map(group => group.planningId));
+  assert.notEqual(after.digest, before.digest);
+  assert.notEqual(inventory.digest, f.inventory.digest);
+  const oldGroups = before.parts.flatMap(part => part.stages.flatMap(stage => stage.groups));
+  const newGroups = after.parts.flatMap(part => part.stages.flatMap(stage => stage.groups));
+  assert.equal(oldGroups.length, newGroups.length);
+  assert.ok(oldGroups.every(group => newGroups.find(next => next.rootId === group.rootId)?.id !== group.id));
+  assert.notEqual(nativeConfigurationDigest({ inventory: f.inventory, profile: 'pr', component: 'framework',
+    shard: 'body-0', shardPlanDigest: before.digest }),
+  nativeConfigurationDigest({ inventory, profile: 'pr', component: 'framework',
+    shard: 'body-0', shardPlanDigest: after.digest }));
+});
+
+test('T-PRD017 native cost fallback retains connected closures and rejects malformed inventories', async t => {
+  const f = await nativeCostFixture(t);
+  const catalog = f.roots[0];
+  const edited = structuredClone(f.files);
+  const source = edited.find(source => source.file === catalog[0]);
+  source.contents = source.contents.replace(`test(${JSON.stringify(catalog[1])},()=>{});`,
+    `test(${JSON.stringify(catalog[1])},async t=>{await t.test('new complete child',()=>{});});`);
+  const inventory = f.compile(edited);
+  const connectedFile = 'test/observer-shard-body.test.mjs';
+  const start = inventory.cases.find(test => test.file === connectedFile && !test.parents.length);
+  const dependent = inventory.cases.find(test => test.name === 'unknown cost 0');
+  const shared = inventory.cases.find(test => test.file === 'test/observer-shard-extra.test.mjs');
+  inventory.groupDeclarations.push(
+    { file: connectedFile, root: start.name, exclusiveResources: ['owned-native-cost-fixture'] },
+    { file: connectedFile, root: dependent.name, dependsOn: [start.name] },
+    { file: shared.file, root: shared.name, exclusiveResources: ['owned-native-cost-fixture'] });
+  for (const target of targets) {
+    const assignment = nativeFrameworkShardPlan({ inventory, plan: f.plan, target });
+    const owner = new Map(assignment.parts.flatMap(part => part.assertionIds.map(id => [id, part.shard])));
+    assert.equal(new Set([start.id, dependent.id, shared.id].map(id => owner.get(id))).size, 1);
+    const closure = inventory.cases.filter(test => test.file === catalog[0] &&
+      (test.name === catalog[1] || test.parents[0] === catalog[1]));
+    assert.equal(closure.length, 2);
+    assert.equal(new Set(closure.map(test => owner.get(test.id))).size, 1);
+    const hint = assignment.placement.groups.find(group => group.rootId === closure[0].id);
+    assert.equal(hint.durationMs, null);
+    assert.equal(hint.costStatus, 'stale-closure-or-resources');
+    assert.ok(assignment.placement.groups.some(group => group.costStatus === 'unknown-root' &&
+      group.durationMs === null), 'Unobserved roots retain explicit count fallback on every native target');
+    const ids = assignment.parts.flatMap(part => part.assertionIds);
+    assert.equal(new Set(ids).size, ids.length);
+    assert.deepEqual([...ids].sort(), inventory.cases.map(test => test.id).sort());
+  }
+  const malformed = mutate => {
+    const value = structuredClone(inventory);
+    mutate(value);
+    assert.throws(() => nativeFrameworkShardPlan({ inventory: value, plan: f.plan, target: 'linux-x64' }),
+      { code: 'INVENTORY' });
+  };
+  malformed(value => value.cases.push(value.cases[0]));
+  malformed(value => value.cases.push({ ...start, id: 'ambiguous-root' }));
+  malformed(value => value.cases.splice(value.cases.findIndex(test => test.id === start.id), 1));
+  malformed(value => value.groupDeclarations.find(group => group.root === dependent.name).dependsOn = ['absent root']);
+  malformed(value => value.groupDeclarations.find(group => group.root === start.name).dependsOn = [dependent.name]);
+});
+
 test('T-PRD017 native protocol4 retains its exact historical file and assertion assignments', async t => {
   const protocol = 'native-framework-shards-v4-split-intel-units';
   const f = await observerApiFixture(t, { frameworkShards: true, shardProtocol: protocol });
@@ -3601,8 +3753,55 @@ test('T-PRD017 native protocol4 retains its exact historical file and assertion 
   }
 });
 
+test('T-PRD017 native placement v6 requires adopted literal cost source and preserves v1 through v5 mappings', async t => {
+  const file = 'scripts/native-validation.mjs';
+  const contents = await fs.readFile(path.join(repositoryRoot, 'scripts', 'native-validation.mjs'), 'utf8');
+  const source = [{ file, contents }];
+  assert.equal(nativePass.sourceNativeFrameworkShardProtocol(source), nativeFrameworkShardProtocol);
+  for (const edited of [
+    contents.replace('"runId": "41712341373"', '"runId": "41712341374"'),
+    contents.replace('export const nativePlacementCosts =', 'const nativePlacementCosts ='),
+    contents.replace('export const nativePlacementCosts = Object.freeze({',
+      'export const nativePlacementCosts = Object.freeze(loadUntrustedCosts({'),
+    contents + `\nexport const nativePlacementCosts = Object.freeze(${JSON.stringify(nativePass.nativePlacementCosts)});\n`,
+    `export const nativeFrameworkShardProtocol = '${nativeFrameworkShardProtocol}';\n` +
+      `function spoof(){export const nativePlacementCosts = Object.freeze(${JSON.stringify(nativePass.nativePlacementCosts)});}`,
+  ]) {
+    assert.notEqual(edited, contents);
+    assert.throws(() => nativePass.sourceNativeFrameworkShardProtocol([{ file, contents: edited }]), { code: 'EVIDENCE' });
+  }
+  const f = await observerApiFixture(t);
+  const old = '89b0233f3e218b65ae355a1574a19d9f422f5d1bd6723b8286ce2043c89dad28';
+  const four = 'c7acad4345ba7cea30f4a59c7338c525821943d5d97290ceb42754979913141a';
+  const mac = 'da83187a3c03b48c8907b7bc488f78321300535205335d53b715e7ddaf5f0c8d';
+  const split = 'b430d40977dc3f8b793b1f8be9c23bd22f5523521d95d6157ae5874c349db86b';
+  const expectations = [
+    ['native-framework-shards-v1', [old, old, mac, mac]],
+    ['native-framework-shards-v2-platform-units', [old, old, mac, mac]],
+    ['native-framework-shards-v3-four-body-platform-units', [four, four, mac, mac]],
+    ['native-framework-shards-v4-split-intel-units', [four, four, mac, split]],
+    ['native-framework-shards-v5-root-components', [
+      'b521ace878adc811c4cd800cd18097d5a537c41a08cc53d24c61a856dd0be8a4',
+      'b521ace878adc811c4cd800cd18097d5a537c41a08cc53d24c61a856dd0be8a4',
+      '97c49fac364db99c3b2609da004676f36e7a37c449df8df3d04bfce5609141cc',
+      '7a9ef751a59a3ea9d92009172a3314d8135f8aad722956d1f8f00b861fc33602',
+    ]],
+  ];
+  for (const [protocol, expected] of expectations) {
+    assert.equal(nativePass.sourceNativeFrameworkShardProtocol([{ file,
+      contents: `export const nativeFrameworkShardProtocol = '${protocol}';` }]), protocol);
+    for (const [index, target] of targets.entries()) {
+      const assignment = nativeFrameworkShardPlan({ inventory: f.source.inventory, plan: f.source.plan, target, protocol });
+      assert.equal(Object.hasOwn(assignment, 'placement'), false, 'Historical definitions acquire no new fields');
+      const mapping = assignment.parts.map(part => ({ shard: part.shard,
+        files: part.stages.flatMap(stage => stage.files), assertionIds: part.assertionIds }));
+      assert.equal(createHash('sha256').update(JSON.stringify(mapping)).digest('hex'), expected[index]);
+    }
+  }
+});
+
 test('T-PRD017 native protocol5 spreads independent same-file roots and executes connected complete closures exactly once', async t => {
-  const protocol = 'native-framework-shards-v5-root-components';
+  const protocols = ['native-framework-shards-v5-root-components', nativeFrameworkShardProtocol];
   const f = await observerApiFixture(t);
   const files = [...f.source.files].map(([file, contents]) => ({ file,
     contents: f.source.names.some(test => test.file === file && test.stage === 'regression') ?
@@ -3628,57 +3827,60 @@ test('T-PRD017 native protocol5 spreads independent same-file roots and executes
   const inventory = compileValidationSourceInventory({ files: files.filter(source => selectedPaths.has(source.file)),
     surfacePaths: files.map(source => source.file) });
   assert.equal(inventory.complete, true, JSON.stringify(inventory.unresolved));
-  assert.equal(nativePrPartsForProtocol(protocol).length, 25);
-  for (const target of targets) {
-    const request = { inventory, plan: f.source.plan, target, protocol };
-    const assignment = nativeFrameworkShardPlan(request);
-    assert.deepEqual(nativeFrameworkShardPlan(request), assignment, 'Assignment must be deterministic');
-    const bodies = assignment.parts.filter(part => part.shard.startsWith('body-'));
-    assert.equal(bodies.filter(part => part.stages.some(stage => stage.files.includes(bodyFile))).length,
-      target.startsWith('macos-') ? 3 : 4, 'Independent roots of one file must use every existing body VM');
-    const owner = new Map(assignment.parts.flatMap(part => part.assertionIds.map(id => [id, part.shard])));
-    const connected = inventory.cases.filter(test => test.file === extraFile ||
-      test.file === bodyFile && (test.name.startsWith('connected ') || test.parents[0] === 'connected start'));
-    assert.equal(connected.length, 4);
-    assert.equal(new Set(connected.map(test => owner.get(test.id))).size, 1,
-      'Dependencies, descendants and cross-file shared resources form one complete component');
-    const ids = assignment.parts.flatMap(part => part.assertionIds);
-    assert.deepEqual([...ids].sort(), inventory.cases.map(test => test.id).sort());
-    assert.equal(new Set(ids).size, ids.length);
-    const historical = nativeFrameworkShardPlan({ ...request, protocol: 'native-framework-shards-v4-split-intel-units',
-      inventory: f.source.inventory });
-    assert.deepEqual(assignment.parts.filter(part => part.shard.startsWith('units')),
-      historical.parts.filter(part => part.shard.startsWith('units')), 'Unit topology and selection must not change');
-  }
-  const target = process.platform === 'win32' ? 'windows-x64' :
-    process.platform === 'darwin' ? `macos-${process.arch}` : 'linux-x64';
-  const assignment = nativeFrameworkShardPlan({ inventory, plan: f.source.plan, target, protocol });
-  const actual = [];
-  for (const part of assignment.parts.filter(part => part.shard.startsWith('body-'))) for (const stage of part.stages) {
-    for (const file of stage.files) {
-      const destination = path.join(f.root, ...file.split('/'));
-      await fs.mkdir(path.dirname(destination), { recursive: true });
-      await fs.writeFile(destination, files.find(source => source.file === file).contents.replace(
-        'throw new Error("candidate test source must never execute in the trusted observer");', ''));
+  for (const protocol of protocols) {
+    assert.equal(nativePrPartsForProtocol(protocol).length, 25);
+    for (const target of targets) {
+      const request = { inventory, plan: f.source.plan, target, protocol };
+      const assignment = nativeFrameworkShardPlan(request);
+      assert.deepEqual(nativeFrameworkShardPlan(request), assignment, 'Assignment must be deterministic');
+      const bodies = assignment.parts.filter(part => part.shard.startsWith('body-'));
+      assert.equal(bodies.filter(part => part.stages.some(stage => stage.files.includes(bodyFile))).length,
+        target.startsWith('macos-') ? 3 : 4, 'Independent roots of one file must use every existing body VM');
+      const owner = new Map(assignment.parts.flatMap(part => part.assertionIds.map(id => [id, part.shard])));
+      const connected = inventory.cases.filter(test => test.file === extraFile ||
+        test.file === bodyFile && (test.name.startsWith('connected ') || test.parents[0] === 'connected start'));
+      assert.equal(connected.length, 4);
+      assert.equal(new Set(connected.map(test => owner.get(test.id))).size, 1,
+        'Dependencies, descendants and cross-file shared resources form one complete component');
+      const ids = assignment.parts.flatMap(part => part.assertionIds);
+      assert.deepEqual([...ids].sort(), inventory.cases.map(test => test.id).sort());
+      assert.equal(new Set(ids).size, ids.length);
+      const historical = nativeFrameworkShardPlan({ ...request, protocol: 'native-framework-shards-v4-split-intel-units',
+        inventory: f.source.inventory });
+      assert.deepEqual(assignment.parts.filter(part => part.shard.startsWith('units')),
+        historical.parts.filter(part => part.shard.startsWith('units')), 'Unit topology and selection must not change');
     }
-    const selected = await createPlan(parseOptions(['targeted', '--workers', '2', '--name', stage.selectorName,
-      ...stage.files.map(file => path.join(f.root, ...file.split('/')))]), f.root);
-    const reportPath = path.join(f.root, `${part.shard}-roots.json`);
-    assert.equal(await runTests(selected, { reportPath }), 0);
-    const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
-    validateNativeGroupReport({ inventory, stage, report,
-      journal: await fs.readFile(`${reportPath}.journal.ndjson`, 'utf8'), target });
-    actual.push(...report.executions.map(row => [row.file, row.parents, row.name]));
+    const target = process.platform === 'win32' ? 'windows-x64' :
+      process.platform === 'darwin' ? `macos-${process.arch}` : 'linux-x64';
+    const assignment = nativeFrameworkShardPlan({ inventory, plan: f.source.plan, target, protocol });
+    const actual = [];
+    for (const part of assignment.parts.filter(part => part.shard.startsWith('body-'))) for (const stage of part.stages) {
+      for (const file of stage.files) {
+        const destination = path.join(f.root, ...file.split('/'));
+        await fs.mkdir(path.dirname(destination), { recursive: true });
+        await fs.writeFile(destination, files.find(source => source.file === file).contents.replace(
+          'throw new Error("candidate test source must never execute in the trusted observer");', ''));
+      }
+      const selected = await createPlan(parseOptions(['targeted', '--workers', '2', '--name', stage.selectorName,
+        ...stage.files.map(file => path.join(f.root, ...file.split('/')))]), f.root);
+      const reportPath = path.join(f.root, `${protocol}-${part.shard}-roots.json`);
+      assert.equal(await runTests(selected, { reportPath }), 0);
+      const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+      validateNativeGroupReport({ inventory, stage, report,
+        journal: await fs.readFile(`${reportPath}.journal.ndjson`, 'utf8'), target });
+      actual.push(...report.executions.map(row => [row.file, row.parents, row.name]));
+    }
+    const expected = assignment.parts.filter(part => part.shard.startsWith('body-'))
+      .flatMap(part => part.stages.flatMap(stage => stage.cases));
+    assert.deepEqual(actual.map(digest).sort(), expected.map(test => digest([test.file, test.parents, test.name])).sort());
+    assert.equal(new Set(actual.map(digest)).size, actual.length);
   }
-  const expected = assignment.parts.filter(part => part.shard.startsWith('body-'))
-    .flatMap(part => part.stages.flatMap(stage => stage.cases));
-  assert.deepEqual(actual.map(digest).sort(), expected.map(test => digest([test.file, test.parents, test.name])).sort());
-  assert.equal(new Set(actual.map(digest)).size, actual.length);
 });
 
 test('T-PRD017 native protocol5 and historical4 retain source-bound observer and SDK reconstruction', async t => {
-  const protocols = ['native-framework-shards-v4-split-intel-units', 'native-framework-shards-v5-root-components'];
-  assert.equal(nativeFrameworkShardProtocol, protocols[1]);
+  const protocols = ['native-framework-shards-v4-split-intel-units', 'native-framework-shards-v5-root-components',
+    'native-framework-shards-v6-stable-cost-components'];
+  assert.equal(nativeFrameworkShardProtocol, protocols[2]);
   for (const shardProtocol of protocols) {
     const f = await observerApiFixture(t, { frameworkShards: true, shardProtocol,
       bootstrapProtocol: nativeCryptoBootstrapProtocol, nodeArtifactReader: true });
@@ -3711,9 +3913,14 @@ test('T-PRD017 native protocol5 and historical4 retain source-bound observer and
         sourceTime: data['execution.json'].observedAt, sourceSequence: data['execution.json'].sequence,
       }), ...input });
     assert.equal((await replay()).evaluation.status, 'Passed');
+    const changedSources = definition.sourceFiles.map(source => source.file === definition.stages[0].files[0] ?
+      { ...source, contents: `${source.contents}\n// Same selectors, different original source evidence.\n` } : source);
+    assert.notEqual(digest(changedSources), digest(definition.sourceFiles));
+    await assert.rejects(replay({ definition: { ...definition, sourceFiles: changedSources } }), { code: 'EVIDENCE' },
+      'Stable placement never admits an old source execution as current proof');
     await assert.rejects(replay({ definition: { ...definition,
       frameworkShards: protocols.find(protocol => protocol !== shardProtocol) } }), { code: 'EVIDENCE' },
-    'Captured v4 source cannot be relabelled as v5, or vice versa');
+    'Captured v4/v5/v6 source cannot be relabelled as another placement protocol');
   }
 });
 

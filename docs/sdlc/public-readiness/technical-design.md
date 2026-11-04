@@ -405,7 +405,7 @@ observed part results. Require source-, platform-, job-, run- and attempt-bound
 unit evidence before regression shards execute. Independently verify every
 part's SDK context, complete assertion union and allocated-prefix cleanup;
 missing, duplicated, overlapping or swapped parts cannot produce completeness.
-The source-adopted `native-framework-shards-v5-root-components` protocol retains
+The source-adopted `native-framework-shards-v6-stable-cost-components` protocol retains
 v4's four
 explicit platform-specific unit-to-regression job groups. A platform's unit
 producers must all complete successfully, including retention and cleanup, before
@@ -419,12 +419,21 @@ nonempty extended-unit subset. Both Intel unit jobs share `native-units-mi`'s
 standard runner matrix, each with its own four-worker budget and prefix. No waiting
 regression host is started early merely to overlap provisioning.
 For body placement, derive complete root groups from the existing scheduler,
-then join dependency and shared-exclusive-resource edges transitively. Assign
-whole connected components deterministically by assertion count, group count
-and stable identity to the least-loaded existing body producer. Independent
-roots from one file may execute on different hosts; a root's descendants and
-connected components may not. Body file lists may overlap, but source-bound
-escaped full-name selectors must execute each assigned assertion exactly once.
+then join dependency and shared-exclusive-resource edges transitively. V6 uses
+qualified observed root costs to place whole connected components, with a
+separate stable planning identity derived from exact file/root identities rather
+than whole-file source hashes. Preserve actual source-bound assertion, group,
+configuration and execution identities independently of planning keys.
+The source-declared cost table retains original run/attempt/source, native
+target, runtime and requested-worker provenance. Matching closure and resource
+shape can retain an explicitly historical-source scheduling lead; it cannot
+grant execution credit or establish matched current-host service time.
+Unknown or incompatible costs remain explicit and use count-based fallback
+with stable planning ties, not invented millisecond estimates. Summed work
+weights are not a prediction of concurrent lane duration. Independent roots
+from one file may execute on different hosts; a root's descendants and connected
+components may not. Body file lists may overlap, but source-bound escaped
+full-name selectors must execute each assigned assertion exactly once.
 Ambiguous selectors fail rather than executing an unassigned closure.
 Derive the complete validated root-group inventory once per planning invocation,
 index it by file and project each shard's exact complete selection in original
@@ -435,7 +444,11 @@ current component placement remain unchanged for identical inputs.
 This changes cross-host assignment only: within-host scheduling policy v9
 remains byte-identical. Verify the workflow's selected protocol against the
 captured native planner and SDK reconstruction; old source cannot be relabelled
-as v5. Keep v4's exact historical file assignments and twenty-five-part topology.
+as v6. Keep v4's exact historical file assignments and v5's original count/hash
+component assignments and serialized identities, each with its twenty-five-part
+topology. Captured v6 planner source must carry the authentic adopted literal
+cost declaration; reject missing, computed, duplicate or altered declarations
+without executing captured code. Historical v1-v5 replay requires no v6 table.
 Preserve the original `native-framework-shards-v1` global-barrier and
 `native-framework-shards-v2-platform-units` twenty-part proof and archive
 semantics, and the `native-framework-shards-v3-four-body-platform-units`
@@ -499,44 +512,51 @@ Historical v2-v8 identities and captured-source replay remain unchanged.
 It does not cache cold Go builds, prune lifecycle/failure probes or alter assertions.
 
 The PR workflow uses five Linux read-only allocation coordinators under
-`arm-regression-allocation-v8-own-platform-critical`. All three Intel critical
+`arm-regression-allocation-v9-ready-critical-fairness`. All three Intel critical
 bodies become eligible after both Intel unit jobs, independently of queued
 ARM body or refresh allocations. This removes coordination-only cross-platform
-request blocking, not either platform's own complete unit barrier. After ARM's
-own unit barrier, `mac-admission` observes its three long body workers. The
-`intel-retained-admission` coordinator observes Intel's actual body-0 worker before
-releasing ARM's separate short refresh together with `mac-admission`; refresh
-retains its own ARM unit barrier and both allocation prerequisites.
-The coordinator retains its historical job/artifact identifier, while its
-current closed `intel-primary-body` group requires body-0 allocation.
+request blocking, not either platform's own complete unit barrier.
+After ARM's own unit barrier, `mac-admission` selects `arm-refresh-ready`:
+the mandatory short refresh receives a fair turn after the first actual body
+allocation on each currently-ready architecture, rather than after the entire
+ARM body and Intel-primary allocation chain. Preserve real own-unit/data
+prerequisites. A foreign architecture whose units are not yet complete does not
+reserve future capacity. Readiness is reevaluated from complete attempt-scoped
+metadata, not a queued timestamp placeholder.
+The independent `intel-retained-admission` coordinator still observes Intel's
+actual body-0 worker for completeness, but no longer gates ARM refresh.
+Its historical job/artifact identifier and closed `intel-primary-body` group
+retain their authentic meaning.
 `arm-refresh-admission` still observes the refresh worker and is required for
 producer completeness, but no longer gates independent Intel critical requests.
 ARM's genuine Homebrew producer retains its initial schedule.
-The existing `intel-homebrew-admission` coordinator now observes allocation
-of all three Intel bodies through the closed `intel-bodies` group before
-releasing Intel's genuine Homebrew producer. This lets eligible critical bodies
-take available Mac capacity first, without reserving an extra VM or waiting
-for a body to finish. `intel-admission` independently observes those same
-allocations before releasing the separate short Intel refresh. No gate waits for a Homebrew command or any
-producer's completion. Native part names, recipes, assertions, retention and
-cleanup remain unchanged.
+The existing `intel-homebrew-admission` and `intel-admission` coordinators select
+`intel-auxiliaries-ready`. After both own Intel units succeed, Intel Homebrew and
+short refresh yield to all three actual body allocations on every
+currently-ready architecture. The finite ready-body cohort prevents auxiliary
+work overtaking already-ready ARM bodies without blocking independent Intel
+critical requests, waiting for future units or waiting for body completion.
+No coordinator reserves a waiting Mac VM. Native part names, recipes,
+assertions, retention and cleanup remain unchanged.
 A queued `started_at` placeholder is not allocation evidence; a runner or
 started step is required. Completed allocated parts also satisfy admission; no stage
 waits for its allocated parts to finish. Each helper invocation selects only
-the closed `arm-bodies`, `intel-primary-body`, `arm-refresh`,
-`intel-homebrew` or `intel-bodies` group. The historical `arm-regressions`
-group remains the default for existing callers. Current v8 and historical v5-v7
+its closed role group. V9 adds `arm-refresh-ready` and
+`intel-auxiliaries-ready` while retaining `arm-bodies`, `intel-primary-body`,
+`arm-refresh`, `intel-homebrew` and `intel-bodies`. The historical `arm-regressions`
+group remains the default for existing callers. Current v9 and historical v5-v8
 use `intel-primary-body`; historical v4 retains `intel-retained-body` and its
 original body-1 receipt semantics. Preserve v5's original Homebrew-allocation
 dependency only as historical v5, never relabel it as current v6.
-Retain the exact historical v1-v7 resource graphs and unmarked native v1-v4 replay rather than
+Retain the exact historical v1-v7 resource graphs, v8's own-platform critical graph and unmarked native v1-v4 replay rather than
 silently adopting new dependencies.
 No coordinator occupies a Mac VM while waiting or adds a native producer
 part. The policy does not change the twenty-five-part assertion union,
 architecture coverage, resource allowances or native command watchdogs. V8
 retains v7's twenty-minute allocation observation budget,
 with five-second polling and a twenty-two-minute coordinator
-job watchdog for setup and receipt retention. The previous eight-minute cutoff
+job watchdog for setup and receipt retention; v9 preserves those bounds.
+The previous eight-minute cutoff
 failed before the measured eleven-minute provider allocation and suppressed
 mandatory downstream roles. This observation budget is not a delivery limit:
 late allocation still counts in an already running lane and can fail its
@@ -554,6 +574,11 @@ Release prepublication and default whole-native execution remain separate and
 unchanged. Fresh complete hosted measurements still decide delivery success.
 This prioritizes owned work within the existing shared pool; it does not claim
 that Intel Homebrew is the only provider bottleneck or erase provisioning gaps.
+Original readiness, request, allocation and bounded changing-decision
+observations distinguish source eligibility from provider worker availability.
+Observed concurrency and historical five-job planning assumptions do not
+establish an exact provider quota. Fairness configuration or an unchanged-source
+lucky rerun is not a performance pass.
 The existing Homebrew command trace also records a monotonic `elapsedMs` for
 each awaited subprocess, including rejected commands. This measures service
 time, not surrounding snapshot checks, bootstrap, evidence retention or cleanup.
@@ -565,6 +590,15 @@ build. Keep transactions, durability flushes, lock races, archival and cleanup
 real. Any runtime optimization of repeated reads/indexing must preserve revision,
 containment, invalidation and crash guarantees and receive its affected regression
 coverage. Do not add a test-only switch disabling fsync or reducing stress limits.
+Publish independent immutable validation objects in batches of at most four.
+Retain every real atomic write, file/directory flush and fresh hash-checked
+readback. Drain the entire active batch before reporting its first
+input-ordered failure or starting a later batch; publication faults also stop
+later batches. Commit the Store transaction only after all objects publish
+successfully. This is bounded file I/O, not additional process capacity,
+shared callback concurrency or a cache across mutation boundaries.
+Fresh object reads retain their existing bounded overlap and causal
+containment/identity/post-read checks; no synchronous public API is rewritten.
 When a purge lock's owner file changes during its bounded read, treat the
 unresolved concurrent owner as `LOCK_BUSY`, not as permission to remove the lock.
 Preserve owner bytes and runtime contents without retrying or weakening the

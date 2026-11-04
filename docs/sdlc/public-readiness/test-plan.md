@@ -1318,6 +1318,22 @@ do not prove that the latency target was achieved.
 Stability, complete native coverage and honest failure reporting take precedence:
 do not drop assertions, weaken checks or hide retries to meet the target.
 An incomplete or failed attempt is not a successful full-suite benchmark.
+For catalog/proof processing, measure fresh catalog/proof reload, immutable
+object publication, actual grouped execution, normalization, evaluation and
+admission separately. Distinguish nonoverlapping elapsed phases from inclusive
+or summed concurrent service times. Keep the authentic original root and
+2066/2245/2265 exhaustion boundaries; account for new regressions separately.
+The PR-only `immutable validation publication bounds overlap and drains ordered
+failures before later batches` root in `test/validation-catalog.test.mjs`
+belongs to the validation/catalog persistence maintainer. It uses owned
+filesystem/module patches in one process-isolated root, with one process slot,
+no external shared resource and no critical promotion. Prove a four-live-write
+barrier, real file/directory flush attempts, fresh corrupt-readback rejection,
+ordered competing errors with full drain, no later batch after failure or
+publication fault, preserved existing corruption and owned temporary cleanup.
+The complete original root must still pass with every required real write,
+fresh read, proof, durability and tamper check. Focused Windows measurements
+cannot establish a Mac result or replace full native lane acceptance.
 Do not cancel an Intel measurement at the former 16-minute observation cutoff.
 Its revised observation cutoff is 20 minutes; a still-active lane at that
 cutoff cannot pass the strict timing limit. This changes no command watchdog,
@@ -1360,8 +1376,10 @@ parallel admission need not start unequal-demand groups in strict file order.
 Earlier dispatch is not itself proof of a native speedup.
 Verify the actual producer's requested/capacity fields and shared
 nested-allocation bounds; the default local gate and 32-slot ceiling do not
-change. Account for the personal-account limit of five concurrent hosted Mac
-jobs across both architectures. Observation cutoffs do not authorize automatic
+change. Coordinate critical and auxiliary requests across both Mac
+architectures. The historical five-job planning assumption and observed
+concurrency are not independent proof of the provider's current quota.
+Observation cutoffs do not authorize automatic
 cancellation: retain actual terminal results even after a delivery limit is
 missed, report that timing dimension as Failed, and return to measured bottleneck
 work. Do not rerun an unchanged candidate to replace a timing miss with a lucky pass.
@@ -1623,8 +1641,9 @@ the original subset. A new legitimate test must not erase preservation checks.
    platform's regression shards execute; another platform or attempt cannot
    supply the prerequisite. Include the unit barrier, every part's provisioning,
    evidence retention and cleanup in the whole-lane elapsed time.
-   For current `native-framework-shards-v5-root-components` and historical
-   `native-framework-shards-v4-split-intel-units`, require each platform's
+   For current `native-framework-shards-v6-stable-cost-components` and historical
+   `native-framework-shards-v4-split-intel-units` and
+   `native-framework-shards-v5-root-components`, require each platform's
    actual unit jobs to finish successfully, including evidence and cleanup,
    before its own regression jobs start. Other platforms' unit jobs may finish
    later; all twenty-five successful parts still remain mandatory for completeness.
@@ -1634,15 +1653,23 @@ the original subset. A new legitimate test must not erase preservation checks.
    unions including descendants, dependencies and exclusive resources. The new
    Intel producer has no unit prerequisite of its own. Every Intel regression
    must wait for both unit jobs, not a borrowed ARM/original-unit result.
-   Current v5 assigns complete dependency/exclusive-resource-connected root
-   components across the existing bodies, balancing assertion and group counts
-   deterministically. Independent roots of one file may occupy different
+   Current v6 assigns complete dependency/exclusive-resource-connected root
+   components across the existing bodies using qualified observed work costs
+   and stable exact file/root planning identities. Historical source costs are
+   explicit scheduling leads only, never current execution credit or predicted
+   concurrent lane duration. Unknown or incompatible target/runtime/closure/
+   resource costs use explicit count-based fallback with stable planning ties.
+   Actual assertion/group/configuration/execution identities remain source-bound.
+   Independent roots of one file may occupy different
    hosts, but descendants and connected components must remain together.
    Body file lists may overlap; exact source-bound escaped full-name selectors
    must preserve the disjoint complete assertion union and reject ambiguity.
-   Keep scheduling policy v9 byte-identical and replay v1-v4 assignments exactly.
-   A v5 workflow label must match the captured planner and archived SDK source;
-   relabelling an old planner is non-passing.
+   Keep scheduling policy v9 byte-identical and replay v1-v5 assignments and
+   serialized identities exactly, including v5's original count/hash placement.
+   A v6 workflow label must match the captured planner, adopted literal cost
+   table and archived SDK source. Reject missing, altered, computed or duplicate
+   table declarations without executing captured code; historical v1-v5 needs
+   no v6 table. Relabelling an old planner is non-passing.
    The three PR-only roots in `test/public-readiness-native.test.mjs` are
    `T-PRD017 native protocol4 retains its exact historical file and assertion assignments`,
    `T-PRD017 native protocol5 spreads independent same-file roots and executes connected complete closures exactly once`,
@@ -1651,8 +1678,16 @@ the original subset. A new legitimate test must not erase preservation checks.
    source and SDK fixtures with declared synthetic dependency/resource edges.
    They require Node and owned local files on the existing native lanes, add no
    critical-profile assertion, and prove neither actual native overlap nor a
-   latency improvement. Fresh complete hosted measurements remain required.
-   Under `arm-regression-allocation-v8-own-platform-critical`, require all three
+   latency improvement. Four additional PR-only native placement roots cover
+   observed-cost balancing, stable ownership under unrelated source edits,
+   explicit fallback/invalidation and actual isolated v5/v6 dispatch with exact
+   report/journal union. The native-validation maintainer owns their network-free
+   Node fixtures. Their complete roots declare one slot, except the real tiny
+   execution control's two-slot prerequisite; no critical member is added.
+   The existing source-bound observer/SDK root also verifies v4/v5/v6 replay,
+   old-source rejection and protocol relabel refusal. Fresh complete hosted
+   measurements remain required.
+   Under `arm-regression-allocation-v9-ready-critical-fairness`, require all three
    Intel critical bodies and their allocation observers to become eligible
    after both successful Intel unit jobs without waiting for queued ARM bodies
    or refresh. T-MACADM018 covers this boundary, failed/missing own-unit
@@ -1660,24 +1695,28 @@ the original subset. A new legitimate test must not erase preservation checks.
    It is PR-only, Node-only and network-free; the native-validation maintainer
    owns its isolated complete root and synthetic read-only metadata, with no
    shared resources, new capacity or critical-profile membership.
-   Require the Linux `mac-admission` coordinator to observe all three long ARM
-   body workers in the exact repository/run/attempt/head context before ARM's
-   short refresh dispatches.
-   Require `intel-retained-admission` to observe that actual worker before
-   ARM's separate short refresh dispatches, retaining its own ARM unit barrier.
-   Its historical job/artifact identifier remains, but current
-   `intel-primary-body` receipts must identify body-0, not a relabelled body-1.
+   Require the Linux `mac-admission` coordinator's `arm-refresh-ready` group to
+   admit the short mandatory ARM refresh after the first actual body allocation
+   on each currently-ready architecture. Preserve its own complete ARM unit
+   barrier; remove the coordination-only Intel-primary/all-ARM-body chain.
+   A foreign architecture with missing, queued or incomplete units cannot
+   reserve future capacity. Reevaluate readiness from complete same-attempt
+   metadata. `intel-retained-admission` still independently observes body-0
+   for completeness but no longer gates refresh. Its historical job/artifact
+   identifier remains; `intel-primary-body` receipts must identify body-0,
+   not a relabelled body-1.
    Require `arm-refresh-admission` to observe that refresh worker for producer
    completeness without gating independent Intel critical bodies. Keep ARM
    genuine Homebrew initial.
-   Require the existing `intel-homebrew-admission` coordinator to select the
-   closed `intel-bodies` group and observe actual allocation of all three Intel
-   bodies before Intel Homebrew dispatch. The new T-MACADM016 regression must
-   prove available capacity admits the waiting bodies first, queued timestamp
+   Require the existing `intel-homebrew-admission` and `intel-admission`
+   coordinators to select `intel-auxiliaries-ready`: after both own Intel units
+   succeed, observe all three actual body allocations on each currently-ready
+   architecture before requesting Intel Homebrew or short refresh. Preserve
+   T-MACADM016's historical Intel-only group contract. Current ready-critical
+   controls must prove waiting ready ARM bodies receive priority too, queued timestamp
    placeholders do not release Homebrew, and all bodies still running suffice:
    no body or Homebrew completion dependency, added VM, or dependency cycle.
-   Independently require `intel-admission` to observe those body allocations
-   before short Intel refresh dispatches. No coordinator may wait for
+   No coordinator may wait for
    a command or producer completion, create an observed-producer dependency
    cycle, or hold a waiting Mac VM. Require the closed helper group selection,
    exact new job identities and all five coordinator results in completeness.
@@ -1686,7 +1725,7 @@ the original subset. A new legitimate test must not erase preservation checks.
    without allocation. Admission must not wait for allocated ARM parts to
    complete, consume a waiting Mac VM, add a native part or supply passing
    assertion credit. Exercise bounded timeout/cancellation without a passing
-   fallback. V8 retains v7's twenty-minute allocation
+   fallback. V9 retains v7/v8's twenty-minute allocation
    observation budget, five-second polling and twenty-two-minute coordinator
    watchdogs. Keep historical v1-v6's original ten-minute watchdogs authentic.
    The PR-only T-MACADM017 regression uses a private injected clock and synthetic
@@ -1704,10 +1743,17 @@ the original subset. A new legitimate test must not erase preservation checks.
    alongside the existing split Intel refresh/Homebrew bindings. Reject stale
    aliases. Preserve v4's original `intel-retained-body`/body-1 receipt semantics;
    retain v5's original Homebrew-first dependencies only as v5 and reject a
-   label-only or hybrid v5-to-v6 substitution. Reject either v7/v8 graph under
-   the other protocol's label. Replay the exact v1-v7
+   label-only or hybrid v5-to-v6 substitution. Reject v7/v8/v9 graphs under
+   another protocol's label. Replay the exact v1-v8
    resource graphs and unmarked historical
    native graphs without borrowing new dependency or origin proof.
+   T-MACADM019 through T-MACADM022 are PR-only Node-only, network-free
+   maintainer-owned roots using synthetic attempt-scoped metadata and owned
+   source fixtures. They prove ready-body priority versus future-unit blocking,
+   ARM refresh's bounded fair turn, authentic historical graph rejection and
+   changing readiness/allocation observations with bounded failures. Each
+   complete isolated root declares one slot and no shared resources; neither
+   critical cap grows.
    Configured priority is only a lead; provider allocation gaps remain in the
    measured whole-lane span and cannot be converted into a passing estimate.
    Keep `native-framework-shards-v1` global-barrier and
@@ -1733,8 +1779,9 @@ the original subset. A new legitimate test must not erase preservation checks.
    Controlled negatives must reject six-of-seven Intel parts, either missing,
    failed, stale or wrong-attempt unit origin, a regression starting before
    either unit cleanup completes, duplicated canonical work and borrowed prefix
-   receipts. Genuine hosted whole-lane timing remains required; the additional
-   standard Intel VM fills the fifth initial Mac slot, not a speedup claim.
+   receipts. Genuine hosted whole-lane timing remains required. The separate
+   Intel unit VM supplies actual capacity, not proof of the current global Mac
+   quota or a latency improvement.
    Exercise actual Go, Python, shell and Homebrew surfaces in their assigned
    lanes. Install tests operate only in fixture homes; fork jobs have no publish
    capability. Required authentic-verifier setup supplies independently pinned

@@ -1321,7 +1321,7 @@ test('T-PRD022 actual workflow graph applies semantic YAML, effective permission
   const workflows = await readWorkflowPolicySources(repositoryRoot);
   const positive = inspectWorkflowTrust(workflows);
   assert.equal(positive.complete, true, JSON.stringify(positive.blockers));
-  assert.equal(positive.nativeResourcePolicy, 'arm-regression-allocation-v8-own-platform-critical');
+  assert.equal(positive.nativeResourcePolicy, 'arm-regression-allocation-v9-ready-critical-fairness');
   const producer = positive.workflows.find(item => item.file === '.github/workflows/ci.yml');
   assert.deepEqual(producer.document.permissions, { contents: 'read' });
   assert.deepEqual(producer.jobs.find(job => job.id === 'mac-admission').effectivePermissions,
@@ -1726,8 +1726,23 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.deepEqual(ci.jobs.native.needs, ['intent', 'source', 'native-units']);
   assert.deepEqual(ci.jobs['native-units'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-homebrew'].needs, ['intent', 'source']);
-  assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v8-own-platform-critical');
-  const historicalV7 = structuredClone(ci);
+  assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v9-ready-critical-fairness');
+  const historicalV8 = structuredClone(ci);
+  historicalV8.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v8-own-platform-critical';
+  historicalV8.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = 'native-framework-shards-v5-root-components';
+  for (const key of ['native-ma-refresh', 'arm-refresh-admission']) {
+    historicalV8.jobs[key].needs = ['intent', 'source', 'native-units-ma', 'intel-retained-admission', 'mac-admission'];
+  }
+  historicalV8.jobs['mac-admission'].steps[4].name = 'Wait for actual ARM body worker allocation';
+  historicalV8.jobs['mac-admission'].steps[4].run =
+    historicalV8.jobs['mac-admission'].steps[4].run.replace('--group arm-refresh-ready', '--group arm-bodies');
+  for (const key of ['intel-admission', 'intel-homebrew-admission']) {
+    historicalV8.jobs[key].steps[4].name =
+      `Wait for actual Intel ${key === 'intel-admission' ? '' : 'critical '}body worker allocation`;
+    historicalV8.jobs[key].steps[4].run =
+      historicalV8.jobs[key].steps[4].run.replace('--group intel-auxiliaries-ready', '--group intel-bodies');
+  }
+  const historicalV7 = structuredClone(historicalV8);
   historicalV7.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v7-bounded-queue-wait';
   for (const key of ['native-mi-retained', 'intel-retained-admission']) {
     historicalV7.jobs[key].needs.push('mac-admission');
@@ -1763,11 +1778,18 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   const inspectDocument = document => inspectWorkflowTrust(workflows.map(workflow =>
     workflow.file === '.github/workflows/ci.yml' ? { ...workflow, contents: Object.entries(document)
       .map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n' } : workflow));
+  assert.equal(inspectDocument(historicalV8).complete, true, 'Historical v8 retains its Intel-only allocation graph');
+  const relabeledV8 = structuredClone(historicalV8);
+  relabeledV8.env.SDLC_MAC_ADMISSION_POLICY = ci.env.SDLC_MAC_ADMISSION_POLICY;
+  assert.equal(inspectDocument(relabeledV8).complete, false, 'Intel-only v8 receipts cannot be relabeled as readiness-aware v9');
+  const mislabeledV9 = structuredClone(ci);
+  mislabeledV9.env.SDLC_MAC_ADMISSION_POLICY = historicalV8.env.SDLC_MAC_ADMISSION_POLICY;
+  assert.equal(inspectDocument(mislabeledV9).complete, false, 'The fair-turn graph cannot borrow historical v8 identity');
   assert.equal(inspectDocument(historicalV7).complete, true, 'Historical v7 keeps its actual cross-platform graph');
   const relabeledV7 = structuredClone(historicalV7);
   relabeledV7.env.SDLC_MAC_ADMISSION_POLICY = ci.env.SDLC_MAC_ADMISSION_POLICY;
-  assert.equal(inspectDocument(relabeledV7).complete, false, 'Old v7 dependencies are not current v8 semantics');
-  const mislabeledV8 = structuredClone(ci);
+  assert.equal(inspectDocument(relabeledV7).complete, false, 'Old v7 dependencies are not current v9 semantics');
+  const mislabeledV8 = structuredClone(historicalV8);
   mislabeledV8.env.SDLC_MAC_ADMISSION_POLICY = historicalV7.env.SDLC_MAC_ADMISSION_POLICY;
   assert.equal(inspectDocument(mislabeledV8).complete, false, 'New v8 graph cannot borrow an old v7 identity');
   assert.equal(result.nativeProtocol, nativeFrameworkShardProtocol);
@@ -1811,9 +1833,9 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     ['intent', 'source', 'native-units-mi']);
   assert.deepEqual(ci.jobs['native-homebrew-mi'].needs, ['intent', 'source', 'intel-homebrew-admission']);
   assert.deepEqual(ci.jobs['native-mi-retained'].needs, ['intent', 'source', 'native-units-mi']);
-  assert.deepEqual(ci.jobs['native-ma-refresh'].needs, ['intent', 'source', 'native-units-ma', 'intel-retained-admission', 'mac-admission']);
+  assert.deepEqual(ci.jobs['native-ma-refresh'].needs, ['intent', 'source', 'native-units-ma', 'mac-admission']);
   assert.deepEqual(ci.jobs['intel-retained-admission'].needs, ['intent', 'source', 'native-units-mi']);
-  assert.deepEqual(ci.jobs['arm-refresh-admission'].needs, ['intent', 'source', 'native-units-ma', 'intel-retained-admission', 'mac-admission']);
+  assert.deepEqual(ci.jobs['arm-refresh-admission'].needs, ['intent', 'source', 'native-units-ma', 'mac-admission']);
   assert.deepEqual(ci.jobs['native-mi'].strategy.matrix.include.map(row => row.shard),
     ['body-1', 'body-2']);
   assert.deepEqual(ci.jobs['native-ma'].strategy.matrix.include.map(row => row.shard),
@@ -1898,7 +1920,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
       ...(part.shard && part.shard !== 'units' ? [nativePartJobKey({ ...part, shard: 'units' })] : []),
       ...(key === 'native-mi-refresh' ? ['intel-admission'] : []),
       ...(key === 'native-homebrew-mi' ? ['intel-homebrew-admission'] : []),
-      ...(key === 'native-ma-refresh' ? ['intel-retained-admission', 'mac-admission'] : [])]);
+      ...(key === 'native-ma-refresh' ? ['mac-admission'] : [])]);
     if (part.shard === 'units') {
       assert.equal(ci.jobs[key].strategy.matrix.include.length, part.target === 'macos-x64' ? 2 : 1);
       assert.ok(ci.jobs[key].strategy.matrix.include.every(row =>
@@ -1981,7 +2003,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
       `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n',
   });
   const admissionStep = document => document.jobs['mac-admission'].steps
-    .find(step => step.name === 'Wait for actual ARM body worker allocation');
+    .find(step => step.name === 'Admit ARM refresh after ready critical turns');
   for (const [label, mutate, code] of [
     ...admissionKeys.flatMap(key => [10, 23].map(minutes => [
       `${key} changes the source-bound observation watchdog to ${minutes} minutes`,
@@ -2123,7 +2145,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
     ['Intel admission polls ARM instead of bodies', doc => {
       doc.jobs['intel-admission'].steps[4].run =
-        doc.jobs['intel-admission'].steps[4].run.replace('--group intel-bodies ', '');
+        doc.jobs['intel-admission'].steps[4].run.replace('--group intel-auxiliaries-ready ', '');
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
     ['Intel admission treats queued timestamp as allocation', doc => {
       doc.jobs['intel-admission'].steps[4].run = 'node -e "console.log(jobs.every(job => job.started_at))"';
@@ -2197,7 +2219,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
     ['Homebrew admission polls its own worker instead of the body group', doc => {
       const step = doc.jobs['intel-homebrew-admission'].steps[4];
-      step.run = step.run.replace('--group intel-bodies', '--group intel-homebrew');
+      step.run = step.run.replace('--group intel-auxiliaries-ready', '--group intel-homebrew');
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
     ['Homebrew admission accepts queued timestamps', doc => {
       doc.jobs['intel-homebrew-admission'].steps[4].run = 'node -e "console.log(jobs.every(job => job.started_at))"';
@@ -2209,8 +2231,8 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
       const step = doc.jobs['producer-summary'].steps[0];
       step.run = step.run.replace(' "$INTEL_HOMEBREW_ADMISSION_RESULT"', '');
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
-    ['ARM refresh steals retained first allocation', doc => {
-      doc.jobs['native-ma-refresh'].needs = ['intent', 'source', 'native-units-ma', 'mac-admission'];
+    ['ARM refresh bypasses readiness-aware critical turns', doc => {
+      doc.jobs['native-ma-refresh'].needs = ['intent', 'source', 'native-units-ma'];
     }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
     ['ARM refresh loses its own unit barrier', doc => {
       doc.jobs['native-ma-refresh'].needs = ['intent', 'source', 'intel-retained-admission'];
@@ -2229,7 +2251,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
     ['ARM body gate still waits on short refresh', doc => {
       const step = doc.jobs['mac-admission'].steps[4];
-      step.run = step.run.replace('--group arm-bodies ', '');
+      step.run = step.run.replace('--group arm-refresh-ready ', '');
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
     ...[
       ['intel-retained-admission', 'native-mi-retained', 'intel-primary-body', 'INTEL_RETAINED_ADMISSION_RESULT'],
@@ -2305,7 +2327,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     step.run = step.run.replace(' "$ARM_REFRESH_RESULT" "$MI_RETAINED_RESULT" ' +
       '"$INTEL_RETAINED_ADMISSION_RESULT" "$ARM_REFRESH_ADMISSION_RESULT"', '');
   };
-  const admittedV3 = structuredClone(ci);
+  const admittedV3 = structuredClone(historicalV8);
   removeRetainedPriority(admittedV3);
   admittedV3.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v3-intel-homebrew-first';
   const previousV3 = inspectWorkflowTrust([documentSource(admittedV3)]);
@@ -2325,7 +2347,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     delete step.env.INTEL_HOMEBREW_ADMISSION_RESULT;
     step.run = step.run.replace(' "$INTEL_HOMEBREW_ADMISSION_RESULT"', '');
   };
-  const admittedV2 = structuredClone(ci);
+  const admittedV2 = structuredClone(historicalV8);
   removeHomebrewPriority(admittedV2);
   admittedV2.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v2-priority-intel-bodies';
   const previousV2 = inspectWorkflowTrust([documentSource(admittedV2)]);
@@ -2348,15 +2370,17 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     for (const name of ['MI_REFRESH_RESULT', 'MI_HOMEBREW_RESULT', 'INTEL_ADMISSION_RESULT']) delete step.env[name];
     step.run = step.run.replace(' "$INTEL_ADMISSION_RESULT" "$MI_REFRESH_RESULT" "$MI_HOMEBREW_RESULT"', '');
   };
-  const admittedV1 = structuredClone(ci);
+  const admittedV1 = structuredClone(historicalV8);
   removePriority(admittedV1);
   admittedV1.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v1';
   const previousResource = inspectWorkflowTrust([documentSource(admittedV1)]);
   assert.equal(previousResource.complete, true, JSON.stringify(previousResource.blockers));
   assert.equal(previousResource.nativeResourcePolicy, 'arm-regression-allocation-v1');
   for (const protocol of nativeFrameworkShardProtocols) {
-    const historical = structuredClone(ci);
-    if (protocol !== nativeFrameworkShardProtocol) delete historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL;
+    const historical = structuredClone(historicalV8);
+    if (protocol === nativeFrameworkShardProtocol || protocol === 'native-framework-shards-v5-root-components') {
+      historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = protocol;
+    } else delete historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL;
     removePriority(historical);
     delete historical.env.SDLC_MAC_ADMISSION_POLICY;
     delete historical.jobs['mac-admission'];

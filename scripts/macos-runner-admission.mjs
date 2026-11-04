@@ -3,6 +3,16 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
+const criticalPlatforms = Object.freeze([
+  { target: 'macos-arm64', units: ['native-macos-arm64-framework-units'],
+    bodies: [0, 1, 2].map(index => `native-macos-arm64-framework-body-${index}`) },
+  { target: 'macos-x64', units: ['native-macos-x64-framework-units', 'native-macos-x64-framework-units-1'],
+    bodies: [0, 1, 2].map(index => `native-macos-x64-framework-body-${index}`) },
+]);
+const readyGroups = Object.freeze({
+  'arm-refresh-ready': { ownTarget: 'macos-arm64', minimumAllocations: 1 },
+  'intel-auxiliaries-ready': { ownTarget: 'macos-x64', minimumAllocations: 3 },
+});
 const admissionGroups = Object.freeze({
   'arm-regressions': ['refresh', 'body-0', 'body-1', 'body-2']
     .map(shard => `native-macos-arm64-framework-${shard}`),
@@ -14,6 +24,8 @@ const admissionGroups = Object.freeze({
   'intel-retained-body': ['native-macos-x64-framework-body-1'],
   'intel-primary-body': ['native-macos-x64-framework-body-0'],
   'arm-refresh': ['native-macos-arm64-framework-refresh'],
+  ...Object.fromEntries(Object.keys(readyGroups).map(group =>
+    [group, criticalPlatforms.flatMap(platform => [...platform.units, ...platform.bodies])])),
 });
 const api = 'https://api.github.com';
 const maximumWaitMs = 20 * 60 * 1000;
@@ -46,6 +58,64 @@ function validateRun(run, expected) {
   'Provider run identity differs from the current caller');
 }
 
+function allocationPart(name, jobs) {
+  const job = jobs.find(item => item.name === name);
+  if (!job) return { name, allocated: false, proof: 'missing' };
+  requireFact(['queued', 'waiting', 'pending', 'requested', 'in_progress', 'completed'].includes(job.status),
+    'A required Mac part has an unreadable provider status');
+  const startedStep = Array.isArray(job.steps) && job.steps.some(step =>
+    ['in_progress', 'completed'].includes(step.status) && step.conclusion !== 'skipped' &&
+    timestamp(step.started_at));
+  const runner = typeof job.runner_name === 'string' && job.runner_name.trim().length > 0;
+  // GitHub supplies started_at for some queued placeholders; it is not worker proof.
+  const allocated = runner || startedStep;
+  return { id: job.id, name, status: job.status, conclusion: job.conclusion ?? null,
+    allocated, proof: allocated ? runner ? 'runner' : 'started-step' : 'unallocated' };
+}
+
+function readyAdmission(jobs, expected) {
+  const policy = readyGroups[expected.group];
+  const readiness = criticalPlatforms.map(platform => {
+    const units = platform.units.map(name => {
+      const part = allocationPart(name, jobs);
+      const job = jobs.find(item => item.name === name);
+      if (part.status === 'completed' && part.conclusion === 'success') {
+        requireFact(timestamp(job.completed_at) && part.allocated,
+          'A successful own-unit prerequisite requires actual allocation and completion time');
+      }
+      return { ...part, completedAt: job?.completed_at ?? null };
+    });
+    const ready = units.every(unit => unit.status === 'completed' && unit.conclusion === 'success');
+    const parts = platform.bodies.map(name => {
+      const part = allocationPart(name, jobs);
+      const job = jobs.find(item => item.name === name);
+      requireFact(job?.created_at == null || timestamp(job.created_at), 'A critical request time is unreadable');
+      const actualSteps = (Array.isArray(job?.steps) ? job.steps : []).filter(step =>
+        ['in_progress', 'completed'].includes(step.status) && step.conclusion !== 'skipped' &&
+        timestamp(step.started_at)).map(step => step.started_at).sort((a, b) => Date.parse(a) - Date.parse(b));
+      return { ...part, requestedAt: job?.created_at ?? null, workerStepStartedAt: actualSteps[0] ?? null };
+    });
+    return { target: platform.target, ready, units, parts,
+      minimumAllocations: policy.minimumAllocations,
+      allocated: parts.filter(part => part.allocated).length };
+  });
+  const selected = readiness.filter(platform => platform.ready);
+  const own = readiness.find(platform => platform.target === policy.ownTarget);
+  // Critical bodies are never gated here. Refresh gets a finite first-allocation
+  // turn; opportunistic Intel work yields to the complete currently-ready cohort.
+  const admitted = own.ready && selected.every(platform =>
+    platform.allocated >= platform.minimumAllocations);
+  const observation = { repository: expected.repository, runId: expected.runId,
+    attempt: expected.attempt, headSha: expected.headSha, event: expected.event, group: expected.group,
+    policy: 'arm-regression-allocation-v9-ready-critical-fairness',
+    readiness: readiness.map(({ parts, ...platform }) => platform),
+    parts: selected.flatMap(platform => platform.parts), admitted };
+  const ownFailed = own.units.some(unit => unit.status === 'completed' && unit.conclusion !== 'success');
+  const impossible = selected.some(platform => platform.parts.filter(part =>
+    part.allocated || part.status !== 'completed').length < platform.minimumAllocations);
+  return { observation, terminated: ownFailed || impossible };
+}
+
 // This is only a resource-allocation fact, never a native correctness verdict.
 export function evaluateMacAdmission({ run, jobs, complete }, expected) {
   validateExpected(expected);
@@ -67,24 +137,12 @@ export function evaluateMacAdmission({ run, jobs, complete }, expected) {
       names.add(job.name);
     }
   }
-  const parts = requiredNames.map(name => {
-    const job = jobs.find(item => item.name === name);
-    if (!job) return { name, allocated: false, proof: 'missing' };
-    requireFact(['queued', 'waiting', 'pending', 'requested', 'in_progress', 'completed'].includes(job.status),
-      'A required Mac part has an unreadable provider status');
-    const startedStep = Array.isArray(job.steps) && job.steps.some(step =>
-      ['in_progress', 'completed'].includes(step.status) && step.conclusion !== 'skipped' &&
-      timestamp(step.started_at));
-    const runner = typeof job.runner_name === 'string' && job.runner_name.trim().length > 0;
-    // GitHub supplies started_at for some queued placeholders; it is not worker proof.
-    const allocated = runner || startedStep;
-    return { id: job.id, name, status: job.status, conclusion: job.conclusion ?? null,
-      allocated, proof: allocated ? runner ? 'runner' : 'started-step' : 'unallocated' };
-  });
-  const observation = { repository: expected.repository, runId: expected.runId,
+  const readiness = Object.hasOwn(readyGroups, group) ? readyAdmission(jobs, { ...expected, group }) : null;
+  const parts = readiness?.observation.parts ?? requiredNames.map(name => allocationPart(name, jobs));
+  const observation = readiness?.observation ?? { repository: expected.repository, runId: expected.runId,
     attempt: expected.attempt, headSha: expected.headSha, event: expected.event, group, parts,
     admitted: parts.every(part => part.allocated) };
-  if (parts.some(part => !part.allocated && part.status === 'completed') ||
+  if ((readiness ? readiness.terminated : parts.some(part => !part.allocated && part.status === 'completed')) ||
       !observation.admitted && (run.status === 'completed' || run.conclusion != null)) {
     throw Object.assign(new Error('Mac admission ended with missing worker allocation'),
       { code: 'ADMISSION_TERMINATED', observation });
@@ -132,12 +190,24 @@ export async function waitForMacAdmission(expected, {
   requireFact(positive(timeoutMs) && timeoutMs <= maximumWaitMs &&
     positive(pollMs) && pollMs <= 5000, 'Admission wait must remain bounded');
   const deadline = now() + timeoutMs;
+  const started = deadline - timeoutMs;
   const bounded = new AbortController();
   const cancel = () => bounded.abort();
   signal?.addEventListener('abort', cancel, { once: true });
   if (signal?.aborted) cancel();
   const timer = setTimeout(cancel, timeoutMs);
   let lastObservation = null;
+  const observations = [];
+  let lastDecision;
+  const retain = observation => {
+    if (!Object.hasOwn(readyGroups, expected.group)) return observation;
+    const decision = JSON.stringify(observation);
+    if (decision !== lastDecision) {
+      observations.push({ elapsedMs: now() - started, ...observation });
+      lastDecision = decision;
+    }
+    return { ...observation, observations: [...observations] };
+  };
   const check = () => {
     if (signal?.aborted) fail('ADMISSION_CANCELLED', 'Mac admission was cancelled');
     if (bounded.signal.aborted || now() >= deadline) fail('ADMISSION_TIMEOUT', 'Mac admission exceeded its bounded wait');
@@ -215,14 +285,14 @@ export async function waitForMacAdmission(expected, {
         nextPage(response.headers, `${prefix}/jobs`, page, pages);
         jobs.push(...data.jobs);
       }
-      lastObservation = evaluateMacAdmission({ run, jobs, complete: jobs.length === total }, expected);
+      lastObservation = retain(evaluateMacAdmission({ run, jobs, complete: jobs.length === total }, expected));
       check();
       if (lastObservation.admitted) return lastObservation;
       await sleep(Math.min(pollMs, deadline - now()), { signal: bounded.signal });
     }
     fail('ADMISSION_TIMEOUT', 'Mac admission exceeded its bounded observation count');
   } catch (error) {
-    if (error.observation) lastObservation = error.observation;
+    if (error.observation) lastObservation = retain(error.observation);
     const code = signal?.aborted ? 'ADMISSION_CANCELLED' :
       bounded.signal.aborted || now() >= deadline ? 'ADMISSION_TIMEOUT' : error.code ?? 'ADMISSION_PROVIDER';
     throw Object.assign(new Error(code === 'ADMISSION_CANCELLED' ? 'Mac admission was cancelled' :

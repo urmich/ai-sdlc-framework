@@ -150,14 +150,16 @@ const criticalBodyResourcePolicy = 'arm-regression-allocation-v5-critical-body-f
 const allCriticalBodiesResourcePolicy = 'arm-regression-allocation-v6-all-critical-bodies-first';
 const boundedQueueResourcePolicy = 'arm-regression-allocation-v7-bounded-queue-wait';
 const ownPlatformResourcePolicy = 'arm-regression-allocation-v8-own-platform-critical';
+const readyCriticalResourcePolicy = 'arm-regression-allocation-v9-ready-critical-fairness';
 const priorityPolicies = [intelPriorityResourcePolicy, intelHomebrewResourcePolicy,
   retainedFirstResourcePolicy, criticalBodyResourcePolicy, allCriticalBodiesResourcePolicy, boundedQueueResourcePolicy,
-  ownPlatformResourcePolicy];
+  ownPlatformResourcePolicy, readyCriticalResourcePolicy];
 const admissionPolicies = [macAdmissionResourcePolicy, ...priorityPolicies];
 
 function resourceJobKey(part, protocol, resourcePolicy) {
   if ([retainedFirstResourcePolicy, criticalBodyResourcePolicy,
-    allCriticalBodiesResourcePolicy, boundedQueueResourcePolicy, ownPlatformResourcePolicy].includes(resourcePolicy)) {
+    allCriticalBodiesResourcePolicy, boundedQueueResourcePolicy, ownPlatformResourcePolicy,
+    readyCriticalResourcePolicy].includes(resourcePolicy)) {
     if (part.target === 'macos-arm64' && part.shard === 'refresh') return 'native-ma-refresh';
     if (part.target === 'macos-x64' &&
       part.shard === (resourcePolicy === retainedFirstResourcePolicy ? 'body-1' : 'body-0')) return 'native-mi-retained';
@@ -170,7 +172,7 @@ function resourceJobKey(part, protocol, resourcePolicy) {
 }
 
 function expectedMacAdmissionJob(group = 'arm-regressions', retainedFirst = false,
-  allCriticalBodies = false, boundedQueue = false, ownPlatform = false) {
+  allCriticalBodies = false, boundedQueue = false, ownPlatform = false, readyCritical = false) {
   const job = {
     needs: ['intent', 'source', 'native-units-ma'],
     if: "${{ needs.intent.outputs.requires-native == 'true' }}",
@@ -266,11 +268,23 @@ function expectedMacAdmissionJob(group = 'arm-regressions', retainedFirst = fals
     job.needs = ['intent', 'source', 'native-units-mi'];
   }
   if (ownPlatform && group === 'arm-refresh') job.needs.push('mac-admission');
+  if (readyCritical && group === 'arm-bodies') {
+    job.steps[4].name = 'Admit ARM refresh after ready critical turns';
+    job.steps[4].run = job.steps[4].run.replace('--group arm-bodies', '--group arm-refresh-ready');
+  }
+  if (readyCritical && ['intel-bodies', 'intel-homebrew'].includes(group)) {
+    job.steps[4].name = 'Admit Intel auxiliaries after ready critical bodies';
+    job.steps[4].run = job.steps[4].run.replace('--group intel-bodies', '--group intel-auxiliaries-ready');
+  }
+  if (readyCritical && group === 'arm-refresh') {
+    job.needs = ['intent', 'source', 'native-units-ma', 'mac-admission'];
+  }
   return job;
 }
 
 function macAdmissionPolicyMatches(document, protocol, priority, homebrewFirst, retainedFirst) {
-  const ownPlatform = document.env?.SDLC_MAC_ADMISSION_POLICY === ownPlatformResourcePolicy;
+  const readyCritical = document.env?.SDLC_MAC_ADMISSION_POLICY === readyCriticalResourcePolicy;
+  const ownPlatform = readyCritical || document.env?.SDLC_MAC_ADMISSION_POLICY === ownPlatformResourcePolicy;
   const boundedQueue = ownPlatform || document.env?.SDLC_MAC_ADMISSION_POLICY === boundedQueueResourcePolicy;
   const allCriticalBodies = boundedQueue ||
     document.env?.SDLC_MAC_ADMISSION_POLICY === allCriticalBodiesResourcePolicy;
@@ -348,19 +362,23 @@ function macAdmissionPolicyMatches(document, protocol, priority, homebrewFirst, 
     copy.strategy = right.strategy;
     return digest(copy) === digest(right);
   };
-  return [native.nativeSplitUnitFrameworkShardProtocol, native.nativeFrameworkShardProtocol].includes(protocol) &&
+  return [native.nativeSplitUnitFrameworkShardProtocol, native.nativeRootComponentFrameworkShardProtocol,
+    native.nativeFrameworkShardProtocol].includes(protocol) &&
     digest(document.jobs?.['mac-admission'] ?? null) ===
-      digest(expectedMacAdmissionJob(retainedFirst ? 'arm-bodies' : 'arm-regressions', false, false, boundedQueue)) &&
+      digest(expectedMacAdmissionJob(retainedFirst ? 'arm-bodies' : 'arm-regressions', false, false,
+        boundedQueue, false, readyCritical)) &&
     (priority ? digest(document.jobs?.['intel-admission'] ?? null) ===
-      digest(expectedMacAdmissionJob('intel-bodies', retainedFirst, allCriticalBodies, boundedQueue, ownPlatform)) : document.jobs?.['intel-admission'] === undefined) &&
+      digest(expectedMacAdmissionJob('intel-bodies', retainedFirst, allCriticalBodies, boundedQueue,
+        ownPlatform, readyCritical)) : document.jobs?.['intel-admission'] === undefined) &&
     (homebrewFirst ? digest(document.jobs?.['intel-homebrew-admission'] ?? null) ===
-      digest(expectedMacAdmissionJob('intel-homebrew', retainedFirst, allCriticalBodies, boundedQueue, ownPlatform)) :
+      digest(expectedMacAdmissionJob('intel-homebrew', retainedFirst, allCriticalBodies, boundedQueue,
+        ownPlatform, readyCritical)) :
       document.jobs?.['intel-homebrew-admission'] === undefined) &&
     (!retainedFirst || digest(document.jobs?.['intel-retained-admission'] ?? null) ===
       digest(expectedMacAdmissionJob(document.env?.SDLC_MAC_ADMISSION_POLICY === retainedFirstResourcePolicy ?
-        'intel-retained-body' : 'intel-primary-body', false, false, boundedQueue, ownPlatform)) &&
+        'intel-retained-body' : 'intel-primary-body', false, false, boundedQueue, ownPlatform, readyCritical)) &&
       digest(document.jobs?.['arm-refresh-admission'] ?? null) ===
-      digest(expectedMacAdmissionJob('arm-refresh', false, false, boundedQueue, ownPlatform)) &&
+      digest(expectedMacAdmissionJob('arm-refresh', false, false, boundedQueue, ownPlatform, readyCritical)) &&
       sameRecipe(document.jobs?.['native-mi-retained'], document.jobs?.['native-mi']) &&
       sameRecipe(document.jobs?.['native-ma-refresh'], document.jobs?.['native-ma'])) &&
     (!priority || sameRecipe(document.jobs?.['native-mi-refresh'], document.jobs?.['native-mi']) &&
@@ -390,21 +408,23 @@ export function inspectWorkflowTrust(workflows) {
       native.nativePlatformUnitFrameworkShardProtocol :
       sharded ? native.nativeLegacyFrameworkShardProtocol : null;
     const marker = selected.document.env?.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL;
-    const rootComponents = marker === native.nativeFrameworkShardProtocol &&
+    const rootComponents = [native.nativeRootComponentFrameworkShardProtocol, native.nativeFrameworkShardProtocol].includes(marker) &&
       topologyProtocol === native.nativeSplitUnitFrameworkShardProtocol;
     if (marker !== undefined && !rootComponents) {
       result.blockers.push({ file: selected.file, code: 'NATIVE_SHARD_PROTOCOL_DIFFERS' });
     }
-    const protocol = rootComponents ? native.nativeFrameworkShardProtocol : topologyProtocol;
+    const protocol = rootComponents ? marker : topologyProtocol;
     nativeProtocol = protocol;
     const resourcePolicy = selected.document.env?.SDLC_MAC_ADMISSION_POLICY;
     const admission = admissionPolicies.includes(resourcePolicy);
     const priority = priorityPolicies.includes(resourcePolicy);
-    const ownPlatform = resourcePolicy === ownPlatformResourcePolicy;
+    const readyCritical = resourcePolicy === readyCriticalResourcePolicy;
+    const ownPlatform = readyCritical || resourcePolicy === ownPlatformResourcePolicy;
     const allCriticalBodies = [allCriticalBodiesResourcePolicy, boundedQueueResourcePolicy,
-      ownPlatformResourcePolicy].includes(resourcePolicy);
+      ownPlatformResourcePolicy, readyCriticalResourcePolicy].includes(resourcePolicy);
     const retainedFirst = [retainedFirstResourcePolicy, criticalBodyResourcePolicy,
-      allCriticalBodiesResourcePolicy, boundedQueueResourcePolicy, ownPlatformResourcePolicy].includes(resourcePolicy);
+      allCriticalBodiesResourcePolicy, boundedQueueResourcePolicy, ownPlatformResourcePolicy,
+      readyCriticalResourcePolicy].includes(resourcePolicy);
     const homebrewFirst = retainedFirst || resourcePolicy === intelHomebrewResourcePolicy;
     nativeResourcePolicy = resourcePolicy ?? null;
     if ((resourcePolicy !== undefined &&
@@ -444,7 +464,8 @@ export function inspectWorkflowTrust(workflows) {
               homebrewFirst && key === 'native-mi-refresh' ? 'intel-homebrew-admission' : 'intel-admission'] : []),
           ...(retainedFirst && !ownPlatform && key === 'native-mi-retained' ? ['mac-admission'] : []),
           ...(retainedFirst && key === 'native-ma-refresh' ?
-            ['intel-retained-admission', ...(ownPlatform ? ['mac-admission'] : [])] : [])];
+            [...(readyCritical ? [] : ['intel-retained-admission']),
+              ...(ownPlatform ? ['mac-admission'] : [])] : [])];
           return jobs[key]?.strategy?.['fail-fast'] !== false || jobs[key]?.['timeout-minutes'] !== 360 ||
             priority && (jobs[key]?.name !== 'native-${{ matrix.role }}' ||
               jobs[key]?.['runs-on'] !== '${{ matrix.os }}' ||

@@ -8,7 +8,7 @@ import { validationPlatforms } from './validation-inventory.mjs';
 import { nativeConfigurationDigest, nativeProducerRole, nativePrPartsForProtocol, nativeExpectedAssignment,
   nativeSpecification, nativeFrameworkShardProtocol, requireNativeShardUnitOrder } from './native-validation.mjs';
 import { nativeFrameworkShardProtocols, nativeFourBodyFrameworkShardProtocol,
-  nativeSplitUnitFrameworkShardProtocol } from './native-validation.mjs';
+  nativeSplitUnitFrameworkShardProtocol, nativeRootComponentFrameworkShardProtocol } from './native-validation.mjs';
 import { calculatorCapability, calculatorBaselineCapability } from './pr-calculator.mjs';
 import { nativeBootstrapProtocol, nativeBodyBootstrapProtocol } from './toolchain-baseline.mjs';
 import { nativeBootstrapRequirements } from './native-bootstrap-capability.mjs';
@@ -40,7 +40,8 @@ const splitUnitShardPolicy = Object.freeze({ ...shardPolicy,
   origins: 'all-twenty-three-original-native-framework-executions',
   verifierId: 'github-native-component-projection-shards-v3' });
 const componentPolicy = protocol => !protocol ? nativeComponentPolicy :
-  [nativeSplitUnitFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? splitUnitShardPolicy :
+  [nativeSplitUnitFrameworkShardProtocol, nativeRootComponentFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(protocol) ? splitUnitShardPolicy :
     protocol === nativeFourBodyFrameworkShardProtocol ? fourBodyShardPolicy : shardPolicy;
 const sourceTimes = values => [...values].sort((a, b) => Date.parse(a) - Date.parse(b));
 const prefix = name => /^(T-[A-Z0-9]+(?:-[A-Z0-9]+)*)(?:\s|$)/u.exec(name)?.[1];

@@ -131,15 +131,26 @@ function validateSafeObject(value) {
   } else safeRecord(value, LIMITS.artifact);
 }
 export async function flushValidationObjects(store, workItemId, context) {
-  for (const [sha256, bytes] of context.validationObjects) {
-    const ref = { sha256, bytes: bytes.length };
-    const file = validationObjectPath(store, workItemId, ref);
-    if (await exists(file)) await readValidationObject(store, workItemId, ref);
-    else {
-      await atomicWrite(file, bytes);
-      await readValidationObject(store, workItemId, ref);
+  const entries = context.validationObjects.entries();
+  while (true) {
+    const batch = [];
+    for (let index = 0; index < 4; index++) {
+      const entry = entries.next();
+      if (entry.done) break;
+      batch.push(entry.value);
     }
-    await store.fault('validation:object');
+    if (!batch.length) return;
+    // Independent immutable objects drain before ordered faults or a transaction commit.
+    const results = await Promise.allSettled(batch.map(async ([sha256, bytes]) => {
+      const ref = { sha256, bytes: bytes.length };
+      const file = validationObjectPath(store, workItemId, ref);
+      if (!await exists(file)) await atomicWrite(file, bytes);
+      await readValidationObject(store, workItemId, ref);
+    }));
+    for (const result of results) {
+      if (result.status === 'rejected') throw result.reason;
+      await store.fault('validation:object');
+    }
   }
 }
 export function validateTestDefinitions(tests, { inline = false, requireUnitFirst = true } = {}) {
