@@ -204,14 +204,23 @@ export async function startWindowsRuntimeObserver({ directory, ownerPid, expecte
     };
     resolve({ code, signal, spawnFailed });
   }));
-  async function marker(kind, timeoutMs) {
-    const deadline = performance.now() + timeoutMs;
+  async function marker(kind, timeoutMs, { preparation = false } = {}) {
+    let deadline = performance.now() + timeoutMs;
     while (performance.now() < deadline) {
       try { return await smallJson(files[kind], 256); }
       catch (error) {
         if (error.code !== 'ENOENT') throw new Error('observer-invalid-marker');
       }
       if (closed) break;
+      if (preparation) {
+        const compiling = await startupPhase(files.startupCompiling, 'compiling');
+        if (performance.now() < deadline && compiling.status === 'verified') {
+          // Bound shell/module preparation separately from the unchanged
+          // compilation/readiness window; this fact is not readiness proof.
+          preparation = false;
+          deadline = performance.now() + timeoutMs;
+        }
+      }
       await sleep(10);
     }
     // A delayed wake must not discard proof published while the probe was pending.
@@ -289,7 +298,7 @@ export async function startWindowsRuntimeObserver({ directory, ownerPid, expecte
     return { observation, observerExit, compilerSettled: await refreshCompilerSettlement() };
   });
   let isReady = false;
-  const ready = marker('ready', 5000).then(async value => {
+  const ready = marker('ready', 5000, { preparation: true }).then(async value => {
     const valid = exactKeys(value, ['schema', 'ownerHandlePinned', 'compilerSandboxed'])
       && value.schema === 2 && value.ownerHandlePinned === true && value.compilerSandboxed === true;
     const settled = valid && await refreshCompilerSettlement();

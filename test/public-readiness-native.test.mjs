@@ -5,6 +5,8 @@ export const validationDeclarations = {
   ],
   "applicability": [{
     "names": [
+      "T-PRD017 native v11 pools qualified complete Intel components within unchanged resource and SDK limits",
+      "T-PRD017 native v11 authenticates current costs and preserves historical source and fallback",
       "T-PRD017 stable native cost placement balances observed whole roots without borrowing evidence",
       "T-PRD017 unrelated source edits preserve planning ownership but invalidate native execution identity",
       "T-PRD017 native cost fallback retains connected closures and rejects malformed inventories",
@@ -32,6 +34,10 @@ export const validationDeclarations = {
     "prerequisites": ["Node and owned repository-local source/report fixtures; complete causal roots remain sequential"]
   }],
   "groups": [
+    {"root": "T-PRD017 native v11 pools qualified complete Intel components within unchanged resource and SDK limits",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD017 native v11 authenticates current costs and preserves historical source and fallback",
+      "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD074 exact typed native source retains code and credential-negative fixtures without becoming sanitized log text",
       "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD074 source safety rejects unapproved query aliases and credential fragments independently",
@@ -3936,6 +3942,13 @@ async function nativeAffinityFixture(t, options) {
     retainedRoot: 'retained identity acceptance through existing public consumers' };
 }
 
+function authenticV10ObserverSource(contents) {
+  const original = contents.replace('assert.equal(result.rows.length, 21);', 'assert.equal(result.rows.length, 20);');
+  assert.equal(createHash('sha256').update(original).digest('hex'),
+    nativePass.nativePlacementPhasesV10.phases[2].sourceDigest);
+  return original;
+}
+
 async function nativeIsolationFixture(t, options = {}) {
   const f = await nativeAffinityFixture(t, { bootstrapProtocol: nativeCryptoBootstrapProtocol, ...options });
   const catalog = f.files.find(source => source.file === 'test/validation-catalog.test.mjs');
@@ -3946,6 +3959,8 @@ async function nativeIsolationFixture(t, options = {}) {
   f.files.push({ file: surface, contents: await fs.readFile(path.join(repositoryRoot, ...surface.split('/')), 'utf8') });
   const observer = f.files.find(source => source.file === 'test/public-readiness-observer.test.mjs');
   observer.contents = await fs.readFile(path.join(repositoryRoot, 'test', 'public-readiness-observer.test.mjs'), 'utf8');
+  if (options.shardProtocol === 'native-framework-shards-v10-phased-intel-component-rebalance')
+    observer.contents = authenticV10ObserverSource(observer.contents);
   for (const file of ['scripts/github-readiness-host.mjs', 'scripts/pr-observer.mjs', 'scripts/read-validation-artifact.py']) {
     const contents = await fs.readFile(path.join(repositoryRoot, ...file.split('/')), 'utf8');
     const selected = f.files.find(source => source.file === file);
@@ -3955,9 +3970,158 @@ async function nativeIsolationFixture(t, options = {}) {
   return { ...f, inventory: f.compile(f.files) };
 }
 
-test('T-PRD017 native v10 moves only the qualified complete observer component into a settled primary phase', async t => {
-  const f = await nativeIsolationFixture(t);
+async function intelGitSourceInventory() {
+  const inventory = await compileValidationInventory(repositoryRoot);
+  assert.equal(inventory.complete, true, JSON.stringify(inventory.unresolved));
+  const files = await Promise.all(inventory.sourceFiles.map(async ({ file }) => ({
+    file,
+    contents: (await fs.readFile(path.join(repositoryRoot, ...file.split('/')), 'utf8'))
+      .replace(/\r\n/gu, '\n'),
+  })));
+  return compileValidationSourceInventory({ files,
+    surfacePaths: [...new Set(inventory.surfaces.map(surface => surface.path))] });
+}
+
+test('T-PRD017 native v11 pools qualified complete Intel components within unchanged resource and SDK limits', async t => {
+  const f = { inventory: await intelGitSourceInventory(),
+    plan: await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8') };
   const options = { inventory: f.inventory, plan: f.plan, target: 'macos-x64' };
+  const current = nativeFrameworkShardPlan(options);
+  const primary = current.parts.find(part => part.shard === 'body-0');
+  assert.deepEqual(primary.stages.map(stage => stage.name), ['regression'],
+    'Independent complete primary components must share one bounded ready pool instead of serial isolation');
+  const anchors = [
+    'assertion-0f5721a6329b2ef16d4f48e70ef01d0f0715e6a4f3cefeedc3449361fa57e8e5',
+    'assertion-30a06918b0d6d26eed9773acffe13e64087e7a1ec315a6a5c60d6a026fb52d22',
+    'assertion-b1b032561853815caa7a039f5c020e573a19067118dec177cae55e2d89dc1092',
+  ];
+  assert.ok(anchors.every(id => primary.stages[0].groups.some(group => group.rootId === id)));
+  assert.ok(primary.stages[0].groups.length > anchors.length);
+  assert.equal(current.placement.parallel.status, 'applied');
+  assert.equal(current.placement.parallel.capacity, 14);
+  assert.equal(current.placement.parallel.evidenceCredit, false);
+  assert.equal(current.placement.parallel.predictedSavingMs, null);
+  const changedCallback = current.placement.groups.find(group =>
+    group.rootId === 'assertion-d33dd92ab0ef357c66eced91ec8ed8b491ac4c48b19b4f5543935ea2f64f37e7');
+  assert.equal(changedCallback.durationMs, null, 'The changed finalizer regression cannot inherit C74 timing');
+  assert.equal(changedCallback.costStatus, 'unmeasured-callback');
+  assert.ok(current.parts.every(part => part.stages.every(stage => !stage.phase)));
+  const ids = current.parts.flatMap(part => part.assertionIds);
+  assert.deepEqual([...ids].sort(), f.inventory.cases.map(test => test.id).sort());
+  assert.equal(new Set(ids).size, ids.length);
+  const historical = nativeFrameworkShardPlan({ ...options,
+    protocol: 'native-framework-shards-v10-phased-intel-component-rebalance' });
+  const old = await nativeIsolationFixture(t, { shardProtocol: nativePass.nativeComponentRebalanceFrameworkShardProtocol });
+  const authentic = nativeFrameworkShardPlan({ inventory: old.inventory, plan: old.plan, target: options.target,
+    protocol: 'native-framework-shards-v10-phased-intel-component-rebalance' });
+  assert.deepEqual(authentic.parts.find(part => part.shard === 'body-0').stages.map(stage => stage.name),
+    ['regression-catalog', 'regression-retained', 'regression-observer']);
+  assert.deepEqual(current.parts.filter(part => !part.shard.startsWith('body-')),
+    historical.parts.filter(part => !part.shard.startsWith('body-')));
+  const requests = { ...options, assignment: current, profile: 'pr', component: 'framework',
+    protocol: nativeCryptoBootstrapProtocol };
+  for (const shard of ['body-0', 'body-1', 'body-2']) {
+    const tools = nativeBootstrapRequirements({ ...requests, shard });
+    const permitted = nativePass.nativePlacementReadyPoolV11.shards.find(part => part.shard === shard).tools;
+    assert.ok(Object.entries(tools).every(([tool, required]) => !required || permitted[tool]));
+  }
+  for (const target of ['linux-x64', 'windows-x64', 'macos-arm64']) {
+    assert.deepEqual(nativeFrameworkShardPlan({ ...options, target }).parts,
+      nativeFrameworkShardPlan({ ...options, target,
+        protocol: 'native-framework-shards-v10-phased-intel-component-rebalance' }).parts);
+  }
+});
+
+test('T-PRD017 native v11 authenticates current costs and preserves historical source and fallback', async t => {
+  const f = { inventory: await intelGitSourceInventory(),
+    plan: await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8') };
+  const options = { inventory: f.inventory, plan: f.plan, target: 'macos-x64' };
+  const source = await fs.readFile(path.join(repositoryRoot, 'scripts', 'native-validation.mjs'), 'utf8');
+  const select = contents => nativePass.sourceNativeFrameworkShardProtocol([
+    { file: 'scripts/native-validation.mjs', contents }]);
+  assert.equal(select(source), nativeFrameworkShardProtocol);
+  for (const name of ['nativePlacementCostsV11', 'nativePlacementReadyPoolV11']) {
+    const from = source.indexOf(`export const ${name} = Object.freeze({`);
+    const end = source.indexOf('\n});', from) + 4;
+    assert.ok(from > 0 && end > from);
+    assert.throws(() => select(source.replace(`export const ${name} =`, `const ${name} =`)),
+      { code: 'EVIDENCE' });
+    assert.throws(() => select(source + `\nexport const ${name} = Object.freeze({});\n`),
+      { code: 'EVIDENCE' });
+    const altered = structuredClone(nativePass[name]);
+    altered.node = '24.20.1';
+    assert.throws(() => select(source.slice(0, from) +
+      `export const ${name} = Object.freeze(${JSON.stringify(altered)});\n` + source.slice(end)),
+    { code: 'EVIDENCE' });
+    assert.throws(() => select(source.slice(0, from) +
+      `export const ${name} = Object.freeze(JSON.parse(${JSON.stringify(JSON.stringify(nativePass[name]))}));\n` +
+      source.slice(end)), { code: 'EVIDENCE' });
+  }
+  const rootId = 'assertion-0f5721a6329b2ef16d4f48e70ef01d0f0715e6a4f3cefeedc3449361fa57e8e5';
+  for (const mutate of [
+    inventory => { inventory.cases.find(test => test.id === rootId).definitionDigest = 'a'.repeat(64); },
+    inventory => { inventory.cases.find(test => test.id === rootId).sourceDigest = 'b'.repeat(64); },
+    inventory => inventory.groupDeclarations.push({ file: 'test/validation-catalog.test.mjs',
+      root: inventory.cases.find(test => test.id === rootId).name, minimumSlots: 2 }),
+  ]) {
+    const inventory = structuredClone(f.inventory);
+    mutate(inventory);
+    const changed = nativeFrameworkShardPlan({ ...options, inventory });
+    assert.notEqual(changed.placement.parallel.status, 'applied');
+    const ids = changed.parts.flatMap(part => part.assertionIds);
+    assert.deepEqual([...ids].sort(), inventory.cases.map(test => test.id).sort());
+    assert.equal(new Set(ids).size, ids.length);
+    assert.ok(changed.parts.every(part => part.assertionIds.length > 0 &&
+      part.stages.every(stage => !stage.phase)));
+  }
+  const shared = structuredClone(f.inventory);
+  const connectedRoots = nativePass.nativePlacementReadyPoolV11.anchors.slice(0, 2)
+    .map(id => shared.cases.find(test => test.id === id));
+  for (const root of connectedRoots) {
+    const declaration = shared.groupDeclarations.find(group => group.file === root.file && group.root === root.name);
+    if (declaration) declaration.exclusiveResources = ['owned-v11-joined-resource'];
+    else shared.groupDeclarations.push({ file: root.file, root: root.name,
+      exclusiveResources: ['owned-v11-joined-resource'] });
+  }
+  const connected = nativeFrameworkShardPlan({ ...options, inventory: shared });
+  assert.notEqual(connected.placement.parallel.status, 'applied');
+  assert.equal(connected.parts.find(part => part.assertionIds.includes(connectedRoots[0].id)),
+    connected.parts.find(part => part.assertionIds.includes(connectedRoots[1].id)),
+  'Fallback still places the entire shared-resource component on one host');
+  const current = nativeFrameworkShardPlan(options);
+  const from = source.indexOf('function qualifyNativeParallelPlacement(');
+  const end = source.indexOf('\nfunction partitionNativeBodyGroups(', from);
+  const groups = current.parts.filter(part => part.shard.startsWith('body-'))
+    .flatMap(part => part.stages.flatMap(stage => stage.groups));
+  for (const [status, runtime, capacity] of [
+    ['unsupported-runtime', '24.20.1', 14], ['unsupported-capacity', '24.20.0', 13],
+  ]) {
+    const qualify = runInContext(`${source.slice(from, end)}\nqualifyNativeParallelPlacement;`,
+      createContext({ digest, nativeToolchain: { node: runtime },
+        nativePlacementReadyPoolV11: nativePass.nativePlacementReadyPoolV11,
+        nativePlacementCostsV11: nativePass.nativePlacementCostsV11,
+        nativePlacementCosts: { workers: { 'macos-x64': capacity } },
+        nativeBootstrapRequirements: () => { throw new Error('Unsupported runtime/capacity must fail before SDK adoption'); } }));
+    const placement = structuredClone(current.placement);
+    qualify(placement, groups, f.inventory, f.plan);
+    assert.equal(placement.parallel.status, status);
+  }
+  let historical = source.replace(
+    `export const nativeFrameworkShardProtocol = '${nativeFrameworkShardProtocol}';`,
+    "export const nativeFrameworkShardProtocol = 'native-framework-shards-v10-phased-intel-component-rebalance';");
+  for (const name of ['nativePlacementCostsV11', 'nativePlacementReadyPoolV11']) {
+    const from = historical.indexOf(`export const ${name} = Object.freeze({`);
+    const end = historical.indexOf('\n});', from) + 4;
+    historical = historical.slice(0, from) + historical.slice(end);
+  }
+  assert.equal(select(historical), 'native-framework-shards-v10-phased-intel-component-rebalance',
+    'Genuine historical v10 must not require either new current planning literal');
+});
+
+test('T-PRD017 native v10 moves only the qualified complete observer component into a settled primary phase', async t => {
+  const f = await nativeIsolationFixture(t, { shardProtocol: nativePass.nativeComponentRebalanceFrameworkShardProtocol });
+  const options = { inventory: f.inventory, plan: f.plan, target: 'macos-x64',
+    protocol: nativePass.nativeComponentRebalanceFrameworkShardProtocol };
   const historical = nativeFrameworkShardPlan({ ...options,
     protocol: 'native-framework-shards-v9-phased-intel-isolation' });
   const assignment = nativeFrameworkShardPlan(options);
@@ -4006,8 +4170,9 @@ test('T-PRD017 native v10 moves only the qualified complete observer component i
 });
 
 test('T-PRD017 native v10 rejects changed observer qualification and preserves historical v9', async t => {
-  const f = await nativeIsolationFixture(t);
-  const options = { plan: f.plan, target: 'macos-x64' };
+  const f = await nativeIsolationFixture(t, { shardProtocol: nativePass.nativeComponentRebalanceFrameworkShardProtocol });
+  const options = { plan: f.plan, target: 'macos-x64',
+    protocol: nativePass.nativeComponentRebalanceFrameworkShardProtocol };
   const file = 'test/public-readiness-observer.test.mjs';
   const root = f.inventory.cases.find(test =>
     test.id === 'assertion-b1b032561853815caa7a039f5c020e573a19067118dec177cae55e2d89dc1092').name;
@@ -4048,7 +4213,9 @@ test('T-PRD017 native v10 rejects changed observer qualification and preserves h
   assert.notEqual(observer.contents, original);
   assert.equal(nativeFrameworkShardPlan({ ...options, inventory: f.compile(expanded) })
     .placement.phases.status, 'changed-closure-or-resources');
-  const source = await fs.readFile(path.join(repositoryRoot, 'scripts', 'native-validation.mjs'), 'utf8');
+  const source = (await fs.readFile(path.join(repositoryRoot, 'scripts', 'native-validation.mjs'), 'utf8')).replace(
+    `export const nativeFrameworkShardProtocol = '${nativeFrameworkShardProtocol}';`,
+    `export const nativeFrameworkShardProtocol = '${nativePass.nativeComponentRebalanceFrameworkShardProtocol}';`);
   const qualified = nativeFrameworkShardPlan({ ...options, inventory: f.inventory });
   const groups = qualified.parts.filter(part => part.shard.startsWith('body-'))
     .flatMap(part => part.stages.flatMap(stage => stage.groups));
@@ -4088,7 +4255,7 @@ test('T-PRD017 native v10 rejects changed observer qualification and preserves h
     source.slice(end)), { code: 'EVIDENCE' });
   const historicalSource = source.slice(0, from) + source.slice(end);
   assert.equal(select(historicalSource.replace(
-    `export const nativeFrameworkShardProtocol = '${nativeFrameworkShardProtocol}';`,
+    `export const nativeFrameworkShardProtocol = '${nativePass.nativeComponentRebalanceFrameworkShardProtocol}';`,
     `export const nativeFrameworkShardProtocol = '${nativePass.nativePhasedIsolationFrameworkShardProtocol}';`)),
   nativePass.nativePhasedIsolationFrameworkShardProtocol,
   'Authentic historical v9 must not require the v10 phase literal');
@@ -4362,7 +4529,7 @@ test('T-PRD017 native v9 primary waits for owned process settlement and blocks f
 });
 
 test('T-PRD017 native v10 primary settles every owned phase and blocks failed observer successors', async t => {
-  await nativePhaseSettlementBoundary(t, nativeFrameworkShardProtocol);
+  await nativePhaseSettlementBoundary(t, nativePass.nativeComponentRebalanceFrameworkShardProtocol);
 });
 
 async function nativePhaseSettlementBoundary(t, shardProtocol) {
@@ -5239,18 +5406,19 @@ test('T-PRD017 native protocol5 spreads independent same-file roots and executes
 
 test('T-PRD017 native protocol5 and historical4 retain source-bound observer and SDK reconstruction', async t => {
   const { protocolPairs, runProtocolRow } = await import('./readiness-protocol-row.mjs');
-  assert.equal(protocolPairs.length, 20, 'Append v10 without replacing any original complete causal row');
-  assert.deepEqual(protocolPairs.slice(-3), [
+  assert.equal(protocolPairs.length, 21, 'Append v11 without replacing any original complete causal row');
+  assert.deepEqual(protocolPairs.slice(-4), [
     [nativePass.nativeCatalogIsolationFrameworkShardProtocol, nativeCryptoBootstrapProtocol],
     [nativePass.nativePhasedIsolationFrameworkShardProtocol, nativeCryptoBootstrapProtocol],
+    [nativePass.nativeComponentRebalanceFrameworkShardProtocol, nativeCryptoBootstrapProtocol],
     [nativeFrameworkShardProtocol, nativeCryptoBootstrapProtocol],
   ]);
   await runProtocolRow(t, protocolPairs[18]);
   const protocols = ['native-framework-shards-v4-split-intel-units', 'native-framework-shards-v5-root-components',
     'native-framework-shards-v6-stable-cost-components', 'native-framework-shards-v7-resource-affinity-components',
     'native-framework-shards-v8-intel-catalog-isolation',
-    'native-framework-shards-v9-phased-intel-isolation', nativeFrameworkShardProtocol];
-  assert.equal(nativeFrameworkShardProtocol, 'native-framework-shards-v10-phased-intel-component-rebalance');
+    'native-framework-shards-v9-phased-intel-isolation',
+    nativePass.nativeComponentRebalanceFrameworkShardProtocol, nativeFrameworkShardProtocol];
   for (const shardProtocol of protocols) {
     const f = await observerApiFixture(t, { frameworkShards: true, shardProtocol,
       bootstrapProtocol: nativeCryptoBootstrapProtocol, nodeArtifactReader: true });
@@ -5874,6 +6042,9 @@ test('T-PRD018 native finalization persists missing-stage failure bundles and pr
   assert.equal(raw.finishedAt, null);
   assert.notEqual(raw.exitCode, 0);
   assert.ok(result.diagnostics.some(row => row.code === 'MISSING_STAGE_REPORT'));
+  assert.ok(result.diagnostics.some(row => row.stage === 'presentation' &&
+    row.code === 'UNAVAILABLE_NATIVE_TIMING_PROJECTION'));
+  assert.deepEqual(result.timingAnnotations, []);
   assert.equal(await fs.readFile(path.join(directory, 'regression.json.journal.ndjson'), 'utf8'), journal);
   const bundle = JSON.parse(await fs.readFile(path.join(directory, 'readiness-bundle.json'), 'utf8'));
   const original = bundle.objects.find(object => object.value.kind === 'execution-bytes').value;

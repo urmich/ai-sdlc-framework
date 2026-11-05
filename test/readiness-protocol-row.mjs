@@ -9,6 +9,7 @@ import { nativePrPartsForProtocol, nativeWorkflowContract,
   nativeSplitUnitFrameworkShardProtocol, nativeFourBodyFrameworkShardProtocol,
   nativePlatformUnitFrameworkShardProtocol, nativeLegacyFrameworkShardProtocol,
   nativeFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
+  nativeComponentRebalanceFrameworkShardProtocol,
   nativeFrameworkShardPlan, replayNativeEvidence, verifyNativeShardUnitOrder } from '../scripts/native-validation.mjs';
 import { nativeUnitBootstrapProtocol, nativeBodyBootstrapProtocol,
   nativeBootstrapProtocol } from '../scripts/toolchain-baseline.mjs';
@@ -35,6 +36,7 @@ export const protocolPairs = Object.freeze([[nativeSplitUnitFrameworkShardProtoc
   [nativeLegacyFrameworkShardProtocol, nativeBootstrapProtocol],
   [nativeCatalogIsolationFrameworkShardProtocol, nativeBootstrapProtocol],
   [nativePhasedIsolationFrameworkShardProtocol, nativeBootstrapProtocol],
+  [nativeComponentRebalanceFrameworkShardProtocol, nativeBootstrapProtocol],
   [nativeFrameworkShardProtocol, nativeBootstrapProtocol]].map(pair => Object.freeze(pair)));
 
 // SDK verifier capabilities and every causal assertion stay in the same child.
@@ -43,7 +45,8 @@ export async function runProtocolRow(t, [shardProtocol, bootstrapProtocol]) {
     ambient: shardProtocol === nativeSplitUnitFrameworkShardProtocol, rootParent: t.fixtureParent });
   const expectedCount = nativePrPartsForProtocol(shardProtocol).length;
   const splitUnits = [nativeSplitUnitFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
-    nativePhasedIsolationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol);
+    nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(shardProtocol);
   const frameworkCount = expectedCount - 2;
   assert.equal(f.parts.size, expectedCount);
   assert.equal(expectedCount, splitUnits ? 25 :

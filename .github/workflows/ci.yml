@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 env:
-  SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL: native-framework-shards-v10-phased-intel-component-rebalance
+  SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL: native-framework-shards-v11-parallel-intel-ready-pool
   SDLC_MAC_ADMISSION_POLICY: arm-regression-allocation-v10-intel-primary-first
   # Representative public regression input, not an installer version-support whitelist.
   SUPPORTED_PREVIOUS_REPOSITORY: urmich/ai-sdlc-framework

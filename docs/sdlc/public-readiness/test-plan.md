@@ -105,7 +105,8 @@ successful overlap. Resource matching is part of source/configuration evidence.
 The versioned native-protocol regression retains its original root and all
 seventeen original complete protocol/bootstrap scenarios, plus the historical
 v8/bootstrap eighteenth row, historical v9/bootstrap nineteenth row and current
-v10/bootstrap twentieth row. Reserve four root slots before
+v10/bootstrap twentieth row, retaining all twenty as historical scenarios when
+appending the current v11/bootstrap twenty-first row. Reserve four root slots before
 setup, then run whole scenarios in isolated children under the existing shared
 producer budget, bounded to four and the actual caller allocation. Environment
 changes, SDK capabilities, original verification, negative controls, projection,
@@ -1191,6 +1192,28 @@ Keep the five-second capture allowance, native retained-handle/PID-reuse/exit-or
 positive controls and cleanup assertions unchanged. Controlled diagnostics do
 not reproduce or clear the historical hosted timeout.
 
+The existing PR-only Windows readiness root in
+`test/public-readiness-inventory.test.mjs` also verifies separate bounded
+preparation and compilation/readiness windows. Only a source-verified compiling
+marker observed within the five-second preparation allowance arms one further
+five-second window; absent, wrong-source or late markers cannot extend it.
+This intentionally permits at most ten seconds of startup polling, not the
+previous single five-second dispatch allowance. Preserve delayed-wake proof,
+affirmative compiler settlement, failed admission, one-second native observation,
+1500ms capture, the mandatory real native-positive root and its thirty-second
+timeout. Its controlled marker/spawn instrumentation remains process-local,
+Node-only and one-slot, with no critical promotion or native execution credit.
+
+The existing PR-only `TOOL02 Windows validation settlement bounds exited roots
+and failed or stalled tree termination` root in
+`test/distribution-boundary-lifetime.test.mjs` must await its first durable running
+checkpoint before starting cancellation accounting. Model cold preparation with
+an injected clock advance and retain the real 1500ms watchdog plus a command-clock
+assertion. Keep all six modes, the original one-second production stop deadline,
+five-second preparation bound, twenty-second root timeout, five-slot declaration
+and owned writer/controller/retention cleanup proofs. This fixes a fixture race,
+not a demonstrated sole cause or fresh cure of the hosted cancellation failure.
+
 `T-PRD018 native timing notices retain only ten source-bound actual group and
 root durations` in `test/public-readiness-native.test.mjs` is maintainer-owned,
 PR-only and Node-only on the existing native lanes. Reserve two aggregate slots
@@ -1222,6 +1245,12 @@ durations exactly in the closed header, and the actual terminal group only when
 all declared group intervals are complete. Invalid, missing, reordered or
 unbounded original inputs become explicit unknown coordinates, not fabricated
 clocks; a presentation fallback cannot change readiness, failure or settlement.
+Extend the existing missing-stage finalization root to cover an unavailable
+public diagnostic preimage: retain the original nonpassing evaluation, partial
+journal and evidence bundle, report the closed presentation diagnostic and emit
+no unbound notices. Derivation itself belongs inside that presentation boundary.
+This extends one existing PR-only, Node-only, one-slot owned-fixture root without
+adding descendants or changing full-context admission or the critical budget.
 Extend the existing timing-offset control with all six states, complete ordered
 numeric-run decoding, declared bounds, source/order rejection and an explicitly
 synthetic 1462-group formatting-capacity case. This adds no root or descendant,
@@ -1752,7 +1781,8 @@ the original subset. A new legitimate test must not erase preservation checks.
    supply the prerequisite. Include the unit barrier, every part's provisioning,
    evidence retention and cleanup in the whole-lane elapsed time.
    For current implementation candidate
-   `native-framework-shards-v10-phased-intel-component-rebalance` and historical
+   `native-framework-shards-v11-parallel-intel-ready-pool` and historical
+   `native-framework-shards-v10-phased-intel-component-rebalance` and
    `native-framework-shards-v9-phased-intel-isolation` and
    `native-framework-shards-v8-intel-catalog-isolation` and
    `native-framework-shards-v7-resource-affinity-components` and
@@ -1768,7 +1798,7 @@ the original subset. A new legitimate test must not erase preservation checks.
    unions including descendants, dependencies and exclusive resources. The new
    Intel producer has no unit prerequisite of its own. Every Intel regression
    must wait for both unit jobs, not a borrowed ARM/original-unit result.
-   Current v10 retains v9/v8/v7/v6's complete dependency/exclusive-resource-connected root
+   Current v11 retains v10/v9/v8/v7/v6's complete dependency/exclusive-resource-connected root
    components and places them across the existing bodies using qualified observed
    work costs and stable exact file/root planning identities. Historical source costs are
    explicit scheduling leads only, never current execution credit or predicted
@@ -1779,7 +1809,7 @@ the original subset. A new legitimate test must not erase preservation checks.
    hosts, but descendants and connected components must remain together.
    Body file lists may overlap; exact source-bound escaped full-name selectors
    must preserve the disjoint complete assertion union and reject ambiguity.
-   Keep within-phase scheduling policy v9 byte-identical and replay v1-v9 assignments and
+   Keep within-phase scheduling policy v9 byte-identical and replay v1-v10 assignments and
    serialized identities exactly, including v5's original count/hash placement
    and v6's unchanged `nativePlacementCosts` table and SDK reconstruction.
    V7's separate `nativePlacementCostsV7` overlay contains ten completed Intel
@@ -1859,7 +1889,7 @@ the original subset. A new legitimate test must not erase preservation checks.
    `regression-retained` through `verifyNativePhaseSettlement` and the separate
    original report/journal, command/journal and settlement receipt, bound to
    phase/context/command/report/command-journal identities.
-   V9/V10 Intel timing boundaries must pass 1,499,999ms but reject 1,500,000ms;
+   V9/V10/V11 Intel timing boundaries must pass 1,499,999ms but reject 1,500,000ms;
    genuine v1-v8 originals retain their strict 1,200,000ms historical limit.
    Phase isolation is a measurement candidate: observed service sums can still
    exceed twenty-five minutes and longer primary allocation may affect secondary
@@ -1909,6 +1939,32 @@ the original subset. A new legitimate test must not erase preservation checks.
    no historical row or required descendant may disappear. These controls supply
    no native timing credit: the qualified move still requires fresh whole-lane
    correctness and strict Intel under-twenty-five-minute acceptance.
+   V11 replaces current primary phase isolation with the authenticated
+   `native-intel-parallel-ready-pool-v1` rule and ordinary `regression` stage.
+   Verify `nativePlacementCostsV11` and `nativePlacementReadyPoolV11` against
+   captured source; reject changed current definitions, closure, resources,
+   target, runtime or capacity rather than borrowing an incompatible lead.
+   The complete catalog, retained-identity and observer components retain
+   minimum slots one/four/one and share the primary ready pool with transferred
+   whole components only through existing dependency/resource admission.
+   Preserve all twenty-five producers, fourteen-slot bodies, four-slot units,
+   complete disjoint assertion assignment and actual selected SDK requirements.
+   No new phase/journal or blanket callback concurrency is introduced.
+   The maintainer-owned PR-only extended-unit roots in
+   `test/public-readiness-native.test.mjs` are
+   `T-PRD017 native v11 pools qualified complete Intel components within unchanged resource and SDK limits`
+   and `T-PRD017 native v11 authenticates current costs and preserves historical source and fallback`.
+   Each reserves one slot, has no prerequisite or exclusive resource, and uses
+   Node-only process-isolated owned fixtures on the existing four native lanes.
+   Retain original-source failure, corrected controls, current-source/CRLF
+   qualification and genuine historical assignment/SDK replay separately from
+   whole-candidate validation. Append v11 as causal row twenty-one without
+   replacing any of the twenty historical scenarios or their descendants.
+   Preserve historical v9/v10 phase settlement and reject cross-protocol
+   relabelling. Neither historical C74 cost projections nor these controls
+   measure changed callbacks, new causal work or shared-host contention.
+   Fresh native correctness and complete physical lane timing remain required;
+   no critical-profile growth or current timing credit follows from this design.
    The three PR-only roots in `test/public-readiness-native.test.mjs` are
    `T-PRD017 native protocol4 retains its exact historical file and assertion assignments`,
    `T-PRD017 native protocol5 spreads independent same-file roots and executes connected complete closures exactly once`,

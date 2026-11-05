@@ -198,6 +198,11 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
       const directory = await fs.mkdtemp(path.join(root, '.test-data', 'tool02-'));
       const token = randomUUID();
       const cancellation = new AbortController();
+      const writerReady = Promise.withResolvers();
+      const runningDurable = Promise.withResolvers();
+      let firstRunning = true;
+      let preparationAdvance = 0;
+      const clock = { now: () => performance.now() + preparationAdvance };
       const lifetime = { cleanupSafe: true, unsettledCommands: [] };
       const retentionFailure = Object.assign(new Error('Owned final report persistence failed'), { code: 'OWNED_PERSISTENCE' });
       let child;
@@ -207,10 +212,20 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
       let killerSignals = 0;
       let launches = 0;
       const context = createContext({
-        Buffer, TextDecoder, path, performance, setTimeout, clearTimeout, delay, console,
+        Buffer, TextDecoder, path, performance: clock, setTimeout, clearTimeout, delay, console,
         createHash, digest, SdlcError, sanitizeExecutionPayload, root,
         atomicWrite: async (file, bytes) => {
           if (mode === 'retention-failed' && JSON.parse(bytes).checkpoint.phase === 'finished') throw retentionFailure;
+          if (firstRunning && JSON.parse(bytes).checkpoint.phase === 'running') {
+            firstRunning = false;
+            if (mode === 'stalled') {
+              await writerReady.promise;
+              preparationAdvance += 2000;
+            }
+            await atomicWrite(file, bytes);
+            runningDurable.resolve();
+            return;
+          }
           return atomicWrite(file, bytes);
         },
         open: fs.open, realpath: fs.realpath, processDiagnostic,
@@ -256,6 +271,20 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
         }
         assert.equal(identity.token, token);
         assert.equal(identity.parent, child.pid);
+        writerReady.resolve();
+        phase('running-checkpoint');
+        let preparationTimer;
+        await Promise.race([
+          runningDurable.promise,
+          observed.then(({ error }) => {
+            throw error ?? new Error('Owned command settled before its running checkpoint');
+          }),
+          new Promise((_, reject) => {
+            preparationTimer = setTimeout(() => reject(new Error(
+              'Owned command must retain its running checkpoint before cancellation')),
+            Math.max(0, deadline - performance.now()));
+          }),
+        ]).finally(() => clearTimeout(preparationTimer));
         if (Object.hasOwn(ready, mode)) {
           ready[mode].resolve(identity);
           let timer;
@@ -291,6 +320,7 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
           assert.equal(child.exitCode, 23);
         }
         const started = performance.now();
+        const commandStarted = clock.now();
         phase('cancellation-settlement');
         cancellation.abort();
         const sentinel = Symbol('unsettled');
@@ -301,6 +331,8 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
         phase(outcome === sentinel ? 'cancellation-watchdog' : 'cancellation-return');
         assert.notEqual(outcome, sentinel, `${mode}: cancellation must settle inside its original one-second stop window`);
         assert.ok(performance.now() - started < 1500);
+        assert.ok(clock.now() - commandStarted < 1500,
+          'Cold running-checkpoint preparation must finish before the cancellation deadline starts');
         phase('cleanup-lifetime');
         assert.equal(lifetime.cleanupSafe, false, 'A bounded return must not authorize deletion under the owned writer');
         assert.equal(lifetime.unsettledCommands[0].pid, child.pid);
@@ -345,6 +377,7 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
         }));
         failures.push({ mode, message: error.message, ...phases.get(mode) });
       } finally {
+        writerReady.resolve();
         phase('writer-drain');
         await fs.writeFile(path.join(directory, `${token}.release`), '');
         const deadline = performance.now() + 5000;

@@ -51,7 +51,7 @@ export const validationDeclarations = {
     "names": ["T-PRD018 Windows observer readiness retains published proof when its polling wake crosses the deadline"],
     "platforms": ["windows-x64"],
     "owner": "runner-termination-evidence-contract",
-    "reason": "PR-only deterministic controller regression: delayed polling retains valid proof and rejects missing/unsettled/wrong-source proof. The actual settlement helper is evaluated with controlled observer/admission boundaries to retain final error facts before fail-stop, including stop failure. No real descendant, compiler or critical promotion.",
+    "reason": "PR-only deterministic controller regression: delayed polling retains valid proof, bounded preparation does not consume compilation/readiness time, and absent/invalid/wrong-source preparation cannot extend waiting. Missing/unsettled/wrong-source readiness still fails. The actual settlement helper is evaluated with controlled observer/admission boundaries to retain final error facts before fail-stop, including stop failure. No real descendant, compiler or critical promotion.",
     "prerequisites": ["Node; independent process-isolated root and owned repository-local marker fixtures"]
   }, {
     "names": ["T-PRD018 capture admission reserves its complete process tree while independent peers progress"],
@@ -728,6 +728,94 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
           assert.equal(result.cleanup, settled ? 'awaited' : 'unknown');
           assert.equal(result.forcedObserverStop, false);
           assert.equal(result.observation, null, 'Injected markers supply no native observation credit');
+        }
+      }
+    }
+    for (const mode of ['prepared', 'wrong-preparation-source', 'preparation-expired', 'readiness-expired']) {
+      const originalSpawn = childProcess.spawn;
+      const originalStat = fsPromises.stat;
+      const originalNow = performance.now;
+      const probes = Array.from({ length: 3 }, () => ({
+        entered: Promise.withResolvers(), release: Promise.withResolvers(),
+      }));
+      const child = new EventEmitter();
+      child.pid = 900001;
+      child.kill = () => { throw new Error('An injected observer must not be signaled'); };
+      child.unref = () => {};
+      let dispatched = false;
+      let probeIndex = 0;
+      let now = 0;
+      let observer;
+      let readiness;
+      childProcess.spawn = () => { dispatched = true; return child; };
+      fsPromises.stat = async filename => {
+        if (filename.endsWith('.ready.json') && probeIndex < probes.length) {
+          const probe = probes[probeIndex++];
+          probe.entered.resolve();
+          await probe.release.promise;
+          throw Object.assign(new Error('Controlled absent readiness marker'), { code: 'ENOENT' });
+        }
+        return originalStat(filename);
+      };
+      performance.now = () => now;
+      syncBuiltinESMExports();
+      try {
+        const { startWindowsRuntimeObserver: start } =
+          await import(new URL(`./windows-runtime-observer/index.mjs?preparation-${mode}`, import.meta.url));
+        observer = await start({
+          directory: path.join(directory, `preparation-${mode}`), ownerPid: process.pid, expectedImage: 'node',
+        });
+        assert.equal(dispatched, true, 'Preparation regression must never launch a real compiler or observer');
+        readiness = observer.ready.then(value => ({ value }), error => ({ error }));
+        child.emit('spawn');
+        await probes[0].entered.promise;
+        now = mode === 'preparation-expired' ? 5001 : 3500;
+        await atomicWrite(observer.files.startupCompiling, JSON.stringify({
+          schema: 1, phase: 'compiling', reason: 'none', elapsedMs: 1369, utcMs: Date.now(),
+          observerSha256: mode === 'wrong-preparation-source' ? '0'.repeat(64) : proof.observerSha256,
+          bridgeSha256: proof.bridgeSha256,
+        }));
+        probes[0].release.resolve();
+        await probes[1].entered.promise;
+        now = mode === 'readiness-expired' ? 8501 : 6500;
+        probes[1].release.resolve();
+        if (mode === 'prepared' || mode === 'readiness-expired') {
+          await probes[2].entered.promise;
+          if (mode === 'prepared') {
+            await atomicWrite(observer.files.compilerSettled, JSON.stringify(proof));
+            await atomicWrite(observer.files.ready, JSON.stringify({
+              schema: 2, ownerHandlePinned: true, compilerSandboxed: true,
+            }));
+          }
+          probes[2].release.resolve();
+        } else probes[2].release.resolve();
+        const result = await readiness;
+        if (mode === 'prepared') {
+          assert.deepEqual(result.value, {
+            ready: true, ownerHandlePinned: true, compilerSandboxed: true, compilerSettled: true,
+          }, `Verified preparation at 3500ms must leave the complete 5000ms compilation/readiness window; ${
+            result.error?.message ?? 'no startup failure'}`);
+          await assert.rejects(observer.request({ pid: process.pid, createdBeforeMs: Date.now() }),
+            /observer-invalid-request/);
+        } else {
+          assert.match(result.error?.message ?? '', /^observer-not-ready; startup=/,
+            `${mode}: preparation and readiness have separate finite deadlines`);
+          assert.equal((await observer.startupFacts()).readiness.status, 'missing');
+        }
+      } finally {
+        for (const probe of probes) probe.release.resolve();
+        child.emit('close', 0, null);
+        await readiness;
+        childProcess.spawn = originalSpawn;
+        fsPromises.stat = originalStat;
+        performance.now = originalNow;
+        syncBuiltinESMExports();
+        if (observer) {
+          const result = await observer.finalize();
+          assert.equal(result.compilerSettled, mode === 'prepared');
+          assert.equal(result.cleanup, mode === 'prepared' ? 'awaited' : 'unknown');
+          assert.equal(result.forcedObserverStop, false);
+          assert.equal(result.observation, null, 'Preparation markers supply no native observation credit');
         }
       }
     }

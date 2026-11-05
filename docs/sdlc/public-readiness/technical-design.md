@@ -406,7 +406,7 @@ unit evidence before regression shards execute. Independently verify every
 part's SDK context, complete assertion union and allocated-prefix cleanup;
 missing, duplicated, overlapping or swapped parts cannot produce completeness.
 The current implementation candidate
-`native-framework-shards-v10-phased-intel-component-rebalance` retains
+`native-framework-shards-v11-parallel-intel-ready-pool` retains
 v4's four
 explicit platform-specific unit-to-regression job groups. A platform's unit
 producers must all complete successfully, including retention and cleanup, before
@@ -565,6 +565,29 @@ The independent v9/v10 phase-settlement controls bind selection writers to each
 existing per-mode owned fixture root. Check descriptor bytes below that root
 after actual commands settle; cleanup removes only the owned fixture after
 verified process settlement, never checkout-global paths inferred absent earlier.
+V11 replaces the current Intel primary's sequential phase isolation with the
+source-qualified `native-intel-parallel-ready-pool-v1` rule. Authenticate the
+strict JSON `nativePlacementCostsV11` and `nativePlacementReadyPoolV11` literals.
+The complete catalog, retained-identity and observer components may share the
+ordinary `regression` ready pool with transferred complete components; their
+minimum allocations remain one, four and one slots. Each independent root
+still executes in its own owned process. Preserve transitive dependency and
+exclusive-resource closures, the fourteen-slot body limit, four-slot units,
+actual selected SDK requirements and all twenty-five producers. This is not
+blanket callback concurrency or a new phase, journal or physical producer.
+Qualify current source, complete closure, resources, target, runtime and capacity;
+incompatible or unknown inputs retain explicit safe fallback, not invented
+current service times or partially moved components.
+Keep genuine v1-v10 assignment, literal, SDK and serialized-identity replay.
+Historical v9/v10 still require their own original phase reports, journals and
+settlement barriers; a v11 regression report cannot stand in for them.
+Append the v11 causal protocol/bootstrap scenario after all twenty historical
+rows. C74 observations and conservative quantized intervals are historical
+scheduling leads only: changed callbacks, new controls and shared-host contention
+remain unmeasured. Neither the placement projection nor local controls establish
+current native overlap, correctness or whole-lane timing. Require fresh native
+correctness and the unchanged non-Intel fifteen-minute and strict Intel
+under-twenty-five-minute limits.
 Captured v6 planner source must carry the authentic adopted `nativePlacementCosts`
 literal. V7 additionally requires authentic `nativePlacementAffinities` and
 `nativePlacementCostsV7` strict JSON literals. Reject missing, computed, duplicate
@@ -1813,6 +1836,17 @@ regressions exercise these boundaries without a native compiler or target and
 restore their process-local spawn instrumentation. Wrong-source markers never
 establish settlement. A subsequent finalization can refine an unknown snapshot
 from late affirmative proof without repeating signals or mutating old results.
+For runtime-observer readiness, bound shell/module preparation separately from
+compilation and readiness. One source-verified compiling marker observed before
+the initial five-second deadline arms exactly one further five-second window.
+Missing, invalid, foreign-source or late markers cannot rearm it. This changes
+maximum startup polling from five to ten seconds; it does not change the
+one-second observation window, 1500ms capture wait or thirty-second native root
+timeout. A preparation marker is neither readiness nor compiler-settlement
+proof. Preserve the final delayed-wake inspection and all affirmative native
+proof, target-lifetime, fail-stop and unknown-cleanup requirements. Controlled
+clock regressions and a local native-positive result do not establish the
+cause or cure of the historical hosted startup failure.
 If cleanup or compiler settlement remains unknown, the original acquired worker
 requests persistent aggregate admission stop over its existing authenticated
 socket. Mark the broker stopped before acknowledgement and reject queued/new
@@ -1865,6 +1899,17 @@ remains concurrent; failed exclusive producers abort pending readiness.
 Keep native identity capture, stop budgets, resource bounds, exit proofs and
 overall watchdogs unchanged. This corrects controlled clock accounting, not
 the unproven cause of a historical hosted failure.
+
+The Windows command-settlement fixture must also finish preparation before
+starting its cancellation clock. Writer provenance alone does not establish
+that the initial running checkpoint is durable: the command awaits that write
+before its stop/close race. Await the actual first running `atomicWrite` under
+the remaining original five-second preparation allowance, racing early command
+settlement. A controlled clock advance models cold preparation without sleeps.
+Keep the original production stop deadline, physical 1500ms watchdog, all six
+settlement modes and real writer-drain/retention/controller cleanup proofs.
+No production termination behavior changes, and later persistence remains part
+of actual return latency; this fixture correction does not prove a hosted cure.
 
 The standalone simultaneous-activation fixture similarly separates cold staging
 from the contender's lock-wait allowance. Hold the first real promotion after
@@ -1942,6 +1987,14 @@ are complete. Never silently truncate a vector. Formatting rejection first
 attempts the independently declared all-unknown vector, then emits no unsafe
 notice if that also exceeds bounds; retain a closed presentation diagnostic
 without changing readiness or the original failure.
+
+Public timing-preimage derivation is itself presentation work. Keep it inside
+the same exception boundary as coordinate formatting so a legacy partial-stage
+selection cannot replace its original nonpassing evaluation with a diagnostic
+exception. Only an independently valid binding permits the all-unknown
+coordinate fallback. Otherwise emit no notices and retain the closed
+presentation-unavailable diagnostic, original journal and evidence bundle.
+Do not manufacture stage defaults or relax full-context evidence admission.
 
 No names, paths, commands, error bodies or original report payloads are encoded.
 Coarse coordinates and synthetic formatting-capacity controls neither prove a
