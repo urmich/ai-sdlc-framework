@@ -17,7 +17,7 @@ export const validationDeclarations = {
     "names": ["published references are fresh-checked after cache use and missing/corrupt pages cannot become success"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "catalog-service-contract",
-    "reason": "PR-only owned producer/admission boundary. Starting a real new fixture execution needs the bound working directory, not replay of prior outcomes; immutable-page corruption and loss still fail closed at admission and fresh reload.",
+    "reason": "PR-only owned producer/admission boundary. Real fixture execution and admission do not depend on an unused caller-authored report; starting the producer needs the bound working directory, not replay of prior outcomes. Immutable-page corruption and loss still fail closed at admission and fresh reload.",
     "prerequisites": ["Node, Git and six aggregate worker slots; owned repository-local repository and Copilot home"]
   }],
   "variants": [
@@ -103,9 +103,7 @@ async function report(f, cycle, tests, statuses = {}) {
   return { file, evidenceRef: pathToFileURL(file).href };
 }
 async function submit(f, cycle, tests, statuses = {}) {
-  const retained = await report(f, cycle, tests, statuses);
   await recordFixtureTests(f.store, cycle, tests, statuses);
-  return retained;
 }
 async function localOperation(f, cycle, testId, correlationKey) {
   return (await prepareOperation(f.store, { workItemId: f.workItemId, sessionId: f.sessionId,
@@ -596,6 +594,29 @@ test('published references are fresh-checked after cache use and missing/corrupt
   assert.equal(currentTestEvidence(selected, current.records, unit, f.clock).status, 'Passed');
   assert.equal(Object.keys(cycleResultIds(selected)).length, 1);
   assert.equal(stagePassed(selected, current.records, 'local', f.clock), false);
+  const nextUnit = cycleTests(selected).find(test => test.level === 'unit' && test.id !== unit.id);
+  const originalWriteFile = fsPromises.writeFile;
+  const restoreWriteFile = () => {
+    fsPromises.writeFile = originalWriteFile;
+    syncBuiltinESMExports();
+  };
+  t.after(restoreWriteFile);
+  fsPromises.writeFile = async (target, ...args) => {
+    if (typeof target === 'string' && path.dirname(target) === f.root &&
+        /^execution-[a-f0-9]{16}\.json$/u.test(path.basename(target))) {
+      throw Object.assign(new Error('An unused caller-authored report is not an execution prerequisite'),
+        { code: 'UNUSED_FIXTURE_REPORT' });
+    }
+    return originalWriteFile(target, ...args);
+  };
+  syncBuiltinESMExports();
+  try { await submit(f, selected, [nextUnit]); }
+  finally { restoreWriteFile(); }
+  const fresh = await reopened.load(f.workItemId);
+  const recorded = currentCycle(fresh.records, fresh.checkpoint);
+  assert.equal(currentTestEvidence(recorded, fresh.records, nextUnit, f.clock).status, 'Passed');
+  assert.equal(Object.keys(cycleResultIds(recorded)).length, 2);
+  assert.equal(stagePassed(recorded, fresh.records, 'local', f.clock), false);
 });
 
 test('immutable validation publication bounds overlap and drains ordered failures before later batches', async t => {

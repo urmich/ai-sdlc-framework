@@ -42,7 +42,7 @@ import { nativePrParts, nativeLegacyPrParts, nativePartJobKey, nativeFrameworkSh
   nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
   nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
   nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-  nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+  nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol,
   nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
 import { compileValidationInventory } from '../scripts/validation-inventory.mjs';
 import { expectedBodySdkRequirements } from './native-sdk-expectations.mjs';
@@ -1333,7 +1333,7 @@ test('T-PRD022 actual workflow graph applies semantic YAML, effective permission
   const workflows = await readWorkflowPolicySources(repositoryRoot);
   const positive = inspectWorkflowTrust(workflows);
   assert.equal(positive.complete, true, JSON.stringify(positive.blockers));
-  assert.equal(positive.nativeResourcePolicy, 'arm-regression-allocation-v10-intel-primary-first');
+  assert.equal(positive.nativeResourcePolicy, 'arm-regression-allocation-v11-ready-arm-frontier');
   const producer = positive.workflows.find(item => item.file === '.github/workflows/ci.yml');
   assert.deepEqual(producer.document.permissions, { contents: 'read' });
   assert.deepEqual(producer.jobs.find(job => job.id === 'mac-admission').effectivePermissions,
@@ -1738,8 +1738,18 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.deepEqual(ci.jobs.native.needs, ['intent', 'source', 'native-units']);
   assert.deepEqual(ci.jobs['native-units'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-homebrew'].needs, ['intent', 'source']);
-  assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v10-intel-primary-first');
-  const historicalV9 = structuredClone(ci);
+  assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v11-ready-arm-frontier');
+  const historicalV10 = structuredClone(ci);
+  historicalV10.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v10-intel-primary-first';
+  const primaryStep = historicalV10.jobs['intel-retained-admission'].steps[4];
+  primaryStep.name = 'Wait for actual Intel primary body worker allocation';
+  primaryStep.run = primaryStep.run.replace('--group intel-secondaries-ready-arm-frontier', '--group intel-primary-body');
+  for (const key of ['intel-admission', 'intel-homebrew-admission']) {
+    const step = historicalV10.jobs[key].steps[4];
+    step.name = 'Admit Intel auxiliaries after ready critical bodies';
+    step.run = step.run.replace('--group intel-auxiliaries-ready-arm-frontier', '--group intel-auxiliaries-ready');
+  }
+  const historicalV9 = structuredClone(historicalV10);
   historicalV9.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v9-ready-critical-fairness';
   historicalV9.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = 'native-framework-shards-v6-stable-cost-components';
   historicalV9.jobs['native-mi'].needs = ['intent', 'source', 'native-units-mi'];
@@ -1794,10 +1804,19 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   const inspectDocument = document => inspectWorkflowTrust(workflows.map(workflow =>
     workflow.file === '.github/workflows/ci.yml' ? { ...workflow, contents: Object.entries(document)
       .map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n' } : workflow));
+  assert.equal(inspectDocument(historicalV10).complete, true,
+    'Historical v10 retains primary-only secondary admission and ready-body-only auxiliary admission');
+  for (const [graph, policy] of [[historicalV10, ci.env.SDLC_MAC_ADMISSION_POLICY],
+    [ci, historicalV10.env.SDLC_MAC_ADMISSION_POLICY]]) {
+    const changed = structuredClone(graph);
+    changed.env.SDLC_MAC_ADMISSION_POLICY = policy;
+    assert.ok(inspectDocument(changed).blockers.some(blocker => blocker.code === 'MAC_ADMISSION_POLICY_DIFFERS'),
+      'V10 and v11 cannot substitute labels while keeping different allocation groups');
+  }
   assert.equal(inspectDocument(historicalV9).complete, true,
     'Published v9 retains simultaneous own-unit-ready Intel critical requests');
-  for (const [graph, policy] of [[historicalV9, ci.env.SDLC_MAC_ADMISSION_POLICY],
-    [ci, historicalV9.env.SDLC_MAC_ADMISSION_POLICY]]) {
+  for (const [graph, policy] of [[historicalV9, historicalV10.env.SDLC_MAC_ADMISSION_POLICY],
+    [historicalV10, historicalV9.env.SDLC_MAC_ADMISSION_POLICY]]) {
     const changed = structuredClone(graph);
     changed.env.SDLC_MAC_ADMISSION_POLICY = policy;
     assert.ok(inspectDocument(changed).blockers.some(blocker => blocker.code === 'NATIVE_COMPONENT_MATRIX_DIFFERS'),
@@ -2172,7 +2191,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
     ['Intel admission polls ARM instead of bodies', doc => {
       doc.jobs['intel-admission'].steps[4].run =
-        doc.jobs['intel-admission'].steps[4].run.replace('--group intel-auxiliaries-ready ', '');
+        doc.jobs['intel-admission'].steps[4].run.replace('--group intel-auxiliaries-ready-arm-frontier ', '');
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
     ['Intel admission treats queued timestamp as allocation', doc => {
       doc.jobs['intel-admission'].steps[4].run = 'node -e "console.log(jobs.every(job => job.started_at))"';
@@ -2246,7 +2265,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
     ['Homebrew admission polls its own worker instead of the body group', doc => {
       const step = doc.jobs['intel-homebrew-admission'].steps[4];
-      step.run = step.run.replace('--group intel-auxiliaries-ready', '--group intel-homebrew');
+      step.run = step.run.replace('--group intel-auxiliaries-ready-arm-frontier', '--group intel-homebrew');
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
     ['Homebrew admission accepts queued timestamps', doc => {
       doc.jobs['intel-homebrew-admission'].steps[4].run = 'node -e "console.log(jobs.every(job => job.started_at))"';
@@ -2281,7 +2300,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
       step.run = step.run.replace('--group arm-refresh-ready ', '');
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
     ...[
-      ['intel-retained-admission', 'native-mi-retained', 'intel-primary-body', 'INTEL_RETAINED_ADMISSION_RESULT'],
+      ['intel-retained-admission', 'native-mi-retained', 'intel-secondaries-ready-arm-frontier', 'INTEL_RETAINED_ADMISSION_RESULT'],
       ['arm-refresh-admission', 'native-ma-refresh', 'arm-refresh', 'ARM_REFRESH_ADMISSION_RESULT'],
     ].flatMap(([key, nativeJob, group, result]) => [
       [`${key} waits for producer completion`, doc => {
@@ -2405,7 +2424,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.equal(previousResource.nativeResourcePolicy, 'arm-regression-allocation-v1');
   for (const protocol of nativeFrameworkShardProtocols) {
     const historical = structuredClone(historicalV8);
-    if ([nativeFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+    if ([nativeFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
       nativeParallelReadyPoolFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
       nativePhasedIsolationFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
       nativeResourceAffinityFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,

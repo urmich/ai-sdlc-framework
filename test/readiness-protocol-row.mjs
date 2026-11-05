@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { canonical, digest } from '../src/core.mjs';
 import { observerApiFixture } from './readiness-observer-fixture.mjs';
 import { inspectWorkflowTrust, verifyOriginalNativeRows, verifyNativeCleanup,
@@ -11,6 +12,7 @@ import { nativePrPartsForProtocol, nativeWorkflowContract,
   nativeFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
   nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
   nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+  nativeCatalogServiceFrameworkShardProtocol,
   nativeFrameworkShardPlan, replayNativeEvidence, verifyNativeShardUnitOrder } from '../scripts/native-validation.mjs';
 import { nativeUnitBootstrapProtocol, nativeBodyBootstrapProtocol,
   nativeBootstrapProtocol } from '../scripts/toolchain-baseline.mjs';
@@ -41,6 +43,7 @@ export const protocolPairs = Object.freeze([[nativeSplitUnitFrameworkShardProtoc
   [nativeParallelReadyPoolFrameworkShardProtocol, nativeBootstrapProtocol],
   [nativeServiceBalanceFrameworkShardProtocol, nativeBootstrapProtocol],
   [nativeCatalogReservationFrameworkShardProtocol, nativeBootstrapProtocol],
+  [nativeCatalogServiceFrameworkShardProtocol, nativeBootstrapProtocol],
   [nativeFrameworkShardProtocol, nativeBootstrapProtocol]].map(pair => Object.freeze(pair)));
 
 // SDK verifier capabilities and every causal assertion stay in the same child.
@@ -51,7 +54,8 @@ export async function runProtocolRow(t, [shardProtocol, bootstrapProtocol]) {
   const splitUnits = [nativeSplitUnitFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
     nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
     nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
-    nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol);
+    nativeCatalogReservationFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(shardProtocol);
   const frameworkCount = expectedCount - 2;
   assert.equal(f.parts.size, expectedCount);
   assert.equal(expectedCount, splitUnits ? 25 :
@@ -60,6 +64,17 @@ export async function runProtocolRow(t, [shardProtocol, bootstrapProtocol]) {
     contents: f.source.files.get(nativeWorkflowContract.path) }]);
   assert.equal(trust.complete, true, JSON.stringify(trust.blockers));
   assert.equal(trust.nativeProtocol, shardProtocol);
+  if (shardProtocol === nativeCatalogServiceFrameworkShardProtocol) {
+    assert.equal(trust.nativeResourcePolicy, 'arm-regression-allocation-v10-intel-primary-first');
+    assert.equal(createHash('sha256').update(f.source.files.get(nativeWorkflowContract.path)).digest('hex'),
+      '530002ff625b72d079873a0377f856ae817892f9444a90a6cea81e329364a137');
+    assert.equal(createHash('sha256').update(f.source.files.get('scripts/macos-runner-admission.mjs')).digest('hex'),
+      '409c458a56f4aa59244f2ffdbea5fb6ea66b0001c580f6eeca803f3c6b21b0be');
+    assert.equal(f.source.files.get('scripts/native-validation.mjs').includes('nativePlacementOwnershipV15'), false,
+      'Genuine v14 source must not acquire future qualification data');
+  }
+  if (shardProtocol === nativeFrameworkShardProtocol)
+    assert.equal(trust.nativeResourcePolicy, 'arm-regression-allocation-v11-ready-arm-frontier');
   const dictionary = entries => ({ ...Object.fromEntries(entries),
     texts: Object.fromEntries([...entries].map(([file, value]) =>
       [file, typeof value === 'string' ? value : canonical(value)])) });

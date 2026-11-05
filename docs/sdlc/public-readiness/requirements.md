@@ -179,16 +179,23 @@ counts.
   of dependent groups through original process/timing evidence, locally and in
   the applicable PR environment. Report worker utilization, critical-path and
   remaining serial-tail measurements. Configured concurrency or valid YAML is
-  not execution proof and is not advertised as full optimization. Each complete
-  logical native PR lane must meet its release-candidate limit: Linux, Windows
+  not execution proof and is not advertised as full optimization. Retain the
+  performance targets for each complete logical native PR lane: Linux, Windows
   and Apple Silicon each at most 15 minutes (900 seconds), and Intel macOS
-  strictly under 25 minutes (1,500 seconds). The owner's revised Intel target
+  strictly under 25 minutes (1,500 seconds). The owner has deferred these
+  performance targets as gates for the current public-launch release candidate
+  and announcement, prioritizing correctness and early delivery. Report actual
+  spans and unmet targets without converting a timing failure into Passed.
+  Complete native correctness, regression checks, source-bound evidence, owned
+  cleanup and the requested reviews remain mandatory. This deferral does not
+  change command watchdogs, resource allowances or required assertions.
+  The owner's revised Intel target
   replaces the earlier twenty-minute acceptance limit without rewriting its
   historical execution records. Shorter recorded lane durations
   are historical measurements, not acceptance limits.
   Include toolchain setup, required tests/procedures, evidence retention and
   owned-resource cleanup. Intel's former 15-minute target remains a stretch
-  goal, not the current release-candidate limit.
+  goal, not the current performance target.
   If a lane has parallel required parts, measure from the earliest part's worker
   start to the latest part's completion; timing one part alone does not satisfy
   this target. Report provider queueing separately without hiding a queued part

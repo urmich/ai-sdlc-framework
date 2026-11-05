@@ -11,8 +11,8 @@ permissions:
   contents: read
 
 env:
-  SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL: native-framework-shards-v14-catalog-fixture-service
-  SDLC_MAC_ADMISSION_POLICY: arm-regression-allocation-v10-intel-primary-first
+  SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL: native-framework-shards-v15-source-qualified-ownership
+  SDLC_MAC_ADMISSION_POLICY: arm-regression-allocation-v11-ready-arm-frontier
   # Representative public regression input, not an installer version-support whitelist.
   SUPPORTED_PREVIOUS_REPOSITORY: urmich/ai-sdlc-framework
   SUPPORTED_PREVIOUS_VERSION: '0.3.1'
@@ -1323,11 +1323,11 @@ jobs:
       - name: Select pinned native Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with: { node-version: '24.20.0', architecture: x64, check-latest: false }
-      - name: Wait for actual Intel primary body worker allocation
+      - name: Admit Intel secondaries after primary and ready ARM frontier
         env: { GITHUB_TOKEN: '${{ github.token }}', ADMISSION_HEAD_SHA: '${{ github.event.pull_request.head.sha || github.sha }}' }
         run: |
           mkdir -p .test-data
-          node scripts/macos-runner-admission.mjs --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --head-sha "$ADMISSION_HEAD_SHA" --group intel-primary-body --output .test-data/intel-retained-admission.json
+          node scripts/macos-runner-admission.mjs --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --head-sha "$ADMISSION_HEAD_SHA" --group intel-secondaries-ready-arm-frontier --output .test-data/intel-retained-admission.json
       - name: Retain Intel retained admission observation
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -1569,13 +1569,13 @@ jobs:
       - name: Select pinned native Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with: { node-version: '24.20.0', architecture: x64, check-latest: false }
-      - name: Admit Intel auxiliaries after ready critical bodies
+      - name: Admit Intel auxiliaries after ready bodies and ARM refresh
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ADMISSION_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           mkdir -p .test-data
-          node scripts/macos-runner-admission.mjs --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --head-sha "$ADMISSION_HEAD_SHA" --group intel-auxiliaries-ready --output .test-data/intel-admission.json
+          node scripts/macos-runner-admission.mjs --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --head-sha "$ADMISSION_HEAD_SHA" --group intel-auxiliaries-ready-arm-frontier --output .test-data/intel-admission.json
       - name: Retain Intel admission observation
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -1618,13 +1618,13 @@ jobs:
       - name: Select pinned native Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with: { node-version: '24.20.0', architecture: x64, check-latest: false }
-      - name: Admit Intel auxiliaries after ready critical bodies
+      - name: Admit Intel auxiliaries after ready bodies and ARM refresh
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ADMISSION_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           mkdir -p .test-data
-          node scripts/macos-runner-admission.mjs --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --head-sha "$ADMISSION_HEAD_SHA" --group intel-auxiliaries-ready --output .test-data/intel-homebrew-admission.json
+          node scripts/macos-runner-admission.mjs --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --head-sha "$ADMISSION_HEAD_SHA" --group intel-auxiliaries-ready-arm-frontier --output .test-data/intel-homebrew-admission.json
       - name: Retain Intel Homebrew admission observation
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

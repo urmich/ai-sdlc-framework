@@ -24,9 +24,9 @@ import { nativeLegacyPrParts, nativeFrameworkShardPlan, nativeFrameworkShardProt
   nativeCatalogIsolationFrameworkShardProtocol, nativePlacementCostsV9, nativePlacementPhasesV9,
   nativePhasedIsolationFrameworkShardProtocol, nativePlacementPhasesV10,
   nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-  nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+  nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol,
   nativePlacementCostsV11, nativePlacementReadyPoolV11, nativePlacementTransfersV12, nativePlacementReservationV13,
-  nativePlacementServiceV14,
+  nativePlacementServiceV14, nativePlacementOwnershipV15,
   verifyNativePhaseSettlement,
   nativePartJobKey, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
 import { nativeResourceFacts, nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
@@ -76,6 +76,54 @@ const calculatorSources = await Promise.all(calculatorFiles.map(async file => ({
 })));
 const calculatorManifest = await fs.readFile(path.join(repositoryRoot, 'test', 'calculator', 'package.json'), 'utf8');
 const currentSchedulingSource = await fs.readFile(new URL('../scripts/test-scheduling.mjs', import.meta.url), 'utf8');
+
+function authenticV14Workflow(contents) {
+  const original = contents.replace(/\r\n/gu, '\n')
+    .replaceAll(nativeFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol)
+    .replaceAll('arm-regression-allocation-v11-ready-arm-frontier',
+      'arm-regression-allocation-v10-intel-primary-first')
+    .replaceAll('Admit Intel secondaries after primary and ready ARM frontier',
+      'Wait for actual Intel primary body worker allocation')
+    .replaceAll('intel-secondaries-ready-arm-frontier', 'intel-primary-body')
+    .replaceAll('Admit Intel auxiliaries after ready bodies and ARM refresh',
+      'Admit Intel auxiliaries after ready critical bodies')
+    .replaceAll('intel-auxiliaries-ready-arm-frontier', 'intel-auxiliaries-ready');
+  assert.equal(createHash('sha256').update(original).digest('hex'),
+    '530002ff625b72d079873a0377f856ae817892f9444a90a6cea81e329364a137');
+  return original;
+}
+
+function authenticV10AdmissionHelper(contents) {
+  const original = contents.replace(/\r\n/gu, '\n')
+    .replace("  'intel-secondaries-ready-arm-frontier': { ownTarget: 'macos-x64', minimumAllocations: 3,\n" +
+      "    armRefresh: true, intelPrimaryOnly: true },\n" +
+      "  'intel-auxiliaries-ready-arm-frontier': { ownTarget: 'macos-x64', minimumAllocations: 3,\n" +
+      "    armRefresh: true },\n", '')
+    .replace('  ...Object.fromEntries(Object.entries(readyGroups).map(([group, policy]) =>\n' +
+      '    [group, criticalPlatforms.flatMap(platform => [...platform.units, ...platform.bodies,\n' +
+      "      ...(policy.armRefresh && platform.target === 'macos-arm64' ?\n" +
+      "        ['native-macos-arm64-framework-refresh'] : [])])])),",
+    '  ...Object.fromEntries(Object.keys(readyGroups).map(group =>\n' +
+      '    [group, criticalPlatforms.flatMap(platform => [...platform.units, ...platform.bodies])])),')
+    .replace("    const primaryOnly = policy.intelPrimaryOnly && platform.target === 'macos-x64';\n" +
+      "    const armRefresh = policy.armRefresh && platform.target === 'macos-arm64';\n" +
+      '    const requiredParts = [...(primaryOnly ? platform.bodies.slice(0, 1) : platform.bodies),\n' +
+      "      ...(armRefresh ? ['native-macos-arm64-framework-refresh'] : [])];\n" +
+      '    const parts = requiredParts.map(name => {',
+    '    const parts = platform.bodies.map(name => {')
+    .replace('      minimumAllocations: primaryOnly ? 1 : policy.minimumAllocations + (armRefresh ? 1 : 0),',
+      '      minimumAllocations: policy.minimumAllocations,')
+    .replace('  // Intel primary stays independent so ARM refresh can take its first-body turn\n' +
+      '  // before the ready ARM frontier releases Intel secondaries and auxiliaries.',
+    '  // Critical bodies are never gated here. Refresh gets a finite first-allocation\n' +
+      '  // turn; opportunistic Intel work yields to the complete currently-ready cohort.')
+    .replace("    policy: policy.armRefresh ? 'arm-regression-allocation-v11-ready-arm-frontier' :\n" +
+      "      'arm-regression-allocation-v9-ready-critical-fairness',",
+    "    policy: 'arm-regression-allocation-v9-ready-critical-fairness',");
+  assert.equal(createHash('sha256').update(original).digest('hex'),
+    '409c458a56f4aa59244f2ffdbea5fb6ea66b0001c580f6eeca803f3c6b21b0be');
+  return original;
+}
 
 function writerDefinition() {
   return `on: workflow_dispatch
@@ -197,7 +245,7 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
   if ([nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
     nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
     nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-    nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+    nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol,
     nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementCosts = Object.freeze(${JSON.stringify(nativePlacementCosts)});\n`);
@@ -205,14 +253,14 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
   if ([nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
     nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
     nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
-    nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
+    nativeCatalogReservationFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementAffinities = Object.freeze(${JSON.stringify(nativePlacementAffinities)});\n` +
       `export const nativePlacementCostsV7 = Object.freeze(${JSON.stringify(nativePlacementCostsV7)});\n`);
   }
   if ([nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
     nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-    nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+    nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol,
     nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementCostsV8 = Object.freeze(${JSON.stringify(nativePlacementCostsV8)});\n` +
@@ -220,33 +268,36 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
   }
   if ([nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
     nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
-    nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
+    nativeCatalogReservationFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementCostsV9 = Object.freeze(${JSON.stringify(nativePlacementCostsV9)});\n` +
       `export const nativePlacementPhasesV9 = Object.freeze(${JSON.stringify(nativePlacementPhasesV9)});\n`);
   }
   if ([nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-    nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+    nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol,
     nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementPhasesV10 = Object.freeze(${JSON.stringify(nativePlacementPhasesV10)});\n`);
   }
   if ([nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
-    nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
+    nativeCatalogReservationFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementCostsV11 = Object.freeze(${JSON.stringify(nativePlacementCostsV11)});\n` +
       `export const nativePlacementReadyPoolV11 = Object.freeze(${JSON.stringify(nativePlacementReadyPoolV11)});\n`);
   }
-  if ([nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+  if ([nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol,
     nativeFrameworkShardProtocol].includes(shardProtocol))
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementTransfersV12 = Object.freeze(${JSON.stringify(nativePlacementTransfersV12)});\n`);
-  if ([nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol))
+  if ([nativeCatalogReservationFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol))
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementReservationV13 = Object.freeze(${JSON.stringify(nativePlacementReservationV13)});\n`);
-  if (shardProtocol === nativeFrameworkShardProtocol)
+  if ([nativeCatalogServiceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol))
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementServiceV14 = Object.freeze(${JSON.stringify(nativePlacementServiceV14)});\n`);
+  if (shardProtocol === nativeFrameworkShardProtocol)
+    files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
+      `export const nativePlacementOwnershipV15 = Object.freeze(${JSON.stringify(nativePlacementOwnershipV15)});\n`);
   files.set('scripts/test-scheduling.mjs', schedulingSource);
   const schedulingPolicy = sourceValidationSchedulingPolicy([{ file: 'scripts/test-scheduling.mjs', contents: schedulingSource }]);
   assert.ok(['source', 'missing', 'mutated'].includes(admissionHelper));
@@ -255,10 +306,12 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
     'arm-regression-allocation-v3-intel-homebrew-first', 'arm-regression-allocation-v4-retained-first',
     'arm-regression-allocation-v5-critical-body-first', 'arm-regression-allocation-v6-all-critical-bodies-first',
     'arm-regression-allocation-v7-bounded-queue-wait', 'arm-regression-allocation-v8-own-platform-critical',
-    'arm-regression-allocation-v9-ready-critical-fairness', 'arm-regression-allocation-v10-intel-primary-first']
+    'arm-regression-allocation-v9-ready-critical-fairness', 'arm-regression-allocation-v10-intel-primary-first',
+    'arm-regression-allocation-v11-ready-arm-frontier']
     .includes(workflow.env?.SDLC_MAC_ADMISSION_POLICY) && admissionHelper !== 'missing') {
-    const macAdmissionHelper = readFileSync(
-      new URL('../scripts/macos-runner-admission.mjs', import.meta.url), 'utf8');
+    const currentHelper = readFileSync(new URL('../scripts/macos-runner-admission.mjs', import.meta.url), 'utf8');
+    const macAdmissionHelper = workflow.env.SDLC_MAC_ADMISSION_POLICY === 'arm-regression-allocation-v11-ready-arm-frontier' ?
+      currentHelper : authenticV10AdmissionHelper(currentHelper);
     files.set('scripts/macos-runner-admission.mjs', macAdmissionHelper +
       (admissionHelper === 'mutated' ? '\n// Controlled unadopted helper delta.\n' : ''));
   }
@@ -894,6 +947,10 @@ export async function observerApiFixture(t, options = {}) {
   });
   if (ambient) assert.equal(path.resolve(os.tmpdir()), scratch, 'SDK artifact scratch must stay inside this owned checkout root');
   const currentCi = await fs.readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const historicalV14Ci = authenticV14Workflow(currentCi);
+  const v10 = parseWorkflow({ file: nativeWorkflowContract.path, contents: historicalV14Ci });
+  const historicalV10Ci = Object.entries(v10)
+    .map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n';
   const shardProtocol = options.shardProtocol ?? nativeFrameworkShardProtocol;
   const protocolParts = nativePrPartsForProtocol(shardProtocol);
   const protocolKeys = [...new Set(protocolParts.map(part => nativePartJobKey(part, shardProtocol)))];
@@ -924,7 +981,7 @@ export async function observerApiFixture(t, options = {}) {
     nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol];
   if (options.frameworkShards &&
     splitHistoricalProtocols.includes(shardProtocol)) {
-    const historical = parseWorkflow({ file: nativeWorkflowContract.path, contents: currentCi });
+    const historical = parseWorkflow({ file: nativeWorkflowContract.path, contents: historicalV10Ci });
     if (shardProtocol !== nativeResourceAffinityFrameworkShardProtocol)
       historical.jobs['native-mi'].needs = ['intent', 'source', 'native-units-mi'];
     if (shardProtocol === nativeResourceAffinityFrameworkShardProtocol) {
@@ -953,18 +1010,19 @@ export async function observerApiFixture(t, options = {}) {
       .map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n';
   }
   const ci = options.frameworkShards ? shardProtocol === nativeFrameworkShardProtocol ? currentCi :
-    shardProtocol === nativeCatalogReservationFrameworkShardProtocol ? currentCi.replaceAll(
-      nativeFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol) :
-    shardProtocol === nativeServiceBalanceFrameworkShardProtocol ? currentCi.replaceAll(
-      nativeFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol) :
-    shardProtocol === nativeParallelReadyPoolFrameworkShardProtocol ? currentCi.replaceAll(
-      nativeFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol) :
-    shardProtocol === nativeComponentRebalanceFrameworkShardProtocol ? currentCi.replaceAll(
-      nativeFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol) :
-    shardProtocol === nativePhasedIsolationFrameworkShardProtocol ? currentCi.replaceAll(
-      nativeFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol) :
-    shardProtocol === nativeCatalogIsolationFrameworkShardProtocol ? currentCi.replace(
-      nativeFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol) :
+    shardProtocol === nativeCatalogServiceFrameworkShardProtocol ? historicalV14Ci :
+    shardProtocol === nativeCatalogReservationFrameworkShardProtocol ? historicalV10Ci.replaceAll(
+      nativeCatalogServiceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol) :
+    shardProtocol === nativeServiceBalanceFrameworkShardProtocol ? historicalV10Ci.replaceAll(
+      nativeCatalogServiceFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol) :
+    shardProtocol === nativeParallelReadyPoolFrameworkShardProtocol ? historicalV10Ci.replaceAll(
+      nativeCatalogServiceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol) :
+    shardProtocol === nativeComponentRebalanceFrameworkShardProtocol ? historicalV10Ci.replaceAll(
+      nativeCatalogServiceFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol) :
+    shardProtocol === nativePhasedIsolationFrameworkShardProtocol ? historicalV10Ci.replaceAll(
+      nativeCatalogServiceFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol) :
+    shardProtocol === nativeCatalogIsolationFrameworkShardProtocol ? historicalV10Ci.replace(
+      nativeCatalogServiceFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol) :
     splitHistoricalProtocols.includes(shardProtocol) ?
       splitHistoricalCi : historicalCi : `name: CI
 on: pull_request

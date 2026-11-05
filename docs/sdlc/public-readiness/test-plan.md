@@ -107,9 +107,10 @@ seventeen original complete protocol/bootstrap scenarios, plus the historical
 v8/bootstrap eighteenth row, historical v9/bootstrap nineteenth row,
 v10/bootstrap twentieth row and v11/bootstrap twenty-first row, retaining all
 twenty-one when appending the historical v12/bootstrap twenty-second row.
-Retain the historical v13/bootstrap twenty-third row and append the current
-v14/bootstrap twenty-fourth row without replacing those twenty-three actual
-scenarios.
+Retain the historical v13/bootstrap twenty-third row and genuine C81
+v14/bootstrap-v6 twenty-fourth row with its v10 admission graph. Append the
+current v15/bootstrap-v6 twenty-fifth row with v11 admission without replacing
+any of those twenty-four actual scenarios.
 Reserve four root slots before
 setup, then run whole scenarios in isolated children under the existing shared
 producer budget, bounded to four and the actual caller allocation. Environment
@@ -1455,12 +1456,19 @@ fixture evidence through the actual API-only observer boundary.
 
 ## 6. Comparable benchmark procedure
 
-The required delivery limits for each **complete logical native PR lane** are
+The performance targets for each **complete logical native PR lane** are
 Linux, Windows and Apple Silicon **each at most 900 seconds (15m)**, and Intel
 macOS **strictly under 1,500 seconds (25m)**. The owner's revised Intel limit
 replaces the former twenty-minute acceptance target; preserve its original
 execution records rather than relabelling them. Earlier Intel targets do not
 remain additional acceptance requirements.
+The owner defers these performance targets as gates for the current public-launch
+release candidate and announcement. Complete correctness, all applicable
+assertions and native producers, authentic source/SDK evidence, owned cleanup
+and the requested reviews remain mandatory. Record actual whole-lane durations
+and any Failed timing verdict without relabelling it Passed; performance
+improvement is deferred, not proven. Preserve historical timing interpretation,
+strict-boundary regression assertions, finite watchdogs and resource contracts.
 The recorded Linux **460 seconds (7m40s)**, Windows **665 seconds (11m05s)** and
 Apple Silicon **627 seconds (10m27s)** are historical lane measurements, not
 current delivery limits or new stretch targets.
@@ -1823,7 +1831,8 @@ the original subset. A new legitimate test must not erase preservation checks.
    supply the prerequisite. Include the unit barrier, every part's provisioning,
    evidence retention and cleanup in the whole-lane elapsed time.
    For current implementation candidate
-   `native-framework-shards-v14-catalog-fixture-service` and historical
+   `native-framework-shards-v15-source-qualified-ownership` and historical
+   `native-framework-shards-v14-catalog-fixture-service` and
    `native-framework-shards-v13-catalog-process-reservation` and
    `native-framework-shards-v12-intel-service-balance` and
    `native-framework-shards-v11-parallel-intel-ready-pool` and
@@ -2080,7 +2089,29 @@ the original subset. A new legitimate test must not erase preservation checks.
    Preserve authentic v1-v13 assignment/literal/SDK reconstruction and append
    the real v14/bootstrap twenty-fourth causal row. All twenty-five producers,
    thirteen Mac cleanups, fourteen-slot Intel bodies, four-slot units and the
-   twenty-seven critical budget remain unchanged. The existing PR-only native
+   twenty-seven critical budget remain unchanged.
+   V15 qualification binds the exact current inventory, callbacks, resource
+   closures and selected SDK destinations to final C81 source
+   `51de4c9ff6a62c655dede580d8328eb6e9ea47c8` ownership. Preserve all original
+   component owners and non-Intel selections without estimating new durations:
+   all 1,016 current body service costs remain unmeasured. The current inventory
+   has 1,855 assertions and no additional body group. Preserve all thirteen
+   historical placement literal JSON texts and genuine v14 source qualification,
+   including its original reservation, parallel plan and six transfers.
+   Keep the complete real catalog with only its unused caller-authored report
+   removed; actual producer/admission and explicit negative reports still run.
+   Retain all 2066/2245/2265 boundaries, integrity/retention checks and seven-slot
+   reservation. The original interrupted baseline is NotRun, not a comparison
+   or passing performance result. Existing PR-only source/SDK roots must cover
+   actual current v15 and authentic historical v14/v10 replay, strict literal
+   rejection, incompatible input fallback and unchanged complete ownership.
+   Preserve all twenty-four original causal rows and append current v15 as
+   row twenty-five. Both the original v14 and current v15 rows use their genuine
+   bootstrap v6; do not relabel v14 as the new v11 admission graph.
+   These network-free owned Node controls add no critical member or provider
+   acceptance credit. Fresh whole-candidate checks, Review and native
+   correctness remain required; performance remains owner-deferred.
+   The existing PR-only native
    qualification roots retain their isolated Node fixtures and classifications;
    no current native overlap, timing or acceptance follows from those fixtures.
    The three PR-only roots in `test/public-readiness-native.test.mjs` are
@@ -2210,6 +2241,44 @@ the original subset. A new legitimate test must not erase preservation checks.
    roots declare one slot, no prerequisites and no shared exclusive resources.
    Preserve the queued-placeholder, completion-wait, wrong-group and cycle
    negatives; no new critical member, producer or coordinator is introduced.
+   For `arm-regression-allocation-v11-ready-arm-frontier`, retain independent
+   Intel primary eligibility after both successful own-unit jobs. Require
+   secondaries to observe actual primary allocation and all three ARM bodies
+   plus mandatory ARM refresh when ARM units are currently complete. Require
+   Intel auxiliaries to respect that ARM frontier and their existing ready
+   Intel-body requirements. Cover partial frontier rejection, in-progress and
+   completed allocated parts, unavailable allocation proof, changing readiness
+   and bounded cancellation/failure without a passing fallback.
+   ARM units that are not ready must not reserve future capacity. Preserve
+   ARM refresh's first-body-per-ready-architecture rule: actual independent
+   Intel primary satisfies its Intel turn, with no secondary/refresh cycle or
+   producer-completion dependency. Never allocate a waiting Mac host as a gate.
+   Preserve authentic v1-v10 source graphs, helper groups and receipts; reject
+   v10/v11 label substitution in either direction rather than relabelling old
+   evidence. Source-bound SDK fixtures must distinguish admission policy from
+   native protocol identity and qualify any changed inventory/service inputs.
+   The new frontier unit regressions remain PR-only, Node-only, network-free
+   and maintainer-owned in `test/macos-runner-admission.unit.test.mjs`, with
+   synthetic attempt-scoped metadata, isolated complete roots and truthful
+   resource declarations. Source/SDK controls retain their declared resources.
+   The exact new roots are `T-MACADM025 ready ARM frontier reserves all bodies and refresh before Intel secondaries and auxiliaries`
+   and `T-MACADM026 ready ARM frontier observations retain allocation changes cancellation and failed reads`.
+   Each reserves one slot, has no prerequisites or exclusive resources, and
+   leaves both critical caps unchanged. The existing T-MACADM023 root becomes
+   `T-MACADM023 Intel secondary requests wait for actual primary allocation without reserving future ARM units`;
+   preserve its historical controls. Verify the existing retained-admission
+   coordinator selects `intel-secondaries-ready-arm-frontier` and both Intel
+   auxiliary coordinators select `intel-auxiliaries-ready-arm-frontier`,
+   without changing the historical groups or `arm-refresh-ready`.
+   Add no critical member, producer, coordinator, worker allowance or retry.
+   Priority is not proof of provider capacity or sufficient Intel service
+   headroom. Validate the existing fixture/service correction with the complete
+   real catalog and unchanged integrity, retention and exhaustion requirements,
+   then run the fresh frozen-candidate local gate, Review and complete native
+   matrix. No local timing extrapolation or missing provider payload supplies
+   current native correctness, overlap, timing or release-acceptance credit.
+   Further performance optimization is not a gate under the owner's current
+   section-6 deferral.
    Configured priority is only a lead; provider allocation gaps remain in the
    measured whole-lane span and cannot be converted into a passing estimate.
    Keep `native-framework-shards-v1` global-barrier and

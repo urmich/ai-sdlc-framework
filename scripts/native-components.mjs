@@ -12,7 +12,8 @@ import { nativeFrameworkShardProtocols, nativeFourBodyFrameworkShardProtocol,
   nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
   nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
   nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-  nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol } from './native-validation.mjs';
+  nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+  nativeCatalogServiceFrameworkShardProtocol } from './native-validation.mjs';
 import { calculatorCapability, calculatorBaselineCapability } from './pr-calculator.mjs';
 import { nativeBootstrapProtocol, nativeBodyBootstrapProtocol } from './toolchain-baseline.mjs';
 import { nativeBootstrapRequirements } from './native-bootstrap-capability.mjs';
@@ -48,7 +49,7 @@ const componentPolicy = protocol => !protocol ? nativeComponentPolicy :
     nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
     nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
     nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-    nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+    nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol,
     nativeFrameworkShardProtocol].includes(protocol) ? splitUnitShardPolicy :
     protocol === nativeFourBodyFrameworkShardProtocol ? fourBodyShardPolicy : shardPolicy;
 const sourceTimes = values => [...values].sort((a, b) => Date.parse(a) - Date.parse(b));

@@ -2,7 +2,9 @@ export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [{"coverage": "direct", "paths": ["scripts/macos-runner-admission.mjs"]}],
   "groups": [
-    {"root": "T-MACADM023 Intel secondary requests wait only for actual own-unit-ready primary allocation", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-MACADM025 ready ARM frontier reserves all bodies and refresh before Intel secondaries and auxiliaries", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-MACADM026 ready ARM frontier observations retain allocation changes cancellation and failed reads", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-MACADM023 Intel secondary requests wait for actual primary allocation without reserving future ARM units", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-MACADM024 primary-first admission preserves authentic v9 graphs and rejects v9 v10 relabels", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-MACADM019 Intel auxiliaries yield to ready critical bodies across architectures without waiting for future units", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-MACADM020 mandatory ARM refresh takes a bounded fair turn without the full body allocation chain", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
@@ -61,6 +63,19 @@ function criticalJobs() {
 function allocate(record) {
   Object.assign(record, { status: 'in_progress', runner_name: 'synthetic-body-worker',
     started_at: '2026-10-23T10:42:07Z' });
+}
+function frontierJobs() {
+  return [...criticalJobs(), { ...jobs()[0], id: 300, created_at: startedAt }];
+}
+function restoreV10Groups(ci) {
+  const primary = ci.jobs['intel-retained-admission'].steps[4];
+  primary.name = 'Wait for actual Intel primary body worker allocation';
+  primary.run = primary.run.replace('--group intel-secondaries-ready-arm-frontier', '--group intel-primary-body');
+  for (const key of ['intel-admission', 'intel-homebrew-admission']) {
+    const step = ci.jobs[key].steps[4];
+    step.name = 'Admit Intel auxiliaries after ready critical bodies';
+    step.run = step.run.replace('--group intel-auxiliaries-ready-arm-frontier', '--group intel-auxiliaries-ready');
+  }
 }
 function json(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), { status, headers });
@@ -258,11 +273,115 @@ test('T-MACADM017 delayed provider allocation remains observable without waiving
 });
 
 // PR-only: owned synthetic metadata, no provider, timers, shared resources or critical promotion.
-test('T-MACADM019 Intel auxiliaries yield to ready critical bodies across architectures without waiting for future units', async () => {
-  const contents = await fs.readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
-  const ci = parseWorkflow({ file: '.github/workflows/ci.yml', contents });
-  const group = /--group ([a-z-]+)/u.exec(ci.jobs['intel-homebrew-admission'].steps[4].run)[1];
-  const identity = { ...expected, group };
+test('T-MACADM025 ready ARM frontier reserves all bodies and refresh before Intel secondaries and auxiliaries', async () => {
+  const ci = parseWorkflow({ file: '.github/workflows/ci.yml',
+    contents: await fs.readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8') });
+  assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v11-ready-arm-frontier');
+  assert.match(ci.jobs['intel-retained-admission'].steps[4].run, /--group intel-secondaries-ready-arm-frontier /u);
+  for (const key of ['intel-admission', 'intel-homebrew-admission'])
+    assert.match(ci.jobs[key].steps[4].run, /--group intel-auxiliaries-ready-arm-frontier /u);
+  for (const [group, intelBodies] of [
+    ['intel-secondaries-ready-arm-frontier', 1], ['intel-auxiliaries-ready-arm-frontier', 3],
+  ]) {
+    const identity = { ...expected, group };
+    const records = frontierJobs();
+    const admitted = selected => evaluateMacAdmission(observation(selected), identity);
+    const arm = records.filter(record => record.name.includes('arm64-framework-') && !record.name.endsWith('units'));
+    const intel = records.filter(record => record.name.includes('x64-framework-body'));
+    allocate(intel[0]);
+    assert.equal(admitted(records).admitted, false, 'Actual Intel primary cannot overtake the ready ARM frontier');
+    allocate(arm[0]);
+    assert.equal(evaluateMacAdmission(observation(records),
+      { ...expected, group: 'arm-refresh-ready' }).admitted, true,
+    'Independent Intel primary supplies the Intel turn; ARM refresh cannot cycle on gated secondaries');
+    for (const record of arm.filter(record => !record.name.endsWith('refresh'))) allocate(record);
+    assert.equal(admitted(records).admitted, false, 'Mandatory ARM refresh must also receive actual allocation');
+    allocate(arm.find(record => record.name.endsWith('refresh')));
+    assert.equal(admitted(records).admitted, intelBodies === 1,
+      'Secondaries need only Intel primary; auxiliaries retain every ready Intel body requirement');
+    for (const record of intel.slice(1)) allocate(record);
+    const ready = admitted(records);
+    assert.equal(ready.admitted, true, 'Executing producers need not finish to release Intel requests');
+    assert.deepEqual(ready.readiness.map(platform => [platform.target, platform.minimumAllocations]),
+      [['macos-arm64', 4], ['macos-x64', intelBodies]]);
+    assert.equal(ready.parts.length, 4 + intelBodies);
+    assert.ok(ready.parts.every(part => part.status === 'in_progress' && part.conclusion === null));
+    const completed = records.map(record => ({ ...record, status: 'completed',
+      conclusion: 'success', completed_at: startedAt }));
+    assert.equal(admitted(completed).admitted, true, 'Completed allocated frontier parts remain proof');
+    for (const name of [...arm.map(record => record.name), intel[0].name]) {
+      const placeholders = records.map(record => record.name === name ? { ...record, status: 'queued',
+        runner_name: '', steps: [{ status: 'completed', conclusion: 'skipped', started_at: startedAt }] } : record);
+      assert.equal(admitted(placeholders).admitted, false, `Queued timestamp cannot prove ${name}`);
+    }
+    const future = frontierJobs();
+    Object.assign(future[0], { status: 'in_progress', conclusion: null });
+    for (const record of future.filter(record => record.name.includes('x64-framework-body')).slice(0, intelBodies)) allocate(record);
+    assert.equal(admitted(future).admitted, true, 'Unfinished foreign units must not reserve future allocation');
+    assert.equal(admitted(future.filter(record => record.id !== 100)).admitted, true);
+    assert.equal(admitted(records.filter(record => record.id !== 102)).admitted, false,
+      'Both complete own Intel unit producers are required');
+    assert.throws(() => admitted(records.map(record => record.id === 102 ?
+      { ...record, conclusion: 'failure' } : record)), { code: 'ADMISSION_TERMINATED' });
+    assert.throws(() => admitted([...records, { ...records.find(record => record.id === 300), id: 999 }]),
+      { code: 'ADMISSION_IDENTITY' }, 'Refresh identity is part of the closed frontier');
+    const cancelled = records.map(record => record.id === 300 ? { ...record, runner_name: '',
+      status: 'completed', conclusion: 'cancelled' } : record);
+    assert.throws(() => admitted(cancelled), { code: 'ADMISSION_TERMINATED' });
+    const historical = evaluateMacAdmission(observation(records.filter(record => record.id !== 300)),
+      { ...expected, group: 'intel-auxiliaries-ready' });
+    assert.equal(historical.admitted, true, 'Historical v9/v10 auxiliary semantics do not acquire a refresh wait');
+    assert.equal(evaluateMacAdmission(observation([intel[0]]),
+      { ...expected, group: 'intel-primary-body' }).admitted, true, 'Historical primary group stays allocation-only');
+  }
+});
+
+// PR-only: native-validation maintainer, one-slot synthetic GET metadata and private clock.
+test('T-MACADM026 ready ARM frontier observations retain allocation changes cancellation and failed reads', async () => {
+  for (const group of ['intel-secondaries-ready-arm-frontier', 'intel-auxiliaries-ready-arm-frontier']) {
+    const identity = { ...expected, group };
+    const records = frontierJobs();
+    for (const record of records.filter(record => record.name.includes('framework-body'))) allocate(record);
+    Object.assign(records[0], { status: 'in_progress', conclusion: null });
+    const primary = records.find(record => record.name.endsWith('x64-framework-body-0'));
+    Object.assign(primary, { status: 'queued', runner_name: '' });
+    const source = adapter({ selectedJobs: records });
+    let time = 0;
+    source.options.now = () => time;
+    source.options.sleep = async ms => {
+      time += ms;
+      if (time === 3) {
+        Object.assign(records[0], { status: 'completed', conclusion: 'success' });
+        allocate(primary);
+      } else allocate(records.find(record => record.id === 300));
+    };
+    const result = await waitForMacAdmission(identity, source.options);
+    assert.deepEqual(result.observations.map(row => [row.elapsedMs, row.admitted]),
+      [[0, false], [3, false], [6, true]]);
+    assert.deepEqual(result.observations.map(row => row.readiness[0].ready), [false, true, true]);
+    assert.ok(result.observations[1].parts.some(part => part.name.endsWith('refresh') && !part.allocated));
+    for (const mode of ['timeout', 'cancel', 'denied', 'unreadable', 'terminal']) {
+      const pending = frontierJobs();
+      const controller = new AbortController();
+      const transport = adapter({ selectedJobs: pending });
+      transport.options.signal = controller.signal;
+      if (mode === 'cancel') transport.options.sleep = async () => controller.abort();
+      if (mode === 'denied' || mode === 'unreadable') transport.options.fetch = async url =>
+        transport.calls.push(url) <= 2 ? json(url === prefix ? run() :
+          { total_count: pending.length, jobs: pending }) :
+          mode === 'denied' ? json({}, 403) : new Response('not JSON');
+      if (mode === 'terminal') Object.assign(pending.find(record => record.id === 300),
+        { status: 'completed', conclusion: 'cancelled' });
+      await assert.rejects(waitForMacAdmission(identity, transport.options), error =>
+        error.code === ({ timeout: 'ADMISSION_TIMEOUT', cancel: 'ADMISSION_CANCELLED', denied: 'ADMISSION_HTTP',
+          unreadable: 'ADMISSION_PROVIDER', terminal: 'ADMISSION_TERMINATED' })[mode] &&
+        error.observation.admitted === false && error.observation.observations.length >= 1);
+    }
+  }
+});
+
+test('T-MACADM019 Intel auxiliaries yield to ready critical bodies across architectures without waiting for future units', () => {
+  const identity = { ...expected, group: 'intel-auxiliaries-ready' };
   const records = criticalJobs();
   const admitted = selected => evaluateMacAdmission(observation(selected), identity);
   for (const body of records.filter(record => record.name.includes('x64-framework-body'))) allocate(body);
@@ -322,7 +441,7 @@ test('T-MACADM020 mandatory ARM refresh takes a bounded fair turn without the fu
   assert.match(ci.jobs['mac-admission'].steps[4].run, /--group arm-refresh-ready /u);
   for (const key of ['intel-admission', 'intel-homebrew-admission']) {
     assert.deepEqual(ci.jobs[key].needs, ['intent', 'source', 'native-units-mi']);
-    assert.match(ci.jobs[key].steps[4].run, /--group intel-auxiliaries-ready /u);
+    assert.match(ci.jobs[key].steps[4].run, /--group intel-auxiliaries-ready-arm-frontier /u);
   }
   assert.deepEqual(ci.jobs['native-mi-retained'].needs, ['intent', 'source', 'native-units-mi']);
   assert.deepEqual(ci.jobs['native-mi'].needs,
@@ -333,6 +452,7 @@ test('T-MACADM020 mandatory ARM refresh takes a bounded fair turn without the fu
 test('T-MACADM021 readiness fairness cannot relabel historical source admission graphs', async () => {
   const contents = await fs.readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
   const ci = parseWorkflow({ file: '.github/workflows/ci.yml', contents });
+  restoreV10Groups(ci);
   ci.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v9-ready-critical-fairness';
   ci.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = 'native-framework-shards-v6-stable-cost-components';
   ci.jobs['native-mi'].needs = ['intent', 'source', 'native-units-mi'];
@@ -419,7 +539,7 @@ test('T-MACADM022 readiness observations retain changing critical cohorts alloca
 });
 
 // PR-only: native-validation maintainer; one-slot Node/source and synthetic metadata, no shared resources.
-test('T-MACADM023 Intel secondary requests wait only for actual own-unit-ready primary allocation', async () => {
+test('T-MACADM023 Intel secondary requests wait for actual primary allocation without reserving future ARM units', async () => {
   const contents = await fs.readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
   const ci = parseWorkflow({ file: '.github/workflows/ci.yml', contents });
   const results = new Map([['intent', 'success'], ['source', 'success'], ['native-units-mi', 'success']]);
@@ -473,6 +593,7 @@ test('T-MACADM024 primary-first admission preserves authentic v9 graphs and reje
     contents: Object.entries(document).map(([key, value]) =>
       `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n' }]);
   const v10 = structuredClone(current);
+  restoreV10Groups(v10);
   v10.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v10-intel-primary-first';
   v10.jobs['native-mi'].needs = ['intent', 'source', 'native-units-mi', 'intel-retained-admission'];
   assert.equal(inspect(v10).complete, true, JSON.stringify(inspect(v10).blockers));
@@ -481,6 +602,19 @@ test('T-MACADM024 primary-first admission preserves authentic v9 graphs and reje
   v9.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = 'native-framework-shards-v6-stable-cost-components';
   v9.jobs['native-mi'].needs = ['intent', 'source', 'native-units-mi'];
   assert.equal(inspect(v9).complete, true, JSON.stringify(inspect(v9).blockers));
+  assert.equal(inspect(current).complete, true, JSON.stringify(inspect(current).blockers));
+  for (const [graph, policy] of [[v10, current.env.SDLC_MAC_ADMISSION_POLICY],
+    [current, v10.env.SDLC_MAC_ADMISSION_POLICY]]) {
+    const relabeled = structuredClone(graph);
+    relabeled.env.SDLC_MAC_ADMISSION_POLICY = policy;
+    assert.ok(inspect(relabeled).blockers.some(blocker => blocker.code === 'MAC_ADMISSION_POLICY_DIFFERS'),
+      'V10 and v11 have different closed allocation groups despite the same producer graph');
+  }
+  for (const key of ['intel-retained-admission', 'intel-admission', 'intel-homebrew-admission']) {
+    const hybrid = structuredClone(current);
+    hybrid.jobs[key].steps[4] = v10.jobs[key].steps[4];
+    assert.equal(inspect(hybrid).complete, false, 'Each v11 gate must observe the ready ARM frontier');
+  }
   for (const [graph, policy] of [[v9, v10.env.SDLC_MAC_ADMISSION_POLICY],
     [v10, v9.env.SDLC_MAC_ADMISSION_POLICY]]) {
     const relabeled = structuredClone(graph);
@@ -521,7 +655,7 @@ test('T-MACADM018 queued ARM allocation cannot suppress own-unit-ready Intel cri
     }
     results.set('native-units-mi', 'success');
   }
-  assert.equal(eligible('native-mi'), false, 'Only primary allocation, not ARM, still gates secondaries');
+  assert.equal(eligible('native-mi'), false, 'The allocation observer still gates secondaries');
   assert.equal(ci.jobs['native-units-mi'].strategy.matrix.include.length, 2);
   assert.equal(eligible('native-homebrew-mi'), false);
   assert.equal(eligible('native-mi-refresh'), false);
@@ -532,7 +666,7 @@ test('T-MACADM018 queued ARM allocation cannot suppress own-unit-ready Intel cri
   allocate(intel[0]);
   assert.equal(evaluateMacAdmission(observation(intel), { ...expected, group: 'intel-primary-body' }).admitted, true);
   results.set('intel-retained-admission', 'success');
-  assert.equal(eligible('native-mi'), true, 'Queued ARM work cannot block primary-allocated Intel secondaries');
+  assert.equal(eligible('native-mi'), true, 'Missing foreign unit origins cannot reserve future ARM capacity');
   for (const record of intel) Object.assign(record, { status: 'in_progress', runner_name: 'synthetic-intel' });
   assert.equal(allocated().admitted, true, 'Actual allocation, not ARM completion, releases opportunistic work');
   results.set('intel-admission', 'success');
@@ -661,8 +795,8 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   assert.equal(intelGate['runs-on'], 'ubuntu-24.04');
   assert.equal(intelGate['timeout-minutes'], 22);
   assert.deepEqual(intelGate.permissions, { actions: 'read', contents: 'read' });
-  assert.match(intelGate.steps.find(step => step.name === 'Admit Intel auxiliaries after ready critical bodies').run,
-    /--group intel-auxiliaries-ready --output \.test-data\/intel-admission\.json/u);
+  assert.match(intelGate.steps.find(step => step.name === 'Admit Intel auxiliaries after ready bodies and ARM refresh').run,
+    /--group intel-auxiliaries-ready-arm-frontier --output \.test-data\/intel-admission\.json/u);
   const homebrewGate = ci.jobs['intel-homebrew-admission'];
   assert.deepEqual(homebrewGate.needs, ['intent', 'source', 'native-units-mi']);
   assert.equal(homebrewGate.name, 'Intel Homebrew admission');
@@ -670,10 +804,10 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
   assert.equal(homebrewGate['timeout-minutes'], 22);
   assert.equal(homebrewGate.strategy, undefined);
   assert.deepEqual(homebrewGate.permissions, { actions: 'read', contents: 'read' });
-  assert.match(homebrewGate.steps.find(step => step.name === 'Admit Intel auxiliaries after ready critical bodies').run,
-    /--group intel-auxiliaries-ready --output \.test-data\/intel-homebrew-admission\.json/u);
+  assert.match(homebrewGate.steps.find(step => step.name === 'Admit Intel auxiliaries after ready bodies and ARM refresh').run,
+    /--group intel-auxiliaries-ready-arm-frontier --output \.test-data\/intel-homebrew-admission\.json/u);
   for (const [key, needs, group] of [
-    ['intel-retained-admission', ['intent', 'source', 'native-units-mi'], 'intel-primary-body'],
+    ['intel-retained-admission', ['intent', 'source', 'native-units-mi'], 'intel-secondaries-ready-arm-frontier'],
     ['arm-refresh-admission', ['intent', 'source', 'native-units-ma', 'mac-admission'], 'arm-refresh'],
   ]) {
     const gate = ci.jobs[key];

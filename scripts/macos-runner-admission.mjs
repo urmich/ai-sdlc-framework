@@ -12,6 +12,10 @@ const criticalPlatforms = Object.freeze([
 const readyGroups = Object.freeze({
   'arm-refresh-ready': { ownTarget: 'macos-arm64', minimumAllocations: 1 },
   'intel-auxiliaries-ready': { ownTarget: 'macos-x64', minimumAllocations: 3 },
+  'intel-secondaries-ready-arm-frontier': { ownTarget: 'macos-x64', minimumAllocations: 3,
+    armRefresh: true, intelPrimaryOnly: true },
+  'intel-auxiliaries-ready-arm-frontier': { ownTarget: 'macos-x64', minimumAllocations: 3,
+    armRefresh: true },
 });
 const admissionGroups = Object.freeze({
   'arm-regressions': ['refresh', 'body-0', 'body-1', 'body-2']
@@ -24,8 +28,10 @@ const admissionGroups = Object.freeze({
   'intel-retained-body': ['native-macos-x64-framework-body-1'],
   'intel-primary-body': ['native-macos-x64-framework-body-0'],
   'arm-refresh': ['native-macos-arm64-framework-refresh'],
-  ...Object.fromEntries(Object.keys(readyGroups).map(group =>
-    [group, criticalPlatforms.flatMap(platform => [...platform.units, ...platform.bodies])])),
+  ...Object.fromEntries(Object.entries(readyGroups).map(([group, policy]) =>
+    [group, criticalPlatforms.flatMap(platform => [...platform.units, ...platform.bodies,
+      ...(policy.armRefresh && platform.target === 'macos-arm64' ?
+        ['native-macos-arm64-framework-refresh'] : [])])])),
 });
 const api = 'https://api.github.com';
 const maximumWaitMs = 20 * 60 * 1000;
@@ -86,7 +92,11 @@ function readyAdmission(jobs, expected) {
       return { ...part, completedAt: job?.completed_at ?? null };
     });
     const ready = units.every(unit => unit.status === 'completed' && unit.conclusion === 'success');
-    const parts = platform.bodies.map(name => {
+    const primaryOnly = policy.intelPrimaryOnly && platform.target === 'macos-x64';
+    const armRefresh = policy.armRefresh && platform.target === 'macos-arm64';
+    const requiredParts = [...(primaryOnly ? platform.bodies.slice(0, 1) : platform.bodies),
+      ...(armRefresh ? ['native-macos-arm64-framework-refresh'] : [])];
+    const parts = requiredParts.map(name => {
       const part = allocationPart(name, jobs);
       const job = jobs.find(item => item.name === name);
       requireFact(job?.created_at == null || timestamp(job.created_at), 'A critical request time is unreadable');
@@ -96,18 +106,19 @@ function readyAdmission(jobs, expected) {
       return { ...part, requestedAt: job?.created_at ?? null, workerStepStartedAt: actualSteps[0] ?? null };
     });
     return { target: platform.target, ready, units, parts,
-      minimumAllocations: policy.minimumAllocations,
+      minimumAllocations: primaryOnly ? 1 : policy.minimumAllocations + (armRefresh ? 1 : 0),
       allocated: parts.filter(part => part.allocated).length };
   });
   const selected = readiness.filter(platform => platform.ready);
   const own = readiness.find(platform => platform.target === policy.ownTarget);
-  // Critical bodies are never gated here. Refresh gets a finite first-allocation
-  // turn; opportunistic Intel work yields to the complete currently-ready cohort.
+  // Intel primary stays independent so ARM refresh can take its first-body turn
+  // before the ready ARM frontier releases Intel secondaries and auxiliaries.
   const admitted = own.ready && selected.every(platform =>
     platform.allocated >= platform.minimumAllocations);
   const observation = { repository: expected.repository, runId: expected.runId,
     attempt: expected.attempt, headSha: expected.headSha, event: expected.event, group: expected.group,
-    policy: 'arm-regression-allocation-v9-ready-critical-fairness',
+    policy: policy.armRefresh ? 'arm-regression-allocation-v11-ready-arm-frontier' :
+      'arm-regression-allocation-v9-ready-critical-fairness',
     readiness: readiness.map(({ parts, ...platform }) => platform),
     parts: selected.flatMap(platform => platform.parts), admitted };
   const ownFailed = own.units.some(unit => unit.status === 'completed' && unit.conclusion !== 'success');

@@ -406,7 +406,7 @@ unit evidence before regression shards execute. Independently verify every
 part's SDK context, complete assertion union and allocated-prefix cleanup;
 missing, duplicated, overlapping or swapped parts cannot produce completeness.
 The current implementation candidate
-`native-framework-shards-v14-catalog-fixture-service` retains
+`native-framework-shards-v15-source-qualified-ownership` retains
 v4's four
 explicit platform-specific unit-to-regression job groups. A platform's unit
 producers must all complete successfully, including retention and cleanup, before
@@ -662,6 +662,26 @@ Append the actual v14/bootstrap twenty-fourth causal row without replacing its
 twenty-three predecessors. Local fixture timings are developmental observations,
 not native scaling predictions or proof of the complete lane limit. Current
 whole-candidate validation, Review and native acceptance remain NotRun.
+V15 preserves authentic v14 and binds the current inventory, callbacks, resource
+closures and SDK destinations to the final C81 ownership from source
+`51de4c9ff6a62c655dede580d8328eb6e9ea47c8`. This is source-qualified ownership,
+not a duration model: all 1,016 current body service costs are explicitly
+unmeasured. Keep the existing component owners, non-Intel selections, unit
+partition algorithm, resource reservations and complete assertion union.
+The catalog fixture removes only an unused caller-authored report from its
+private submission path. Actual producer execution, admission, explicit negative
+reports, fresh integrity checks and the 2066/2245/2265 boundaries remain intact.
+Keep all thirteen historical placement literal JSON texts unchanged, including
+v14's actual source, reservation, parallel-plan and transfer qualification.
+Preserve the original twenty-four causal rows: the authentic C81 v14 row retains
+its v10 admission graph and original bootstrap v6. Append current v15/bootstrap
+v6 with v11 admission as row twenty-five; do not relabel or replace the old row,
+and do not introduce a bootstrap version merely for this qualification change.
+The current inventory contains 1,855 assertions; the two new ARM-frontier unit
+controls add no body group or critical member. The interrupted local baseline
+provides no comparison or speedup claim. Fresh frozen-candidate local checks,
+Review and complete native correctness remain required, while whole-lane
+performance improvement is deferred by the owner.
 Captured v6 planner source must carry the authentic adopted `nativePlacementCosts`
 literal. V7 additionally requires authentic `nativePlacementAffinities` and
 `nativePlacementCostsV7` strict JSON literals. Reject missing, computed, duplicate
@@ -686,13 +706,21 @@ diagnostic artifacts, as specified below; no producer may borrow another's recei
 Bootstrap v5 requires two genuine Homebrew owners and eleven source-bound
 nonallocation proofs, retaining all thirteen diagnostic artifacts and steps.
 Keep default whole-native execution and release prepublication compatible.
-The required logical lane span is at most 900 seconds (15 minutes) on each of
+The tracked logical lane target is at most 900 seconds (15 minutes) on each of
 Linux, Windows and Apple Silicon, and strictly under 1,500 seconds (25 minutes)
 on Intel macOS. Shorter recorded durations are historical measurements, not
 acceptance limits. Measure from the earliest required unit/framework/Homebrew
 worker start through the last evidence/cleanup completion, including unit barriers,
 repeated provisioning and internal queues. Intel's earlier fifteen- and
 twenty-minute targets do not remain additional acceptance requirements.
+For the current public-launch release candidate, the owner defers these
+performance targets in favor of correctness and early delivery. Preserve actual
+timing verdicts and historical limits; neither a slow green run nor this
+deferral supplies a passing latency result. Complete native correctness,
+source-bound evidence, owned cleanup and the requested candidate reviews remain
+required. Version-specific timing checks and finite command/allocation
+watchdogs below retain their original semantics; the deferral changes the
+current release decision, not test results or process-lifetime safeguards.
 V9 uses the new twenty-five-minute limit; historical v1-v8 timing interpretation
 retains its original twenty-minute limit without retrospective passing credit.
 Its delivery observation cutoff is twenty-five minutes, without changing command watchdogs,
@@ -735,7 +763,7 @@ change cross-host ownership.
 Historical v2-v8 identities and captured-source replay remain unchanged.
 It does not cache cold Go builds, prune lifecycle/failure probes or alter assertions.
 
-The PR workflow uses five Linux read-only allocation coordinators under
+The v10 PR workflow uses five Linux read-only allocation coordinators under
 `arm-regression-allocation-v10-intel-primary-first`. Intel primary/body-0 and
 the existing `intel-retained-admission` observer remain eligible after both
 successful Intel unit jobs. Only the existing `native-mi` secondary body-1/body-2
@@ -820,6 +848,38 @@ lucky rerun is not a performance pass.
 Primary-first eligibility cannot establish that the long catalog service fits
 the strict Intel delivery limit. New-source local, Review and native acceptance
 remain NotRun until their applicable complete executions.
+The successor `arm-regression-allocation-v11-ready-arm-frontier` policy preserves
+independent Intel primary eligibility after both successful own-unit jobs.
+Before releasing Intel secondaries, require affirmative primary allocation and,
+when ARM units are currently complete, allocation of all three ARM bodies and
+the mandatory ARM refresh. Intel auxiliaries respect the same ready ARM frontier
+while retaining their existing ready Intel-body allocation requirements.
+The existing `intel-retained-admission` coordinator selects the new closed
+`intel-secondaries-ready-arm-frontier` group. The two Intel auxiliary
+coordinators select `intel-auxiliaries-ready-arm-frontier`; preserve the old
+groups' historical contracts and the unchanged `arm-refresh-ready` group.
+Reevaluate the ready cohort from complete same-attempt metadata on each
+observation; a foreign architecture with incomplete units cannot reserve future
+capacity. Already released requests are not retroactively cancelled.
+Keep ARM refresh's first-allocated-body turn on each currently-ready architecture.
+Independent Intel primary supplies that Intel turn, so refresh never depends on
+the secondaries it helps release. Observe allocation, not producer completion;
+completed parts require affirmative allocation proof and queued timestamp
+placeholders supply none. No coordinator waits on a Mac VM or adds a producer.
+Preserve all five Linux coordinators, twenty-five producers, thirteen Mac
+cleanup roles, thirty-four expanded jobs and existing worker/watchdog bounds.
+Keep v1-v10 resource graphs, helper-group semantics and receipts authentic;
+v10 source or evidence cannot become v11 by changing its policy label.
+Admission-policy versioning alone does not require a native protocol change.
+Changed inventory or service qualification still needs its own source-bound
+compatibility proof without rewriting historical literals or borrowing costs.
+This is request-priority mitigation, not an allocation-predicate repair, a
+provider quota claim or a guarantee of worker availability. It cannot alone
+remove Intel primary's service tail. Validate the existing successor changes
+through fresh complete hosted correctness and retain the whole-lane timing
+observations, but do not require further timing optimization for the current
+owner-deferred release. Local, Review and native acceptance for the successor
+remain NotRun until their actual executions complete.
 The existing Homebrew command trace also records a monotonic `elapsedMs` for
 each awaited subprocess, including rejected commands. This measures service
 time, not surrounding snapshot checks, bootstrap, evidence retention or cleanup.
