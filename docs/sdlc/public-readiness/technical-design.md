@@ -406,7 +406,7 @@ unit evidence before regression shards execute. Independently verify every
 part's SDK context, complete assertion union and allocated-prefix cleanup;
 missing, duplicated, overlapping or swapped parts cannot produce completeness.
 The current implementation candidate
-`native-framework-shards-v12-intel-service-balance` retains
+`native-framework-shards-v13-catalog-process-reservation` retains
 v4's four
 explicit platform-specific unit-to-regression job groups. A platform's unit
 producers must all complete successfully, including retention and cleanup, before
@@ -607,6 +607,37 @@ captured v11 does not need the new transfer literal. This is a bounded placement
 hypothesis, not a future timing guarantee: diagnostic fixed-C76 queue/setup
 assumptions and the unresolved producer-source preimage grant no native credit.
 Fresh complete correctness and whole-lane measurement remain required.
+V13 preserves authentic v12 as `nativeServiceBalanceFrameworkShardProtocol`
+and adds only the strict `nativePlacementReservationV13` resource rule.
+Reserve seven slots for the complete catalog callback: one isolated worker,
+one CLI and up to five concurrently awaited candidate-snapshot Git readers.
+The direct arithmetic child and sequential fixture setup have smaller process
+trees. This source audit is not a measured hosted PID peak or an explanation
+of C79's slowdown. Preserve every catalog assertion, prerequisite and deadline.
+The existing capture-admission regression uses the real selected catalog group:
+six slots reject before callback/child dispatch, seven admit its complete
+reservation, and an actual owned lease settles before peer capacity reuse.
+Keep its original cancellation and capture/peer controls; its declaration is
+seven slots, within the unchanged ARM allocation, and it remains PR-only.
+Changing catalog's minimum invalidates its historical one-slot service lead.
+Authenticate the new complete inventory/root binding and explicit unknowns;
+catalog remains null/unmeasured-resources, never a borrowed C74/C76/C79 cost.
+A duration-free root-order ownership vector preserves the existing C79 Intel
+component assignments before the unchanged six-component v12 transfer. This
+avoids interpreting an unknown catalog as zero-cost backfill capacity and adds
+no search, phase, producer, worker or execution architecture. Validate every
+complete dependency/exclusive-resource component and selected SDK destination
+before applying any ownership. Changed source, callback, resource, anchor,
+ordering or SDK capability retains atomic safe fallback. The old v12 null-anchor
+rejection and every v1-v12 literal/assignment/SDK replay remain unchanged;
+historical fixtures reconstruct and authenticate their exact original catalog
+source instead of relabelling the new declaration as a historical pass.
+Append the actual v13/bootstrap scenario after all twenty-two original causal
+rows. Preserve all twenty-five producers, thirteen Mac cleanups, fourteen-slot
+Intel bodies, four-slot units and the finite twenty-seven critical budget.
+Current whole-candidate validation, Review and native timing remain NotRun.
+The source-correct admission candidate provides no under-twenty-five-minute
+guarantee; original C79 correctness success and 27:37 timing failure are immutable.
 Captured v6 planner source must carry the authentic adopted `nativePlacementCosts`
 literal. V7 additionally requires authentic `nativePlacementAffinities` and
 `nativePlacementCostsV7` strict JSON literals. Reject missing, computed, duplicate

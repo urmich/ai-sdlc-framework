@@ -2,7 +2,7 @@ export const validationDeclarations = {
   "schemaVersion": 1,
   "groups": [{
     "root": "T-PRD018 capture admission reserves its complete process tree while independent peers progress",
-    "minimumSlots": 6
+    "minimumSlots": 7
   }, {
     "root": "T-PRD018 command capture durably retains dispatched identity and sanitized progress before cancellation or abrupt termination",
     "minimumSlots": 5
@@ -57,8 +57,8 @@ export const validationDeclarations = {
     "names": ["T-PRD018 capture admission reserves its complete process tree while independent peers progress"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "runner-resource-contract",
-    "reason": "PR-only capture admission regression: real cancellation selection rejects fewer than four process slots before dispatch, controlled capacity pressure plus real isolated worker leases and peer capacity reuse; no critical promotion.",
-    "prerequisites": ["Node and six aggregate worker slots; owned repository-local process fixtures"]
+    "reason": "PR-only admission regression: real cancellation and catalog selections reject insufficient capacity before dispatch; retain capture pressure and actual isolated leases. The catalog reserves seven slots, settles, then releases capacity to a peer. No expensive catalog callback or critical promotion.",
+    "prerequisites": ["Node and seven aggregate worker slots; owned repository-local process fixtures"]
   }, {
     "names": ["T-PRD018 command capture durably retains dispatched identity and sanitized progress before cancellation or abrupt termination"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
@@ -905,6 +905,31 @@ test('T-PRD018 capture admission reserves its complete process tree while indepe
     assert.deepEqual([...admittedCancellation.completed.values()], ['Passed']);
     assert.deepEqual(admittedCancellation.notRun, []);
 
+    const catalogPlan = await createPlan(parseOptions(['targeted', '--workers', '8', '--name',
+      '^complete synthetic per-case reports obey all 2066 unit prerequisites and full aggregate coverage$',
+      'test/validation-catalog.test.mjs']));
+    assert.equal(catalogPlan.groups.length, 1);
+    const catalog = catalogPlan.groups[0];
+    let catalogDispatched = false;
+    await assert.rejects(runValidationReadyPool(catalogPlan.groups, {
+      concurrency: 6, capacity: 6, signal: t.signal, execute: async () => {
+        catalogDispatched = true;
+        return 'Passed';
+      },
+    }), { code: 'BUDGET' });
+    assert.equal(catalogDispatched, false,
+      'Reserve the catalog worker, CLI and five concurrent Git readers before child dispatch');
+    let catalogSlots;
+    const admittedCatalog = await runValidationReadyPool(catalogPlan.groups, {
+      concurrency: 7, capacity: 7, signal: t.signal, execute: async selected => {
+        catalogSlots = selected.minimumSlots;
+        return 'Passed';
+      },
+    });
+    assert.equal(catalogSlots, 7);
+    assert.deepEqual([...admittedCatalog.completed.values()], ['Passed']);
+    assert.deepEqual(admittedCatalog.notRun, []);
+
     const root = 'T-PRD018 command capture durably retains dispatched identity and sanitized progress before cancellation or abrupt termination';
     const plan = await createPlan(parseOptions(['targeted', '--workers', '6', '--name',
       '^T-PRD018 command capture durably', 'test/public-readiness-inventory.test.mjs']));
@@ -962,9 +987,9 @@ test('T-PRD018 capture admission reserves its complete process tree while indepe
       finally { finish.resolve(); await pressure; }
     }
 
-    const budget = await enterTestBudget({ workers: 6, fileCount: 3 });
+    let budget = await enterTestBudget({ workers: 6, fileCount: 3 });
     const children = [];
-    const environment = { ...process.env, ...budget.environment, NODE_OPTIONS: '', NODE_PATH: '' };
+    let environment = { ...process.env, ...budget.environment, NODE_OPTIONS: '', NODE_PATH: '' };
     delete environment.NODE_TEST_CONTEXT;
     delete environment.SDLC_TEST_REPORT_CONTEXT;
     const module = new URL('../scripts/test-budget.mjs', import.meta.url).href;
@@ -1012,6 +1037,35 @@ worker.close();process.disconnect();
         budgetId: owned.budget.id, capacity: owned.budget.capacity }));
       next.child.send({ release: true });
       owner.child.send({ release: true });
+    } finally {
+      for (const { child } of children) {
+        if (child.connected) child.send({ release: true }, () => {});
+      }
+      try { await Promise.all(children.map(({ done }) => done)); }
+      finally { await budget.close(); }
+    }
+
+    budget = await enterTestBudget({ workers: 7, fileCount: 2 });
+    environment = { ...process.env, ...budget.environment, NODE_OPTIONS: '', NODE_PATH: '' };
+    delete environment.NODE_TEST_CONTEXT;
+    delete environment.SDLC_TEST_REPORT_CONTEXT;
+    try {
+      const owner = start(catalog.id, catalog.minimumSlots);
+      const owned = await owner.ready;
+      assert.equal(owner.child.exitCode, null, 'The controlled catalog boundary must hold its complete reservation');
+      assert.equal(owned.lease.minimumSlots, catalogSlots);
+      assert.equal(owned.lease.finishedAt, null);
+      assert.ok(owned.budget.capacity >= owned.lease.minimumSlots);
+      owner.child.send({ release: true });
+      await owner.done;
+      const peer = start(digest('catalog-reservation-peer'), 1);
+      const shared = await peer.ready;
+      assert.equal(owner.child.exitCode, 0, 'Catalog settlement must release its entire reservation before peer reuse');
+      assert.equal(shared.budget.id, owned.budget.id);
+      assert.equal(shared.lease.minimumSlots, 1);
+      t.diagnostic(JSON.stringify({ catalog: owned.lease, peer: shared.lease,
+        budgetId: owned.budget.id, capacity: owned.budget.capacity }));
+      peer.child.send({ release: true });
     } finally {
       for (const { child } of children) {
         if (child.connected) child.send({ release: true }, () => {});

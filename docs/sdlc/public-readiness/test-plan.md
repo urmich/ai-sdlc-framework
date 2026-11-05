@@ -106,7 +106,9 @@ The versioned native-protocol regression retains its original root and all
 seventeen original complete protocol/bootstrap scenarios, plus the historical
 v8/bootstrap eighteenth row, historical v9/bootstrap nineteenth row,
 v10/bootstrap twentieth row and v11/bootstrap twenty-first row, retaining all
-twenty-one when appending the current v12/bootstrap twenty-second row.
+twenty-one when appending the historical v12/bootstrap twenty-second row.
+Append the current v13/bootstrap twenty-third row without replacing those
+twenty-two actual scenarios.
 Reserve four root slots before
 setup, then run whole scenarios in isolated children under the existing shared
 producer budget, bounded to four and the actual caller allocation. Environment
@@ -1790,7 +1792,8 @@ the original subset. A new legitimate test must not erase preservation checks.
    supply the prerequisite. Include the unit barrier, every part's provisioning,
    evidence retention and cleanup in the whole-lane elapsed time.
    For current implementation candidate
-   `native-framework-shards-v12-intel-service-balance` and historical
+   `native-framework-shards-v13-catalog-process-reservation` and historical
+   `native-framework-shards-v12-intel-service-balance` and
    `native-framework-shards-v11-parallel-intel-ready-pool` and
    `native-framework-shards-v10-phased-intel-component-rebalance` and
    `native-framework-shards-v9-phased-intel-isolation` and
@@ -1808,7 +1811,7 @@ the original subset. A new legitimate test must not erase preservation checks.
    unions including descendants, dependencies and exclusive resources. The new
    Intel producer has no unit prerequisite of its own. Every Intel regression
    must wait for both unit jobs, not a borrowed ARM/original-unit result.
-   Current v12 retains v11/v10/v9/v8/v7/v6's complete dependency/exclusive-resource-connected root
+   Historical v12 retains v11/v10/v9/v8/v7/v6's complete dependency/exclusive-resource-connected root
    components and places them across the existing bodies using qualified observed
    work costs and stable exact file/root planning identities. Historical source costs are
    explicit scheduling leads only, never current execution credit or predicted
@@ -2002,6 +2005,38 @@ the original subset. A new legitimate test must not erase preservation checks.
    supply neither a current duration bound nor native correctness/timing credit.
    Current whole-candidate validation, Review and native acceptance remain
    NotRun until their actual executions complete.
+   V13 corrects only the complete catalog root's reservation: its worker, CLI
+   and five concurrent Git readers require seven slots. Direct arithmetic and
+   sequential setup branches require fewer. Preserve the unchanged callback,
+   all 2066 unit prerequisites, 2245 pre-review outcomes and original deadlines.
+   Extend the existing PR-only capture-admission root with the real catalog
+   selection: capacity six rejects before dispatch; capacity seven admits the
+   complete reservation. Its real owned seven-slot lease must settle before
+   peer reuse. Retain every cancellation/capture-pressure/peer assertion. The
+   root now reserves seven slots, fitting the unchanged seven-slot ARM host;
+   no expensive catalog execution is needed for this small admission control.
+   The coordinator's affected gate independently includes the real catalog root.
+   Authenticate `nativePlacementReservationV13` and its exact current source,
+   callback, closure/resources and root-order binding. Catalog's new resource
+   shape has no inherited one-slot duration. Preserve prior unknowns, derive
+   additional changed-callback/resource unknowns and fit no C76/C79 costs.
+   Keep C79's complete Intel component ownership through a duration-free
+   authenticated ownership vector, before applying the unchanged six-component
+   v12 transfer; do not score the unknown catalog as free backfill capacity.
+   Any changed anchor, binding, component, resource, SDK or ownership input
+   rejects the whole current placement and retains complete safe fallback.
+   The new maintainer-owned PR-only extended-unit root
+   `T-PRD017 native v13 reserves the complete catalog without inheriting its one-slot duration or changing ownership`
+   reserves one slot, has no dependency/exclusive resource and uses network-free
+   owned Node fixtures on all four lanes. Preserve authentic v1-v12 assignment,
+   source and SDK replay, including the original min-one catalog source.
+   Append one actual v13/bootstrap causal row after all twenty-two originals.
+   All twenty-five producers, thirteen Mac cleanups, fourteen-slot Intel bodies,
+   four-slot units and the twenty-seven critical budget remain unchanged.
+   This is a resource-contract correction, not a measured hosted peak or a
+   timing cure. Fresh current-candidate local validation, Review and native
+   correctness/whole-lane timing remain NotRun; C79's 27:37 timing failure and
+   all original execution evidence remain historical and immutable.
    The three PR-only roots in `test/public-readiness-native.test.mjs` are
    `T-PRD017 native protocol4 retains its exact historical file and assertion assignments`,
    `T-PRD017 native protocol5 spreads independent same-file roots and executes connected complete closures exactly once`,

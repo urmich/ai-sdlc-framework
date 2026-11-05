@@ -1,5 +1,16 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
+  "groups": [{
+    "root": "complete synthetic per-case reports obey all 2066 unit prerequisites and full aggregate coverage",
+    "minimumSlots": 7
+  }],
+  "applicability": [{
+    "names": ["complete synthetic per-case reports obey all 2066 unit prerequisites and full aggregate coverage"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "catalog-resource-contract",
+    "reason": "PR-only complete catalog integration root. Reserve its worker, CLI and five concurrent candidate-snapshot Git readers; direct fixture arithmetic and sequential Git setup require fewer slots. Preserve all original assertions and deadlines; no critical promotion or hosted process-peak/timing claim.",
+    "prerequisites": ["Node, Git and seven aggregate worker slots; owned repository-local repository and Copilot home"]
+  }],
   "variants": [
     {"expression": "`delayed local operation preserves dispatch source A under selection B${interrupted ? ' through terminal recovery' : ''}`", "domains": {"interrupted ? ' through terminal recovery' : ''": ["", " through terminal recovery"]}},
     {"expression": "`Store STAGING equal-time ${outcomes.join('/')} stays Failed after reload and delayed older events`", "domains": {"outcomes.join('/')": ["Failed/Passed", "Passed/Failed"]}},
