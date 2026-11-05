@@ -10,8 +10,10 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { digest } from '../src/core.mjs';
 import { fixture, coding, completeReview, grant, testDefinitions,
-  registerFixtureProviderRequest, registerFixtureProviderResult } from './helpers.mjs';
+  recordFixtureTest, registerFixtureProviderRequest,
+  registerFixtureProviderResult } from './helpers.mjs';
 
 const adapter = path.resolve('test/fixtures/cli-provider-verifiers.mjs');
 const bin = path.resolve('bin/sdlc.mjs');
@@ -53,7 +55,7 @@ test('public CLI verifier injection survives process boundaries and rejects mism
   await fs.writeFile(path.join(f.repo, '.sdlc', 'config.json'), JSON.stringify({
     defaultBranch: 'refs/heads/main',
     environments: { DEV: { target: 'dev-target',
-      configDigest: 'configuration-1', allowedStages: ['DEV'] } },
+      configDigest: digest('configuration-1'), allowedStages: ['DEV'] } },
   }));
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Fixture candidate');
@@ -234,17 +236,27 @@ test('public CLI verifier injection survives process boundaries and rejects mism
 
   const started = await call(['cycle', 'start'], {
     workItemId: f.workItemId, tests: testDefinitions(),
-    configDigest: 'configuration-1', cause: 'isolated provider fixture',
+    configDigest: digest('configuration-1'), cause: 'isolated provider fixture',
   });
   assert.equal(started.code, 0);
   const cycle = started.result.cycle;
   for (const testId of ['T-unit', 'T-integration']) {
-    const evidence = await call(['evidence', 'test'], {
+    const input = {
       workItemId: f.workItemId, cycleId: cycle.id, testId,
       status: 'Passed', owner: 'agent', host: 'local',
       expectedMet: true, evidenceRef: `fixture:${testId}`,
+    };
+    const selfReported = await call(['evidence', 'test'], input);
+    assert.equal(selfReported.code, 4);
+    assert.equal(selfReported.result.error.code, 'EVIDENCE');
+    const verified = await recordFixtureTest(f.store, input);
+    facts.now = f.clock.now();
+    const evidence = await call(['evidence', 'test'], {
+      ...input, evidenceRef: verified.evidenceRef,
     });
     assert.equal(evidence.code, 0);
+    assert.equal(evidence.result.id, verified.id,
+      'A fresh CLI process reuses the independently executed original, not a caller-authored pass');
   }
   await completeReview(f, cycle);
   await grant(f, 'dev-authorization', {

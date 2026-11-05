@@ -103,7 +103,13 @@ optional names, owner and reason. Two-worker callbacks reserve both tokens
 before their deadlines begin; missing aggregate allocation cannot be called
 successful overlap. Resource matching is part of source/configuration evidence.
 The versioned native-protocol regression retains its original root and all
-seventeen complete protocol/bootstrap scenarios. Reserve four root slots before
+seventeen original complete protocol/bootstrap scenarios, plus the historical
+v8/bootstrap eighteenth row, historical v9/bootstrap nineteenth row,
+v10/bootstrap twentieth row and v11/bootstrap twenty-first row, retaining all
+twenty-one when appending the historical v12/bootstrap twenty-second row.
+Append the current v13/bootstrap twenty-third row without replacing those
+twenty-two actual scenarios.
+Reserve four root slots before
 setup, then run whole scenarios in isolated children under the existing shared
 producer budget, bounded to four and the actual caller allocation. Environment
 changes, SDK capabilities, original verification, negative controls, projection,
@@ -112,6 +118,13 @@ row exactly once; unknown, duplicate, missing or incomplete outcomes fail.
 Two PR-only controller regressions cover outcome identity, failure stop/drain
 and serial fallback. Preserve actual child/lease overlap and cleanup evidence;
 this changes neither the 27-assertion critical budget nor native acceptance.
+The same PR-only controls accept independent worker epochs in both directions
+through real owned children, while rejecting malformed or reversed local
+intervals, foreign/duplicate/missing/open broker leases, incomplete commands
+and premature command-side inspection. Correlate actual live-to-closed lease
+identity after child exit without cross-process clock ordering or tolerance.
+The coupled owned-writer retention regression preserves every uncertain-writer,
+snapshot-failure, drainage and cleanup path.
 Standalone syntax checks use a bounded ready-work pool up to available CPU
 capacity and the existing 32-slot ceiling. An inherited test allocation keeps
 the checker serial rather than multiplying unregistered work. Preserve every
@@ -170,6 +183,14 @@ original command/test deadlines remain unchanged.
 The command-capture root and its peers reserve their complete declared process
 trees before timed callbacks. A PR-only admission regression must reject
 under-reservation while showing independent peer capacity reuse.
+The CI tool-cancellation root reserves four slots for its test worker, command,
+descendant and Windows termination controller or POSIX observation query.
+The existing admission regression uses that real source selection: three slots
+must reject before callback dispatch, while four admit the complete group.
+Retain every strict process-absence, cancellation, sanitization, journal and
+stop-race assertion and the original one-second stop deadline. Correcting this
+under-reservation does not establish the cause of an earlier native failure or
+grant a current native correctness or timing pass.
 The PR-only Windows termination-observation regression exercises controlled
 controller/root completion orders and timeout/error paths. Require bounded
 dispatch/event observations and the immutable pre-cleanup snapshot in both the
@@ -208,6 +229,145 @@ then release and await the owner before exact committed replay or semantic
 refusal checks. Preserve the full 4096-byte proof, one delivery identity,
 no additional notice, conflict/stale refusals and archive/prune assertions.
 Production lock acquisition and its original budget remain unchanged.
+
+The simultaneous standalone-channel fixture first completes the real cold
+staging and holds promotion, then observes the contender's actual `EEXIST`
+against that still-owned lock before releasing the first activation. Require
+both successful activations and the same launcher, the unchanged short busy-lock
+refusal with retained foreign bytes, and tampered-version rejection. Do not spend
+the contender's five-second allowance on the first install's cold copy.
+A new PR-only, all-four-platform, one-process regression executes that exact
+fixture and actual activation/lock source against an owned synthetic tree with
+controlled staging elapsed time. It preserves real filesystem contention and
+settles both activations before restoring its process-local filesystem
+observation. This is not native package/launcher acceptance; the original
+npm-dependent distribution fixture remains required on capable PR runners.
+The finite critical27 gate, production deadlines and native delivery limits do
+not change.
+
+After module loading, native-toolchain CLI request, provisioning and cleanup
+failures emit a bounded sanitized check annotation even when bootstrap evidence
+does not yet exist. Retain the closed stage and actual Node/platform/architecture;
+reject oversized or unsafe diagnostics into an original-byte identity rather
+than printing them in the annotation. Preserve the original thrown error and
+nonzero exit. Module-import failures remain outside that CLI catch boundary.
+The process-isolated, one-slot, all-four-platform PR-only regression is owned by
+the native-bootstrap diagnostics contract and checks an actual early CLI failure,
+workflow escaping, secret exclusion and the bounded fallback. It requires stock
+Node, not Go, npm or native Homebrew, and does not prove native provisioning.
+The existing TOOL02 failure facts additionally distinguish its bounded return,
+cleanup/retention/report/stdout checks and controller dispatch/stop assertions.
+These are observed assertion phases; phase-entry elapsed time is not a measured
+termination duration. The earlier Intel bootstrap failure and Windows
+cancellation failures remain unexplained until actual retained evidence
+establishes their causes; diagnostic changes do not claim to fix those causes.
+
+The original Windows capture/cancellation root additionally observes the actual
+`taskkill.exe` spawn without changing that invocation, the production backend or
+its one-second stop budget. Before creating the controller or command, an optional
+owned PowerShell 5.1 observer compiles a small C# bridge inside its new
+repository-local compiler directory. The isolated controller atomically publishes
+only the dispatched PID and original spawn-event UTC bound to the observer's
+nonce-owned request. Neither observation nor publication is awaited by the
+production cancellation decision. Preserve all original journal, redaction,
+closure and cleanup assertions; native facts cannot satisfy a missing root-close
+event. A failed readiness attempt must settle both observer and compiler before
+creating any controller/command; unknown startup lifetime fails without creating
+additional processes. PowerShell closure alone never proves compiler settlement.
+Complete the original root/controller cleanup before awaiting observer
+finalization, so diagnostics add no delay before existing fixture cleanup.
+
+The observer pins original owner/target process handles once, then uses only
+handle-based image, creation/CPU/exit-time, wait and exit-code queries. Retain at
+most eight samples, 32 attempts and 8192 bytes; unknown, late, inaccessible and
+same-millisecond/reused identity remain unavailable, never success. A real native
+exit code 259 is not a liveness test. Root-native survival and thread wait reasons
+remain explicitly unavailable. Its spawn-bound sampling window is diagnostic,
+not the production stop-entry clock; timestamps bound non-atomic native reads.
+Compact validated first/latest facts accompany the original assertion failure,
+including the exact dispatch bound, binding/capture reason and late/truncated
+sample distinctions; missing facts stay unknown rather than becoming false.
+Observer teardown releases and awaits only its own process, never signals the
+observed target, and prevents directory removal while its exit or compiler
+settlement is unknown. A strict post-compilation marker bound to the captured
+PowerShell/bridge source hashes, or genuine pre-dispatch failure, provides
+affirmative compiler-settlement evidence; a later process error does not.
+Unknown observer/compiler cleanup additionally stops later admission through the
+original acquired worker's authenticated aggregate-budget connection. The stopped
+state survives that worker's closure: queued and fresh roots/producers cannot
+reuse its released slots, while already-running peers and cleanup may finish.
+This is fail-stop containment of uncertain lifetime, not proof of compiler exit.
+The four-slot, all-four-platform PR-only runner regression uses an isolated
+owned broker and stock Node marker barriers to retain the original failed root,
+reject queued/fresh admission before and after its closure, preserve unknown
+cleanup, and let an already-running peer finish without signals. It creates no
+native compiler or observed target and cannot poison the enclosing test broker.
+
+The separate all-four-platform, two-slot PR-only root
+`T-PRD010 admission stop retains its original worker until delayed acknowledgement`
+uses a real owned broker and original preloaded Node worker. Delay delivery of
+the authenticated stop response with process-local socket instrumentation, then
+require acknowledgement and persistent stopped admission before worker exit.
+Restore instrumentation and settle the child and broker before owned cleanup.
+This runner-resource-contract regression has no prerequisite roots or shared
+external resources, creates no native compiler/target and does not enter
+critical27. Preserve its original-source failure and corrected-source pass;
+neither result explains the separate hosted `observer-not-ready` failure.
+
+Conservatively reserve five capture-root slots (worker, controller, command,
+taskkill and observer); the compiler finishes before target creation. The
+all-four-platform admission regression models this reservation in a six-slot
+pool and proves an independent one-slot peer can progress without admitting
+multi-process peers into its single remaining slot. A new Windows-only,
+three-slot PR root exercises controlled live, exit-259 and image-mismatch
+observations against owned targets. Its ready/release barriers test native fact
+semantics, not cold taskkill startup or hosted cancellation equivalence.
+Injected original-child cases additionally distinguish missing readiness,
+affirmative post-compilation readiness, genuine spawn failure and an error after
+spawn. They create no native observer/compiler and provide no native execution
+credit; process-local spawn instrumentation is always restored. Wrong-source
+proof remains unknown; late affirmative proof can refine a new result without
+mutating the previous unknown snapshot or repeating stop attempts.
+Compilation precedes target creation; only one compiler or one target overlaps
+the worker/observer. A separate Windows-only, one-slot PR control advances a
+readiness polling wake past its deadline after proof publication. Require the
+final marker inspection without another wait, and reject missing markers,
+unsettled compiler evidence and wrong-source proof. Its process-local spawn,
+filesystem and clock instrumentation is restored; it launches no real observer
+or compiler and cannot substitute for the original native control.
+Extend that same one-slot control with pending compilation, late affirmative
+compiler proof, compile failure, owner rejection and private/unknown input.
+Require only closed, source-validated startup phases and bounded numeric facts;
+reject arbitrary fields/reasons and exclude paths and caller values. The actual
+readiness failure message must retain its closed decision snapshot unchanged
+through the public sanitizer, for existing provider failure annotations rather
+than diagnostic-log-only visibility. Preserve the failed readiness decision
+after later settlement proof and keep all original deadlines and positive native
+assertions. These additions are diagnostic only: hosted startup cause remains
+unproven until an applicable original observation establishes it.
+Extend the same one-slot control by evaluating the actual settlement helper with
+modeled observer and admission boundaries. Check settled cleanup, unknown
+compiler lifetime, unknown observer cleanup and a rejected admission-stop request.
+Require the closed post-finalization snapshot on the original failure before
+admission stop, exact sanitizer preservation and the original stop error when it
+rejects. This control creates no new descendant, compiler, socket or timer and
+does not wrap the functional root in another runner or infer subtree settlement
+from runner closure. The original helper fails for missing final error facts;
+the original functional capture, mandatory real native-positive and isolated
+fail-stop controls remain required separately. This corrects diagnostic
+visibility, not fallback behavior or the unknown hosted startup cause, and
+supplies no native timing or compiler-lifetime credit.
+The mandatory native-positive root also settles a rejected readiness attempt
+before rethrowing its original error. Extend the existing one-slot modeled
+control to verify final facts precede rejection, unknown lifetime still stops
+admission, and a concurrent stop failure preserves both original errors.
+Successful readiness does not finalize early or change the real target lifetime;
+all native-positive assertions, compiler proof and deadlines remain unchanged.
+This closes the mandatory-path diagnostic gap, not the unexplained startup cause.
+All these roots remain outside critical27. New-source local,
+Review and native results remain NotRun until their actual executions; the prior
+24-of-25 native producer pass and recurring Windows failure remain historical,
+not a current completeness or cancellation-fix claim.
 
 Local test results are not inputs required from an external contributor merely
 to open a PR. PR jobs never
@@ -314,9 +474,11 @@ controlled tests.
 The separate source-selected `native-bootstrap-role-capabilities-v5` omits
 Go/schema setup from framework bodies without the real Go/schema or native
 launcher roots; all real Go tests, vet, native execution and independent
-cold-cache rebuild assertions remain intact. Linux/Windows `body-3` omits
-CPython; other current bodies retain runtime-only CPython except the real schema
-body. All framework Mac bodies omit unused Brew/core/Ruby/prefix setup. Genuine
+cold-cache rebuild assertions remain intact. Derive Go, CPython and schema
+requirements from each frozen selected root closure, not historical body
+indices. Current body closures retain CPython; schema packages belong only to
+the actual schema-procedure owner. All framework Mac bodies omit unused
+Brew/core/Ruby/prefix setup. Genuine
 Homebrew omits independent Go/CPython/schema SDK setup but preserves pinned
 Brew/core/Ruby, the complete native Node bottle closure, real audit/style,
 previous/current lifecycle and cleanup. Whole/full and R-PRE are unchanged.
@@ -539,7 +701,11 @@ before assertions. The real-kernel root reserves four aggregate slots for its
 test worker, owned root, descendant writer and unrelated sibling; host worker
 limits and the one-second settlement bound remain unchanged.
 The separate TOOL02 controlled Windows settlement root retains all six modes
-under its twenty-second ceiling. Admit at most two independent VM/root/writer
+under its twenty-second ceiling. Its pre-cancellation root-exit observation
+has a separate five-second window after writer/peer readiness; preparation
+cannot consume that observation window. Preserve native ownership/drain checks,
+the cancellation settlement assertion and the one-second production stop budget.
+Admit at most two independent VM/root/writer
 scopes together and declare five slots for the test process plus their four
 children. Require both first-pair provenance announcements before release;
 serial-execution mutation must fail this bounded overlap check. Drain every
@@ -717,6 +883,47 @@ sanitization when the temporary reuse budget is exhausted.
 The literal-text regression checks scanner bypass only for ASCII letters,
 digits and spaces; sensitive-key redaction, rich-text fallback and the original
 payload byte limit remain enforced.
+The maintainer-owned PR-only root `T-PRD037 retained object children are sanitized
+once without changing legacy redaction or admission guards` in
+`test/validation-evidence.unit.test.mjs` observes actual per-object traversal
+through nested objects and arrays. Both payload passes remain; completed
+children must not be re-summarized per ancestor. Require exact legacy digests
+for core-only and payload-only sensitive keys, embedded JSON and mixed-case
+redaction markers; retain deep ordinary summaries, fresh mutation rejection,
+assertion-proof rejection and independent node/depth/byte bounds. This is a
+process-isolated Node-only root on all four existing native lanes. Its
+`Object.entries` instrumentation is restored locally; it adds no critical
+assertion, dependency or shared external resource.
+The existing PR-only root `referenced assertion preparation overlaps within its
+shared serialized reservation and preserves ordered authority` in
+`test/public-readiness-evidence.test.mjs` includes a controlled initial proof-read
+failure. Require the exact original rejection rather than a later barrier
+timeout, and reject replay completion before its required read barrier.
+Complete and verify the original normalized import and later parent preparation
+before starting the five-second concurrent-read watchdog. Bound that real setup
+separately at thirty seconds, requiring both the first original assertion read
+to close and the first expected child read to open;
+neither preload a context nor bypass any retained dependency validation.
+A controlled original-import read and a controlled large-parent read in the
+existing reservation mode each advance the mocked clock past five seconds
+without consuming the later overlap deadline. Restore real timers before
+releasing each setup read so the overlap watchdog remains active. Failure
+diagnostics distinguish the unchanged thirty-second and five-second watchdogs.
+Preserve all fifteen original modes,
+every overlap, four-handle, reservation, ordered-failure, cache, staged-read and
+alias assertion, and add this deterministic slow-setup mode. The
+maintainer owns this process-isolated, network-free fixture on the existing
+native Node lanes; it adds no critical-profile assertion or shared resource.
+The maintainer-owned PR-only root `T-PRD017 native shard construction derives
+complete root groups once and preserves exact dispatch selectors` in
+`test/public-readiness-native.test.mjs` compares complete stage groups to the
+independent canonical grouping, including escaped names, descendants, dependency
+edges, exclusive resources, slot demand and the exact once-only assertion union.
+Its process-local Node inspector session observes one complete-inventory
+derivation per planning call; a second call must observe mutated resource input
+without changing the earlier result. Run on the existing native Node lanes,
+with owned, credential/network-free fixtures and no cross-process profiler or
+shared resource. This adds one PR-only root, not a critical-profile assertion.
 The JWT-header regression observes avoided JSON parses for decoded non-object
 candidates while retaining real object headers with JSON whitespace, exact
 redaction digests, malformed-object handling and conservative overlong headers.
@@ -961,6 +1168,141 @@ a Test Design/review responsibility.
 
 ### 5.2 Complete PR coverage, trust and provider enforcement
 
+`T-PRD018 rejected failure diagnostics retain only closed error and owned phase
+facts` in `test/test-runner.test.mjs` is maintainer-owned, PR-only and Node-only
+on all four native lanes. Its isolated actual formatter VM reserves one slot,
+with no prerequisite roots, child processes or shared resources. Prove rejected
+text retains its original identity plus allowlisted Node error codes/types and
+available bounded owned-settlement facts; exclude unknown values, invalid
+durations, oversized assertion arrays and raw messages, bound cyclic causes,
+and keep ordinary diagnostics unchanged. The existing real unsafe-diagnostic
+root must still preserve genuine Failed outcomes, passing siblings, incomplete
+evidence and fatal opaque-event rejection. TOOL02 adds observed mode/phase facts
+to its original error only on failure; all six real modes, assertions, five-slot
+allocation, deadlines and cleanup remain unchanged. No critical promotion,
+historical Intel-cause claim or native pass follows from these diagnostic tests.
+
+The maintainer-owned, PR-only `T-PRD018 native failure annotations escape
+workflow-command injection without changing the underlying failure` root also
+requires the exact failed assertion identity when the retained diagnostic is a
+rejection placeholder. Keep workflow-command escaping and the original Failed
+outcome; never emit rejected original text. This Node-only isolated root retains
+its existing four-platform applicability and introduces no dependencies, shared
+resources, worker increase or critical-profile membership.
+
+The same annotation root preserves closed Windows observer phase/exit/byte-count
+facts through sanitization without changing the Failed outcome.
+`T-PRD018 Windows capture diagnostics distinguish startup and exited observers
+without exposing output` in `test/test-runner.test.mjs` is maintainer-owned,
+PR-only and Node-only on all four existing native lanes. Its isolated controlled
+streams reserve one slot and cover startup, exit-before-close with buffered
+identity, spawn/record/size failures and rejected raw output. An isolated process
+stub supplies the PID and a synthetic SystemRoot; require the mocked spawn path
+to use that root without reading or mutating the host environment.
+Keep the five-second capture allowance, native retained-handle/PID-reuse/exit-order
+positive controls and cleanup assertions unchanged. Controlled diagnostics do
+not reproduce or clear the historical hosted timeout.
+
+The existing PR-only Windows readiness root in
+`test/public-readiness-inventory.test.mjs` also verifies separate bounded
+preparation and compilation/readiness windows. Only a source-verified compiling
+marker observed within the five-second preparation allowance arms one further
+five-second window; absent, wrong-source or late markers cannot extend it.
+This intentionally permits at most ten seconds of startup polling, not the
+previous single five-second dispatch allowance. Preserve delayed-wake proof,
+affirmative compiler settlement, failed admission, one-second native observation,
+1500ms capture, the mandatory real native-positive root and its thirty-second
+timeout. Its controlled marker/spawn instrumentation remains process-local,
+Node-only and one-slot, with no critical promotion or native execution credit.
+
+The existing PR-only `TOOL02 Windows validation settlement bounds exited roots
+and failed or stalled tree termination` root in
+`test/distribution-boundary-lifetime.test.mjs` must await its first durable running
+checkpoint before starting cancellation accounting. Model cold preparation with
+an injected clock advance and retain the real 1500ms watchdog plus a command-clock
+assertion. Keep all six modes, the original one-second production stop deadline,
+five-second preparation bound, twenty-second root timeout, five-slot declaration
+and owned writer/controller/retention cleanup proofs. This fixes a fixture race,
+not a demonstrated sole cause or fresh cure of the hosted cancellation failure.
+
+`T-PRD018 native timing notices retain only ten source-bound actual group and
+root durations` in `test/public-readiness-native.test.mjs` is maintainer-owned,
+PR-only and Node-only on the existing native lanes. Reserve two aggregate slots
+before its isolated timed root; six sequential owned fixture stages retain all
+twelve real inner groups and borrow the same broker, not a second allowance.
+Compare notice IDs and durations with original runner/journal fields, enforce
+the ten-notice/closed-output bounds, reject mismatched source/command and invalid
+durations, and verify original start/end offsets without summing concurrent work
+into a serial estimate. The finalizer's version-one `numeric-rle-v1` projection
+also covers every independently declared group on failed producers, preserving
+the original Failed outcome, unchanged runner reports and owned cleanup.
+Bind the ordered vector to source, selection, scheduling-policy and group-order
+digests; never obtain identities from encoded coordinates. Reconstruct the
+selection independently from public repository/commit/tree, run/attempt, exact
+job name and source-declared target/component/shard/stage selections. Changing
+only private bootstrap prefixes, executable or frozen-artifact facts must not
+change this diagnostic selection; changing a public identity or stage must.
+Keep full-context validation independent: mismatched private expected facts
+still reject original evidence/coordinates rather than gain acceptance.
+The existing control verifies both full and body-1 role reconstruction without
+reading execution payloads. Distinguish unknown,
+explicitly unstarted, started-without-end and complete reported Passed, Failed
+or NotRun intervals. None of these diagnostic states grants assertion credit.
+Require at most ten notices, total UTF-8 bytes strictly below 4096, the first
+notice below 1024 and every later notice below 400. Adaptive power-of-two
+`quantumMs` encodes conservative coordinate intervals, not reconstructed exact
+timestamps or exact non-longest durations. Retain the ten longest observed
+durations exactly in the closed header, and the actual terminal group only when
+all declared group intervals are complete. Invalid, missing, reordered or
+unbounded original inputs become explicit unknown coordinates, not fabricated
+clocks; a presentation fallback cannot change readiness, failure or settlement.
+Extend the existing missing-stage finalization root to cover an unavailable
+public diagnostic preimage: retain the original nonpassing evaluation, partial
+journal and evidence bundle, report the closed presentation diagnostic and emit
+no unbound notices. Derivation itself belongs inside that presentation boundary.
+This extends one existing PR-only, Node-only, one-slot owned-fixture root without
+adding descendants or changing full-context admission or the critical budget.
+Extend the existing timing-offset control with all six states, complete ordered
+numeric-run decoding, declared bounds, source/order rejection and an explicitly
+synthetic 1462-group formatting-capacity case. This adds no root or descendant,
+native measurement or original evidence-payload transfer.
+Missing clocks remain unavailable. Preserve partial readiness and verify fixture cleanup. It has no
+provider access, shared resources or prerequisite roots. Neither new root
+expands critical27, changes native role membership or grants native timing,
+original SDK reconciliation or release-readiness credit.
+
+`T-PRD018 optional timing consumer preserves legacy partial and blocked outcomes
+and finalizer errors` is maintainer-owned, PR-only and Node-only on all four
+existing native lanes. Its isolated VM uses the actual entry consumer with one
+slot, no dependencies or shared resources. Cover absent, null, empty-array and
+malformed non-array metadata for Passed, Failed and blocked NotRun responses;
+preserve the original evaluation, diagnostics, primary failure and cancellation
+inputs, and rethrow original finalizer errors. Retain the `TOOL03
+actual native child boundary quarantines a surviving detached writer before
+outer cleanup` regression and its real child teardown. Its writer must complete
+the first real ambient and prefix stream writes before publishing readiness.
+Keep all four original modes and add a deterministic controller-exit mode that
+holds periodic writes until the exact original cleanup decision and the parent's
+stream observation. Original source must fail the missing-stream assertion;
+the correction must preserve the identity challenge, quarantine, leases, real
+writer liveness, release/drain and exact owned-directory cleanup. This remains
+one PR-only, Node-only, process-isolated root under its existing resource and
+45-second timeout declaration; no sleeps are substituted for its barriers.
+The native-validation maintainer owns it on all existing native lanes. No critical-profile,
+native-role, deadline or evidence-validation change is implied.
+
+`T-PRD011 exclusive ready clocks exclude the previous holder capture without
+hiding eligible failures` is maintainer-owned, PR-only and Node-only on all four
+native lanes. Its isolated VM reserves one slot and uses a controlled clock:
+either holder may become ready first, its valid capture/release cannot exhaust
+the blocked contender's ready allowance, and an eligible non-ready contender
+still fails that unchanged allowance. Preserve capture and producer failures.
+It has no prerequisite roots, shared resources or native-process requirement.
+The existing real sibling-producer test retains nonexclusive overlap,
+exclusive ordering, aggregate capacity, native identities and exit/cleanup
+proofs. Neither this control nor a local positive clears the historical hosted
+failure or grants delivery-limit credit.
+
 | ID | Environment | Level | Checkpoint | Mode | Owner | Location | Requirements | Observe or assert | Implementation | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | T-PRD014-LX | local | integration | post-review | automated | provider | github-linux-x64 | FR-203; AC-203.1; AC-203.2 | P: open/update the approved fixture PR with no local-result artifact; full current applicable cases execute on Ubuntu, including shared filesystem/Git/tooling; retain exact candidate and case inventory. | procedure: section-7-pr-matrix | NotRun | |
@@ -1096,9 +1438,14 @@ fixture evidence through the actual API-only observer boundary.
 ## 6. Comparable benchmark procedure
 
 The required delivery limits for each **complete logical native PR lane** are
-Linux **at most 460 seconds (7m40s)**, Windows **at most 665 seconds (11m05s)**,
-Apple Silicon **at most 627 seconds (10m27s)** and Intel macOS **strictly under
-1,200 seconds (20m)**. Intel's former 15-minute target remains a stretch goal.
+Linux, Windows and Apple Silicon **each at most 900 seconds (15m)**, and Intel
+macOS **strictly under 1,500 seconds (25m)**. The owner's revised Intel limit
+replaces the former twenty-minute acceptance target; preserve its original
+execution records rather than relabelling them. Earlier Intel targets do not
+remain additional acceptance requirements.
+The recorded Linux **460 seconds (7m40s)**, Windows **665 seconds (11m05s)** and
+Apple Silicon **627 seconds (10m27s)** are historical lane measurements, not
+current delivery limits or new stretch targets.
 Include job-specific toolchain provisioning, every required
 test/procedure, evidence retention and owned-resource cleanup. For a lane with
 parallel required parts, use the earliest part's actual worker start and the
@@ -1112,9 +1459,26 @@ do not prove that the latency target was achieved.
 Stability, complete native coverage and honest failure reporting take precedence:
 do not drop assertions, weaken checks or hide retries to meet the target.
 An incomplete or failed attempt is not a successful full-suite benchmark.
-Do not cancel an Intel measurement at the former 16-minute observation cutoff.
-Its revised observation cutoff is 20 minutes; a still-active lane at that
-cutoff cannot pass the strict timing limit. This changes no command watchdog,
+For catalog/proof processing, measure fresh catalog/proof reload, immutable
+object publication, actual grouped execution, normalization, evaluation and
+admission separately. Distinguish nonoverlapping elapsed phases from inclusive
+or summed concurrent service times. Keep the authentic original root and
+2066/2245/2265 exhaustion boundaries; account for new regressions separately.
+The PR-only `immutable validation publication bounds overlap and drains ordered
+failures before later batches` root in `test/validation-catalog.test.mjs`
+belongs to the validation/catalog persistence maintainer. It uses owned
+filesystem/module patches in one process-isolated root, with one process slot,
+no external shared resource and no critical promotion. Prove a four-live-write
+barrier, real file/directory flush attempts, fresh corrupt-readback rejection,
+ordered competing errors with full drain, no later batch after failure or
+publication fault, preserved existing corruption and owned temporary cleanup.
+The complete original root must still pass with every required real write,
+fresh read, proof, durability and tamper check. Focused Windows measurements
+cannot establish a Mac result or replace full native lane acceptance.
+Do not cancel an Intel measurement at a former observation cutoff or merely
+because it exceeds the delivery limit. Its revised delivery observation cutoff
+is 25 minutes; a still-active lane at that cutoff cannot pass the strict timing
+limit, but its original run must settle naturally. This changes no command watchdog,
 owned-process settlement allowance, assertion, iteration or durability boundary.
 
 For the next PR measurement, explicitly request the native hosts' observed
@@ -1124,6 +1488,14 @@ regression hosts. Keep the two-unit topology, case union and all other selected
 allocations unchanged for this comparison: the four-slot regression trial did
 not complete before the cutoff. Do not claim a whole-lane speedup before complete
 hosted results.
+Treat v7 cost overlays and ARM resource affinity as scheduling hypotheses, not
+matched current measurements. Preserve original root closures, the seven-slot
+ARM allocation and the retained-minimum-four/catalog-minimum-one demands; no
+projected saving or sum of overlapping group durations can satisfy a lane cap.
+V10 primary-first admission corrects request eligibility and arrival priority,
+not the catalog's service duration. New-source local, Review and native
+acceptance remain NotRun until complete applicable executions; prior focused
+or historical results cannot supply current whole-candidate credit.
 Preserve initial observation refresh/regression and observer priorities, then
 prioritize the unchanged CI-input and retained-evidence families under implicit
 policy v9, preserving v8's existing higher-priority prefix. Next prioritize provider consumers, reproducible packaging,
@@ -1154,8 +1526,10 @@ parallel admission need not start unequal-demand groups in strict file order.
 Earlier dispatch is not itself proof of a native speedup.
 Verify the actual producer's requested/capacity fields and shared
 nested-allocation bounds; the default local gate and 32-slot ceiling do not
-change. Account for the personal-account limit of five concurrent hosted Mac
-jobs across both architectures. Observation cutoffs do not authorize automatic
+change. Coordinate critical and auxiliary requests across both Mac
+architectures. The historical five-job planning assumption and observed
+concurrency are not independent proof of the provider's current quota.
+Observation cutoffs do not authorize automatic
 cancellation: retain actual terminal results even after a delivery limit is
 missed, report that timing dimension as Failed, and return to measured bottleneck
 work. Do not rerun an unchanged candidate to replace a timing miss with a lucky pass.
@@ -1218,7 +1592,8 @@ retained guard within seven shared slots` root in
 using owned entered/finished barriers. Three catalog workers, including the
 third long root, must start before the four-slot retained guard is released.
 Keep all closures, the seven-slot budget, explicit caller order and unchanged
-assertion-to-native-shard ownership; no fixed-duration sleep substitutes for
+assertion-to-native-shard ownership within that captured within-host policy
+comparison; no fixed-duration sleep substitutes for
 the barriers.
 The fixture requests only its declared seven participant slots under aggregates
 of seven, fourteen or fifteen. Verify four live source-bound leases, distinct
@@ -1416,7 +1791,17 @@ the original subset. A new legitimate test must not erase preservation checks.
    platform's regression shards execute; another platform or attempt cannot
    supply the prerequisite. Include the unit barrier, every part's provisioning,
    evidence retention and cleanup in the whole-lane elapsed time.
-   For `native-framework-shards-v4-split-intel-units`, require each platform's
+   For current implementation candidate
+   `native-framework-shards-v13-catalog-process-reservation` and historical
+   `native-framework-shards-v12-intel-service-balance` and
+   `native-framework-shards-v11-parallel-intel-ready-pool` and
+   `native-framework-shards-v10-phased-intel-component-rebalance` and
+   `native-framework-shards-v9-phased-intel-isolation` and
+   `native-framework-shards-v8-intel-catalog-isolation` and
+   `native-framework-shards-v7-resource-affinity-components` and
+   `native-framework-shards-v4-split-intel-units` and
+   `native-framework-shards-v5-root-components` and
+   `native-framework-shards-v6-stable-cost-components`, require each platform's
    actual unit jobs to finish successfully, including evidence and cleanup,
    before its own regression jobs start. Other platforms' unit jobs may finish
    later; all twenty-five successful parts still remain mandatory for completeness.
@@ -1426,26 +1811,310 @@ the original subset. A new legitimate test must not erase preservation checks.
    unions including descendants, dependencies and exclusive resources. The new
    Intel producer has no unit prerequisite of its own. Every Intel regression
    must wait for both unit jobs, not a borrowed ARM/original-unit result.
-   Require the Linux `mac-admission` coordinator to observe all three long ARM
-   body workers in the exact repository/run/attempt/head context before Intel's
-   measured critical body-0 producer dispatches under
-   `arm-regression-allocation-v6-all-critical-bodies-first`, still behind both Intel unit jobs.
-   Require `intel-retained-admission` to observe that actual worker before
-   ARM's separate short refresh dispatches, retaining its own ARM unit barrier.
-   Its historical job/artifact identifier remains, but current
-   `intel-primary-body` receipts must identify body-0, not a relabelled body-1.
-   Require `arm-refresh-admission` to observe that refresh worker before Intel
-   body-1 and body-2 become eligible, independently of Homebrew and retaining
-   both Intel units. Keep ARM genuine Homebrew initial.
-   Require the existing `intel-homebrew-admission` coordinator to select the
-   closed `intel-bodies` group and observe actual allocation of all three Intel
-   bodies before Intel Homebrew dispatch. The new T-MACADM016 regression must
-   prove available capacity admits the waiting bodies first, queued timestamp
+   Historical v12 retains v11/v10/v9/v8/v7/v6's complete dependency/exclusive-resource-connected root
+   components and places them across the existing bodies using qualified observed
+   work costs and stable exact file/root planning identities. Historical source costs are
+   explicit scheduling leads only, never current execution credit or predicted
+   concurrent lane duration. Unknown or incompatible target/runtime/closure/
+   resource costs use explicit count-based fallback with stable planning ties.
+   Actual assertion/group/configuration/execution identities remain source-bound.
+   Independent roots of one file may occupy different
+   hosts, but descendants and connected components must remain together.
+   Body file lists may overlap; exact source-bound escaped full-name selectors
+   must preserve the disjoint complete assertion union and reject ambiguity.
+   Keep within-phase scheduling policy v9 byte-identical and replay v1-v11 assignments and
+   serialized identities exactly, including v5's original count/hash placement
+   and v6's unchanged `nativePlacementCosts` table and SDK reconstruction.
+   V7's separate `nativePlacementCostsV7` overlay contains ten completed Intel
+   body-0 group leads from source `6cc595a1a12cc71a6e7fbba2ae72f3696303acea`,
+   run `41803553551`, attempt 1, Node 24.20.0 and fourteen Intel workers.
+   Qualify target/runtime/closure/resource shape before using a lead. Changed
+   source transfers no passing credit; absent v7 samples retain v6 lookup and
+   unknown or incompatible costs remain explicit count-based fallback.
+   V7's ARM-only `nativePlacementAffinities` may coassign the standalone
+   retained-identity component, minimum four slots, with the existing standalone catalog
+   component, minimum one, within the unchanged seven-slot host allocation.
+   Require matching runtime/capacity and complete closure/resource/component
+   shape; retain source qualification, nonempty bodies and explicit incompatible
+   fallback diagnostics. Preserve both independent groups and every descendant,
+   not a merged callback, dependency cycle or Intel affinity. Treat this as a
+   resource-compatible placement hypothesis, not measured overlap or projected
+   savings. No physical producer, worker allowance or exhaustion boundary changes.
+   A v7 workflow label must match the captured planner, archived SDK source and
+   all three authentic strict JSON literals: `nativePlacementCosts`,
+   `nativePlacementAffinities` and `nativePlacementCostsV7`. Reject missing,
+   altered, computed or duplicate declarations without executing captured code.
+   Historical v6 requires its original cost literal but neither v7 addition;
+   historical v1-v5 requires no cost table. Relabelling an old planner is non-passing.
+   V8 additionally authenticates `nativePlacementCostsV8` and
+   `nativePlacementIsolationV8`, retaining original v6/v7 literals. Its thirty
+   C64 Intel scheduling leads retain source `90ae1e4ae10620e12897a5f79be03b4225d2b928`,
+   run `41817138524`, attempt 1, Node 24.20.0 and fourteen-worker provenance.
+   Qualify target/runtime/capacity/closure/resources; absent v8 leads retain
+   v7/v6 lookup and incompatible or unknown costs remain explicit count fallback.
+   Only the exact qualified standalone catalog component may exclusively occupy
+   existing Intel body-0; place every other complete connected component on
+   body-1/body-2. Source, runtime, capacity, closure or resource mismatches must
+   leave ordinary partitioning, without split components or empty required
+   bodies. Preserve four-worker unit barriers and all twenty-five producers.
+   Verify genuine selected-closure Go/Python omissions on the catalog-only role
+   and retained required SDKs elsewhere, not invented tool success or absence.
+   Historical v7 replay uses `nativeResourceAffinityFrameworkShardProtocol`
+   without v8 data or isolation. Native correctness, catalog isolation service
+   and both secondary tails require fresh measurement; no predicted saving
+   establishes the strictly-under-twenty-five-minute Intel limit.
+   V9 qualifies both the complete catalog and retained-identity components for
+   sequential phases on the existing Intel body-0. Execute catalog alone first;
+   dispatch the entire retained component alone only after actual successful
+   process execution and cleanup settlement. Preserve its existing four-wide
+   children, fourteen-worker body capacity, four-worker units, all twenty-five
+   producers and every assertion. Rebalance the remaining whole components over
+   body-1/body-2 using separate authenticated C66 leads; preserve all v6/v7/v8
+   literals and historical v1-v8 placement and SDK identities.
+   Cover qualified assignment and changed source/runtime/capacity/closure/resource
+   fallback without split components, empty required bodies or fake phases.
+   Separate original phase reports and journals must retain exact source,
+   configuration and full regression context and a disjoint complete producer
+   assertion union. Cover successful phase ordering, failed execution, uncertain
+   process or cleanup settlement, prohibited later-phase dispatch, missing or
+   duplicate assertions and rejection of partial passing producer evidence.
+   SDK requirements derive from the actual combined closures, not catalog-only
+   omissions. Require producer-wide maximum-ten timing notices and truthful
+   global coordinates/terminal capsule across phases, including original failed
+   producers, without cross-clock ordering assumptions or ten notices for each
+   phase. Version-one coordinate intervals retain their explicit precision and
+   unknown states; they do not upgrade partial evidence or change historical
+   placement, SDK, phase authentication or any of the twenty causal rows.
+   These network-free owned-fixture controls remain PR-only, maintained by the
+   native-validation maintainer, with no critical promotion. The four exact new
+   roots in `test/public-readiness-native.test.mjs` are:
+   `T-PRD017 native v9 keeps catalog and retained components in qualified isolated primary phases`;
+   `T-PRD017 native v9 falls back safely and authenticates unchanged historical v8`;
+   `T-PRD017 native v9 phase originals require complete disjoint source assertions and settled causal order`;
+   `T-PRD017 native v9 primary waits for owned process settlement and blocks failed or unsafe successors`.
+   The first three require one slot each; the last requires two for its actual
+   owned child. Complete roots execute in isolated processes with owned fixture
+   paths, no shared external resources and no blanket callback concurrency.
+   Authenticate the strict `nativePlacementCostsV9` and
+   `nativePlacementPhasesV9` literals, the historical v8 alias
+   `nativeCatalogIsolationFrameworkShardProtocol`, and phase contract
+   `native-intel-primary-phases-v1`. Verify `regression-catalog` then
+   `regression-retained` through `verifyNativePhaseSettlement` and the separate
+   original report/journal, command/journal and settlement receipt, bound to
+   phase/context/command/report/command-journal identities.
+   V9/V10/V11/V12 Intel timing boundaries must pass 1,499,999ms but reject 1,500,000ms;
+   genuine v1-v8 originals retain their strict 1,200,000ms historical limit.
+   Phase isolation is a measurement candidate: observed service sums can still
+   exceed twenty-five minutes and longer primary allocation may affect secondary
+   queues. Require fresh whole-lane measurement; no local fixture result,
+   historical cost or passing phase grants a native latency pass.
+   V10 adds the source-qualified `regression-observer` third phase on the same
+   Intel primary after both earlier phases successfully settle their owned
+   processes, workers and cleanup. Move only the entire standalone observer
+   component identified by original C70 source/run/attempt and exact source,
+   closure and resource shape; preserve its one-root/one-assertion, one-slot
+   selection and absence of dependency/exclusive-resource edges. Reject changed
+   source, descendants, resources, connected components, runtime or capacity
+   without splitting a closure, emptying a body or inventing a phase.
+   The unrelated protocol-count edit must authenticate its exact new current
+   file digest while preserving the original C70 observed digest separately;
+   verify that the selected callback remains byte-identical rather than
+   relabelling changed source as an observed execution.
+   Repartition remaining whole components across the two existing secondaries.
+   Keep all twenty-five producers, fourteen-slot bodies, four-worker units and
+   within-phase scheduling unchanged. Authenticate `nativePlacementPhasesV10`
+   and `native-intel-primary-phases-v2`; historical v9 uses
+   `nativePhasedIsolationFrameworkShardProtocol`, its original v1 phase contract,
+   assignments and literals without requiring v10 additions.
+   The three new PR-only roots in `test/public-readiness-native.test.mjs` are:
+   `T-PRD017 native v10 moves only the qualified complete observer component into a settled primary phase`;
+   `T-PRD017 native v10 rejects changed observer qualification and preserves historical v9`;
+   `T-PRD017 native v10 primary settles every owned phase and blocks failed observer successors`.
+   The first two require one slot each; the last requires two for owned children.
+   The native-validation maintainer owns their network-free, process-isolated
+   fixtures; no critical promotion, shared external resources or callback
+   concurrency is introduced. Preserve original-source failure and corrected
+   local proof separately from the fresh complete local gate, Review and native
+   execution, whose current statuses remain NotRun until actual results exist.
+   Verify all three separate phase originals and their complete disjoint source
+   assertions, genuine combined Python requirement, exact settlement identities,
+   failed/uncertain predecessor rejection and absent successor dispatch.
+   Run both independent v9/v10 phase controls concurrently with their declared
+   two slots each. Bind each VM's selection writer to its existing per-mode
+   owned fixture root and verify descriptor bytes there after command settlement.
+   Never infer ownership of checkout-global selections from an earlier absence
+   check or remove another root's descriptors. Preserve all mode/failure/cleanup
+   assertions; this ownership regression extends existing PR-only roots.
+   Extend the existing bounded data-only artifact-acquisition control to admit
+   the observer report/command journals while retaining all unknown-name,
+   traversal, executable-content and byte-bound rejections. Preserve all original
+   nineteen complete causal protocol/bootstrap rows and append v10 as row twenty;
+   no historical row or required descendant may disappear. These controls supply
+   no native timing credit: the qualified move still requires fresh whole-lane
+   correctness and strict Intel under-twenty-five-minute acceptance.
+   Historical v11 replaces primary phase isolation with the authenticated
+   `native-intel-parallel-ready-pool-v1` rule and ordinary `regression` stage.
+   Verify `nativePlacementCostsV11` and `nativePlacementReadyPoolV11` against
+   captured source; reject changed current definitions, closure, resources,
+   target, runtime or capacity rather than borrowing an incompatible lead.
+   The complete catalog, retained-identity and observer components retain
+   minimum slots one/four/one and share the primary ready pool with transferred
+   whole components only through existing dependency/resource admission.
+   Preserve all twenty-five producers, fourteen-slot bodies, four-slot units,
+   complete disjoint assertion assignment and actual selected SDK requirements.
+   No new phase/journal or blanket callback concurrency is introduced.
+   The maintainer-owned PR-only extended-unit roots in
+   `test/public-readiness-native.test.mjs` are
+   `T-PRD017 native v11 pools qualified complete Intel components within unchanged resource and SDK limits`
+   and `T-PRD017 native v11 authenticates current costs and preserves historical source and fallback`.
+   Each reserves one slot, has no prerequisite or exclusive resource, and uses
+   Node-only process-isolated owned fixtures on the existing four native lanes.
+   Retain original-source failure, corrected controls, current-source/CRLF
+   qualification and genuine historical assignment/SDK replay separately from
+   whole-candidate validation. Append v11 as causal row twenty-one without
+   replacing any of the twenty historical scenarios or their descendants.
+   Preserve historical v9/v10 phase settlement and reject cross-protocol
+   relabelling. Neither historical C74 cost projections nor these controls
+   measure changed callbacks, new causal work or shared-host contention.
+   Fresh native correctness and complete physical lane timing remain required;
+   no critical-profile growth or current timing credit follows from this design.
+   V12 authenticates `nativePlacementTransfersV12` and the
+   `native-intel-service-balance-v1` rule. After qualified v11-style base
+   placement, transfer exactly six complete single-root components, with their
+   complete 123-assertion union, from existing Intel body-1 to body-2.
+   Qualify the unchanged historical cost literal and root order, current
+   inventory/callback/resource bindings, runtime, capacity, complete components
+   and destination SDK capabilities before moving any component. Incompatibility
+   must reject the entire transfer batch without partial moves or omitted cases.
+   Preserve the original v11 literals and genuine v1-v11 assignment, SDK and
+   source authentication; v11 does not require the v12 transfer declaration.
+   Changed cancellation resources and capture-admission callback cannot borrow
+   their historical leads. All seven unknown roots remain explicit count-based
+   fallback, not newly fitted C76 costs.
+   The native-validation maintainer owns the new PR-only extended-unit root
+   `T-PRD017 native v12 transfers only six qualified complete Intel components with atomic fallback`.
+   It reserves one slot, has no dependency or exclusive resource, and uses owned
+   network-free Node fixtures on all four native lanes. Cover complete disjoint
+   assignment, preserved producers/SDK envelopes, changed callback/resource
+   fallback, strict missing/duplicate/altered-literal rejection and historical
+   v11 authentication. Append the actual v12/bootstrap causal row twenty-two
+   without replacing any historical row. Keep all twenty-five producers,
+   fourteen-slot Intel bodies, four-slot units and thirteen Mac cleanup roles.
+   The bounded six-transfer diagnostic re-simulates admission after each move;
+   its fixed-C76 queue/setup assumptions and unverified producer-source preimage
+   supply neither a current duration bound nor native correctness/timing credit.
+   Current whole-candidate validation, Review and native acceptance remain
+   NotRun until their actual executions complete.
+   V13 corrects only the complete catalog root's reservation: its worker, CLI
+   and five concurrent Git readers require seven slots. Direct arithmetic and
+   sequential setup branches require fewer. Preserve the unchanged callback,
+   all 2066 unit prerequisites, 2245 pre-review outcomes and original deadlines.
+   Extend the existing PR-only capture-admission root with the real catalog
+   selection: capacity six rejects before dispatch; capacity seven admits the
+   complete reservation. Its real owned seven-slot lease must settle before
+   peer reuse. Retain every cancellation/capture-pressure/peer assertion. The
+   root now reserves seven slots, fitting the unchanged seven-slot ARM host;
+   no expensive catalog execution is needed for this small admission control.
+   The coordinator's affected gate independently includes the real catalog root.
+   Authenticate `nativePlacementReservationV13` and its exact current source,
+   callback, closure/resources and root-order binding. Catalog's new resource
+   shape has no inherited one-slot duration. Preserve prior unknowns, derive
+   additional changed-callback/resource unknowns and fit no C76/C79 costs.
+   Keep C79's complete Intel component ownership through a duration-free
+   authenticated ownership vector, before applying the unchanged six-component
+   v12 transfer; do not score the unknown catalog as free backfill capacity.
+   Any changed anchor, binding, component, resource, SDK or ownership input
+   rejects the whole current placement and retains complete safe fallback.
+   The new maintainer-owned PR-only extended-unit root
+   `T-PRD017 native v13 reserves the complete catalog without inheriting its one-slot duration or changing ownership`
+   reserves one slot, has no dependency/exclusive resource and uses network-free
+   owned Node fixtures on all four lanes. Preserve authentic v1-v12 assignment,
+   source and SDK replay, including the original min-one catalog source.
+   Append one actual v13/bootstrap causal row after all twenty-two originals.
+   All twenty-five producers, thirteen Mac cleanups, fourteen-slot Intel bodies,
+   four-slot units and the twenty-seven critical budget remain unchanged.
+   This is a resource-contract correction, not a measured hosted peak or a
+   timing cure. Fresh current-candidate local validation, Review and native
+   correctness/whole-lane timing remain NotRun; C79's 27:37 timing failure and
+   all original execution evidence remain historical and immutable.
+   The three PR-only roots in `test/public-readiness-native.test.mjs` are
+   `T-PRD017 native protocol4 retains its exact historical file and assertion assignments`,
+   `T-PRD017 native protocol5 spreads independent same-file roots and executes connected complete closures exactly once`,
+   and `T-PRD017 native protocol5 and historical4 retain source-bound observer and SDK reconstruction`.
+   The native-validation maintainer owns their network-free, process-isolated
+   source and SDK fixtures with declared synthetic dependency/resource edges.
+   They require Node and owned local files on the existing native lanes, add no
+   critical-profile assertion, and prove neither actual native overlap nor a
+   latency improvement. Four additional PR-only native placement roots cover
+   observed-cost balancing, stable ownership under unrelated source edits,
+   explicit fallback/invalidation and actual isolated v5/v6 dispatch with exact
+   report/journal union. The native-validation maintainer owns their network-free
+   Node fixtures. Their complete roots declare one slot, except the real tiny
+   execution control's two-slot prerequisite; no critical member is added.
+   The existing source-bound observer/SDK root also verifies v4/v5/v6/v7/v8/v9 replay,
+   old-source rejection and protocol relabel refusal. Fresh complete hosted
+   measurements remain required.
+   Five additional PR-only, network-free Node fixture roots owned by the
+   native-validation maintainer are:
+
+   - `T-PRD017 native v7 coassigns only qualified complete ARM affinity components`;
+   - `T-PRD017 native v7 falls back for changed affinity closures resources and components`;
+   - `T-PRD017 native v7 adopts measured Intel leads while preserving published v6 placement`;
+   - `T-PRD017 native v7 authenticates all adopted literals without relabelling historical v6`;
+   - `T-PRD018 native timing offsets retain the terminal group outside the ten longest notices`.
+
+   Three further PR-only, network-free Node roots owned by the same maintainer are:
+
+   - `T-PRD017 native v8 isolates the authentic Intel catalog and derives genuine SDK omissions`;
+   - `T-PRD017 native v8 rejects incompatible catalog isolation without splitting connected closures`;
+   - `T-PRD017 native v8 authenticates current leads and isolation without changing historical identities`.
+
+   Preserve their source-declared isolated resources and inherited aggregate
+   allocation, qualified negative cases, complete union, authentic v1-v8
+   assignments and strict-literal rejection. The original seventeen protocol
+   rows and the historical-v8 eighteenth row remain in order, followed by the
+   new current-v9 nineteenth row.
+
+   Each complete isolated root declares one slot, no prerequisites and no shared
+   exclusive resources. They exercise planner/literal/timing contracts without
+   executing original heavy roots. No root enters critical27; both critical
+   root/assertion caps remain 27. Current new-source local, Review and native
+   results remain NotRun.
+   Under `arm-regression-allocation-v10-intel-primary-first`, require Intel
+   primary/body-0 and existing `intel-retained-admission` to become eligible
+   after both successful Intel unit jobs without waiting for ARM bodies,
+   refresh or future foreign units. Gate only the existing `native-mi`
+   secondary body-1/body-2 matrix on that observer's actual primary allocation,
+   never primary completion. Do not rely on provider matrix allocation order.
+   T-MACADM018 covers failed/missing own-unit prerequisites and independent
+   primary and primary-allocated secondary requests despite queued ARM work,
+   plus preserved opportunistic-work priority.
+   It is PR-only, Node-only and network-free; the native-validation maintainer
+   owns its isolated complete root and synthetic read-only metadata, with no
+   shared resources, new capacity or critical-profile membership.
+   Require the Linux `mac-admission` coordinator's `arm-refresh-ready` group to
+   admit the short mandatory ARM refresh after the first actual body allocation
+   on each currently-ready architecture. Preserve its own complete ARM unit
+   barrier; remove the coordination-only Intel-primary/all-ARM-body chain.
+   A foreign architecture with missing, queued or incomplete units cannot
+   reserve future capacity. Reevaluate readiness from complete same-attempt
+   metadata. `intel-retained-admission` observes body-0 to release only Intel
+   secondaries and for completeness, not to gate ARM refresh. Its historical
+   job/artifact identifier remains; `intel-primary-body` receipts must identify body-0,
+   not a relabelled body-1.
+   Require `arm-refresh-admission` to observe that refresh worker for producer
+   completeness without gating independent Intel critical bodies. Keep ARM
+   genuine Homebrew initial.
+   Require the existing `intel-homebrew-admission` and `intel-admission`
+   coordinators to select `intel-auxiliaries-ready`: after both own Intel units
+   succeed, observe all three actual body allocations on each currently-ready
+   architecture before requesting Intel Homebrew or short refresh. Preserve
+   T-MACADM016's historical Intel-only group contract. Current ready-critical
+   controls must prove waiting ready ARM bodies receive priority too, queued timestamp
    placeholders do not release Homebrew, and all bodies still running suffice:
    no body or Homebrew completion dependency, added VM, or dependency cycle.
-   Independently require `intel-admission` to observe those body allocations
-   before short Intel refresh dispatches. No coordinator may wait for
-   a command or producer completion, create an observed-producer dependency
+   No allocation gate may wait for
+   its observed command or producer completion, create an observed-producer dependency
    cycle, or hold a waiting Mac VM. Require the closed helper group selection,
    exact new job identities and all five coordinator results in completeness.
    Reject queued placeholder timestamps, duplicates, mismatched
@@ -1453,16 +2122,48 @@ the original subset. A new legitimate test must not erase preservation checks.
    without allocation. Admission must not wait for allocated ARM parts to
    complete, consume a waiting Mac VM, add a native part or supply passing
    assertion credit. Exercise bounded timeout/cancellation without a passing
-   fallback. Preserve ARM's own unit barrier, both Intel units and all
-   twenty-five native parts and worker limits; verify real overlap and queues
+   fallback. V10 retains v9's fairness groups, helper algorithm and receipt
+   semantics and v7/v8/v9's twenty-minute allocation
+   observation budget, five-second polling and twenty-two-minute coordinator
+   watchdogs. Keep historical v1-v6's original ten-minute watchdogs authentic.
+   The PR-only T-MACADM017 regression uses a private injected clock and synthetic
+   attempt-scoped metadata to reproduce allocation after eleven minutes, prove
+   continued observation, and retain explicit twenty-minute timeout and terminal
+   cancellation failures. It has no network, ambient credentials, mutable module
+   state or shared resources; the maintainer owns its complete sequential root
+   on the existing native unit lanes. It does not expand the critical profile.
+   Neither longer observation nor allocation success satisfies the unchanged
+   whole-lane delivery limits; queued time inside a running lane still counts.
+   Preserve ARM's own unit barrier, both Intel units and all
+   twenty-five native parts, thirty-four expanded jobs and all five Linux
+   coordinators. Keep seven ARM and fourteen Intel regression workers and four
+   on each Intel unit host; verify real overlap and queues
    again on the next frozen candidate. Verify the split ARM refresh and Intel
    primary body cleanup receipts bind their actual `GITHUB_JOB` identities,
    alongside the existing split Intel refresh/Homebrew bindings. Reject stale
    aliases. Preserve v4's original `intel-retained-body`/body-1 receipt semantics;
    retain v5's original Homebrew-first dependencies only as v5 and reject a
-   label-only or hybrid v5-to-v6 substitution. Replay the exact v1-v5
-   resource graphs and unmarked historical
-   native graphs without borrowing new dependency or origin proof.
+   label-only or hybrid v5-to-v6 substitution. Reject v7/v8/v9/v10 graphs under
+   another protocol's label, including v9/v10 relabelling in either direction.
+   Replay the exact v1-v9 resource graphs, including historical
+   `arm-regression-allocation-v9-ready-critical-fairness` with simultaneous
+   own-unit-ready Intel critical requests, and unmarked historical native graphs
+   without borrowing new dependency or origin proof.
+   T-MACADM019 through T-MACADM022 are PR-only Node-only, network-free
+   maintainer-owned roots using synthetic attempt-scoped metadata and owned
+   source fixtures. They prove ready-body priority versus future-unit blocking,
+   ARM refresh's bounded fair turn, authentic historical graph rejection and
+   changing readiness/allocation observations with bounded failures. Each
+   complete isolated root declares one slot and no shared resources; neither
+   critical cap grows.
+   T-MACADM023 and T-MACADM024 in
+   `test/macos-runner-admission.unit.test.mjs` add PR-only, Node-only,
+   network-free maintainer-owned controls for actual primary allocation and
+   secondary eligibility, unfinished primary/future-unit independence, authentic
+   published v9 restoration and v9/v10 label rejection. Their complete isolated
+   roots declare one slot, no prerequisites and no shared exclusive resources.
+   Preserve the queued-placeholder, completion-wait, wrong-group and cycle
+   negatives; no new critical member, producer or coordinator is introduced.
    Configured priority is only a lead; provider allocation gaps remain in the
    measured whole-lane span and cannot be converted into a passing estimate.
    Keep `native-framework-shards-v1` global-barrier and
@@ -1488,8 +2189,9 @@ the original subset. A new legitimate test must not erase preservation checks.
    Controlled negatives must reject six-of-seven Intel parts, either missing,
    failed, stale or wrong-attempt unit origin, a regression starting before
    either unit cleanup completes, duplicated canonical work and borrowed prefix
-   receipts. Genuine hosted whole-lane timing remains required; the additional
-   standard Intel VM fills the fifth initial Mac slot, not a speedup claim.
+   receipts. Genuine hosted whole-lane timing remains required. The separate
+   Intel unit VM supplies actual capacity, not proof of the current global Mac
+   quota or a latency improvement.
    Exercise actual Go, Python, shell and Homebrew surfaces in their assigned
    lanes. Install tests operate only in fixture homes; fork jobs have no publish
    capability. Required authentic-verifier setup supplies independently pinned
@@ -1966,8 +2668,8 @@ certificate and transparency positives/negatives on the same statement bytes.
 
 Source-selected bootstrap v6 requires acquisition only for closures consuming
 the authentic T-PRD041 root or another declared crypto/verifier prerequisite.
-Current owners are Linux/Windows framework `body-0` and both Mac framework
-`body-2`; all other 21 current PR roles omit the unused setup. Extend existing
+Derive the four platform owners from the frozen source plan instead of a fixed
+body-number affinity; all other 21 current PR roles omit the unused setup. Extend existing
 T-PRD015 controlled bootstrap checks to execute the actual bootstrap function
 with side-effect callbacks for all 25 roles, asserting four acquisitions and
 21 genuine absences of calls, directories, reports, facts and exported inputs.

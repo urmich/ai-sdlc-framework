@@ -217,7 +217,8 @@ export async function selectMaintenanceSource(store, input) {
     'receipts', `${receiptId}.json`));
   requireThat(receipt.sessionId === sessionId &&
     ['userPromptSubmitted', 'ask_user'].includes(receipt.source) &&
-    receipt.inputDigest === digest(input.input),
+    receipt.inputDigest === digest(input.input) &&
+    receipt.captureProvenance === 'supported-input-hook',
   'PROVENANCE', 'Maintenance source selection requires the matching captured user input');
   const sourceRoot = await canonicalPath(input.sourceRoot);
   const pkg = await readJson(path.join(sourceRoot, 'package.json'));

@@ -154,9 +154,34 @@ function failureDiagnostic(error) {
   } catch (problem) {
     if (!(problem instanceof SdlcError) || problem.code !== 'UNSAFE') return { original, diagnostic: original };
     const identity = { sha256: digest(original.message), bytes: Buffer.byteLength(original.message) };
+    const codes = new Set();
+    const owned = new Map();
+    const modes = ['natural', 'root-exit', 'failed', 'stalled', 'reported-stopped', 'retention-failed'];
+    const phases = ['directory', 'writer-provenance', 'peer-provenance', 'natural-settlement',
+      'cancellation-settlement', 'cancellation-watchdog', 'cancellation-return', 'cleanup-lifetime',
+      'retention-result', 'cancellation-report', 'retained-report', 'stdout-retention',
+      'root-exit-result', 'controller-dispatch', 'controller-stop',
+      'writer-drain', 'root-close', 'final-command-settlement', 'cleaned'];
+    let cause = error;
+    for (let depth = 0; depth < 3 && cause && typeof cause === 'object'; depth++, cause = cause.cause) {
+      if (['ERR_TEST_FAILURE', 'ERR_ASSERTION'].includes(cause.code)) codes.add(cause.code);
+      const rows = [cause.ownedSettlementScenario];
+      if (cause.operator === 'deepStrictEqual' && Array.isArray(cause.expected) && !cause.expected.length &&
+          Array.isArray(cause.actual) && cause.actual.length <= modes.length) rows.push(...cause.actual);
+      for (const row of rows) {
+        if (row && modes.includes(row.mode) && !owned.has(row.mode) && phases.includes(row.phase) &&
+            Number.isFinite(row.elapsedMs) && row.elapsedMs >= 0 && row.elapsedMs <= 3600000) {
+          owned.set(row.mode, `${row.mode}/${row.phase}/${Math.round(row.elapsedMs)}ms`);
+        }
+      }
+    }
+    const type = ['testCodeFailure', 'testTimeoutFailure', 'testAborted', 'cancelledByParent', 'subtestsFailed']
+      .includes(original.failureType) ? original.failureType : 'unknown';
+    const facts = `codes=${[...codes].join(',') || 'unknown'} type=${type}` +
+      (owned.size ? ` owned=${[...owned.values()].join(',')}` : '');
     return { original, changed: true, rejection: rejectionCause(problem),
       diagnostic: { ...original,
-        message: 'Failure diagnostic text was rejected; its original identity is preserved.',
+        message: `Failure diagnostic text was rejected; its original identity is preserved. Failure facts: ${facts}.`,
         originalMessage: identity, retention: { status: 'Rejected', ...rejectionCause(problem) } } };
   }
 }
@@ -546,7 +571,13 @@ try {
   };
   const pool = await runValidationReadyPool(groups, {
     concurrency: options.concurrency, capacity: options.executionCapacity ?? capacity,
-    execute: executeGroup, signal: cancellation.signal,
+    execute: async group => {
+      const status = await executeGroup(group);
+      requireThat(!(await readTestBudget()).admissionStopped,
+        'BUDGET', 'Test admission stopped after unsettled owned resources');
+      return status;
+    },
+    signal: cancellation.signal,
   });
   if (pool.notRun.length) process.exitCode ||= 2;
   if (report && summaries.length) report.summary = {

@@ -52,7 +52,7 @@ import { deriveNativeComponentSpecification, nativeComponentSelection,
   projectNativeComponentEvidence, replayNativeComponentEvidence } from '../scripts/native-components.mjs';
 import { compileValidationSourceInventory } from '../scripts/validation-inventory.mjs';
 import { nativeBootstrapProtocol, nativeBodyBootstrapProtocol, nativeUnitBootstrapProtocol } from '../scripts/toolchain-baseline.mjs';
-import { runProtocolPool, reconcileProtocolRows } from './readiness-protocol-pool.mjs';
+import { runProtocolPool, reconcileProtocolRows, validateProtocolExecution } from './readiness-protocol-pool.mjs';
 import { protocolPairs } from './readiness-protocol-row.mjs';
 
 test('T-PRD021 source-bound role bootstrap preserves all producer origins and thirteen independent Mac cleanups', async t => {
@@ -599,8 +599,8 @@ test('T-PRD020 RC66 CI01 platform timing limits preserve inclusive strict and in
   const epoch = Date.parse('2026-10-18T10:00:00.000Z');
   const at = milliseconds => new Date(epoch + milliseconds).toISOString();
   const limits = [
-    ['linux-x64', 460000, true], ['windows-x64', 665000, true],
-    ['macos-arm64', 627000, true], ['macos-x64', 1200000, false],
+    ['linux-x64', 900000, true], ['windows-x64', 900000, true],
+    ['macos-arm64', 900000, true], ['macos-x64', 1500000, false],
   ];
   const partsFor = durationMs => nativePrPartsForProtocol(nativeFrameworkShardProtocol)
     .map((part, index) => ({ ...part, job: {
@@ -617,8 +617,21 @@ test('T-PRD020 RC66 CI01 platform timing limits preserve inclusive strict and in
       assert.ok(lane.parts.every(part => part.providerQueueMs === 1000));
     }
   }
+  const historical = 'native-framework-shards-v8-intel-catalog-isolation';
+  for (const durationMs of [0, 1, 1199999, 1200000, 1200001, 1499999]) {
+    const historicalParts = nativePrPartsForProtocol(historical).map((part, index) => ({ ...part, job: {
+      id: index + 1, created_at: at(-1000), started_at: at(0), completed_at: at(durationMs),
+    } }));
+    const lane = nativeLaneTimings(historicalParts, { shardProtocol: historical })
+      .find(lane => lane.target === 'macos-x64');
+    assert.equal(lane.maximumMs, 1200000);
+    assert.equal(lane.maximumInclusive, false);
+    assert.equal(lane.withinBudget, durationMs < 1200000,
+      'The current v9 target cannot retroactively pass a historical v8 timing miss');
+  }
   assert.equal(nativeLaneTimings(partsFor(1185000)).find(lane => lane.target === 'macos-x64').withinBudget, true);
-  assert.equal(nativeLaneTimings(partsFor(500000)).find(lane => lane.target === 'linux-x64').withinBudget, false);
+  assert.equal(nativeLaneTimings(partsFor(500000)).find(lane => lane.target === 'linux-x64').withinBudget, true);
+  assert.equal(nativeLaneTimings(partsFor(900001)).find(lane => lane.target === 'linux-x64').withinBudget, false);
   for (const mutate of [
     parts => parts.pop(),
     parts => { parts[1] = parts[0]; },
@@ -634,7 +647,7 @@ test('T-PRD020 RC66 CI01 platform timing limits preserve inclusive strict and in
   }
 });
 
-test('T-PRD020 RC66 CI01 current twenty-five-part observer admits Intel 1185s and blocks Linux 500s', async t => {
+test('T-PRD020 RC66 CI01 current twenty-five-part observer admits Intel 1185s and blocks Linux over fifteen minutes', async t => {
   const f = await observerApiFixture(t, { frameworkShards: true, nodeArtifactReader: true, ambient: false });
   const intel = f.jobs.find(job => job.name === 'native-macos-x64-homebrew');
   const start = Date.parse(intel.started_at);
@@ -651,24 +664,26 @@ test('T-PRD020 RC66 CI01 current twenty-five-part observer admits Intel 1185s an
     completeReportRef: 'https://github.com/urmich/ai-sdlc-framework/actions/runs/999/attempts/1',
   });
   assert.match(summary, /Within budget/u);
-  assert.match(summary, /strictly below 1200000ms/u);
+  assert.match(summary, /strictly below 1500000ms/u);
   assert.doesNotMatch(summary, /Under 15m/u);
   intel.steps.find(step => step.name === 'Remove owned short Homebrew prefix').conclusion = 'skipped';
   assert.equal(verdict(await host.snapshot()).status, 'NotRun');
   intel.steps.find(step => step.name === 'Remove owned short Homebrew prefix').conclusion = 'success';
   const linux = f.jobs.find(job => job.name === `native-${f.lanes.get('linux-x64').role}`);
-  linux.completed_at = new Date(start + 500000).toISOString();
+  const linuxStart = Math.min(...f.jobs.filter(job => job.name.startsWith('native-linux-x64-'))
+    .map(job => Date.parse(job.started_at)));
+  linux.completed_at = new Date(linuxStart + 900001).toISOString();
   const blocked = verdict(await host.snapshot());
   assert.equal(blocked.status, 'NotRun');
   assert.ok(blocked.blockers.some(message => message.includes('linux-x64') &&
-    message.includes('at most 460000ms')), JSON.stringify(blocked.blockers));
+    message.includes('at most 900000ms')), JSON.stringify(blocked.blockers));
   await reconcilePrReadiness(host, policy);
   assert.ok(f.writes.some(row => row.context === 'framework/validation' && row.state === 'pending'));
 });
 
 test('T-PRD021 versioned twenty-five twenty-four and twenty-part originals require exact closures cleanup and protected SDK replay', async t => {
   const result = await runProtocolPool(t);
-  assert.equal(result.rows.length, 17);
+  assert.equal(result.rows.length, protocolPairs.length);
   t.diagnostic(JSON.stringify({ protocolPool: result }));
 });
 
@@ -681,9 +696,45 @@ test('T-PRD021 protocol row outcomes reject missing duplicate unknown incomplete
       status: 'Passed', cleaned: true, pid: 100 + index, slot,
       lease: { pid: 100 + index, slot, minimumSlots: 1,
         startedAt: '2026-10-22T10:00:00.000Z', finishedAt: null },
+      startedAt: '2026-10-22T10:00:00.500Z',
       finishedAt: '2026-10-22T10:00:01.000Z' };
   });
   assert.deepEqual(reconcileProtocolRows(rows, [...outcomes].reverse(), sourceDigest), outcomes);
+  for (const offset of [-60000, 60000]) {
+    const independent = outcomes.map(outcome => ({ ...outcome,
+      startedAt: new Date(Date.parse(outcome.startedAt) + offset).toISOString(),
+      finishedAt: new Date(Date.parse(outcome.finishedAt) + offset).toISOString() }));
+    assert.deepEqual(reconcileProtocolRows(rows, independent, sourceDigest), independent);
+  }
+  const outcome = outcomes[0];
+  const report = { complete: true, exitCode: 0, pid: outcome.pid,
+    cleanup: { rootExitObserved: true }, startedAt: '2026-10-22T11:00:00.000Z',
+    finishedAt: '2026-10-22T11:00:02.000Z' };
+  const leases = [{ ...outcome.lease, finishedAt: '2026-10-22T10:00:02.000Z' }];
+  const observedAt = '2026-10-22T11:00:03.000Z';
+  validateProtocolExecution(report, outcome, leases, observedAt);
+  for (const mutate of [
+    value => { value.report.complete = false; },
+    value => { value.report.exitCode = 1; },
+    value => { value.report.cleanup.rootExitObserved = false; },
+    value => { value.report.pid++; },
+    value => { value.report.startedAt = observedAt; },
+    value => { value.report.finishedAt = 'not-a-time'; },
+    value => { value.observedAt = report.startedAt; },
+    value => { value.leases.length = 0; },
+    value => { value.leases.push(value.leases[0]); },
+    value => { value.leases[0].pid++; },
+    value => { value.leases[0].slot = 'foreign'; },
+    value => { value.leases[0].minimumSlots = 2; },
+    value => { value.leases[0].startedAt = report.startedAt; },
+    value => { value.leases[0].finishedAt = null; },
+    value => { value.leases[0].finishedAt = 'not-a-time'; },
+    value => { value.leases[0].finishedAt = '2026-10-22T09:59:59.000Z'; },
+  ]) {
+    const changed = structuredClone({ report, leases, observedAt });
+    mutate(changed);
+    assert.throws(() => validateProtocolExecution(changed.report, outcome, changed.leases, changed.observedAt));
+  }
   for (const mutate of [
     values => values.pop(),
     values => { values[1] = values[0]; },
@@ -696,6 +747,9 @@ test('T-PRD021 protocol row outcomes reject missing duplicate unknown incomplete
     values => { values[1].lease.pid++; },
     values => { values[1].lease.slot = values[0].slot; },
     values => { values[1].lease.finishedAt = values[1].finishedAt; },
+    values => { values[1].lease.startedAt = 'incomplete'; },
+    values => { values[1].startedAt = 'incomplete'; },
+    values => { values[1].startedAt = '2026-10-22T10:00:02.000Z'; },
     values => { values[1].finishedAt = 'incomplete'; },
   ]) {
     const changed = structuredClone(outcomes);
@@ -715,7 +769,7 @@ test('T-PRD021 protocol row pool drains failed children stops dispatch and respe
     /owned checkout-local scratch directory/u);
   const budgetUrl = new URL('../scripts/test-budget.mjs', import.meta.url).href;
   const diagnosticsUrl = new URL('../scripts/validation-tools.mjs', import.meta.url).href;
-  const workerSource = fail => `
+  const workerSource = (fail, clockOffset = 0) => `
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
@@ -726,6 +780,8 @@ const [indexText, sourceDigest, scratch, groupId, pairText] = process.argv.slice
 const index = Number(indexText);
 const pair = JSON.parse(pairText);
 const allocation = await acquireTestWorker(1, { groupId });
+const now = () => new Date(Date.now() + ${clockOffset}).toISOString();
+const startedAt = now();
 const parent = path.dirname(scratch);
 const wait = async predicate => {
   const deadline = performance.now() + 10000;
@@ -753,7 +809,7 @@ try {
     const [lease] = await readTestGroupProcesses(groupId);
     console.log(JSON.stringify({ index, pair, sourceDigest, groupId, status: 'Passed',
       cleaned: true, pid: process.pid, slot: allocation.slot, lease,
-      finishedAt: new Date().toISOString() }));
+      startedAt, finishedAt: now() }));
   }
 } finally { allocation.close(); }
 `;
@@ -794,6 +850,18 @@ try {
     assert.ok(allocation.peakResidentWorkers <= allocation.residentLimit);
     assert.ok(allocation.peakProducers <= allocation.producerLimit);
     assert.ok(allocation.peakControls <= allocation.controlLimit);
+  }
+  for (const offset of [-60000, 60000]) {
+    const clockWorker = path.join(root, `clock-${offset}.mjs`);
+    await fs.writeFile(clockWorker, workerSource(false, offset));
+    const independent = await runProtocolPool(t, { workers: 1, worker: pathToFileURL(clockWorker),
+      rows: protocolPairs.slice(0, 2) });
+    assert.equal(independent.rows.length, 2);
+    for (const record of independent.reports) {
+      assert.equal(record.leases.length, 1);
+      assert.equal(record.leases[0].slot, JSON.parse(record.stdout).slot);
+      assert.equal(typeof record.leases[0].finishedAt, 'string');
+    }
   }
   t.diagnostic(JSON.stringify({ protocolControl: { failure: failure.protocolPool, serial } }));
 });

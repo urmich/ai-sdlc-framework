@@ -1,8 +1,41 @@
 # Integrations
 
+Integration support connects the framework's development and delivery workflow
+with **GitHub** and **Azure DevOps**, including **GitHub Actions** and
+**Azure Pipelines**. The implemented provider scopes differ:
+
+| Integration | Implemented scope | Guide |
+| --- | --- | --- |
+| GitHub | Dedicated connection/transport, repository and execution adapters, trusted-host/Store wiring, and verification of PR/check/artifact results. | [GitHub trusted-host integration](github-adapters.md) |
+| Azure DevOps | Built-in build identity and summary-link adapter, with provider-neutral monitoring, PR/check records and evidence consumers. | [Azure DevOps reference adapter](provider-adapters.md#azure-devops-reference-adapter) |
+
 Provider tools acquire facts and execute separately authorized operations.
 The offline framework checks identities and retains evidence; it is not a
 network SDK or a replacement for provider access controls.
+
+## Pipeline integration
+
+The operation, monitoring and evidence contracts support **GitHub Actions**
+and **Azure Pipelines**:
+
+- Prepare and record separately authorized pipeline operations; reconcile
+  uncertain dispatches through provider reads rather than blind retries.
+- Bind results to the actual workflow/build definition, execution, source and
+  configuration. GitHub run attempts remain distinct; Azure build observations
+  use the built-in adapter's declared attempt capability.
+- Associate PR checks with the observed execution and retain matching
+  execution/artifact evidence rather than trusting a green job label.
+- Monitor existing or newly reported runs every 60 seconds when a running host
+  supplies an actual scheduler and authorized provider-read tools.
+
+This is implemented integration behavior, not an automatic network client:
+the caller's authorized host tools queue/read pipelines and acquire results.
+Installing the framework does not create workflows, configure pipeline
+credentials or grant dispatch/deployment authority. The new generic evidence
+and coverage interfaces are in the **0.5.0 candidate**, not published 0.4.0;
+implemented support does not establish current live-provider acceptance.
+
+## Guides
 
 - [GitHub trusted-host integration](github-adapters.md): retained facade,
   trusted Store wiring, exact run/attempt and artifact identities.

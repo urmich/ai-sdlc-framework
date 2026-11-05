@@ -8,7 +8,8 @@ import { promisify } from 'node:util';
 import { artifact, fixture, coding, completeReview, grant, grantPush, observeFixtureRepository, pushAction,
   orient, registerFixtureProviderRequest, registerFixtureProviderResult,
   testDefinitions, cli } from './helpers.mjs';
-import { startCycle, recordArtifact, recordTest } from '../src/validation.mjs';
+import { startCycle, recordArtifact } from '../src/validation.mjs';
+import { recordFixtureTest as recordTest } from './helpers.mjs';
 import { nextAction, resume } from '../src/recovery.mjs';
 import { readJson, writeJson } from '../src/files.mjs';
 import { currentCycle } from '../src/authority.mjs';
@@ -302,7 +303,7 @@ test('T-01 captured development request permits repository bootstrap outside Git
 
 test('T-16/T-19 interrupted result projection and corrupt checkpoint recover without repeating tests', async t => {
   const f = await coding(await fixture(t));
-  const { cycle } = await startCycle(f.store, { workItemId: f.workItemId, tests: testDefinitions(), configDigest: 'v1', cause: 'first validation' });
+  const { cycle } = await startCycle(f.store, { workItemId: f.workItemId, tests: testDefinitions(), configDigest: digest('v1'), cause: 'first validation' });
   f.store.fault = async stage => { if (stage === 'record:test-evidence') throw new Error('crash after durable evidence'); };
   await assert.rejects(recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id, testId: 'T-unit', status: 'Passed',
     expectedMet: true, evidenceRef: 'fixture:units-complete', owner: 'agent', host: 'local' }), /crash after durable evidence/);
@@ -319,7 +320,7 @@ test('T-16/T-19 interrupted result projection and corrupt checkpoint recover wit
 test('T-16 evidence sequence remains above pruned current-cycle high-water', async t => {
   const f = await coding(await fixture(t));
   const { cycle } = await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'evidence sequence recovery' });
+    configDigest: digest('v1'), cause: 'evidence sequence recovery' });
   await f.store.transaction(f.workItemId, tx => {
     const current = tx.get(cycle.id);
     current.lastEvidenceSequence = 5;
@@ -341,12 +342,12 @@ test('T-16 evidence sequence remains above pruned current-cycle high-water', asy
 test('T-16 interrupted terminal deployment repairs the active cycle projection', async t => {
   const f = await coding(await fixture(t));
   await writeJson(path.join(f.repo, '.sdlc/config.json'), { defaultBranch: 'refs/heads/main', environments: {
-    DEV: { target: 'dev-target', configDigest: 'v1', allowedStages: ['DEV'] },
+    DEV: { target: 'dev-target', configDigest: digest('v1'), allowedStages: ['DEV'] },
   } });
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Commit deployment recovery candidate');
   const repositoryObservation = await observeFixtureRepository(f);
-  const { cycle } = await startCycle(f.store, { workItemId: f.workItemId, tests: testDefinitions(), configDigest: 'v1', cause: 'deployment recovery' });
+  const { cycle } = await startCycle(f.store, { workItemId: f.workItemId, tests: testDefinitions(), configDigest: digest('v1'), cause: 'deployment recovery' });
   for (const testId of ['T-unit', 'T-integration']) {
     await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id, testId,
       status: 'Passed', expectedMet: true, evidenceRef: `fixture:${testId}`, owner: 'agent', host: 'local' });
@@ -374,7 +375,7 @@ test('T-16 interrupted terminal deployment repairs the active cycle projection',
   const artifactCycle = currentCycle(artifactState.records, artifactState.checkpoint);
   assert.equal(artifactState.records.find(record => record.id === artifactCycle.artifacts.DEV).artifactId, 'artifact-dev');
   const action = { class: 'deploy', repositoryId: 'primary', environment: 'DEV', target: 'dev-target',
-    configDigest: 'v1', stages: ['DEV'], artifactId: 'artifact-dev',
+    configDigest: digest('v1'), stages: ['DEV'], artifactId: 'artifact-dev',
     artifactRef: artifact.artifactRef, artifactSha256: artifact.artifactSha256,
     sourceRevision: artifact.sourceRevision, monitorCapability: true };
   const request = { toolName: 'fixture_deploy', toolArgs: { target: 'dev-target' }, cwd: f.repo };
@@ -409,23 +410,23 @@ test('T-20 prepared operations cannot mask a differently classified environment'
   await writeJson(path.join(f.repo, '.sdlc/config.json'), {
     defaultBranch: 'refs/heads/main',
     environments: {
-      DEV: { target: 'dev-target', configDigest: 'v1', allowedStages: ['DEV'] },
-      PROD: { target: 'prod-target', configDigest: 'v1', allowedStages: ['PROD'] },
+      DEV: { target: 'dev-target', configDigest: digest('v1'), allowedStages: ['DEV'] },
+      PROD: { target: 'prod-target', configDigest: digest('v1'), allowedStages: ['PROD'] },
     },
     toolAdapters: [
       { toolName: 'fixture_deploy', match: { slot: 'prod' },
         action: { class: 'deploy', environment: 'PROD', target: 'prod-target',
-          configDigest: 'v1', stages: ['PROD'], monitorCapability: true } },
+          configDigest: digest('v1'), stages: ['PROD'], monitorCapability: true } },
       { toolName: 'fixture_scoped_build', match: { item: 'excluded' },
         action: { class: 'build', environment: 'DEV', target: 'dev-target',
-          configDigest: 'v1', stages: ['DEV'], monitorCapability: true,
+          configDigest: digest('v1'), stages: ['DEV'], monitorCapability: true,
           outOfScope: true, itemId: 'excluded-item' } },
     ],
   });
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Commit classified deployment candidate');
   const repositoryObservation = await observeFixtureRepository(f);
-  const { cycle } = await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'v1', cause: 'classifier mismatch' });
+  const { cycle } = await startCycle(f.store, { workItemId: f.workItemId, configDigest: digest('v1'), cause: 'classifier mismatch' });
   for (const testId of ['T-unit', 'T-integration']) {
     await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id, testId,
       status: 'Passed', expectedMet: true, evidenceRef: `fixture:${testId}`, owner: 'agent', host: 'local' });
@@ -447,7 +448,7 @@ test('T-20 prepared operations cannot mask a differently classified environment'
   const request = { toolName: 'fixture_deploy', toolArgs: { slot: 'prod' }, cwd: f.repo };
   const { operation } = await prepareOperation(f.store, { workItemId: f.workItemId, sessionId: f.sessionId,
     action: { class: 'deploy', repositoryId: 'primary', environment: 'DEV', target: 'dev-target',
-      configDigest: 'v1', stages: ['DEV'], artifactId: 'artifact-dev',
+      configDigest: digest('v1'), stages: ['DEV'], artifactId: 'artifact-dev',
       artifactRef: artifact.artifactRef, artifactSha256: artifact.artifactSha256,
       sourceRevision: artifact.sourceRevision, monitorCapability: true },
     request, correlationKey: 'masked-environment', intent: 'Attempt to mask a PROD classification as DEV' });
@@ -459,7 +460,7 @@ test('T-20 prepared operations cannot mask a differently classified environment'
   const scopedRequest = { toolName: 'fixture_scoped_build', toolArgs: { item: 'excluded' }, cwd: f.repo };
   const scoped = await prepareOperation(f.store, { workItemId: f.workItemId, sessionId: f.sessionId,
     action: { class: 'build', repositoryId: 'primary', environment: 'DEV', target: 'dev-target',
-      configDigest: 'v1', stages: ['DEV'], artifactId: 'build-output',
+      configDigest: digest('v1'), stages: ['DEV'], artifactId: 'build-output',
       provider: 'fixture', pipeline: 'fixture-build',
       sourceRevision: artifact.sourceRevision, monitorCapability: true },
     request: scopedRequest, correlationKey: 'masked-scope', intent: 'Attempt to discard independently classified out-of-scope metadata' });
@@ -613,7 +614,7 @@ test('T-17 once-only grants reserve one operation; revoked grants cannot dispatc
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Commit candidate before push authorization');
   const repositoryObservation = await observeFixtureRepository(f);
-  const cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'v1', cause: 'once-only push' })).cycle;
+  const cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: digest('v1'), cause: 'once-only push' })).cycle;
   for (const testId of ['T-unit', 'T-integration']) await recordTest(f.store, { workItemId: f.workItemId,
     cycleId: cycle.id, testId, status: 'Passed', expectedMet: true,
     evidenceRef: `fixture:${testId}`, owner: 'agent', host: 'local' });
@@ -650,7 +651,7 @@ test('T-22 documented hook payloads capture receipts and invalidate only their o
 });
 test('T-29 Test Plan edits automatically derive a new canonical validation cycle', async t => {
   const f = await coding(await fixture(t));
-  const first = await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'v1', cause: 'initial plan' });
+  const first = await startCycle(f.store, { workItemId: f.workItemId, configDigest: digest('v1'), cause: 'initial plan' });
   await orient(f);
   const plan = path.join(f.repo, 'docs/test-plan.md');
   const original = await fs.readFile(plan, 'utf8');
@@ -675,7 +676,7 @@ test('T-29 Test Plan edits automatically derive a new canonical validation cycle
 test('T-30 failed candidate reconciliation keeps the recovery barrier active', async t => {
   const f = await coding(await fixture(t));
   await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'recovery barrier through reconciliation' });
+    configDigest: digest('v1'), cause: 'recovery barrier through reconciliation' });
   const plan = path.join(f.repo, 'docs/test-plan.md');
   const original = await fs.readFile(plan, 'utf8');
   await fs.writeFile(plan, '# Invalid plan without tests\n');
@@ -694,7 +695,7 @@ test('T-18/T-20 one exact pre-tool dispatch binds once and a lost post-tool hand
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Commit exact push candidate');
   const repositoryObservation = await observeFixtureRepository(f);
-  const cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'v1', cause: 'exact push' })).cycle;
+  const cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: digest('v1'), cause: 'exact push' })).cycle;
   for (const testId of ['T-unit', 'T-integration']) await recordTest(f.store, { workItemId: f.workItemId,
     cycleId: cycle.id, testId, status: 'Passed', expectedMet: true,
     evidenceRef: `fixture:${testId}`, owner: 'agent', host: 'local' });
@@ -727,7 +728,7 @@ test('T-18 completed operations retire beyond the unresolved limit and archived 
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Commit repeated push candidate');
   const repositoryObservation = await observeFixtureRepository(f);
-  const cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'v1', cause: 'repeated pushes' })).cycle;
+  const cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: digest('v1'), cause: 'repeated pushes' })).cycle;
   for (const testId of ['T-unit', 'T-integration']) await recordTest(f.store, { workItemId: f.workItemId,
     cycleId: cycle.id, testId, status: 'Passed', expectedMet: true,
     evidenceRef: `fixture:${testId}`, owner: 'agent', host: 'local' });

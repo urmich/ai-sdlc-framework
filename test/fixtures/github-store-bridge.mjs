@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { coding, fixture, grant, orient } from '../helpers.mjs';
+import { coding, fixture, grant, orient, recordFixtureTest as recordTest } from '../helpers.mjs';
 import { Store } from '../../src/store.mjs';
 import { digest, requireThat } from '../../src/core.mjs';
-import { candidateContentDigest, candidateSnapshot, recordArtifact, recordTest, startCycle } from '../../src/validation.mjs';
+import { candidateContentDigest, candidateSnapshot, recordArtifact, startCycle } from '../../src/validation.mjs';
 import { loadConfig, resolveTestSpecification } from '../../src/artifacts.mjs';
 import { createGitHubConnection } from '../../src/github/connection.mjs';
 import { createGitHubTransport, requireGitHubCapture } from '../../src/github/transport.mjs';
@@ -20,7 +20,7 @@ export const families = Object.freeze([
 export const remote = 'https://github.com/bridge-owner/bridge-repo.git';
 export const connectionId = 'bridge-fixture';
 export const repositoryRef = 'repository:101';
-export const configurationDigest = 'bridge-config-v1';
+export const configurationDigest = digest('bridge-config-v1');
 export const bytesDigest = createHash('sha256').update('immutable fixture artifact').digest('hex');
 
 function frozen(value) {
@@ -310,11 +310,13 @@ export async function bridgeFixture(t) {
   f.prepare = async (family, suffix = '', { claim = true } = {}) => {
     f.clock.advance(1);
     const action = actionFor(family);
+    const operationId = `op-${families.indexOf(family)}${suffix}`;
     if (family === 'notification' && suffix) action.contentDigest = digest(`fixture publication:${suffix}`);
     const preparation = await bridge.legacyOperations.prepare({
-      workItemId: f.workItemId, sessionId: f.sessionId, operationId: `op-${family}${suffix}`, action,
+      workItemId: f.workItemId, sessionId: f.sessionId, operationId, action,
       request: { toolName: 'github-existing-consumer', toolArgs: { family, suffix }, cwd: f.repo },
-      correlationKey: `family-${family}${suffix}`, intent: `Exercise ${family} existing consumer`,
+      // Compact fixture labels leave room for full digests and proofs within 4 KiB.
+      correlationKey: operationId, intent: family,
     }, f.store);
     assert.equal(preparation.operation.intendedOutcome.family, family);
     if (family === 'notification') notificationContent.set(preparation.operation.id,
@@ -502,7 +504,7 @@ export async function bridgeFixture(t) {
           supported: true, hostCallId: prepared.claim.hostCallId },
         ...(status === 'running' ? {} : { result }),
         ...(status === 'failed' ? { failure: { terminal: true, providerVerified: true } } : {}),
-        evidence: { ref: `fixture:provider:${family}:${resultStatus}`, verified: true, sha256: digest(result) },
+        evidence: { ref: `fixture:${family}:${resultStatus}`, verified: true, sha256: digest(result) },
       },
       ...(['execution', 'test', 'artifact'].includes(family) ? {
         executionContext: { provider: 'github', connection: connectionId, scopeRef: repositoryRef,

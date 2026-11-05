@@ -1,7 +1,7 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [
-    {"coverage": "direct", "paths": ["scripts/validation-tools.mjs"]}
+    {"coverage": "direct", "paths": ["scripts/validation-tools.mjs", "packaging/standalone/runtime.mjs"]}
   ],
   "groups": [{
     "root": "T-51 owned boundary terminates descendant writers before return while an unrelated sibling survives",
@@ -14,8 +14,18 @@ export const validationDeclarations = {
     "root": "TOOL02 owned writer provenance is invisible until its complete publication",
     "minimumSlots": 2,
     "exclusiveResources": []
+  }, {
+    "root": "T-51 simultaneous channel fixture excludes cold staging from the contender lock allowance",
+    "minimumSlots": 1,
+    "exclusiveResources": []
   }],
   "applicability": [{
+    "names": ["T-51 simultaneous channel fixture excludes cold staging from the contender lock allowance"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "distribution-activation-contract",
+    "reason": "PR-only controlled admission regression executes actual channel activation and the existing simultaneous fixture against an owned synthetic tree, not native distribution acceptance.",
+    "prerequisites": ["Node and one isolated fixture process"]
+  }, {
     "names": ["TOOL02 owned writer provenance is invisible until its complete publication"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "runner-resource-contract",
@@ -40,11 +50,14 @@ import { PassThrough } from 'node:stream';
 import { createContext, runInContext } from 'node:vm';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { stopOwnedProcessGroup, processDiagnostic } from '../scripts/validation-tools.mjs';
 import { boundaryPhaseDiagnostics } from './distribution-network-boundary.mjs';
 import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
 import { digest, SdlcError } from '../src/core.mjs';
-import { atomicWrite } from '../src/files.mjs';
+import { atomicWrite, canonicalPath, within } from '../src/files.mjs';
+import { canonical } from '../packaging/standalone/archive.mjs';
+import { extractEntries } from '../packaging/standalone/protocol.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const toolsModule = await fs.readFile(new URL('../scripts/validation-tools.mjs', import.meta.url), 'utf8');
@@ -185,6 +198,11 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
       const directory = await fs.mkdtemp(path.join(root, '.test-data', 'tool02-'));
       const token = randomUUID();
       const cancellation = new AbortController();
+      const writerReady = Promise.withResolvers();
+      const runningDurable = Promise.withResolvers();
+      let firstRunning = true;
+      let preparationAdvance = 0;
+      const clock = { now: () => performance.now() + preparationAdvance };
       const lifetime = { cleanupSafe: true, unsettledCommands: [] };
       const retentionFailure = Object.assign(new Error('Owned final report persistence failed'), { code: 'OWNED_PERSISTENCE' });
       let child;
@@ -194,10 +212,20 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
       let killerSignals = 0;
       let launches = 0;
       const context = createContext({
-        Buffer, TextDecoder, path, performance, setTimeout, clearTimeout, delay, console,
+        Buffer, TextDecoder, path, performance: clock, setTimeout, clearTimeout, delay, console,
         createHash, digest, SdlcError, sanitizeExecutionPayload, root,
         atomicWrite: async (file, bytes) => {
           if (mode === 'retention-failed' && JSON.parse(bytes).checkpoint.phase === 'finished') throw retentionFailure;
+          if (firstRunning && JSON.parse(bytes).checkpoint.phase === 'running') {
+            firstRunning = false;
+            if (mode === 'stalled') {
+              await writerReady.promise;
+              preparationAdvance += 2000;
+            }
+            await atomicWrite(file, bytes);
+            runningDurable.resolve();
+            return;
+          }
           return atomicWrite(file, bytes);
         },
         open: fs.open, realpath: fs.realpath, processDiagnostic,
@@ -243,6 +271,20 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
         }
         assert.equal(identity.token, token);
         assert.equal(identity.parent, child.pid);
+        writerReady.resolve();
+        phase('running-checkpoint');
+        let preparationTimer;
+        await Promise.race([
+          runningDurable.promise,
+          observed.then(({ error }) => {
+            throw error ?? new Error('Owned command settled before its running checkpoint');
+          }),
+          new Promise((_, reject) => {
+            preparationTimer = setTimeout(() => reject(new Error(
+              'Owned command must retain its running checkpoint before cancellation')),
+            Math.max(0, deadline - performance.now()));
+          }),
+        ]).finally(() => clearTimeout(preparationTimer));
         if (Object.hasOwn(ready, mode)) {
           ready[mode].resolve(identity);
           let timer;
@@ -270,13 +312,15 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
           return;
         }
         if (mode === 'root-exit') {
+          const exitDeadline = performance.now() + 5000;
           while (child.exitCode === null) {
-            assert.ok(performance.now() < deadline, 'Owned root must exit before cancellation');
+            assert.ok(performance.now() < exitDeadline, 'Owned root must exit before cancellation');
             await delay(10);
           }
           assert.equal(child.exitCode, 23);
         }
         const started = performance.now();
+        const commandStarted = clock.now();
         phase('cancellation-settlement');
         cancellation.abort();
         const sentinel = Symbol('unsettled');
@@ -284,11 +328,16 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
         const outcome = await Promise.race([observed, new Promise(resolve => {
           timer = setTimeout(() => resolve(sentinel), 1500);
         })]).finally(() => clearTimeout(timer));
+        phase(outcome === sentinel ? 'cancellation-watchdog' : 'cancellation-return');
         assert.notEqual(outcome, sentinel, `${mode}: cancellation must settle inside its original one-second stop window`);
         assert.ok(performance.now() - started < 1500);
+        assert.ok(clock.now() - commandStarted < 1500,
+          'Cold running-checkpoint preparation must finish before the cancellation deadline starts');
+        phase('cleanup-lifetime');
         assert.equal(lifetime.cleanupSafe, false, 'A bounded return must not authorize deletion under the owned writer');
         assert.equal(lifetime.unsettledCommands[0].pid, child.pid);
         assert.equal(lifetime.unsettledCommands[0].reportPath, path.join(directory, 'owned.json'));
+        phase('retention-result');
         if (mode === 'retention-failed') {
           assert.equal(outcome.error, retentionFailure);
           t.diagnostic(JSON.stringify({ mode, pid: child.pid, cleanupSafe: lifetime.cleanupSafe,
@@ -296,20 +345,29 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
           return;
         }
         assert.equal(outcome.error, undefined);
+        phase('cancellation-report');
         const result = outcome.report;
         assert.equal(result.complete, false);
         assert.equal(result.cleanup.survivorsVerified, false);
         assert.equal(result.cleanup.outcome, 'uncertain');
         assert.ok(result.causes.some(cause => cause.type === 'cancellation'));
         assert.ok(result.causes.some(cause => cause.type === 'cleanup'));
+        phase('retained-report');
         assert.deepEqual(JSON.parse(await fs.readFile(path.join(directory, 'owned.json'), 'utf8')), result);
+        phase('stdout-retention');
         assert.equal(result.stdout, 'owned-natural-tail');
         if (mode === 'root-exit') {
+          phase('root-exit-result');
           assert.equal(result.exitCode, 23);
           assert.equal(launches, 0);
-        } else assert.equal(launches, 1);
-        if (mode === 'stalled') assert.equal(killerSignals, 1,
-          'Stop the owned controller before it can issue a late tree request');
+        } else {
+          phase('controller-dispatch');
+          assert.equal(launches, 1);
+        }
+        if (mode === 'stalled') {
+          phase('controller-stop');
+          assert.equal(killerSignals, 1, 'Stop the owned controller before it can issue a late tree request');
+        }
         t.diagnostic(JSON.stringify({ mode, pid: child.pid, complete: result.complete,
           exitCode: result.exitCode, cleanup: result.cleanup }));
       } catch (error) {
@@ -319,6 +377,7 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
         }));
         failures.push({ mode, message: error.message, ...phases.get(mode) });
       } finally {
+        writerReady.resolve();
         phase('writer-drain');
         await fs.writeFile(path.join(directory, `${token}.release`), '');
         const deadline = performance.now() + 5000;
@@ -353,7 +412,15 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
       }
     };
     for (let index = 0; index < modes.length; index += 2) {
-      const outcomes = await Promise.allSettled(modes.slice(index, index + 2).map(runMode));
+      const outcomes = await Promise.allSettled(modes.slice(index, index + 2).map(mode =>
+        runMode(mode).catch(error => {
+          if (error && typeof error === 'object' && Object.isExtensible(error)) {
+            Object.defineProperty(error, 'ownedSettlementScenario', {
+              value: { mode, ...phases.get(mode) }, enumerable: true,
+            });
+          }
+          throw error;
+        })));
       for (const outcome of outcomes) {
         if (outcome.status === 'rejected') throw outcome.reason;
       }
@@ -361,6 +428,93 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
     assert.deepEqual([...completedModes].sort(), [...modes].sort());
     assert.deepEqual(failures, []);
   });
+
+test('T-51 simultaneous channel fixture excludes cold staging from the contender lock allowance', async t => {
+  const directory = await fs.mkdtemp(path.join(root, '.test-data', 'channel-admission-'));
+  const fixture = { directory, source: path.join(directory, 'source'),
+    channelRoot: path.join(directory, 'channel'), home: path.join(directory, 'home') };
+  const lock = path.join(fixture.channelRoot, '.channel-lock');
+  const entries = [{ path: 'package/src/install.mjs', data: Buffer.from('controlled channel payload\n'), mode: 0o644 }];
+  const contender = Promise.withResolvers();
+  const timedOut = Promise.withResolvers();
+  const active = [];
+  let sourceChecks = 0;
+  let copyCalls = 0;
+  let offset = 0;
+  const mkdir = fs.mkdir;
+  const observed = t.mock.method(fs.default, 'mkdir', async (...args) => {
+    try { return await mkdir(...args); }
+    catch (error) {
+      if (args[0] === lock && error.code === 'EEXIST') contender.resolve();
+      throw error;
+    }
+  });
+  syncBuiltinESMExports();
+  try {
+    await extractEntries(entries, fixture.source);
+    await fs.mkdir(fixture.home);
+    const runtime = (await fs.readFile(new URL('../packaging/standalone/runtime.mjs', import.meta.url), 'utf8'))
+      .split('export function invokeFramework(')[0]
+      .replace(/^import .+;\r?$/gmu, '').replace(/^export /gmu, '');
+    const channels = await fs.readFile(new URL('./distribution-channels.test.mjs', import.meta.url), 'utf8');
+    const start = channels.indexOf("test('T-51 simultaneous installs serialize; a busy channel times out without deleting its lock'");
+    const end = channels.indexOf('\ntest(', start + 5);
+    assert.ok(start >= 0 && end > start);
+    const context = createContext({
+      fs, path, process, randomUUID, Buffer, canonicalPath, within,
+      canonical: value => canonical(JSON.parse(JSON.stringify(value))),
+      Date: { now: () => Date.now() + offset }, setTimeout, syncBuiltinESMExports,
+      observeInstallOperation: action => action(),
+      observeInstallPhase: (_phase, action) => action(), installPhase() {},
+      async verifyTree(location) {
+        if (location === fixture.source) sourceChecks++;
+        for (const entry of entries) {
+          if (!(await fs.readFile(path.join(location, entry.path))).equals(entry.data)) {
+            throw new Error('Controlled channel payload mismatch');
+          }
+        }
+        return { entries, platform: { platform: process.platform, arch: process.arch },
+          manifest: { name: 'controlled-channel', version: '0.5.0',
+            payload: { sha256: digest('controlled-channel-payload') } } };
+      },
+      async extractEntries(selected, destination) {
+        copyCalls++;
+        if (sourceChecks > 1) await contender.promise;
+        offset += 6000;
+        if (sourceChecks > 1) await timedOut.promise;
+        return extractEntries(selected, destination);
+      },
+    });
+    const activate = runInContext(`${runtime}
+runtimePreflight = async () => process.execPath;
+validateChannelHome = async ({ channelRoot, home }) => ({ channelRoot, home });
+activateChannel;`, context);
+    context.activateChannel = options => {
+      const promise = activate(options);
+      active.push(promise);
+      promise.catch(error => {
+        if (/Channel is busy; lock timeout/u.test(error.message)) timedOut.resolve();
+      });
+      return promise;
+    };
+    context.fixture = async () => fixture;
+    context.assert = assert;
+    context.hostTarget = 'controlled-channel';
+    context.windowsLauncher = 'controlled-only-not-an-executable';
+    const exercise = runInContext(`let captured;
+const test = (_name, _options, action) => { captured = action; };
+${channels.slice(start, end)}
+captured;`, context);
+    await exercise(t);
+    assert.equal(copyCalls, 1, 'Both activations must share exactly one cold staged copy');
+    assert.equal(offset, 6000, 'Cold staging exceeds the unchanged five-second contender allowance');
+  } finally {
+    await Promise.allSettled(active);
+    observed.mock.restore();
+    syncBuiltinESMExports();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
 
 function controlled(mode = 'absent', { automatic = false, broker = false, budgetError = false, budgetAbort = false } = {}) {
   let clock = 0;

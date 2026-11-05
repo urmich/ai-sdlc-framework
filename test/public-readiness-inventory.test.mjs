@@ -2,10 +2,13 @@ export const validationDeclarations = {
   "schemaVersion": 1,
   "groups": [{
     "root": "T-PRD018 capture admission reserves its complete process tree while independent peers progress",
-    "minimumSlots": 5
+    "minimumSlots": 7
   }, {
     "root": "T-PRD018 command capture durably retains dispatched identity and sanitized progress before cancellation or abrupt termination",
-    "minimumSlots": 4
+    "minimumSlots": 5
+  }, {
+    "root": "T-PRD018 Windows native runtime observations retain original handle facts without changing target lifetime",
+    "minimumSlots": 3
   }, {
     "root": "T-PRD018 command checkpoint capacity retains safe original streams without manufacturing completion",
     "minimumSlots": 2
@@ -17,6 +20,12 @@ export const validationDeclarations = {
     "minimumSlots": 3
   }],
   "applicability": [{
+    "names": ["T-PRD013 measured GitHub process partitions preserve every original assertion and callback definition"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "native-regression-contract",
+    "reason": "PR-only source inventory guard: retain all 143 partitioned assertions and their historical fingerprint, pin the exact strengthened proof and isolated-dispatch callbacks, and separately account for the owned-path capacity regression. No critical promotion or source execution.",
+    "prerequisites": ["Node; independent read-only root with no shared mutable state or external resources"]
+  }, {
     "names": [
       "T-PRD074 source literal ownership uses enclosing quotes instead of URL prefixes",
       "T-PRD074 source literal ownership isolates genuine interpolation from nested ordinary strings",
@@ -33,17 +42,29 @@ export const validationDeclarations = {
     "reason": "PR-only VM-controlled Windows termination evidence, privacy, event ordering and fail-closed permutations; no real OS process or critical promotion.",
     "prerequisites": ["Node VM and owned repository-local report/journal fixtures"]
   }, {
+    "names": ["T-PRD018 Windows native runtime observations retain original handle facts without changing target lifetime"],
+    "platforms": ["windows-x64"],
+    "owner": "runner-termination-evidence-contract",
+    "reason": "PR-only live/exit259/image-mismatch native facts plus isolated injected startup/cleanup boundaries; original child/compiler uncertainty stays unknown. No critical promotion or cancellation-success credit; process-local spawn instrumentation is restored.",
+    "prerequisites": ["Node; stock Windows PowerShell 5.1 and .NET Framework compiler; three aggregate slots and new owned repository-local directories"]
+  }, {
+    "names": ["T-PRD018 Windows observer readiness retains published proof when its polling wake crosses the deadline"],
+    "platforms": ["windows-x64"],
+    "owner": "runner-termination-evidence-contract",
+    "reason": "PR-only deterministic controller regression: delayed polling retains valid proof, bounded preparation does not consume compilation/readiness time, and absent/invalid/wrong-source preparation cannot extend waiting. Missing/unsettled/wrong-source readiness still fails. The actual settlement helper is evaluated with controlled observer/admission boundaries to retain final error facts before fail-stop, including stop failure. No real descendant, compiler or critical promotion.",
+    "prerequisites": ["Node; independent process-isolated root and owned repository-local marker fixtures"]
+  }, {
     "names": ["T-PRD018 capture admission reserves its complete process tree while independent peers progress"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "runner-resource-contract",
-    "reason": "PR-only capture admission regression: controlled capacity pressure plus real isolated worker leases and peer capacity reuse; no critical promotion.",
-    "prerequisites": ["Node and five aggregate worker slots; owned repository-local process fixtures"]
+    "reason": "PR-only admission regression: real cancellation and catalog selections reject insufficient capacity before dispatch; retain capture pressure and actual isolated leases. The catalog reserves seven slots, settles, then releases capacity to a peer. No expensive catalog callback or critical promotion.",
+    "prerequisites": ["Node and seven aggregate worker slots; owned repository-local process fixtures"]
   }, {
     "names": ["T-PRD018 command capture durably retains dispatched identity and sanitized progress before cancellation or abrupt termination"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "runner-resource-contract",
-    "reason": "Reserve the test worker, IPC controller, owned command and Windows taskkill controller before the timed callback; journal, closure and cleanup assertions remain unchanged.",
-    "prerequisites": ["Node and four aggregate worker slots; owned repository-local process fixtures"]
+    "reason": "Reserve worker, IPC controller, command, taskkill and read-only native observer; its compiler finishes before command creation. Original journal, closure, cleanup and stop-budget assertions remain unchanged.",
+    "prerequisites": ["Node and five aggregate worker slots; stock Windows PowerShell 5.1/.NET Framework for optional native diagnostics; owned repository-local process fixtures"]
   }, {
     "names": [
       "T-PRD018 command checkpoint capacity retains safe original streams without manufacturing completion",
@@ -90,11 +111,14 @@ import { discoverDeclarations, compileValidationInventory,
   sourceLiteralAt } from '../scripts/validation-inventory.mjs';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import childProcess, { spawn } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import fsPromises from 'node:fs/promises';
+import { performance } from 'node:perf_hooks';
 import { PassThrough } from 'node:stream';
 import { createContext, runInContext } from 'node:vm';
 import { atomicWrite } from '../src/files.mjs';
@@ -102,10 +126,35 @@ import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
 import { executeValidationCommand } from '../scripts/validation-tools.mjs';
 import { createPlan, parseOptions } from '../scripts/test-runner.mjs';
 import { runValidationReadyPool } from '../scripts/test-scheduling.mjs';
-import { enterTestBudget } from '../scripts/test-budget.mjs';
+import { enterTestBudget, stopTestAdmission } from '../scripts/test-budget.mjs';
 import { runRefreshScenario } from './observation-refresh-worker.mjs';
+import { startWindowsRuntimeObserver, validateObservation } from './windows-runtime-observer/index.mjs';
 import { compileCoverage, prepareCoverage, renderCoverageSection, readCoverageSection,
   replaceCoverageSection, inspectCoverage } from '../src/coverage.mjs';
+
+async function settleRuntimeObserver(observer, t, startupFailure) {
+  const result = await observer.finalize();
+  const startup = await observer.startupFacts();
+  if (startupFailure) startupFailure.message += `; startupFinal=${JSON.stringify({
+    cleanup: result.cleanup, compilerSettled: result.compilerSettled,
+    forcedObserverStop: result.forcedObserverStop, releasePublished: result.releasePublished, startup,
+  })}`;
+  t?.diagnostic(JSON.stringify({ nativeObserverStartup: startup }));
+  if (result.cleanup !== 'awaited' || result.compilerSettled !== true) await stopTestAdmission();
+  return result;
+}
+
+async function requireRuntimeObserverReady(observer, t) {
+  try { return await observer.ready; }
+  catch (error) {
+    try { await settleRuntimeObserver(observer, t, error); }
+    catch (settlementError) {
+      throw new AggregateError([error, settlementError],
+        `Native runtime startup and admission stop failed; ${error.message}`);
+    }
+    throw error;
+  }
+}
 
 function specification() {
   return {
@@ -357,10 +406,532 @@ test('T-PRD018 Windows termination observations durably distinguish dispatch and
     }
   });
 
+test('T-PRD018 Windows native runtime observations retain original handle facts without changing target lifetime',
+  { timeout: 30000, skip: process.platform !== 'win32' }, async t => {
+    const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'native-runtime-observation-'));
+    const observers = [];
+    t.after(async () => {
+      for (const observer of observers) {
+        assert.equal((await settleRuntimeObserver(observer, t)).cleanup, 'awaited');
+      }
+      await fs.rm(directory, { recursive: true, force: true });
+    });
+    const within = async promise => {
+      let timer;
+      try {
+        return await Promise.race([promise, new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('Owned native observation did not settle')), 4000);
+        })]);
+      } finally { clearTimeout(timer); }
+    };
+    const environment = { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' };
+    delete environment.NODE_TEST_CONTEXT;
+    delete environment.SDLC_TEST_REPORT_CONTEXT;
+    for (const mode of ['live', 'exit', 'mismatch']) {
+      const current = path.join(directory, mode);
+      await fs.mkdir(current);
+      const observer = await startWindowsRuntimeObserver({
+        directory: path.join(current, 'observer'), ownerPid: process.pid,
+        expectedImage: mode === 'mismatch' ? 'taskkill' : path.basename(process.execPath, '.exe').toLowerCase(),
+      });
+      observers.push(observer);
+      assert.equal((await requireRuntimeObserverReady(observer, t)).compilerSettled, true);
+      const marker = path.join(current, 'ready.json');
+      const release = path.join(current, 'release');
+      const source = path.join(current, 'target.mjs');
+      const exitCode = mode === 'exit' ? 259 : 23;
+      await fs.writeFile(source, `import {existsSync} from 'node:fs';
+import {atomicWrite} from ${JSON.stringify(pathToFileURL(path.resolve('src', 'files.mjs')).href)};
+await atomicWrite(${JSON.stringify(marker)},JSON.stringify({pid:process.pid}));
+const barrier=setInterval(()=>{
+  if(existsSync(${JSON.stringify(release)})){clearInterval(barrier);process.exitCode=${exitCode};}
+},10);
+setTimeout(()=>{clearInterval(barrier);process.exitCode=91;},8000).unref();
+`);
+      const child = spawn(process.execPath, [source], {
+        env: environment, shell: false, stdio: 'ignore', signal: t.signal,
+      });
+      const done = new Promise((resolve, reject) => {
+        child.once('error', reject);
+        child.once('close', (code, signal) => resolve({ code, signal }));
+      });
+      done.catch(() => {});
+      let releasing;
+      const releaseTarget = () => releasing ??= fs.writeFile(release, '', { flag: 'wx' }).then(() => within(done));
+      try {
+        const readyDeadline = Date.now() + 5000;
+        let ready;
+        while (Date.now() < readyDeadline && !ready) {
+          try { ready = JSON.parse(await fs.readFile(marker, 'utf8')); }
+          catch (error) { if (error.code !== 'ENOENT') throw error; }
+          if (!ready) await delay(10);
+        }
+        assert.equal(ready?.pid, child.pid);
+        const createdBeforeMs = Date.now();
+        await observer.request({ pid: child.pid, createdBeforeMs });
+        assert.equal(await observer.captured(), mode !== 'mismatch');
+        if (mode === 'exit') assert.deepEqual(await releaseTarget(), { code: 259, signal: null });
+        const result = await within(observer.completed);
+        const record = result.observation;
+        assert.equal(validateObservation(record), true);
+        assert.ok(Buffer.byteLength(JSON.stringify(record)) <= 8192);
+        assert.equal(record.threadWaits, 'unavailable');
+        assert.equal(record.rootObservation, 'unavailable');
+        assert.equal(validateObservation({ ...record, rawPath: directory }), false);
+        if (mode === 'mismatch') {
+          assert.equal(record.target.status, 'unverified');
+          assert.equal(record.target.reason, 'imageMismatch');
+          assert.equal(record.target.samples.length, 0);
+        } else {
+          assert.equal(record.target.status, 'verified');
+          assert.ok(BigInt(record.target.creationTicks) <
+            116444736000000000n + BigInt(createdBeforeMs) * 10000n);
+          const samples = record.target.samples;
+          assert.ok(samples.length > 0 && samples.length <= 8);
+          assert.ok(samples.every(sample => sample.elapsedMs < 1000));
+          assert.ok(samples.every(sample => sample.cpuTicks === null ||
+            BigInt(sample.cpuTicks) === BigInt(sample.kernelTicks) + BigInt(sample.userTicks)));
+          if (mode === 'exit') {
+            assert.ok(samples.some(sample => sample.nativeExited === true &&
+              sample.waitStatus === 0 && sample.exitCode === 259 && sample.exitTicks !== null));
+          } else {
+            assert.ok(samples.every(sample => sample.nativeExited === false &&
+              sample.waitStatus === 258 && sample.exitCode === null && sample.exitTicks === null));
+          }
+        }
+        if (mode !== 'exit') {
+          assert.equal(child.exitCode, null, 'Read-only observation must not terminate the original target');
+          assert.equal(child.signalCode, null);
+        }
+      } finally {
+        try {
+          const result = await settleRuntimeObserver(observer, t);
+          assert.equal(result.cleanup, 'awaited');
+          assert.equal(result.compilerSettled, true);
+          assert.equal(result.forcedObserverStop, false);
+          assert.equal(result.observerExit.code, 0);
+          assert.deepEqual(await releaseTarget(), { code: exitCode, signal: null });
+        } finally {
+          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+          await within(done);
+        }
+      }
+    }
+    const settlementProof = {
+      schema: 1, compilerSettled: true,
+      observerSha256: digest(await fs.readFile(path.resolve('test', 'windows-runtime-observer', 'observer.ps1'))),
+      bridgeSha256: digest(await fs.readFile(path.resolve('test', 'windows-runtime-observer', 'bridge.cs'))),
+    };
+    for (const mode of ['closed-before-ready', 'ready-before-close', 'spawn-failed', 'error-after-spawn']) {
+      const originalSpawn = childProcess.spawn;
+      const child = new EventEmitter();
+      child.pid = mode === 'spawn-failed' ? undefined : 900001;
+      child.exitCode = null;
+      child.signalCode = null;
+      child.kill = () => { throw new Error('An already-closed injected observer must not be signaled'); };
+      child.unref = () => {};
+      let dispatched = false;
+      let spawnPath;
+      childProcess.spawn = command => { dispatched = true; spawnPath = command; return child; };
+      syncBuiltinESMExports();
+      try {
+        const { startWindowsRuntimeObserver: start } =
+          await import(new URL(`./windows-runtime-observer/index.mjs?cleanup-${mode}`, import.meta.url));
+        const observer = await start({
+          directory: path.join(directory, `injected-${mode}`), ownerPid: process.pid, expectedImage: 'node',
+        });
+        if (!dispatched) {
+          observers.push(observer);
+          throw new Error('Startup cleanup regression requires an injected child, never a real compiler');
+        }
+        let readinessError;
+        const ready = observer.ready.then(() => true, error => { readinessError = error; return false; });
+        if (mode === 'spawn-failed') {
+          child.emit('error', Object.assign(new Error('Injected pre-spawn failure'), {
+            code: 'ENOENT', path: spawnPath, syscall: `spawn ${spawnPath}`,
+          }));
+        } else {
+          child.emit('spawn');
+          if (mode === 'ready-before-close') {
+            await atomicWrite(observer.files.compilerSettled, JSON.stringify(settlementProof));
+            await atomicWrite(observer.files.ready, JSON.stringify({
+              schema: 2, ownerHandlePinned: true, compilerSandboxed: true,
+            }));
+            assert.equal(await ready, true,
+              `${mode}: affirmative startup markers must establish readiness: ${readinessError?.message ?? 'unknown'}`);
+          } else if (mode === 'error-after-spawn') {
+            child.emit('error', Object.assign(new Error('Injected post-spawn failure'), { code: 'EACCES' }));
+          }
+        }
+        child.emit('close', mode === 'spawn-failed' ? -4058 : 0, null);
+        assert.equal(await ready, mode === 'ready-before-close', `${mode}: observed readiness`);
+        const result = await within(observer.finalize());
+        const compilerSettled = mode === 'ready-before-close' || mode === 'spawn-failed';
+        assert.equal(result.compilerSettled, compilerSettled, `${mode}: affirmative compiler settlement`);
+        assert.equal(result.cleanup, compilerSettled ? 'awaited' : 'unknown', `${mode}: complete cleanup`);
+        assert.equal(result.observation, null, 'Injected cleanup supplies no native observation or execution credit');
+        assert.equal(result.forcedObserverStop, false);
+        if (mode === 'closed-before-ready') {
+          await atomicWrite(observer.files.compilerSettled, JSON.stringify({
+            ...settlementProof, observerSha256: '0'.repeat(64),
+          }));
+          assert.equal((await observer.finalize()).cleanup, 'unknown', 'A different source cannot prove settlement');
+          await atomicWrite(observer.files.compilerSettled, JSON.stringify(settlementProof));
+          assert.equal((await observer.finalize()).cleanup, 'awaited', 'Late affirmative proof refines a new result');
+          assert.equal(result.cleanup, 'unknown', 'Earlier unknown snapshots remain immutable');
+        }
+      } finally {
+        childProcess.spawn = originalSpawn;
+        syncBuiltinESMExports();
+      }
+    }
+  });
+
+test('T-PRD018 Windows observer readiness retains published proof when its polling wake crosses the deadline',
+  { timeout: 10000, skip: process.platform !== 'win32' }, async t => {
+    const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'native-runtime-poll-'));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const proof = {
+      schema: 1, compilerSettled: true,
+      observerSha256: digest(await fs.readFile(path.resolve('test', 'windows-runtime-observer', 'observer.ps1'))),
+      bridgeSha256: digest(await fs.readFile(path.resolve('test', 'windows-runtime-observer', 'bridge.cs'))),
+    };
+    for (const mode of ['published', 'unsettled', 'wrong-source', 'missing',
+      'pending-compiler', 'compile-failure', 'owner-rejected', 'private-failure']) {
+      const originalSpawn = childProcess.spawn;
+      const originalStat = fsPromises.stat;
+      const originalNow = performance.now;
+      const probed = Promise.withResolvers();
+      const releaseProbe = Promise.withResolvers();
+      const child = new EventEmitter();
+      child.pid = 900001;
+      child.kill = () => { throw new Error('An injected observer must not be signaled'); };
+      child.unref = () => {};
+      let firstProbe = true;
+      let now = 0;
+      let observer;
+      let readiness;
+      let dispatched = false;
+      childProcess.spawn = () => { dispatched = true; return child; };
+      fsPromises.stat = async filename => {
+        if (firstProbe && filename.endsWith('.ready.json')) {
+          firstProbe = false;
+          probed.resolve();
+          await releaseProbe.promise;
+          throw Object.assign(new Error('Injected first absent marker probe'), { code: 'ENOENT' });
+        }
+        return originalStat(filename);
+      };
+      performance.now = () => now;
+      syncBuiltinESMExports();
+      try {
+        const { startWindowsRuntimeObserver: start } =
+          await import(new URL(`./windows-runtime-observer/index.mjs?poll-${mode}`, import.meta.url));
+        observer = await start({
+          directory: path.join(directory, mode), ownerPid: process.pid, expectedImage: 'node',
+        });
+        assert.equal(dispatched, true, 'The regression must never launch a real compiler or observer');
+        readiness = observer.ready.then(value => ({ value }), error => ({ error }));
+        child.emit('spawn');
+        await probed.promise;
+        if (['pending-compiler', 'compile-failure', 'owner-rejected', 'private-failure'].includes(mode)) {
+          const phase = {
+            schema: 1, phase: 'entered', reason: 'none', elapsedMs: 1, utcMs: 1,
+            observerSha256: proof.observerSha256, bridgeSha256: proof.bridgeSha256,
+          };
+          await atomicWrite(observer.files.startupEntered, JSON.stringify(phase));
+          await atomicWrite(observer.files.startupCompiling, JSON.stringify({
+            ...phase, phase: 'compiling', elapsedMs: 2,
+          }));
+          if (mode !== 'pending-compiler') {
+            await atomicWrite(observer.files.startupFailed, JSON.stringify({
+              ...phase, phase: mode === 'owner-rejected' ? 'ownerBinding' : 'compile',
+              reason: mode === 'owner-rejected' ? 'imageMismatch' : 'bridgeUnavailable',
+              ...(mode === 'private-failure' ? { reason: 'caller-private-startup-value', rawPath: directory } : {}),
+            }));
+          }
+        }
+        if (['published', 'wrong-source', 'owner-rejected'].includes(mode)) {
+          await atomicWrite(observer.files.compilerSettled, JSON.stringify({
+            ...proof, ...(mode === 'wrong-source' ? { observerSha256: '0'.repeat(64) } : {}),
+          }));
+        }
+        if (['published', 'unsettled', 'wrong-source'].includes(mode)) {
+          await atomicWrite(observer.files.ready, JSON.stringify({
+            schema: 2, ownerHandlePinned: true, compilerSandboxed: true,
+          }));
+        }
+        // The markers precede the deadline; only delivery of the absent probe is late.
+        now = 5001;
+        releaseProbe.resolve();
+        const result = await readiness;
+        if (mode === 'published') {
+          assert.deepEqual(result.value, {
+            ready: true, ownerHandlePinned: true, compilerSandboxed: true, compilerSettled: true,
+          }, 'A delayed polling wake must not discard already-published affirmative proof');
+        } else {
+          const prefix = 'observer-not-ready; startup=';
+          assert.ok(result.error?.message.startsWith(prefix), `${mode}: retain closed facts in the failure itself`);
+          const retained = JSON.parse(result.error.message.slice(prefix.length));
+          assert.equal(retained.scope, 'diagnostic-only');
+          assert.equal(retained.readiness.status,
+            ['unsettled', 'wrong-source'].includes(mode) ? 'rejected' : 'missing');
+          assert.ok(Buffer.byteLength(result.error.message) <= 4096);
+          assert.ok(!result.error.message.includes(directory));
+          assert.ok(!result.error.message.includes('caller-private-startup-value'));
+          const { sanitizeExecutionPayload } = await import('../src/validation-evidence.mjs');
+          assert.equal(sanitizeExecutionPayload(Buffer.from(JSON.stringify({
+            message: result.error.message,
+          }))).message, result.error.message, 'Provider annotations must retain the closed diagnostic message');
+        }
+        const facts = await observer.startupFacts();
+        assert.equal(facts.scope, 'diagnostic-only');
+        assert.equal(facts.readiness.status, mode === 'published' ? 'verified' :
+          ['unsettled', 'wrong-source'].includes(mode) ? 'rejected' : 'missing');
+        assert.equal(facts.compilerReceipt, ['published', 'owner-rejected'].includes(mode) ? 'verified' :
+          mode === 'wrong-source' ? 'wrongSource' : 'missing');
+        if (mode === 'pending-compiler') {
+          assert.equal(facts.compiling.status, 'verified');
+          assert.equal(facts.failed.status, 'missing');
+          assert.equal(facts.compilerSettled, false, 'A compiling diagnostic is not compiler settlement');
+          await atomicWrite(observer.files.compilerSettled, JSON.stringify(proof));
+          await atomicWrite(observer.files.startupCompiled, JSON.stringify({
+            schema: 1, phase: 'compiled', reason: 'none', elapsedMs: 6000, utcMs: Date.now(),
+            observerSha256: proof.observerSha256, bridgeSha256: proof.bridgeSha256,
+          }));
+          const later = await observer.startupFacts();
+          assert.equal(later.compiled.status, 'verified');
+          assert.equal(later.compilerSettled, true);
+          assert.equal(facts.compilerSettled, false, 'Later proof cannot rewrite earlier diagnostic snapshots');
+          assert.equal(later.readiness.status, 'missing', 'Late compiler proof cannot manufacture readiness');
+        }
+        if (['compile-failure', 'owner-rejected'].includes(mode)) {
+          assert.equal(facts.failed.status, 'verified');
+          assert.equal(facts.failed.phase, mode === 'owner-rejected' ? 'ownerBinding' : 'compile');
+          assert.equal(facts.failed.reason, mode === 'owner-rejected' ? 'imageMismatch' : 'bridgeUnavailable');
+        }
+        if (mode === 'private-failure') assert.deepEqual(facts.failed, { status: 'invalid' });
+        assert.ok(!JSON.stringify(facts).includes(directory));
+        assert.ok(!JSON.stringify(facts).includes('caller-private-startup-value'));
+      } finally {
+        releaseProbe.resolve();
+        child.emit('close', 0, null);
+        await readiness;
+        childProcess.spawn = originalSpawn;
+        fsPromises.stat = originalStat;
+        performance.now = originalNow;
+        syncBuiltinESMExports();
+        if (observer) {
+          const result = await observer.finalize();
+          const settled = ['published', 'owner-rejected', 'pending-compiler'].includes(mode);
+          assert.equal(result.compilerSettled, settled);
+          assert.equal(result.cleanup, settled ? 'awaited' : 'unknown');
+          assert.equal(result.forcedObserverStop, false);
+          assert.equal(result.observation, null, 'Injected markers supply no native observation credit');
+        }
+      }
+    }
+    for (const mode of ['prepared', 'wrong-preparation-source', 'preparation-expired', 'readiness-expired']) {
+      const originalSpawn = childProcess.spawn;
+      const originalStat = fsPromises.stat;
+      const originalNow = performance.now;
+      const probes = Array.from({ length: 3 }, () => ({
+        entered: Promise.withResolvers(), release: Promise.withResolvers(),
+      }));
+      const child = new EventEmitter();
+      child.pid = 900001;
+      child.kill = () => { throw new Error('An injected observer must not be signaled'); };
+      child.unref = () => {};
+      let dispatched = false;
+      let probeIndex = 0;
+      let now = 0;
+      let observer;
+      let readiness;
+      childProcess.spawn = () => { dispatched = true; return child; };
+      fsPromises.stat = async filename => {
+        if (filename.endsWith('.ready.json') && probeIndex < probes.length) {
+          const probe = probes[probeIndex++];
+          probe.entered.resolve();
+          await probe.release.promise;
+          throw Object.assign(new Error('Controlled absent readiness marker'), { code: 'ENOENT' });
+        }
+        return originalStat(filename);
+      };
+      performance.now = () => now;
+      syncBuiltinESMExports();
+      try {
+        const { startWindowsRuntimeObserver: start } =
+          await import(new URL(`./windows-runtime-observer/index.mjs?preparation-${mode}`, import.meta.url));
+        observer = await start({
+          directory: path.join(directory, `preparation-${mode}`), ownerPid: process.pid, expectedImage: 'node',
+        });
+        assert.equal(dispatched, true, 'Preparation regression must never launch a real compiler or observer');
+        readiness = observer.ready.then(value => ({ value }), error => ({ error }));
+        child.emit('spawn');
+        await probes[0].entered.promise;
+        now = mode === 'preparation-expired' ? 5001 : 3500;
+        await atomicWrite(observer.files.startupCompiling, JSON.stringify({
+          schema: 1, phase: 'compiling', reason: 'none', elapsedMs: 1369, utcMs: Date.now(),
+          observerSha256: mode === 'wrong-preparation-source' ? '0'.repeat(64) : proof.observerSha256,
+          bridgeSha256: proof.bridgeSha256,
+        }));
+        probes[0].release.resolve();
+        await probes[1].entered.promise;
+        now = mode === 'readiness-expired' ? 8501 : 6500;
+        probes[1].release.resolve();
+        if (mode === 'prepared' || mode === 'readiness-expired') {
+          await probes[2].entered.promise;
+          if (mode === 'prepared') {
+            await atomicWrite(observer.files.compilerSettled, JSON.stringify(proof));
+            await atomicWrite(observer.files.ready, JSON.stringify({
+              schema: 2, ownerHandlePinned: true, compilerSandboxed: true,
+            }));
+          }
+          probes[2].release.resolve();
+        } else probes[2].release.resolve();
+        const result = await readiness;
+        if (mode === 'prepared') {
+          assert.deepEqual(result.value, {
+            ready: true, ownerHandlePinned: true, compilerSandboxed: true, compilerSettled: true,
+          }, `Verified preparation at 3500ms must leave the complete 5000ms compilation/readiness window; ${
+            result.error?.message ?? 'no startup failure'}`);
+          await assert.rejects(observer.request({ pid: process.pid, createdBeforeMs: Date.now() }),
+            /observer-invalid-request/);
+        } else {
+          assert.match(result.error?.message ?? '', /^observer-not-ready; startup=/,
+            `${mode}: preparation and readiness have separate finite deadlines`);
+          assert.equal((await observer.startupFacts()).readiness.status, 'missing');
+        }
+      } finally {
+        for (const probe of probes) probe.release.resolve();
+        child.emit('close', 0, null);
+        await readiness;
+        childProcess.spawn = originalSpawn;
+        fsPromises.stat = originalStat;
+        performance.now = originalNow;
+        syncBuiltinESMExports();
+        if (observer) {
+          const result = await observer.finalize();
+          assert.equal(result.compilerSettled, mode === 'prepared');
+          assert.equal(result.cleanup, mode === 'prepared' ? 'awaited' : 'unknown');
+          assert.equal(result.forcedObserverStop, false);
+          assert.equal(result.observation, null, 'Preparation markers supply no native observation credit');
+        }
+      }
+    }
+    const source = await fs.readFile(fileURLToPath(import.meta.url), 'utf8');
+    const helper = source.slice(source.indexOf('async function settleRuntimeObserver('),
+      source.indexOf('function specification()'));
+    for (const mode of ['settled', 'compiler-unknown', 'observer-unknown', 'stop-failed']) {
+      const calls = [];
+      const originalStopError = new Error('Owned admission stop failed');
+      const result = {
+        cleanup: ['observer-unknown', 'stop-failed'].includes(mode) ? 'unknown' : 'awaited',
+        compilerSettled: mode !== 'compiler-unknown',
+        forcedObserverStop: false, releasePublished: true,
+      };
+      const startup = {
+        schema: 1, scope: 'diagnostic-only', observerClosed: mode !== 'observer-unknown',
+        compilerSettled: result.compilerSettled,
+        compilerReceipt: result.compilerSettled ? 'verified' : 'missing',
+      };
+      const context = createContext({ stopTestAdmission: async () => {
+        calls.push('stop');
+        if (mode === 'stop-failed') throw originalStopError;
+      } });
+      runInContext(`${helper}\nglobalThis.settle = settleRuntimeObserver;
+globalThis.requireReady = requireRuntimeObserverReady;`, context);
+      const failure = new Error('observer-not-ready; startup={"observerClosed":false,"compilerSettled":false}');
+      const initialMessage = failure.message;
+      const settling = context.settle({
+        finalize: async () => { calls.push('finalize'); return result; },
+        startupFacts: async () => { calls.push('facts'); return startup; },
+      }, { diagnostic: () => { calls.push('diagnostic'); } }, failure);
+      if (mode === 'stop-failed') await assert.rejects(settling, error => error === originalStopError);
+      else assert.equal(await settling, result);
+      assert.deepEqual(calls, mode === 'settled'
+        ? ['finalize', 'facts', 'diagnostic'] : ['finalize', 'facts', 'diagnostic', 'stop']);
+      assert.ok(failure.message.startsWith(`${initialMessage}; startupFinal=`));
+      const retained = JSON.parse(failure.message.slice(`${initialMessage}; startupFinal=`.length));
+      assert.deepEqual(retained, { ...result, startup });
+      assert.equal(sanitizeExecutionPayload(Buffer.from(JSON.stringify({
+        message: failure.message,
+      }))).message, failure.message, `${mode}: final facts survive failure annotation sanitization`);
+      assert.ok(!failure.message.includes(originalStopError.message));
+      calls.length = 0;
+      const mandatoryFailure = new Error(initialMessage);
+      const mandatory = context.requireReady({
+        ready: Promise.reject(mandatoryFailure),
+        finalize: async () => { calls.push('finalize'); return result; },
+        startupFacts: async () => { calls.push('facts'); return startup; },
+      }, { diagnostic: () => { calls.push('diagnostic'); } });
+      await assert.rejects(mandatory, error => mode === 'stop-failed'
+        ? error.name === 'AggregateError' && error.errors[0] === mandatoryFailure &&
+          error.errors[1] === originalStopError && error.message.includes(mandatoryFailure.message)
+        : error === mandatoryFailure);
+      assert.ok(mandatoryFailure.message.startsWith(`${initialMessage}; startupFinal=`),
+        'Mandatory readiness failure must retain post-finalization facts before it escapes');
+      assert.deepEqual(calls, mode === 'settled'
+        ? ['finalize', 'facts', 'diagnostic'] : ['finalize', 'facts', 'diagnostic', 'stop']);
+      assert.equal(sanitizeExecutionPayload(Buffer.from(JSON.stringify({
+        message: mandatoryFailure.message,
+      }))).message, mandatoryFailure.message);
+    }
+  });
+
 test('T-PRD018 capture admission reserves its complete process tree while independent peers progress',
   { timeout: 30000 }, async t => {
+    const cancellationPlan = await createPlan(parseOptions(['targeted', '--workers', '4', '--name',
+      '^T-PRD018 tool processes retain failures, sanitized partial output and cancellation without surviving children$',
+      'test/public-readiness-ci.test.mjs']));
+    assert.equal(cancellationPlan.groups.length, 1);
+    let underfundedDispatch = false;
+    await assert.rejects(runValidationReadyPool(cancellationPlan.groups, {
+      concurrency: 3, capacity: 3, signal: t.signal, execute: async () => {
+        underfundedDispatch = true;
+        return 'Passed';
+      },
+    }), { code: 'BUDGET' });
+    assert.equal(underfundedDispatch, false,
+      'Cancellation must reserve its worker, command, descendant and native stop/query controller before dispatch');
+    let cancellationSlots;
+    const admittedCancellation = await runValidationReadyPool(cancellationPlan.groups, {
+      concurrency: 4, capacity: 4, signal: t.signal, execute: async selected => {
+        cancellationSlots = selected.minimumSlots;
+        return 'Passed';
+      },
+    });
+    assert.equal(cancellationSlots, 4);
+    assert.deepEqual([...admittedCancellation.completed.values()], ['Passed']);
+    assert.deepEqual(admittedCancellation.notRun, []);
+
+    const catalogPlan = await createPlan(parseOptions(['targeted', '--workers', '8', '--name',
+      '^complete synthetic per-case reports obey all 2066 unit prerequisites and full aggregate coverage$',
+      'test/validation-catalog.test.mjs']));
+    assert.equal(catalogPlan.groups.length, 1);
+    const catalog = catalogPlan.groups[0];
+    let catalogDispatched = false;
+    await assert.rejects(runValidationReadyPool(catalogPlan.groups, {
+      concurrency: 6, capacity: 6, signal: t.signal, execute: async () => {
+        catalogDispatched = true;
+        return 'Passed';
+      },
+    }), { code: 'BUDGET' });
+    assert.equal(catalogDispatched, false,
+      'Reserve the catalog worker, CLI and five concurrent Git readers before child dispatch');
+    let catalogSlots;
+    const admittedCatalog = await runValidationReadyPool(catalogPlan.groups, {
+      concurrency: 7, capacity: 7, signal: t.signal, execute: async selected => {
+        catalogSlots = selected.minimumSlots;
+        return 'Passed';
+      },
+    });
+    assert.equal(catalogSlots, 7);
+    assert.deepEqual([...admittedCatalog.completed.values()], ['Passed']);
+    assert.deepEqual(admittedCatalog.notRun, []);
+
     const root = 'T-PRD018 command capture durably retains dispatched identity and sanitized progress before cancellation or abrupt termination';
-    const plan = await createPlan(parseOptions(['targeted', '--workers', '5', '--name',
+    const plan = await createPlan(parseOptions(['targeted', '--workers', '6', '--name',
       '^T-PRD018 command capture durably', 'test/public-readiness-inventory.test.mjs']));
     const capture = plan.groups.find(group => group.root === root);
     const release = Promise.withResolvers();
@@ -372,14 +943,14 @@ test('T-PRD018 capture admission reserves its complete process tree while indepe
     const pending = runValidationReadyPool([
       group('blocker', 2), group('seed', 1), group('peer', 1),
       { ...capture, dependsOn: ['seed'] },
-    ], { concurrency: 5, capacity: 5, signal: t.signal, execute: async selected => {
+    ], { concurrency: 6, capacity: 6, signal: t.signal, execute: async selected => {
       if (selected.id === 'blocker') await release.promise;
       else if (selected.id === 'seed') await peer.promise;
       else if (selected.id === 'peer') peer.resolve();
       else {
         entered = true;
         assert.equal(released, true,
-          'Capture must not start its timed callback with only three slots available for four live actors');
+          'Capture must not start its timed callback with only four slots available for five live actors');
       }
       return 'Passed';
     } });
@@ -387,7 +958,7 @@ test('T-PRD018 capture admission reserves its complete process tree while indepe
       await peer.promise;
       await new Promise(resolve => setImmediate(resolve));
       assert.equal(entered, false,
-        'An admitted peer must not allow the four-actor capture callback to oversubscribe a five-slot host');
+        'An admitted peer must not allow the five-actor capture callback to oversubscribe a six-slot host');
     } finally {
       released = true;
       release.resolve();
@@ -395,14 +966,14 @@ test('T-PRD018 capture admission reserves its complete process tree while indepe
     }
     assert.equal(entered, true);
 
-    const producers = await createPlan(parseOptions(['targeted', '--workers', '5', '--name',
+    const producers = await createPlan(parseOptions(['targeted', '--workers', '6', '--name',
       '^T-PRD018 (command checkpoint capacity|streamed validation output|validation output keeps)',
       'test/public-readiness-inventory.test.mjs']));
     for (const producer of producers.groups) {
       const finish = Promise.withResolvers();
       let captureLive = false;
       const pressure = runValidationReadyPool([capture, producer], {
-        concurrency: 5, capacity: 5, signal: t.signal, execute: async selected => {
+        concurrency: 6, capacity: 6, signal: t.signal, execute: async selected => {
           if (selected.id === capture.id) {
             captureLive = true;
             await finish.promise;
@@ -416,9 +987,9 @@ test('T-PRD018 capture admission reserves its complete process tree while indepe
       finally { finish.resolve(); await pressure; }
     }
 
-    const budget = await enterTestBudget({ workers: 5, fileCount: 3 });
+    let budget = await enterTestBudget({ workers: 6, fileCount: 3 });
     const children = [];
-    const environment = { ...process.env, ...budget.environment, NODE_OPTIONS: '', NODE_PATH: '' };
+    let environment = { ...process.env, ...budget.environment, NODE_OPTIONS: '', NODE_PATH: '' };
     delete environment.NODE_TEST_CONTEXT;
     delete environment.SDLC_TEST_REPORT_CONTEXT;
     const module = new URL('../scripts/test-budget.mjs', import.meta.url).href;
@@ -456,11 +1027,11 @@ worker.close();process.disconnect();
       const next = start(digest('capture-peer-next'), 1);
       const nextEvidence = await next.ready;
       assert.equal(owner.child.exitCode, null, 'Peer capacity must be reused while capture retains its reservation');
-      assert.equal(owned.lease.minimumSlots, 4);
+      assert.equal(owned.lease.minimumSlots, 5);
       assert.equal(owned.lease.finishedAt, null);
       assert.equal(firstEvidence.budget.id, owned.budget.id);
       assert.equal(nextEvidence.budget.id, owned.budget.id);
-      assert.equal(owned.lease.minimumSlots + nextEvidence.lease.minimumSlots, 5);
+      assert.equal(owned.lease.minimumSlots + nextEvidence.lease.minimumSlots, 6);
       assert.notEqual(nextEvidence.lease.slot, owned.lease.slot);
       t.diagnostic(JSON.stringify({ capture: owned.lease, peer: nextEvidence.lease,
         budgetId: owned.budget.id, capacity: owned.budget.capacity }));
@@ -473,12 +1044,48 @@ worker.close();process.disconnect();
       try { await Promise.all(children.map(({ done }) => done)); }
       finally { await budget.close(); }
     }
+
+    budget = await enterTestBudget({ workers: 7, fileCount: 2 });
+    environment = { ...process.env, ...budget.environment, NODE_OPTIONS: '', NODE_PATH: '' };
+    delete environment.NODE_TEST_CONTEXT;
+    delete environment.SDLC_TEST_REPORT_CONTEXT;
+    try {
+      const owner = start(catalog.id, catalog.minimumSlots);
+      const owned = await owner.ready;
+      assert.equal(owner.child.exitCode, null, 'The controlled catalog boundary must hold its complete reservation');
+      assert.equal(owned.lease.minimumSlots, catalogSlots);
+      assert.equal(owned.lease.finishedAt, null);
+      assert.ok(owned.budget.capacity >= owned.lease.minimumSlots);
+      owner.child.send({ release: true });
+      await owner.done;
+      const peer = start(digest('catalog-reservation-peer'), 1);
+      const shared = await peer.ready;
+      assert.equal(owner.child.exitCode, 0, 'Catalog settlement must release its entire reservation before peer reuse');
+      assert.equal(shared.budget.id, owned.budget.id);
+      assert.equal(shared.lease.minimumSlots, 1);
+      t.diagnostic(JSON.stringify({ catalog: owned.lease, peer: shared.lease,
+        budgetId: owned.budget.id, capacity: owned.budget.capacity }));
+      peer.child.send({ release: true });
+    } finally {
+      for (const { child } of children) {
+        if (child.connected) child.send({ release: true }, () => {});
+      }
+      try { await Promise.all(children.map(({ done }) => done)); }
+      finally { await budget.close(); }
+    }
   });
 
 test('T-PRD018 command capture durably retains dispatched identity and sanitized progress before cancellation or abrupt termination',
   { timeout: 30000 }, async t => {
     const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'command-checkpoint-'));
-    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const observers = [];
+    t.after(async () => {
+      for (const observer of observers) {
+        assert.equal((await settleRuntimeObserver(observer, t)).cleanup, 'awaited',
+          'An unsettled native observer prevents fixture removal');
+      }
+      await fs.rm(directory, { recursive: true, force: true });
+    });
     const environment = { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' };
     delete environment.NODE_TEST_CONTEXT;
     delete environment.SDLC_TEST_REPORT_CONTEXT;
@@ -488,6 +1095,28 @@ test('T-PRD018 command capture durably retains dispatched identity and sanitized
       const name = abrupt ? 'abrupt-command' : 'cancelled-command';
       const marker = path.join(directory, `${name}-entered.json`);
       const release = path.join(directory, `${name}-release`);
+      const terminationDispatch = path.join(directory, `${name}-termination-dispatch.json`);
+      let observer;
+      if (!abrupt && process.platform === 'win32') {
+        try {
+          observer = await startWindowsRuntimeObserver({
+            directory: path.join(directory, 'native-observer'), ownerPid: process.pid, expectedImage: 'taskkill',
+          });
+          observers.push(observer);
+          await observer.ready;
+        } catch (error) {
+          if (observer) {
+            let startup;
+            try { startup = await settleRuntimeObserver(observer, t, error); }
+            catch (settlementError) {
+              throw new AggregateError([error, settlementError],
+                `Native startup and admission stop failed; ${error.message}`);
+            }
+            if (startup.cleanup !== 'awaited' || startup.compilerSettled !== true) throw error;
+          }
+          t.diagnostic('Native controller observation was unavailable; original cancellation assertions remain required.');
+        }
+      }
       const source = path.join(directory, `${name}.mjs`);
       await fs.writeFile(source, `import * as fs from 'node:fs/promises';
 import {atomicWrite} from ${JSON.stringify(filesModule)};
@@ -502,11 +1131,34 @@ while(!(await fs.stat(${JSON.stringify(release)}).catch(error=>{
 }
 `);
       const controllerSource = path.join(directory, `${name}-controller.mjs`);
-      await fs.writeFile(controllerSource, `import {executeValidationCommand} from ${JSON.stringify(module)};
+      await fs.writeFile(controllerSource, `import childProcess from 'node:child_process';
+import {syncBuiltinESMExports} from 'node:module';
+import path from 'node:path';
+import {atomicWrite} from ${JSON.stringify(filesModule)};
+import {executeValidationCommand} from ${JSON.stringify(module)};
+const originalSpawn=childProcess.spawn;
+let dispatchRetained=Promise.resolve();
+childProcess.spawn=function(command,args,options){
+  const child=originalSpawn(command,args,options);
+  if(process.platform==='win32'&&command===path.join(process.env.SystemRoot,'System32','taskkill.exe')){
+    child.once('spawn',()=>{
+      const observed={pid:child.pid,ownerPid:process.pid,rootPid:Number(args[1]),createdBeforeMs:Date.now()};
+      dispatchRetained=Promise.all([
+        atomicWrite(${JSON.stringify(terminationDispatch)},JSON.stringify(observed)),
+        ${observer ? `atomicWrite(${JSON.stringify(observer.files.request)},JSON.stringify({
+          pid:child.pid,createdBeforeMs:observed.createdBeforeMs}))` : 'Promise.resolve()'}
+      ])
+        .catch(()=>process.stderr.write('Owned termination dispatch observation was unavailable.\\n'));
+    });
+  }
+  return child;
+};
+syncBuiltinESMExports();
 const cancellation=new AbortController();
 process.once('message',()=>cancellation.abort());
 await executeValidationCommand({name:${JSON.stringify(name)},command:process.execPath,
   args:[${JSON.stringify(source)}],outputDir:${JSON.stringify(directory)},signal:cancellation.signal});
+await dispatchRetained;
 if(process.connected)process.disconnect();
 `);
       const controller = spawn(process.execPath, [controllerSource], {
@@ -520,6 +1172,9 @@ if(process.connected)process.disconnect();
       });
       let owned;
       let report;
+      let failure;
+      let nativeRuntime;
+      let cancellationSentAtMs = null;
       const reportPath = path.join(directory, `${name}.json`);
       try {
         const deadline = Date.now() + 7000;
@@ -564,6 +1219,7 @@ if(process.connected)process.disconnect();
           assert.deepEqual(await fs.readFile(reportPath), preserved);
           assert.equal(JSON.parse(preserved).complete, false);
         } else {
+          cancellationSentAtMs = Date.now();
           await new Promise((resolve, reject) => controller.send({ cancel: true },
             error => error ? reject(error) : resolve()));
           const result = await done;
@@ -581,22 +1237,66 @@ if(process.connected)process.disconnect();
           assert.equal(digest(finalJournal), cancelled.checkpoint.originalJournalPrefix.sha256);
           assert.equal(finalJournal.length, cancelled.checkpoint.originalJournalPrefix.bytes);
         }
+      } catch (error) {
+        failure = error;
       } finally {
-        await fs.writeFile(release, '');
-        if (owned) {
-          try { process.kill(owned.pid, 'SIGKILL'); }
-          catch (error) { if (error.code !== 'ESRCH') throw error; }
-        }
-        if (controller.exitCode === null && controller.signalCode === null) controller.kill('SIGKILL');
-        await done;
-        const deadline = Date.now() + 5000;
-        while (owned) {
-          try { process.kill(owned.pid, 0); }
-          catch (error) { if (error.code === 'ESRCH') break; throw error; }
-          assert.ok(Date.now() < deadline, 'No owned capture process may survive cleanup');
-          await delay(20);
+        try {
+          await fs.writeFile(release, '');
+          if (owned) {
+            try { process.kill(owned.pid, 'SIGKILL'); }
+            catch (error) { if (error.code !== 'ESRCH') throw error; }
+          }
+          if (controller.exitCode === null && controller.signalCode === null) controller.kill('SIGKILL');
+          await done;
+          const deadline = Date.now() + 5000;
+          while (owned) {
+            try { process.kill(owned.pid, 0); }
+            catch (error) { if (error.code === 'ESRCH') break; throw error; }
+            assert.ok(Date.now() < deadline, 'No owned capture process may survive cleanup');
+            await delay(20);
+          }
+        } catch (error) {
+          failure = failure ? new AggregateError([failure, error], 'Capture assertion and cleanup failed') : error;
+        } finally {
+          if (observer) {
+            try { nativeRuntime = await settleRuntimeObserver(observer, t); }
+            catch (error) {
+              failure = failure ? new AggregateError([failure, error], 'Capture assertion and admission stop failed') : error;
+            }
+          }
         }
       }
+      if (observer) {
+        const observation = nativeRuntime?.observation;
+        const target = observation?.target;
+        const samples = target?.samples ?? [];
+        let dispatch = null;
+        try {
+          const value = JSON.parse(await fs.readFile(terminationDispatch, 'utf8'));
+          if (Number.isSafeInteger(value.pid) && value.pid > 0 &&
+              value.ownerPid === controller.pid && value.rootPid === owned?.pid &&
+              Number.isSafeInteger(value.createdBeforeMs) && value.createdBeforeMs > 0) {
+            dispatch = { pid: value.pid, createdBeforeMs: value.createdBeforeMs };
+          }
+        } catch {}
+        const facts = {
+          window: 'spawn-bound-diagnostic-only', cancellationSentAtMs, dispatch,
+          reason: observation?.reason ?? 'unavailable', identity: target?.status ?? 'unverified',
+          bindingReason: target?.reason ?? 'unavailable',
+          creationTicks: target?.creationTicks ?? null,
+          capturedUtcMs: target?.capturedUtcMs ?? null, sampleAttempts: target?.sampleAttempts ?? null,
+          first: samples[0] ?? null, last: samples.at(-1) ?? null,
+          samplesTruncated: target?.samplesTruncated ?? null,
+          lateSampleDropped: target?.lateSampleDropped ?? null,
+          recordTruncated: observation?.recordTruncated ?? null,
+          compilerSettled: nativeRuntime?.compilerSettled ?? false,
+          cleanup: nativeRuntime?.cleanup ?? 'unknown',
+          rootObservation: 'unavailable', threadWaits: 'unavailable',
+        };
+        t.diagnostic(JSON.stringify({ nativeControllerObservation: facts }));
+        if (failure) failure.message += `\nOwned native controller observation: ${JSON.stringify(facts)}`;
+      }
+      if (failure) throw failure;
     }
   });
 
@@ -1281,6 +1981,11 @@ test('T-PRD013 measured GitHub process partitions preserve every original assert
     [operationFamily, operationFamily, operationFamily,
       boundaryFamily, boundaryFamily, boundaryFamily, boundaryFamily]);
   const snapshotId = 'assertion-2be026a15f5d572e8573f9b9a31de64fea9d53fec0ac215767c7bc378901c216';
+  const capacityRoot = 'GH37 artifact proof fits bounded records beneath a long owned checkout path';
+  const capacityIds = [
+    'assertion-2a9c0fe3719d4fa6dccc791d98c75530c780deb23722a02d290045720ad8fa72',
+    'assertion-f47d61acc8586dfe5859e415407a691d6b448cfb3e24bb740df769d38ab838ef',
+  ];
   const allCases = declarations.flatMap(file => file.cases);
   const snapshot = allCases.filter(test => test.id === snapshotId);
   assert.equal(snapshot.length, 1);
@@ -1288,9 +1993,16 @@ test('T-PRD013 measured GitHub process partitions preserve every original assert
   assert.equal(snapshot[0].name,
     'fixture byte snapshots bound fresh reads and drain failures without caching or losing lock exclusions');
   assert.deepEqual(snapshot[0].parents, []);
-  assert.equal(allCases.length, 144);
+  assert.deepEqual(allCases.filter(test => capacityIds.includes(test.id))
+    .map(({ id, file, name, parents }) => ({ id, file, name, parents })), [
+    { id: capacityIds[0], file: operationFamily, name: capacityRoot, parents: [] },
+    { id: capacityIds[1], file: operationFamily,
+      name: 'complete terminal proof survives the longer native checkout binding', parents: [capacityRoot] },
+  ]);
+  assert.equal(allCases.length, 146);
   assert.equal(new Set(allCases.map(test => test.id)).size, allCases.length);
-  const originals = declarations.map(file => file.cases.filter(test => test.id !== snapshotId));
+  const originals = declarations.map(file => file.cases.filter(test =>
+    test.id !== snapshotId && !capacityIds.includes(test.id)));
   assert.deepEqual(originals.map(cases => cases.filter(test => !test.parents.length).length),
     [2, 1, 1, 1, 1, 1, 1]);
   const assertions = originals.flat().map(test => ({
@@ -1298,6 +2010,48 @@ test('T-PRD013 measured GitHub process partitions preserve every original assert
   })).sort((left, right) => left.id.localeCompare(right.id, 'en'));
   assert.equal(assertions.length, 143);
   assert.equal(new Set(assertions.map(test => test.id)).size, assertions.length);
+  // c8eb58e strengthens terminal-proof checks and isolates the local dispatch fixture.
+  // Pin only those corrected callbacks before comparing the unchanged partition baseline.
+  const correctedCallbacks = [
+    {
+      ids: ['assertion-968fe49ad80856f14328b72ebe847c64ae1b114d930e1c2cae2004c1dc94025c'],
+      original: 'f941e1be1bc5f03d7e35e00ede49c78c15c60b69549456cc878c0924820c01b5',
+      current: '1c0e36246105d1f8a32d1a95c6b16e93777a7399a47abdb1f89014552ea54142',
+    },
+    {
+      ids: [
+        'assertion-18cb1a1c0c043d01ccf7ef51b94c52eaeedcb13b9289b8e7a14fb968f56d1cdf',
+        'assertion-70c5ec78bf1b0ae4771c75fb32f95c0d386ab3d1663a571a53f0b94e6d67290a',
+        'assertion-3ad3a1769ef0144563e7bd1d365320bc4f99199e645fbfdc51022e70e27536e1',
+        'assertion-c7224c831ea10b5563bd0b4965f01851ff9130a9776c92c55760b650ccd3f019',
+        'assertion-0a9f06d9ab74cc5d172c5808bd4f8bdacf5aa6af7bd6ec2eece40e8c6c224dce',
+        'assertion-d31bdc7d0cc5235598988d1967c13eb304c586619f2a610047dbbf89f7ff3ee4',
+        'assertion-df53171e5806a94cabb6e3cc99cd5633fcea9becd9918d2bf78db5b0ed596572',
+        'assertion-334b2c336d1d8bf8377acd456872dbef631b9bd7f863d38f15585d96737ec26d',
+        'assertion-ef66a2f4b9808f540911e7d25b7f8bafa84ac93ad3dd5f03f992bd36fb0f78dc',
+      ],
+      original: '877caa4b50e86556a6e65b5447b97083e203c8a2bbc9d5cb2a5eb3349ba2c96e',
+      current: '5e727ee9e093a0c2b7bd24be16239d2a37256996f5effba8a292c5dd470c3654',
+    },
+    {
+      ids: ['assertion-f723e3a3643a54c3d9d35b1c71ec9f37c09007afa801240ba63943258550e9d3'],
+      original: 'dd9fd7d4a2be36160b0a98778e25f37f13fa8e1836bfd3ddb1d442e6c34859d7',
+      current: '6ce3935477e0ddbbdfb99ed3ad3e1659f6bc9c41dbc53b71acd935c4d59d6ed6',
+    },
+    {
+      ids: ['assertion-a09f1cf05fd498f17ea880655763b3e7c2dcd0b5f86a7593be62adf9e97d6aa1'],
+      original: 'c6a5d4af883deeb7bc28b9991c6eb78b9eca9b0e9370d2a6a233b82cb3fb6723',
+      current: '154aeb0c0c10c95c7edd03e5708248ae2162f60674c13908da89cd6e5fa9aceb',
+    },
+  ];
+  for (const correction of correctedCallbacks) {
+    for (const id of correction.ids) {
+      const callback = assertions.find(test => test.id === id);
+      assert.ok(callback, `Missing corrected callback ${id}`);
+      assert.equal(callback.definitionDigest, correction.current, callback.name);
+      callback.definitionDigest = correction.original;
+    }
+  }
   assert.equal(digest(assertions), '04af554a098d1422688e958a838c68c70b0a576f699e3d509dbfac7c943f8a2a');
 });
 

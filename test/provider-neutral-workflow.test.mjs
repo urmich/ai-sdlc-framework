@@ -16,7 +16,8 @@ import { evaluatePolicy } from '../src/policy.mjs';
 import { resume, status } from '../src/recovery.mjs';
 import { Store } from '../src/store.mjs';
 import { currentArtifact } from '../src/current-evidence.mjs';
-import { recordArtifact, recordTest, startCycle } from '../src/validation.mjs';
+import { recordArtifact, startCycle } from '../src/validation.mjs';
+import { recordFixtureTest as recordTest } from './helpers.mjs';
 
 async function archivedBytes(f, recordId) {
   return fs.readFile(path.join(f.store.workPath(f.workItemId),
@@ -261,27 +262,27 @@ test('T-103/T-104/T-113 late check association requires the current PR, exact re
   const wrongDestinationPolicy = evaluatePolicy(
     await f.store.load(f.workItemId), {
       class: 'build', repositoryId: 'primary', environment: 'DEV',
-      target: 'fixture-build', configDigest: 'fixture-config',
+      target: 'fixture-build', configDigest: digest('fixture-config'),
       provider: 'azure-devops', pipeline: '17',
       localRepositoryPath: f.repo, remoteRepositoryURL: wrongHostedURL,
       sourceRevision, targetRevision, prRecordId: pr.id,
       prId: '18', policyVersion: 'policy-1', monitorCapability: true,
     }, { clock: f.clock, configuration: { environments: {
-      DEV: { target: 'fixture-build', configDigest: 'fixture-config',
+      DEV: { target: 'fixture-build', configDigest: digest('fixture-config'),
         pr: { required: true, validation: true } },
     } } });
   assert.ok(wrongDestinationPolicy.findings.some(finding =>
     finding.rule === 'pr-readiness' &&
     finding.reason.includes('pr-hosted-repository-mismatch')));
   const config = { environments: { DEV: {
-    target: 'fixture-build', configDigest: 'fixture-config',
+    target: 'fixture-build', configDigest: digest('fixture-config'),
     pr: { required: true, validation: true },
   } } };
   await fs.writeFile(path.join(f.repo, '.sdlc', 'config.json'),
     JSON.stringify(config));
   const wrongPrAction = {
     class: 'build', repositoryId: 'primary', environment: 'DEV',
-    target: 'fixture-build', configDigest: 'fixture-config',
+    target: 'fixture-build', configDigest: digest('fixture-config'),
     provider: 'azure-devops', pipeline: '17',
     localRepositoryPath: f.repo, remoteRepositoryURL: repository.remoteRepositoryURL,
     sourceRevision, targetRevision, prRecordId: pr.id, prId: '18',
@@ -388,7 +389,7 @@ test('T-113 selected hosted repository, advanced PR, distinct checks and artifac
   await f.runGit('remote', 'add', 'hosted', hostedURL);
   await fs.writeFile(path.join(f.repo, '.sdlc', 'config.json'), JSON.stringify({
     remote: 'hosted', environments: { DEV: {
-      target: 'dev-target', configDigest: 'config-1',
+      target: 'dev-target', configDigest: digest('config-1'),
     } },
   }));
   await f.runGit('add', '.');
@@ -538,7 +539,7 @@ test('T-113 selected hosted repository, advanced PR, distinct checks and artifac
   });
   const { cycle } = await startCycle(f.store, {
     workItemId: f.workItemId, tests: testDefinitions(),
-    configDigest: 'config-1', cause: 'Disposable candidate',
+    configDigest: digest('config-1'), cause: 'Disposable candidate',
   });
   for (const testId of ['T-unit', 'T-integration']) {
     await recordTest(f.store, { workItemId: f.workItemId,

@@ -2,6 +2,14 @@ export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [{"coverage": "process", "paths": ["scripts/test-runner.mjs", "scripts/test-worker.mjs"]}],
   "groups": [{
+    "root": "T-PRD018 rejected failure diagnostics retain only closed error and owned phase facts",
+    "minimumSlots": 1,
+    "exclusiveResources": []
+  }, {
+    "root": "T-PRD018 Windows capture diagnostics distinguish startup and exited observers without exposing output",
+    "minimumSlots": 1,
+    "exclusiveResources": []
+  }, {
     "root": "T-PRD018 Windows process identity stays pinned through exit probes until explicit release",
     "minimumSlots": 3
   }, {
@@ -19,6 +27,18 @@ export const validationDeclarations = {
     "reason": "These actual overlap/cancellation callbacks need two slots reserved before their deadlines start."
   },
   "applicability": [{
+    "names": ["T-PRD018 rejected failure diagnostics retain only closed error and owned phase facts"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "PR-only isolated failure-formatting regression; no native processes, shared resources or prerequisite roots.",
+    "prerequisites": ["Node and one aggregate worker slot"]
+  }, {
+    "names": ["T-PRD018 Windows capture diagnostics distinguish startup and exited observers without exposing output"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-process-identity-contract",
+    "reason": "PR-only controlled observer-stream regression; process-isolated module context, no native child or shared mutable state.",
+    "prerequisites": ["Node; owned repository-local test evidence"]
+  }, {
     "names": [
       "T-PRD018 Windows process identity stays pinned through exit probes until explicit release"
     ],
@@ -62,6 +82,7 @@ export const validationDeclarations = {
       {"name": "T-130 SIGTERM cancels active file workers before the public runner returns", "parents": []}
     ]},
     {"id": "T-PRD018", "selectors": [
+      {"name": "T-PRD018 rejected failure diagnostics retain only closed error and owned phase facts", "parents": []},
       {"name": "T-PRD018 command cancellation settles the owned group before return and fails closed on unknown survivors", "parents": []},
       {"name": "T-PRD018 owned worker exit assertions distinguish reused identities from surviving workers", "parents": []},
       {"name": "T-PRD018 Windows process identity stays pinned through exit probes until explicit release", "parents": []},
@@ -315,6 +336,65 @@ test('T-PRD018 owned worker exit assertions distinguish reused identities from s
     assert.match(await fs.readFile(`${exitPath}.error`, 'utf8'), /creation does not predate its ready observation/u);
     assert.doesNotThrow(() => process.kill(process.pid, 0),
       'Rejecting an unexpected creation must never terminate that process');
+  }
+});
+
+test('T-PRD018 Windows capture diagnostics distinguish startup and exited observers without exposing output', async () => {
+  const systemRoot = path.join(repositoryRoot, '.test-data', 'synthetic-system-root');
+  for (const mode of ['not-started', 'started', 'exited', 'buffered-identity', 'closed',
+    'signaled', 'negative-exit', 'unknown-signal', 'spawn-error', 'oversized', 'invalid-record']) {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    let expire;
+    let allowance;
+    let executable;
+    const context = createContext({ assert, path, fs,
+      process: { pid: process.pid, env: { SystemRoot: systemRoot } },
+      spawn: command => { executable = command; return child; },
+      setTimeout(callback, milliseconds) { expire = callback; allowance = milliseconds; return 1; },
+      clearTimeout() {} });
+    const capture = runInContext(`(${windowsProcessIdentity.toString()})`, context);
+    const pending = capture(process.pid, 'owned-unused-exit', { createdBeforeMs: Date.now() });
+    const outcome = pending.then(value => ({ value }), error => ({ message: error.message }));
+    assert.equal(executable, path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'));
+    assert.equal(allowance, 5000);
+    const secret = 'private-observer-output-not-for-annotations';
+    child.stderr.write(secret);
+    if (!['not-started', 'spawn-error'].includes(mode)) {
+      child.stdout.write('owned-process-observer-');
+      child.stdout.write('started-v1\n');
+    }
+    if (['exited', 'buffered-identity', 'closed'].includes(mode)) child.emit('exit', 7, null);
+    if (mode === 'signaled') child.emit('exit', null, 'SIGTERM');
+    if (mode === 'negative-exit') child.emit('exit', -1073741510, null);
+    if (mode === 'unknown-signal') child.emit('exit', null, `SIG${secret}`);
+    if (mode === 'buffered-identity') {
+      child.stdout.write(JSON.stringify({ pid: process.pid, present: true,
+        creationTime: '100', image: 'node', observedAt: new Date().toISOString() }) + '\n');
+      child.emit('close', 7, null);
+      const result = await outcome;
+      assert.equal(result.value.identity.pid, process.pid,
+        'An exit event must not discard an identity still draining from stdout');
+      continue;
+    }
+    if (mode === 'closed') child.emit('close', 7, null);
+    else if (mode === 'spawn-error') child.emit('error', new Error(secret));
+    else if (mode === 'oversized') child.stdout.write(secret.repeat(3000));
+    else if (mode === 'invalid-record') child.stdout.write(`${secret}\n`);
+    else expire();
+    const { message } = await outcome;
+    assert.ok(message, mode);
+    assert.equal(message.includes(secret), false);
+    assert.match(message, /observer phase=(?:startup|identity) startup=(?:true|false)/u);
+    assert.ok(message.includes(`startup=${!['not-started', 'spawn-error'].includes(mode)}`), mode);
+    assert.ok(message.includes(`exitObserved=${['exited', 'closed', 'signaled', 'negative-exit', 'unknown-signal'].includes(mode)}`), mode);
+    assert.ok(message.includes(`exitCode=${mode === 'negative-exit' ? -1073741510 :
+      ['exited', 'closed'].includes(mode) ? 7 : 'none'}`), mode);
+    assert.ok(message.includes(`signal=${mode === 'signaled' ? 'SIGTERM' : 'none'}`), mode);
+    assert.ok(message.includes(`stderrBytes=${Buffer.byteLength(secret)}`), mode);
+    if (mode === 'oversized') assert.match(message, /stdoutBytes=65536 /u);
+    assert.equal(sanitizeExecutionPayload(Buffer.from(JSON.stringify({ message }))).message, message);
   }
 });
 
@@ -760,6 +840,57 @@ test('unexecuted assertion', {skip: 'Owned unavailable-adapter fixture'}, () => 
   await assert.rejects(fs.stat(path.join(directory, 'outside.json')), { code: 'ENOENT' });
 });
 
+test('T-PRD018 rejected failure diagnostics retain only closed error and owned phase facts', async () => {
+  const source = await fs.readFile(path.join(repositoryRoot, 'scripts', 'test-worker.mjs'), 'utf8');
+  const start = source.indexOf('function rejectionCause(error) {');
+  const end = source.indexOf('\nfunction retainEvent(', start);
+  assert.ok(start >= 0 && end > start);
+  const format = runInContext(`${source.slice(start, end)}\nfailureDiagnostic;`,
+    createContext({ Buffer, digest, SdlcError, sanitizeExecutionPayload }));
+  const message = "unsupported ['quoted diagnostic']";
+  const rows = [
+    { mode: 'root-exit', phase: 'writer-drain', elapsedMs: 5123.4, message: 'unretained fixture detail' },
+    { mode: 'unretained-mode', phase: 'writer-drain', elapsedMs: 1 },
+    { mode: 'natural', phase: 'unretained-phase', elapsedMs: 1 },
+    { mode: 'failed', phase: 'cleaned', elapsedMs: Infinity },
+  ];
+  const failure = Object.assign(new Error(message), { code: 'ERR_TEST_FAILURE', failureType: 'testCodeFailure',
+    cause: Object.assign(new Error('inner fixture'), {
+      code: 'ERR_ASSERTION', operator: 'deepStrictEqual', expected: [], actual: rows,
+    }) });
+  const result = format(failure);
+  assert.equal(result.diagnostic.retention.status, 'Rejected');
+  assert.equal(result.diagnostic.originalMessage.sha256, digest(message));
+  assert.equal(result.diagnostic.originalMessage.bytes, Buffer.byteLength(message));
+  assert.match(result.diagnostic.message, /codes=ERR_TEST_FAILURE,ERR_ASSERTION type=testCodeFailure/u);
+  assert.match(result.diagnostic.message, /owned=root-exit\/writer-drain\/5123ms/u);
+  assert.ok(!result.diagnostic.message.includes('unretained'));
+  assert.ok(!result.diagnostic.message.includes(message));
+  assert.doesNotThrow(() => sanitizeExecutionPayload(Buffer.from(JSON.stringify({
+    message: result.diagnostic.message,
+  }))));
+  failure.cause.actual = Array.from({ length: 7 }, () => rows[0]);
+  assert.ok(!format(failure).diagnostic.message.includes('owned='));
+  const timeout = format(Object.assign(new Error(message),
+    { code: 'ERR_TEST_FAILURE', failureType: 'testTimeoutFailure' }));
+  assert.match(timeout.diagnostic.message, /type=testTimeoutFailure/u);
+  const unknown = format(Object.assign(new Error(message),
+    { code: 'unretained-code', failureType: 'unretained-type' }));
+  assert.match(unknown.diagnostic.message, /codes=unknown type=unknown/u);
+  assert.ok(!unknown.diagnostic.message.includes('unretained'));
+  const ordinary = format(Object.assign(new Error('Ordinary assertion failure'), { code: 'ERR_ASSERTION' }));
+  assert.equal(ordinary.diagnostic.message, 'Ordinary assertion failure');
+  assert.equal(ordinary.rejection, undefined);
+  const cleanup = Object.assign(new Error(message), { code: 'ERR_TEST_FAILURE', failureType: 'testCodeFailure',
+    cause: Object.assign(new Error(message), { code: 'ERR_ASSERTION',
+      ownedSettlementScenario: { mode: 'stalled', phase: 'root-close', elapsedMs: 71.4 } }) });
+  assert.match(format(cleanup).diagnostic.message, /owned=stalled\/root-close\/71ms/u);
+  cleanup.cause.cause = cleanup;
+  assert.match(format(cleanup).diagnostic.message, /owned=stalled\/root-close\/71ms/u);
+  cleanup.cause.ownedSettlementScenario.phase = 'controller-stop';
+  assert.match(format(cleanup).diagnostic.message, /owned=stalled\/controller-stop\/71ms/u);
+});
+
 test('T-PRD018 unsafe failure diagnostics terminate without hanging or manufacturing complete evidence',
   { timeout: 30000 }, async t => {
     const directory = await scratch(t);
@@ -794,6 +925,12 @@ test('T-PRD018 unsafe failure diagnostics terminate without hanging or manufactu
     const siblingMarker = path.join(directory, 'sibling-finished');
     const privateValue = 'fixture-worker-private-value';
     const guide = `# Current installation\n\n\`\`\`js\nconst config = { authorization: '${privateValue}' };\n\`\`\`\n`;
+    const settlementSource = await fs.readFile(path.join(repositoryRoot,
+      'test', 'distribution-boundary-lifetime.test.mjs'), 'utf8');
+    const attachmentStart = settlementSource.indexOf('const outcomes = await Promise.allSettled(modes.slice(');
+    const attachmentEnd = settlementSource.indexOf('\n      for (const outcome of outcomes)', attachmentStart);
+    assert.ok(attachmentStart >= 0 && attachmentEnd > attachmentStart);
+    const attachment = settlementSource.slice(attachmentStart, attachmentEnd);
     await fs.writeFile(legitimate, `import test from 'node:test';import assert from 'node:assert/strict';
 import {writeFileSync,existsSync,renameSync} from 'node:fs';import {createHash} from 'node:crypto';
 import path from 'node:path';
@@ -810,7 +947,12 @@ test('legitimate Markdown assertion failure',async()=>{
   try{assert.match(${JSON.stringify(guide)},/Old local title/u);}
   catch(error){writeFileSync(${JSON.stringify(identityFile)},JSON.stringify({
     sha256:createHash('sha256').update(error.message).digest('hex'),bytes:Buffer.byteLength(error.message)
-  }));throw error;}
+  }));
+  const modes=['stalled'],index=0;
+  const phases=new Map([['stalled',{phase:'root-close',elapsedMs:71.4}]]);
+  const runMode=async()=>{throw error;};
+  ${attachment}
+  throw outcomes[0].reason;}
 });
 test('passing sibling after diagnostic rejection',async()=>{
   await captureOwnedIdentity('sibling');
@@ -898,6 +1040,8 @@ test('passing sibling after diagnostic rejection',async()=>{
     assert.equal(failed.status, 'Failed');
     assert.equal(failed.diagnostic.retention.status, 'Rejected');
     assert.deepEqual(failed.diagnostic.originalMessage, JSON.parse(await fs.readFile(identityFile, 'utf8')));
+    assert.match(failed.diagnostic.message, /codes=ERR_TEST_FAILURE,ERR_ASSERTION type=testCodeFailure/u);
+    assert.match(failed.diagnostic.message, /owned=stalled\/root-close\/71ms/u);
     assert.equal(await fs.readFile(siblingMarker, 'utf8'), 'finished');
     const journalText = await fs.readFile(`${legitimateReportPath}.journal.ndjson`, 'utf8');
     const notices = journalText.trim().split('\n').map(JSON.parse);

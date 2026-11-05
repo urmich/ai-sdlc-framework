@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { digest } from '../src/core.mjs';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
@@ -7,7 +8,8 @@ import { coding, completeReview, fixture, grant, grantPush, orient,
 import { publicationPaths, verifyPublicationBase } from '../src/git.mjs';
 import { evaluateGate } from '../src/gate.mjs';
 import { markDispatching, prepareOperation } from '../src/operations.mjs';
-import { recordTest, startCycle } from '../src/validation.mjs';
+import { startCycle } from '../src/validation.mjs';
+import { recordFixtureTest as recordTest } from './helpers.mjs';
 
 async function observeHostedBranch(f, branchRef, revision, {
   remoteRepositoryURL, observedAt = new Date(f.clock.now()).toISOString(),
@@ -117,7 +119,7 @@ test('a fetch tracking base cannot authorize an early document push to a differe
     .filter(record => record.type === 'operation').length, 0);
 
   const { cycle } = await startCycle(f.store, {
-    workItemId: f.workItemId, configDigest: 'v1',
+    workItemId: f.workItemId, configDigest: digest('v1'),
     cause: 'Review the entire source candidate before publication to B',
   });
   for (const testId of ['T-unit', 'T-integration']) {

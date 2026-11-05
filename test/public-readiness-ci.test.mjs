@@ -5,8 +5,18 @@ export const validationDeclarations = {
     {"coverage": "direct", "paths": ["scripts/pr-readiness.mjs", "scripts/github-readiness-host.mjs", "scripts/pr-observer.mjs", "scripts/workflow-policy.mjs", "scripts/native-toolchain.mjs", "scripts/native-homebrew-prefix.mjs"]}
   ],
   "groups": [
+    {"root": "T-PRD018 tool processes retain failures, sanitized partial output and cancellation without surviving children", "dependsOn": [], "minimumSlots": 4, "exclusiveResources": []},
+    {"root": "T-PRD020 actual CI schedules twenty-five producer parts behind both Intel unit jobs and distinguishes edited base retargets", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD022 actual workflow graph applies semantic YAML, effective permissions and immutable action policy", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD020 required source safety scans complete committed definitions before native bootstrap", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}
-  ]
+  ],
+  "applicability": [{
+    "names": ["T-PRD018 tool processes retain failures, sanitized partial output and cancellation without surviving children"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "PR-only cancellation coverage reserves the worker, command, descendant and native stop/query controller. Existing cancellation, sanitation, original journal, process absence and controlled stop-race assertions remain unchanged; no critical promotion.",
+    "prerequisites": ["Node and four aggregate worker slots; owned repository-local process fixtures; stock taskkill on Windows or ps on POSIX"]
+  }]
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -28,7 +38,11 @@ import { writePayloadFixture, fixtureCanonical, fixtureSHA, fixtureWindowsLaunch
 import { repositoryRoot } from '../scripts/test-runner.mjs';
 import { previousReleasePins } from '../scripts/release-bundle.mjs';
 import { nativePrParts, nativeLegacyPrParts, nativePartJobKey, nativeFrameworkShardPlan,
-  nativeResourceFacts, nativePrPartsForProtocol, nativeFrameworkShardProtocols,
+  nativeResourceFacts, nativePrPartsForProtocol, nativeFrameworkShardProtocols, nativeFrameworkShardProtocol,
+  nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
+  nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
+  nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
+  nativeServiceBalanceFrameworkShardProtocol,
   nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
 import { compileValidationInventory } from '../scripts/validation-inventory.mjs';
 import { expectedBodySdkRequirements } from './native-sdk-expectations.mjs';
@@ -1319,7 +1333,7 @@ test('T-PRD022 actual workflow graph applies semantic YAML, effective permission
   const workflows = await readWorkflowPolicySources(repositoryRoot);
   const positive = inspectWorkflowTrust(workflows);
   assert.equal(positive.complete, true, JSON.stringify(positive.blockers));
-  assert.equal(positive.nativeResourcePolicy, 'arm-regression-allocation-v6-all-critical-bodies-first');
+  assert.equal(positive.nativeResourcePolicy, 'arm-regression-allocation-v10-intel-primary-first');
   const producer = positive.workflows.find(item => item.file === '.github/workflows/ci.yml');
   assert.deepEqual(producer.document.permissions, { contents: 'read' });
   assert.deepEqual(producer.jobs.find(job => job.id === 'mac-admission').effectivePermissions,
@@ -1708,6 +1722,7 @@ test('T-PRD020 required source safety scans complete committed definitions befor
   assert.equal(viewDiagnostic.includes(encodedUsername), false, 'Encoded query credentials must not leak into diagnostics');
 });
 
+// PR-only: native-validation maintainer; owned Node/source fixtures, no new capability or critical membership.
 test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel unit jobs and distinguishes edited base retargets', async t => {
   const workflows = await readWorkflowPolicySources(repositoryRoot);
   const result = inspectWorkflowTrust(workflows);
@@ -1723,8 +1738,43 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.deepEqual(ci.jobs.native.needs, ['intent', 'source', 'native-units']);
   assert.deepEqual(ci.jobs['native-units'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-homebrew'].needs, ['intent', 'source']);
-  assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v6-all-critical-bodies-first');
-  const historicalV5 = structuredClone(ci);
+  assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v10-intel-primary-first');
+  const historicalV9 = structuredClone(ci);
+  historicalV9.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v9-ready-critical-fairness';
+  historicalV9.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = 'native-framework-shards-v6-stable-cost-components';
+  historicalV9.jobs['native-mi'].needs = ['intent', 'source', 'native-units-mi'];
+  const historicalV8 = structuredClone(historicalV9);
+  historicalV8.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v8-own-platform-critical';
+  historicalV8.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = 'native-framework-shards-v5-root-components';
+  for (const key of ['native-ma-refresh', 'arm-refresh-admission']) {
+    historicalV8.jobs[key].needs = ['intent', 'source', 'native-units-ma', 'intel-retained-admission', 'mac-admission'];
+  }
+  historicalV8.jobs['mac-admission'].steps[4].name = 'Wait for actual ARM body worker allocation';
+  historicalV8.jobs['mac-admission'].steps[4].run =
+    historicalV8.jobs['mac-admission'].steps[4].run.replace('--group arm-refresh-ready', '--group arm-bodies');
+  for (const key of ['intel-admission', 'intel-homebrew-admission']) {
+    historicalV8.jobs[key].steps[4].name =
+      `Wait for actual Intel ${key === 'intel-admission' ? '' : 'critical '}body worker allocation`;
+    historicalV8.jobs[key].steps[4].run =
+      historicalV8.jobs[key].steps[4].run.replace('--group intel-auxiliaries-ready', '--group intel-bodies');
+  }
+  const historicalV7 = structuredClone(historicalV8);
+  historicalV7.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v7-bounded-queue-wait';
+  for (const key of ['native-mi-retained', 'intel-retained-admission']) {
+    historicalV7.jobs[key].needs.push('mac-admission');
+  }
+  for (const key of ['native-mi', 'intel-admission', 'intel-homebrew-admission']) {
+    historicalV7.jobs[key].needs.push('arm-refresh-admission');
+  }
+  for (const key of ['native-ma-refresh', 'arm-refresh-admission']) {
+    historicalV7.jobs[key].needs = historicalV7.jobs[key].needs.filter(dep => dep !== 'mac-admission');
+  }
+  const historicalV6 = structuredClone(historicalV7);
+  historicalV6.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v6-all-critical-bodies-first';
+  const admissionKeys = ['mac-admission', 'intel-admission', 'intel-homebrew-admission',
+    'intel-retained-admission', 'arm-refresh-admission'];
+  for (const key of admissionKeys) historicalV6.jobs[key]['timeout-minutes'] = 10;
+  const historicalV5 = structuredClone(historicalV6);
   historicalV5.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v5-critical-body-first';
   historicalV5.jobs['native-mi'].needs = ['intent', 'source', 'native-units-mi', 'intel-homebrew-admission'];
   historicalV5.jobs['intel-admission'].needs = ['intent', 'source', 'native-units-mi', 'intel-homebrew-admission'];
@@ -1744,12 +1794,47 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   const inspectDocument = document => inspectWorkflowTrust(workflows.map(workflow =>
     workflow.file === '.github/workflows/ci.yml' ? { ...workflow, contents: Object.entries(document)
       .map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n' } : workflow));
+  assert.equal(inspectDocument(historicalV9).complete, true,
+    'Published v9 retains simultaneous own-unit-ready Intel critical requests');
+  for (const [graph, policy] of [[historicalV9, ci.env.SDLC_MAC_ADMISSION_POLICY],
+    [ci, historicalV9.env.SDLC_MAC_ADMISSION_POLICY]]) {
+    const changed = structuredClone(graph);
+    changed.env.SDLC_MAC_ADMISSION_POLICY = policy;
+    assert.ok(inspectDocument(changed).blockers.some(blocker => blocker.code === 'NATIVE_COMPONENT_MATRIX_DIFFERS'),
+      'A label cannot substitute primary-first v10 for the published v9 request graph');
+  }
+  assert.equal(inspectDocument(historicalV8).complete, true, 'Historical v8 retains its Intel-only allocation graph');
+  const relabeledV8 = structuredClone(historicalV8);
+  relabeledV8.env.SDLC_MAC_ADMISSION_POLICY = ci.env.SDLC_MAC_ADMISSION_POLICY;
+  assert.equal(inspectDocument(relabeledV8).complete, false, 'Intel-only v8 receipts cannot borrow current admission identity');
+  const mislabeledCurrent = structuredClone(ci);
+  mislabeledCurrent.env.SDLC_MAC_ADMISSION_POLICY = historicalV8.env.SDLC_MAC_ADMISSION_POLICY;
+  assert.equal(inspectDocument(mislabeledCurrent).complete, false, 'The current graph cannot borrow historical v8 identity');
+  assert.equal(inspectDocument(historicalV7).complete, true, 'Historical v7 keeps its actual cross-platform graph');
+  const relabeledV7 = structuredClone(historicalV7);
+  relabeledV7.env.SDLC_MAC_ADMISSION_POLICY = ci.env.SDLC_MAC_ADMISSION_POLICY;
+  assert.equal(inspectDocument(relabeledV7).complete, false, 'Old v7 dependencies are not current admission semantics');
+  const mislabeledV8 = structuredClone(historicalV8);
+  mislabeledV8.env.SDLC_MAC_ADMISSION_POLICY = historicalV7.env.SDLC_MAC_ADMISSION_POLICY;
+  assert.equal(inspectDocument(mislabeledV8).complete, false, 'New v8 graph cannot borrow an old v7 identity');
+  assert.equal(result.nativeProtocol, nativeFrameworkShardProtocol);
+  for (const marker of ['native-framework-shards-v6', 'native-framework-shards-v4-split-intel-units', false]) {
+    const changed = structuredClone(ci);
+    changed.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = marker;
+    assert.ok(inspectDocument(changed).blockers.some(blocker => blocker.code === 'NATIVE_SHARD_PROTOCOL_DIFFERS'));
+  }
+  assert.equal(inspectDocument(historicalV6).complete, true,
+    'Historical v6 retains its original ten-minute coordinator watchdogs and unchanged dependency graph');
+  const relabeledV6 = structuredClone(historicalV6);
+  relabeledV6.env.SDLC_MAC_ADMISSION_POLICY = ci.env.SDLC_MAC_ADMISSION_POLICY;
+  assert.equal(inspectDocument(relabeledV6).complete, false,
+    'Current policy cannot silently reuse the historical shorter observation watchdog');
   assert.equal(inspectDocument(historicalV5).complete, true,
     'Historical v5 topology and closed receipt groups remain authentic without being relabeled');
   const relabeledV5 = structuredClone(historicalV5);
   relabeledV5.env.SDLC_MAC_ADMISSION_POLICY = ci.env.SDLC_MAC_ADMISSION_POLICY;
   assert.equal(inspectDocument(relabeledV5).complete, false,
-    'A cosmetic v6 label cannot admit the old Homebrew-before-bodies graph');
+    'A current policy label cannot admit the old Homebrew-before-bodies graph');
   const hybrid = structuredClone(ci);
   hybrid.jobs['intel-homebrew-admission'].steps[4].run =
     historicalV5.jobs['intel-homebrew-admission'].steps[4].run;
@@ -1763,19 +1848,20 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     'An old retained-body allocation cannot be relabeled as a current primary-body allocation');
   assert.deepEqual(ci.jobs['mac-admission'].needs, ['intent', 'source', 'native-units-ma']);
   assert.deepEqual(ci.jobs['native-ma'].needs, ['intent', 'source', 'native-units-ma']);
-  assert.deepEqual(ci.jobs['native-mi'].needs, ['intent', 'source', 'native-units-mi', 'arm-refresh-admission']);
+  assert.deepEqual(ci.jobs['native-mi'].needs,
+    ['intent', 'source', 'native-units-mi', 'intel-retained-admission']);
   assert.deepEqual(ci.jobs['native-units-ma'].needs, ['intent', 'source']);
   assert.deepEqual(ci.jobs['native-units-mi'].needs, ['intent', 'source']);
-  assert.deepEqual(ci.jobs['intel-admission'].needs, ['intent', 'source', 'native-units-mi', 'arm-refresh-admission']);
+  assert.deepEqual(ci.jobs['intel-admission'].needs, ['intent', 'source', 'native-units-mi']);
   assert.deepEqual(ci.jobs['native-mi-refresh'].needs,
     ['intent', 'source', 'native-units-mi', 'intel-admission']);
   assert.deepEqual(ci.jobs['intel-homebrew-admission'].needs,
-    ['intent', 'source', 'native-units-mi', 'arm-refresh-admission']);
+    ['intent', 'source', 'native-units-mi']);
   assert.deepEqual(ci.jobs['native-homebrew-mi'].needs, ['intent', 'source', 'intel-homebrew-admission']);
-  assert.deepEqual(ci.jobs['native-mi-retained'].needs, ['intent', 'source', 'native-units-mi', 'mac-admission']);
-  assert.deepEqual(ci.jobs['native-ma-refresh'].needs, ['intent', 'source', 'native-units-ma', 'intel-retained-admission']);
-  assert.deepEqual(ci.jobs['intel-retained-admission'].needs, ['intent', 'source', 'native-units-mi', 'mac-admission']);
-  assert.deepEqual(ci.jobs['arm-refresh-admission'].needs, ['intent', 'source', 'native-units-ma', 'intel-retained-admission']);
+  assert.deepEqual(ci.jobs['native-mi-retained'].needs, ['intent', 'source', 'native-units-mi']);
+  assert.deepEqual(ci.jobs['native-ma-refresh'].needs, ['intent', 'source', 'native-units-ma', 'mac-admission']);
+  assert.deepEqual(ci.jobs['intel-retained-admission'].needs, ['intent', 'source', 'native-units-mi']);
+  assert.deepEqual(ci.jobs['arm-refresh-admission'].needs, ['intent', 'source', 'native-units-ma', 'mac-admission']);
   assert.deepEqual(ci.jobs['native-mi'].strategy.matrix.include.map(row => row.shard),
     ['body-1', 'body-2']);
   assert.deepEqual(ci.jobs['native-ma'].strategy.matrix.include.map(row => row.shard),
@@ -1858,11 +1944,10 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     const part = ci.jobs[key].strategy.matrix.include[0];
     assert.deepEqual(ci.jobs[key].needs, ['intent', 'source',
       ...(part.shard && part.shard !== 'units' ? [nativePartJobKey({ ...part, shard: 'units' })] : []),
-      ...(key === 'native-mi' ? ['arm-refresh-admission'] : []),
       ...(key === 'native-mi-refresh' ? ['intel-admission'] : []),
       ...(key === 'native-homebrew-mi' ? ['intel-homebrew-admission'] : []),
-      ...(key === 'native-mi-retained' ? ['mac-admission'] : []),
-      ...(key === 'native-ma-refresh' ? ['intel-retained-admission'] : [])]);
+      ...(key === 'native-mi' ? ['intel-retained-admission'] : []),
+      ...(key === 'native-ma-refresh' ? ['mac-admission'] : [])]);
     if (part.shard === 'units') {
       assert.equal(ci.jobs[key].strategy.matrix.include.length, part.target === 'macos-x64' ? 2 : 1);
       assert.ok(ci.jobs[key].strategy.matrix.include.every(row =>
@@ -1945,9 +2030,23 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
       `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n',
   });
   const admissionStep = document => document.jobs['mac-admission'].steps
-    .find(step => step.name === 'Wait for actual ARM body worker allocation');
+    .find(step => step.name === 'Admit ARM refresh after ready critical turns');
   for (const [label, mutate, code] of [
-    ['missing Intel admission edge', doc => { doc.jobs['native-mi'].needs.pop(); }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
+    ...admissionKeys.flatMap(key => [10, 23].map(minutes => [
+      `${key} changes the source-bound observation watchdog to ${minutes} minutes`,
+      doc => { doc.jobs[key]['timeout-minutes'] = minutes; },
+      'MAC_ADMISSION_POLICY_DIFFERS',
+    ])),
+    ['missing Intel own units edge', doc => { doc.jobs['native-mi'].needs.pop(); }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
+    ['Intel critical bodies regain an ARM allocation wait', doc => {
+      doc.jobs['native-mi'].needs.push('arm-refresh-admission');
+    }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
+    ['Intel primary body regains an ARM allocation wait', doc => {
+      doc.jobs['native-mi-retained'].needs.push('mac-admission');
+    }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
+    ['ARM refresh loses its own critical-body priority', doc => {
+      doc.jobs['native-ma-refresh'].needs.pop();
+    }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
     ['missing Intel own unit barrier', doc => {
       doc.jobs['native-mi'].needs = ['intent', 'source', 'mac-admission'];
     }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
@@ -2044,7 +2143,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     ['Intel admission loses own unit barrier', doc => {
       doc.jobs['intel-admission'].needs = ['intent', 'source', 'mac-admission'];
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
-    ['Intel admission loses ARM admission', doc => {
+    ['Intel admission loses its complete own unit barrier', doc => {
       doc.jobs['intel-admission'].needs.pop();
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
     ['Intel admission waits on Mac runner', doc => {
@@ -2073,7 +2172,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
     ['Intel admission polls ARM instead of bodies', doc => {
       doc.jobs['intel-admission'].steps[4].run =
-        doc.jobs['intel-admission'].steps[4].run.replace('--group intel-bodies ', '');
+        doc.jobs['intel-admission'].steps[4].run.replace('--group intel-auxiliaries-ready ', '');
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
     ['Intel admission treats queued timestamp as allocation', doc => {
       doc.jobs['intel-admission'].steps[4].run = 'node -e "console.log(jobs.every(job => job.started_at))"';
@@ -2147,7 +2246,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
     ['Homebrew admission polls its own worker instead of the body group', doc => {
       const step = doc.jobs['intel-homebrew-admission'].steps[4];
-      step.run = step.run.replace('--group intel-bodies', '--group intel-homebrew');
+      step.run = step.run.replace('--group intel-auxiliaries-ready', '--group intel-homebrew');
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
     ['Homebrew admission accepts queued timestamps', doc => {
       doc.jobs['intel-homebrew-admission'].steps[4].run = 'node -e "console.log(jobs.every(job => job.started_at))"';
@@ -2159,8 +2258,8 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
       const step = doc.jobs['producer-summary'].steps[0];
       step.run = step.run.replace(' "$INTEL_HOMEBREW_ADMISSION_RESULT"', '');
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
-    ['ARM refresh steals retained first allocation', doc => {
-      doc.jobs['native-ma-refresh'].needs = ['intent', 'source', 'native-units-ma', 'mac-admission'];
+    ['ARM refresh bypasses readiness-aware critical turns', doc => {
+      doc.jobs['native-ma-refresh'].needs = ['intent', 'source', 'native-units-ma'];
     }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
     ['ARM refresh loses its own unit barrier', doc => {
       doc.jobs['native-ma-refresh'].needs = ['intent', 'source', 'intel-retained-admission'];
@@ -2179,7 +2278,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     }, 'NATIVE_COMPONENT_MATRIX_DIFFERS'],
     ['ARM body gate still waits on short refresh', doc => {
       const step = doc.jobs['mac-admission'].steps[4];
-      step.run = step.run.replace('--group arm-bodies ', '');
+      step.run = step.run.replace('--group arm-refresh-ready ', '');
     }, 'MAC_ADMISSION_POLICY_DIFFERS'],
     ...[
       ['intel-retained-admission', 'native-mi-retained', 'intel-primary-body', 'INTEL_RETAINED_ADMISSION_RESULT'],
@@ -2227,6 +2326,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
       `${label}: ${JSON.stringify(rejected.blockers)}`);
   }
   const removeRetainedPriority = document => {
+    for (const key of admissionKeys) document.jobs[key]['timeout-minutes'] = 10;
     document.jobs['native-ma'].strategy.matrix.include.unshift(
       ...document.jobs['native-ma-refresh'].strategy.matrix.include);
     document.jobs['native-mi'].strategy.matrix.include.push(
@@ -2254,7 +2354,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     step.run = step.run.replace(' "$ARM_REFRESH_RESULT" "$MI_RETAINED_RESULT" ' +
       '"$INTEL_RETAINED_ADMISSION_RESULT" "$ARM_REFRESH_ADMISSION_RESULT"', '');
   };
-  const admittedV3 = structuredClone(ci);
+  const admittedV3 = structuredClone(historicalV8);
   removeRetainedPriority(admittedV3);
   admittedV3.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v3-intel-homebrew-first';
   const previousV3 = inspectWorkflowTrust([documentSource(admittedV3)]);
@@ -2274,7 +2374,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     delete step.env.INTEL_HOMEBREW_ADMISSION_RESULT;
     step.run = step.run.replace(' "$INTEL_HOMEBREW_ADMISSION_RESULT"', '');
   };
-  const admittedV2 = structuredClone(ci);
+  const admittedV2 = structuredClone(historicalV8);
   removeHomebrewPriority(admittedV2);
   admittedV2.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v2-priority-intel-bodies';
   const previousV2 = inspectWorkflowTrust([documentSource(admittedV2)]);
@@ -2297,14 +2397,21 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
     for (const name of ['MI_REFRESH_RESULT', 'MI_HOMEBREW_RESULT', 'INTEL_ADMISSION_RESULT']) delete step.env[name];
     step.run = step.run.replace(' "$INTEL_ADMISSION_RESULT" "$MI_REFRESH_RESULT" "$MI_HOMEBREW_RESULT"', '');
   };
-  const admittedV1 = structuredClone(ci);
+  const admittedV1 = structuredClone(historicalV8);
   removePriority(admittedV1);
   admittedV1.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v1';
   const previousResource = inspectWorkflowTrust([documentSource(admittedV1)]);
   assert.equal(previousResource.complete, true, JSON.stringify(previousResource.blockers));
   assert.equal(previousResource.nativeResourcePolicy, 'arm-regression-allocation-v1');
   for (const protocol of nativeFrameworkShardProtocols) {
-    const historical = structuredClone(ci);
+    const historical = structuredClone(historicalV8);
+    if ([nativeFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+      nativeParallelReadyPoolFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
+      nativePhasedIsolationFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
+      nativeResourceAffinityFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
+      'native-framework-shards-v5-root-components'].includes(protocol)) {
+      historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = protocol;
+    } else delete historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL;
     removePriority(historical);
     delete historical.env.SDLC_MAC_ADMISSION_POLICY;
     delete historical.jobs['mac-admission'];
@@ -2449,6 +2556,13 @@ with zipfile.ZipFile(sys.argv[2],"w",compression=zipfile.ZIP_DEFLATED) as bundle
     ['prefix-free-missing-request', [nonallocation[0]], { kind: 'cleanup', ownedPrefix: false }],
     ['valid-stage-journal', [...good, { name: 'regression.json.journal.ndjson',
       text: '{"kind":"diagnostic","text":"' + 'x'.repeat(1000) + '"}\n', repeat: 5000 }]],
+    ['valid-phase-journals', [...good,
+      { name: 'regression-observer.json', text: '{"kind":"synthetic-observer-report","complete":true}\n' },
+      { name: 'regression-observer-command.json', text: '{"kind":"synthetic-observer-command","complete":true}\n' },
+      { name: 'regression-observer-settlement.json', text: '{"kind":"synthetic-observer-settlement","settled":true}\n' },
+      ...['regression-catalog', 'regression-retained', 'regression-observer'].flatMap(stage =>
+      [`${stage}.json.journal.ndjson`, `${stage}-command.journal.ndjson`].map(name =>
+        ({ name, text: '{"kind":"diagnostic","text":"' + 'x'.repeat(1000) + '"}\n', repeat: 5000 })))]],
     ['oversized-other', [...good, { name: 'other.log', text: 'x', repeat: 4 * 1024 * 1024 + 1 }]],
     ['unknown-journal', [...good, { name: 'unrecognized.json.journal.ndjson', text: 'x',
       repeat: 4 * 1024 * 1024 + 1 }]],
@@ -2456,6 +2570,18 @@ with zipfile.ZipFile(sys.argv[2],"w",compression=zipfile.ZIP_DEFLATED) as bundle
       repeat: 4 * 1024 * 1024 + 1 }]],
     ['oversized-stage-journal', [...good, { name: 'regression.json.journal.ndjson', text: 'x',
       repeat: 16 * 1024 * 1024 + 1 }]],
+    ['oversized-phase-journal', [...good, { name: 'regression-retained-command.journal.ndjson', text: 'x',
+      repeat: 16 * 1024 * 1024 + 1 }]],
+    ['oversized-observer-report-journal', [...good, { name: 'regression-observer.json.journal.ndjson', text: 'x',
+      repeat: 16 * 1024 * 1024 + 1 }]],
+    ['oversized-observer-command-journal', [...good, { name: 'regression-observer-command.journal.ndjson', text: 'x',
+      repeat: 16 * 1024 * 1024 + 1 }]],
+    ['unknown-observer-journal', [...good, { name: 'regression-observer-extra.json.journal.ndjson', text: 'x',
+      repeat: 4 * 1024 * 1024 + 1 }]],
+    ['nested-observer-journal', [...good, { name: 'nested/regression-observer.json.journal.ndjson', text: 'x',
+      repeat: 4 * 1024 * 1024 + 1 }]],
+    ['executable-observer-journal', [...good,
+      { name: 'regression-observer-command.journal.ndjson', text: '{}\n', mode: 0o100755 }]],
     ['aggregate-journals', [good[0], { name: 'readiness-bundle.json', text: ' ', repeat: 16 * 1024 * 1024 },
       ...['unit', 'required-units', 'regression'].map(stage => ({
         name: `${stage}.json.journal.ndjson`, text: 'x', repeat: 16 * 1024 * 1024,
@@ -2479,14 +2605,22 @@ with zipfile.ZipFile(sys.argv[2],"w",compression=zipfile.ZIP_DEFLATED) as bundle
       assert.equal(result['native-homebrew-prefix-request.json'].kind, 'native-homebrew-prefix-not-required');
       assert.equal(Object.hasOwn(result, 'native-homebrew-prefix-allocation.json'), false);
       assert.equal(Object.hasOwn(result, 'native-homebrew-prefix-cleanup.json'), false);
-    } else if (name === 'valid' || name === 'valid-stage-journal') {
+    } else if (name === 'valid' || name === 'valid-stage-journal' || name === 'valid-phase-journals') {
       const result = await api.client.artifact(metadata);
       assert.deepEqual(result['execution.json'], { kind: 'original-data' });
       assert.equal(result.texts['execution.json'], good[0].text);
       assert.equal(result.files.find(file => file.filename === 'execution.json').sha256, digest(good[0].text));
-      if (name === 'valid-stage-journal') {
-        const original = entries.at(-1).text.repeat(entries.at(-1).repeat);
-        const journal = 'regression.json.journal.ndjson';
+      for (const entry of entries.filter(entry => entry.name.startsWith('regression-observer') &&
+        entry.name.endsWith('.json'))) {
+        assert.deepEqual(result[entry.name], JSON.parse(entry.text));
+        assert.equal(result.texts[entry.name], entry.text);
+        assert.deepEqual(result.files.find(file => file.filename === entry.name), {
+          filename: entry.name, size: Buffer.byteLength(entry.text), sha256: digest(entry.text),
+        });
+      }
+      for (const entry of entries.filter(entry => entry.name.endsWith('.journal.ndjson'))) {
+        const original = entry.text.repeat(entry.repeat);
+        const journal = entry.name;
         assert.ok(Buffer.byteLength(original) > 4 * 1024 * 1024);
         assert.equal(result.texts[journal], original);
         assert.deepEqual(result.files.find(file => file.filename === journal), {

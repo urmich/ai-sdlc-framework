@@ -8,8 +8,9 @@ import { cycleTests, OUTCOME_PAGE_SIZE, requireCatalogSpecification, stageValida
   validateTestDefinitions } from './validation-catalog.mjs';
 import { appendTestObservation, bindExecutionEvidence, initializeReferencedCycle,
   lookupOperation, lookupTestEvidence, observationAfterReset, resetCycleResults, retainedPayloadReference,
-  sameExecutionSources, selectTestObservation, testResetBarrier } from './validation-evidence.mjs';
-import { createEvidenceBundle, readinessCaseProof, refreshReadinessEvaluation,
+  sameExecutionSources, selectTestObservation, testResetBarrier,
+  verifiedOperationCompletedAt } from './validation-evidence.mjs';
+import { createEvidenceBundle, readinessCaseProofs, refreshReadinessEvaluation,
   requireReadinessEvaluation } from './validation-readiness.mjs';
 import { effectiveStagingExecution, stagingExecutionGuidance,
   stagingExecutionMatches } from './staging.mjs';
@@ -298,6 +299,31 @@ export function checkTestStart(cycle, records, test, { unitFirstOverride = false
       'UNIT_FIRST', 'Run the full required local unit suite before other local tests');
   }
 }
+function testEvidenceAction(metadata, test, input, operation) {
+  return operation ? { ...operation.action, operationId: operation.id } : {
+    class: 'test', repositoryId: metadata.coordinatorId, environment: test.environment,
+    testId: test.id, owner: input.owner ?? test.owner, host: input.host ?? test.location,
+  };
+}
+function unitCompletedBefore(cycle, records, unit, startedAt, clock) {
+  const current = currentTestEvidence(cycle, records, unit, clock);
+  if (current?.status !== 'Passed' || current.expectedMet !== true ||
+      current.owner !== unit.owner || current.host !== unit.location ||
+      !current.evidenceRef || current.activity !== undefined && current.activity !== 'complete') return false;
+  let completedAt = current.sourceCompletedAt;
+  if (unit.mode === 'automated' && completedAt === undefined) {
+    completedAt = verifiedOperationCompletedAt(current, records);
+  }
+  if (unit.mode !== 'automated' && completedAt === undefined) {
+    completedAt = current.sourceObservedAt !== undefined ? current.sourceObservedAt :
+      current.operationId ? lookupOperation(records, current.operationId)?.updatedAt :
+        current.eventId ? records.find(record => record.id === current.eventId)?.occurredAt :
+          current.observedAt;
+  }
+  const completed = Date.parse(completedAt ?? '');
+  const started = Date.parse(startedAt ?? '');
+  return Number.isFinite(completed) && Number.isFinite(started) && completed <= started;
+}
 async function recordTestInTransaction(store, input, tx) {
   object(input, ['workItemId', 'cycleId', 'testId', 'status', 'evidenceRef', 'runId', 'artifactId', 'deploymentId', 'operationId', 'expectedMet', 'owner', 'host', 'activity', 'eventId'],
     ['workItemId', 'cycleId', 'testId', 'status']);
@@ -396,16 +422,15 @@ async function recordTestInTransaction(store, input, tx) {
           'EVIDENCE', 'Test evidence expected-result evaluation differs from its operation');
         const normalized = tx.normalizedImports?.get(test.id);
         if (normalized) requireThat(
-          digest(operation.resultProof?.executionIdentity ?? null) === digest(normalized.context.producer) &&
-            operation.resultProof?.attemptCapability === normalized.context.attemptCapability,
+          operation.action.environment === 'local' && !operation.resultProof ?
+            normalized.context.producer.executionRef === operation.id &&
+              normalized.context.jobRef === operation.requestFingerprint :
+            digest(operation.resultProof?.executionIdentity ?? null) === digest(normalized.context.producer) &&
+              operation.resultProof?.attemptCapability === normalized.context.attemptCapability,
           'PROVENANCE', 'Normalized report belongs to a different managed execution or attempt');
       }
     }
-    const testAction = operation ? { ...operation.action, operationId: operation.id } : {
-      class: 'test', repositoryId: tx.metadata.coordinatorId, environment: test.environment,
-      testId: test.id, owner: input.owner ?? test.owner,
-      host: input.host ?? test.location,
-    };
+    const testAction = testEvidenceAction(tx.metadata, test, input, operation);
     const unitFirstOverride = applicableOverride(tx.all(), 'unit-first', testAction,
       { cycleId: cycle.id, clock: store.clock });
     if (!(tx.normalizedImports?.has(test.id) && input.status === 'NotRun')) {
@@ -507,7 +532,7 @@ async function recordTestInTransaction(store, input, tx) {
     });
     requireThat(observationAfterReset(cycle, tx.all(), evidence), 'STALE',
       'Result belongs to an execution before the current reset barrier');
-    await bindExecutionEvidence(store, tx, cycle, test, evidence);
+    await bindExecutionEvidence(store, tx, cycle, test, evidence, { requireIndependentProof: true });
     const committed = lookupTestEvidence(cycle, tx.all(), evidence.id);
     if (committed) {
       const content = ({ sequence, observedAt, ...record }) => record;
@@ -610,14 +635,14 @@ export async function recordReadiness(store, input) {
     const evaluation = refreshReadinessEvaluation(input.evaluation, {
       now: now(store.clock), barriers,
     });
-    const proofs = evaluation.cases.map(result => readinessCaseProof(evaluation, result.testId));
+    const proofs = readinessCaseProofs(evaluation);
     for (const proof of proofs) {
       const test = tests.find(test => test.id === proof.definition.id);
       const trace = specification.traceability?.find(row => row.testId === test.id);
       requireThat(proof.context.candidateDigest === cycle.candidateDigest &&
         proof.context.testSpecDigest === cycle.testSpecDigest &&
         proof.context.configDigest === cycle.configDigest &&
-        sameExecutionSources(proof.context.sources, cycle.sources) &&
+        sameExecutionSources(proof.context.sources, cycle.sources, { requireRevision: test.environment !== 'local' }) &&
         proof.context.environment === test.environment &&
         proof.definition.mode === test.mode && proof.definition.owner === test.owner &&
         proof.definition.location === test.location &&
@@ -636,13 +661,14 @@ export async function recordReadiness(store, input) {
       (left.source?.sourceObservedAt ?? '').localeCompare(right.source?.sourceObservedAt ?? ''));
     for (const proof of proofs) {
       const test = tests.find(test => test.id === proof.definition.id);
+      const binding = bindings.find(binding => binding.testId === test.id) ?? {};
+      const operation = binding.operationId ? lookupOperation(tx.all(), binding.operationId) : null;
+      const unitFirstOverride = applicableOverride(tx.all(), 'unit-first',
+        testEvidenceAction(tx.metadata, test, {}, operation), { cycleId: cycle.id, clock: store.clock });
       const units = tests.filter(test => testCheckpoint(test) === 'pre-review' && test.level === 'unit');
       if (testCheckpoint(test) === 'pre-review' && test.level !== 'unit' &&
-          !units.every(unit => {
-            const current = currentTestEvidence(cycle, tx.all(), unit, store.clock);
-            return current?.status === 'Passed' && current.sourceCompletedAt &&
-              proof.source && Date.parse(current.sourceCompletedAt) <= Date.parse(proof.source.sourceStartedAt);
-          })) {
+          !unitFirstOverride && !units.every(unit => unitCompletedBefore(cycle, tx.all(), unit,
+            proof.source?.sourceStartedAt, store.clock))) {
         const problem = { testId: test.id, code: 'UNIT_FIRST',
           message: 'Every required local unit execution must complete successfully before this execution starts' };
         blocked.push(problem);
@@ -665,7 +691,6 @@ export async function recordReadiness(store, input) {
         status: proof.status, importRef, assertionPageRefs, blockers: proof.blockers,
       });
       tx.normalizedImports.set(test.id, { ...proof, ref });
-      const binding = bindings.find(binding => binding.testId === test.id) ?? {};
       evidence.push(await recordTestInTransaction(store, {
         ...binding, workItemId: input.workItemId, cycleId: cycle.id, testId: test.id,
         status: proof.status, expectedMet: proof.status === 'Passed',

@@ -206,7 +206,8 @@ async function recoverResultProjections(records, clock = Date, context) {
       validateRecord(evidence);
       safeRecord(evidence, recordLimit(evidence));
       if (!observationAfterReset(cycle, records, evidence)) continue;
-      await bindExecutionEvidence(context.store, context, cycle, test, evidence);
+      await bindExecutionEvidence(context.store, context, cycle, test, evidence,
+        { historicalRecovery: true });
       appendTestObservation(context, cycle, evidence);
       if (cycle.storageVersion !== 2) changed.push(evidence.id);
     }

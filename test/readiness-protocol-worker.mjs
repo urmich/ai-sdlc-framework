@@ -13,6 +13,7 @@ assert.deepEqual(pair, protocolPairs[index]);
 assert.match(sourceDigest, /^[a-f0-9]{64}$/u);
 assert.equal((await protocolPoolIdentity(protocolPairs)).sourceDigest, sourceDigest);
 const allocation = await acquireTestWorker(1, { groupId });
+const startedAt = new Date().toISOString();
 const hooks = [];
 const cleanupFailures = [];
 let primary;
@@ -34,7 +35,7 @@ try {
   assert.equal(processes[0].pid, process.pid);
   assert.equal(processes[0].slot, allocation.slot);
   console.log(JSON.stringify({ index, pair, sourceDigest, groupId, status: 'Passed', cleaned: true,
-    pid: process.pid, slot: allocation.slot, lease: processes[0],
+    pid: process.pid, slot: allocation.slot, lease: processes[0], startedAt,
     finishedAt: new Date().toISOString(), ...row }));
 } catch (error) {
   console.error(JSON.stringify({ ...processDiagnostic(error), cleanupFailures }));

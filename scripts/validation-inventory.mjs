@@ -26,20 +26,36 @@ function templateEnd(source, from, nesting = 0, interpolations = []) {
   }
   throw new Error('Unterminated JavaScript template in validation declarations');
 }
-function decodeString(source) {
+/** Decode a quoted source span with the inventory lexer's nonexecuting escape grammar. */
+export function decodeString(source) {
   const value = source.slice(1, -1);
-  return value.replace(/\\(?:u\{([a-f0-9]+)\}|u([a-f0-9]{4})|x([a-f0-9]{2})|(\r?\n)|(.))/giu,
-    (_, point, unicode, hex, continuation, escaped) => {
+  // Legacy octal consumes up to three digits after 0-3, but only two after 4-7.
+  return value.replace(/\\(?:u\{([A-Fa-f0-9]+)\}|u([A-Fa-f0-9]{4})|x([A-Fa-f0-9]{2})|([0-3][0-7]{0,2}|[4-7][0-7]?)|(\r\n|[\n\r\u2028\u2029])|(.))/gu,
+    (_, point, unicode, hex, octal, continuation, escaped) => {
       if (point || unicode || hex) return String.fromCodePoint(parseInt(point ?? unicode ?? hex, 16));
+      if (octal) return String.fromCharCode(parseInt(octal, 8));
       if (continuation) return '';
       return ({ n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', v: '\v', 0: '\0' })[escaped] ?? escaped;
     });
+}
+const identifierStart = /^[$_\p{ID_Start}]$/u;
+const identifierContinue = /^[$_\u200c\u200d\p{ID_Continue}]$/u;
+function identifierCharacter(source, index, first) {
+  const escape = source[index] === '\\' ?
+    /^\\u(?:\{[A-Fa-f0-9]+\}|[A-Fa-f0-9]{4})/u.exec(source.slice(index)) : null;
+  if (source[index] === '\\' && !escape) return null;
+  const value = escape ? decodeString('"' + escape[0] + '"') : String.fromCodePoint(source.codePointAt(index));
+  const allowed = first ? identifierStart : identifierContinue;
+  return allowed.test(value) ? { value, end: index + (escape ? escape[0].length : value.length) } : null;
 }
 export function declarationTokens(source) {
   return declarationTokensIn(source, 0, source.length).tokens;
 }
 function declarationTokensIn(source, from, to, nesting = 0, interpolation = false) {
   const tokens = [];
+  const parentheses = [];
+  let controlHeader = false;
+  let htmlCloseAllowed = true;
   let index = from;
   let depth = 1;
   let located = 0;
@@ -48,21 +64,44 @@ function declarationTokensIn(source, from, to, nesting = 0, interpolation = fals
   while (index < to) {
     const start = index;
     const character = source[index];
-    if (/\s/u.test(character)) { index++; continue; }
-    if (source.startsWith('//', index)) {
-      const end = source.indexOf('\n', index);
-      index = end < 0 ? source.length : end;
+    if (/\s/u.test(character)) {
+      if (/[\n\r\u2028\u2029]/u.test(character)) htmlCloseAllowed = true;
+      index++;
+      continue;
+    }
+    if (source.startsWith('//', index) || index === 0 && source.startsWith('#!', index) ||
+        source.startsWith('<!--', index) || htmlCloseAllowed && source.startsWith('-->', index)) {
+      const end = /[\n\r\u2028\u2029]/gu;
+      end.lastIndex = index + 2;
+      const terminator = end.exec(source);
+      index = terminator ? terminator.index : source.length;
       continue;
     }
     if (source.startsWith('/*', index)) {
       const end = source.indexOf('*/', index + 2);
       requireThat(end >= 0, 'INVENTORY', 'Unterminated JavaScript comment');
+      if (/[\n\r\u2028\u2029]/u.test(source.slice(index, end))) htmlCloseAllowed = true;
       index = end + 2;
       continue;
     }
     let kind = 'punctuation';
     let value = character;
     let interpolations;
+    const previous = tokens.at(-1);
+    const before = tokens.at(-2);
+    const propertyAccess = before?.kind === 'punctuation' && before.value === '.';
+    const precedingPropertyAccess = tokens.at(-3)?.kind === 'punctuation' && tokens.at(-3).value === '.';
+    const postfix = previous?.kind === 'punctuation' && before?.kind === 'punctuation' &&
+      ['+', '-'].includes(previous.value) && before.value === previous.value && before.end === previous.start;
+    const spread = previous?.kind === 'punctuation' && previous.value === '.' && propertyAccess &&
+      precedingPropertyAccess && source.slice(tokens.at(-3).start, previous.end) === '...';
+    const labelledExit = previous?.kind === 'identifier' && before?.kind === 'identifier' &&
+      ['break', 'continue'].includes(before.value) && !precedingPropertyAccess &&
+      !/[\n\r\u2028\u2029]/u.test(source.slice(before.end, previous.start)) &&
+      /[\n\r\u2028\u2029]/u.test(source.slice(previous.end, start));
+    const privateIdentifier = character === '#' && index + 1 < to ?
+      identifierCharacter(source, index + 1, true) : null;
+    const identifier = privateIdentifier ?? identifierCharacter(source, index, true);
     if (character === "'" || character === '"') {
       kind = 'string';
       interpolations = [];
@@ -73,33 +112,53 @@ function declarationTokensIn(source, from, to, nesting = 0, interpolation = fals
       interpolations = [];
       index = templateEnd(source, index, nesting, interpolations);
       value = source.slice(start, index);
-    } else if (/[A-Za-z_$]/u.test(character)) {
+    } else if (identifier) {
       kind = 'identifier';
-      index++;
-      while (index < source.length && /[\w$]/u.test(source[index])) index++;
-      value = source.slice(start, index);
-    } else if (character === '/' && (!tokens.length ||
-        ['(', '[', '{', ',', '=', ':', 'return', '>', '!', '&', '|', '?', ';'].includes(tokens.at(-1).value))) {
+      value = (privateIdentifier ? '#' : '') + identifier.value;
+      index = identifier.end;
+      while (index < to) {
+        const next = identifierCharacter(source, index, false);
+        if (!next) break;
+        value += next.value;
+        index = next.end;
+      }
+    } else if (character === '/' && (!previous || controlHeader || spread || labelledExit ||
+        previous.kind === 'punctuation' && !postfix &&
+          ['(', '[', '{', ',', '=', ':', '>', '!', '&', '|', '?', ';', '+', '-', '*', '%', '^', '~', '<']
+            .includes(previous.value) ||
+        previous.kind === 'identifier' && !propertyAccess &&
+          ['return', 'throw', 'case', 'delete', 'void', 'typeof', 'new', 'in', 'instanceof',
+            'else', 'do', 'break', 'continue', 'debugger'].includes(previous.value))) {
       kind = 'regex';
       let characterClass = false;
+      let terminated = false;
       for (index++; index < source.length; index++) {
         if (source[index] === '\\') index++;
         else if (source[index] === '[') characterClass = true;
         else if (source[index] === ']') characterClass = false;
-        else if (source[index] === '/' && !characterClass) { index++; break; }
+        else if (source[index] === '/' && !characterClass) { index++; terminated = true; break; }
       }
+      requireThat(terminated, 'INVENTORY', 'Unterminated JavaScript regex in validation declarations');
       while (index < source.length && /[a-z]/iu.test(source[index])) index++;
       value = source.slice(start, index);
     } else index++;
     requireThat(index <= to, 'INVENTORY', 'JavaScript token crosses its interpolation boundary');
+    if (kind === 'punctuation' && character === '(') {
+      parentheses.push(previous?.kind === 'identifier' && !propertyAccess &&
+        (['if', 'while', 'for', 'with', 'switch', 'catch'].includes(previous.value) ||
+          previous.value === 'await' && before?.kind === 'identifier' && before.value === 'for' &&
+            !precedingPropertyAccess));
+    }
+    controlHeader = kind === 'punctuation' && character === ')' ? parentheses.pop() === true : false;
+    htmlCloseAllowed = false;
     if (interpolation && kind === 'punctuation') {
       if (character === '{') depth++;
       else if (character === '}' && --depth === 0) return { tokens, end: index };
     }
     const gap = source.slice(located, start);
-    const newline = gap.lastIndexOf('\n');
-    line += gap.split('\n').length - 1;
-    column = newline < 0 ? column + gap.length : gap.length - newline;
+    const lines = gap.split(/\r\n|[\n\r\u2028\u2029]/u);
+    line += lines.length - 1;
+    column = lines.length === 1 ? column + gap.length : lines.at(-1).length + 1;
     located = start;
     tokens.push({ kind, value, start, end: index, line,
       column, ...(interpolations ? { interpolations } : {}) });

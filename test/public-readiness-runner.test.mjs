@@ -5,6 +5,10 @@ export const validationDeclarations = {
     {"coverage": "direct", "paths": ["scripts/test-scheduling.mjs", "scripts/test-budget.mjs", "scripts/test-local-evidence.mjs", "scripts/validation-benchmark.mjs"]}
   ],
   "groups": [{
+    "root": "T-PRD011 exclusive ready clocks exclude the previous holder capture without hiding eligible failures",
+    "minimumSlots": 1,
+    "exclusiveResources": []
+  }, {
     "root": "T-PRD010 PR-description priority admits its isolated closure before queued work while the retained guard is live",
     "minimumSlots": 5
   }, {
@@ -14,8 +18,22 @@ export const validationDeclarations = {
     "root": "T-PRD010 protocol pool retains uncertain writers and cleans only proven safe operations",
     "minimumSlots": 2,
     "exclusiveResources": []
+  }, {
+    "root": "T-PRD010 uncertain native cleanup stops aggregate admission after its original worker closes",
+    "minimumSlots": 4,
+    "exclusiveResources": []
+  }, {
+    "root": "T-PRD010 admission stop retains its original worker until delayed acknowledgement",
+    "minimumSlots": 2,
+    "exclusiveResources": []
   }],
   "applicability": [{
+    "names": ["T-PRD011 exclusive ready clocks exclude the previous holder capture without hiding eligible failures"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "PR-only controlled readiness-clock regression; isolated VM and owned logical contenders, no native processes or shared resources.",
+    "prerequisites": ["Node and one aggregate worker slot"]
+  }, {
     "names": ["T-PRD010 PR-description priority admits its isolated closure before queued work while the retained guard is live"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "runner-resource-contract",
@@ -27,6 +45,18 @@ export const validationDeclarations = {
     "owner": "runner-resource-contract",
     "reason": "PR-only actual pool control flow with controlled executor lifetime, snapshot and close failures and owned stock Node writers; no native termination or provider access.",
     "prerequisites": ["Node and two aggregate worker slots"]
+  }, {
+    "names": ["T-PRD010 uncertain native cleanup stops aggregate admission after its original worker closes"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "PR-only authenticated aggregate fail-stop regression with an isolated broker, original failing worker, running peer and queued stock Node worker; modeled uncertainty creates no compiler or native target.",
+    "prerequisites": ["Node and four aggregate worker slots; owned repository-local fixtures"]
+  }, {
+    "names": ["T-PRD010 admission stop retains its original worker until delayed acknowledgement"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "PR-only original worker/preload regression with a real isolated broker and delayed delivery of its authenticated stop response; no native compiler or critical promotion.",
+    "prerequisites": ["Node and two aggregate worker slots; owned repository-local process fixture"]
   }, {
     "names": [
       "T-PRD010 independent file workers overlap without sharing environment, module patches or fixture ownership",
@@ -54,7 +84,9 @@ export const validationDeclarations = {
   },
   "plannedCases": [
     {"id": "T-PRD010", "selectors": [
-      {"name": "T-PRD010 PR-description priority admits its isolated closure before queued work while the retained guard is live", "parents": []}
+      {"name": "T-PRD010 PR-description priority admits its isolated closure before queued work while the retained guard is live", "parents": []},
+      {"name": "T-PRD010 admission stop retains its original worker until delayed acknowledgement", "parents": []},
+      {"name": "T-PRD010 uncertain native cleanup stops aggregate admission after its original worker closes", "parents": []}
     ]},
     {"id": "T-PRD011", "selectors": [
       {"name": "T-PRD010 independent file workers overlap without sharing environment, module patches or fixture ownership", "parents": []}
@@ -110,7 +142,7 @@ test('T-PRD010 protocol pool retains uncertain writers and cleans only proven sa
     const failures = [];
     const poolSource = await fs.readFile(new URL('./readiness-protocol-pool.mjs', import.meta.url), 'utf8');
     const validateSource = poolSource.slice(poolSource.indexOf('function validateProtocolOutcome('),
-      poolSource.indexOf('export function reconcileProtocolRows('));
+      poolSource.indexOf('export function reconcileProtocolRows(')).replace(/^export /gmu, '');
     for (const mode of ['incomplete', 'retention-failed', 'incomplete-budget-close-failed',
       'safe', 'safe-retention-failed', 'invalid-json', 'retention-failed-snapshot-close-failed',
       'incomplete-snapshot-close-failed', 'snapshot-only-failed']) {
@@ -134,12 +166,14 @@ test('T-PRD010 protocol pool retains uncertain writers and cleans only proven sa
       let token;
       let reportPath;
       let budgetClosed = false;
+      let closedLease;
       const context = createContext({
         assert, path, os, process, randomUUID, repositoryRoot, protocolPairs, JSON,
         digest: value => digest(typeof value === 'object' ? JSON.parse(JSON.stringify(value)) : value),
         AbortController, AbortSignal, fileURLToPath, processDiagnostic,
         defaultWorker: new URL('./readiness-protocol-worker.mjs', import.meta.url),
         protocolPoolIdentity, resolveValidationWorkers, reconcileProtocolRows,
+        async readTestGroupProcesses() { return [closedLease]; },
         async runValidationReadyPool(groups, options) {
           try { return await runValidationReadyPool(groups, options); }
           catch (error) { rowFailure = error; throw error; }
@@ -205,7 +239,8 @@ test('T-PRD010 protocol pool retains uncertain writers and cleans only proven sa
           const finishedAt = new Date().toISOString();
           const outcome = { index: 0, pair: protocolPairs[0], sourceDigest: operation.args[2],
             groupId: operation.args[4], status: 'Passed', cleaned: true, pid, slot: lease.slot,
-            lease, finishedAt, fixtureRoot: path.join(scratch, `observer-api-${randomUUID()}`) };
+            lease, startedAt, finishedAt, fixtureRoot: path.join(scratch, `observer-api-${randomUUID()}`) };
+          closedLease = { ...lease, finishedAt };
           const report = { complete: !unsafe, exitCode: 0, pid, startedAt, finishedAt,
             stdout: mode === 'invalid-json' ? '{invalid-json' : JSON.stringify(outcome), stderr: '', cleanup };
           await fs.writeFile(reportPath, JSON.stringify(report), { flag: 'wx' });
@@ -901,6 +936,253 @@ test('T-PRD010 impossible four-level resident lineage rejects before yielding an
       }
     }
   }
+});
+
+test('T-PRD010 admission stop retains its original worker until delayed acknowledgement',
+  { timeout: 10000 }, async t => {
+    const root = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'admission-stop-ack-'));
+    const owner = await enterTestBudget({ workers: 1, fileCount: 1, inherited: null, parent: null, slot: null });
+    let child;
+    let completed;
+    t.after(async () => {
+      if (child?.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      await completed;
+      await owner.close();
+      await fs.rm(root, { recursive: true });
+    });
+    const script = path.join(root, 'worker.mjs');
+    await fs.writeFile(script, `
+import net from 'node:net';
+import assert from 'node:assert/strict';
+import {stopTestAdmission} from ${JSON.stringify(new URL('../scripts/test-budget.mjs', import.meta.url).href)};
+const originalEmit=net.Socket.prototype.emit;
+let delayed=false;
+net.Socket.prototype.emit=function(kind,...args){
+  if(kind==='data'&&!delayed&&String(args[0]).includes('"admissionStopped":true')){
+    delayed=true;
+    setTimeout(()=>originalEmit.call(this,kind,...args),200).unref();
+    return true;
+  }
+  return originalEmit.call(this,kind,...args);
+};
+try{
+  const result=await stopTestAdmission();
+  assert.equal(delayed,true);
+  assert.equal(result.complete,true);
+  assert.equal(result.admissionStopped,true);
+  console.log('owned-stop-acknowledged');
+}finally{net.Socket.prototype.emit=originalEmit;}
+`);
+    const environment = { ...process.env, ...owner.environment, NODE_OPTIONS: '', NODE_PATH: '' };
+    delete environment.NODE_TEST_CONTEXT;
+    const result = await new Promise((resolve, reject) => {
+      child = execFile(process.execPath, [
+        '--import', new URL('../scripts/test-budget-worker.mjs', import.meta.url).href, script,
+      ], { cwd: repositoryRoot, env: environment, windowsHide: true }, (error, stdout, stderr) => {
+        resolve({ code: error?.code ?? 0, stdout, stderr });
+      });
+      child.once('error', reject);
+      completed = new Promise(resolve => child.once('close', resolve));
+    });
+    assert.equal(result.code, 0, result.stdout + result.stderr);
+    assert.equal(result.stdout.trim(), 'owned-stop-acknowledged');
+    assert.equal((await owner.snapshot()).admissionStopped, true);
+  });
+
+test('T-PRD010 uncertain native cleanup stops aggregate admission after its original worker closes',
+  { timeout: 30000 }, async t => {
+  const budget = await import('../scripts/test-budget.mjs');
+  assert.equal(typeof budget.stopTestAdmission, 'function');
+  const root = path.join(repositoryRoot, '.test-data', `admission-uncertainty-${randomUUID()}`);
+  const home = path.join(root, 'home');
+  await fs.mkdir(home, { recursive: true });
+  const children = [];
+  let owner;
+  let queuedProducer;
+  t.after(async () => {
+    await Promise.all(['stop-fault', 'release-fault', 'release-peer']
+      .map(name => fs.writeFile(path.join(root, name), 'release')));
+    await Promise.all(children.map(child => child.completed));
+    await queuedProducer?.close();
+    await owner?.close();
+    assert.equal(path.dirname(root), path.join(repositoryRoot, '.test-data'));
+    await fs.rm(root, { recursive: true });
+    await assert.rejects(fs.stat(root), { code: 'ENOENT' });
+  });
+  const waitFor = async (label, observe) => {
+    const deadline = performance.now() + 10000;
+    while (performance.now() < deadline) {
+      const result = await observe();
+      if (result) return result;
+      await delay(10);
+    }
+    assert.fail(`Owned admission barrier did not settle: ${label}`);
+  };
+  const exists = file => fs.stat(file).then(() => true, error => {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  });
+  const record = async name => {
+    const file = path.join(root, `${name}.json`);
+    await waitFor(name, () => exists(file));
+    return JSON.parse(await fs.readFile(file, 'utf8'));
+  };
+  const script = path.join(root, 'worker.mjs');
+  await fs.writeFile(script, `
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as fs from 'node:fs/promises';
+import path from 'node:path';
+import {setTimeout as delay} from 'node:timers/promises';
+import * as budget from ${JSON.stringify(new URL('../scripts/test-budget.mjs', import.meta.url).href)};
+const [root,mode]=process.argv.slice(2);
+const failsafe=setTimeout(()=>process.exit(2),20000);
+failsafe.unref();
+async function publish(name,value){
+  const file=path.join(root,name+'.json');
+  await fs.writeFile(file+'.pending',JSON.stringify(value),{flag:'wx'});
+  await fs.rename(file+'.pending',file);
+}
+async function barrier(name){
+  const deadline=performance.now()+10000;
+  while(performance.now()<deadline){
+    try{await fs.stat(path.join(root,name));return;}
+    catch(error){if(error.code!=='ENOENT')throw error;}
+    await delay(10);
+  }
+  assert.fail('Owned fixture release was not published');
+}
+let lease;
+try{
+  if(mode==='queued'||mode==='new'){
+    try{lease=await budget.acquireTestWorker();}
+    catch(error){
+      assert.equal(error.code,'BUDGET');
+      const state=await budget.readTestBudget();
+      await publish(mode+'-rejected',{code:error.code,budgetId:state.id,admissionStopped:state.admissionStopped});
+    }
+    if(lease){
+      await publish(mode+'-started',{started:true});
+      assert.fail('Stopped aggregate admitted another original root');
+    }
+  }else{
+    lease=await budget.acquireTestWorker();
+    await test(mode==='fault'?'owned original runtime failure':'owned running peer',async()=>{
+      const initial=await budget.readTestBudget();
+      await publish(mode+'-ready',{budgetId:initial.id,admissionStopped:initial.admissionStopped});
+      if(mode==='fault'){
+        const original=Object.assign(new Error('owned original native cleanup failure'),{code:'OWNED_RUNTIME_UNCERTAINTY'});
+        const nativeCleanup={cleanup:'unknown',compilerSettled:false};
+        await publish('uncertain-cleanup',nativeCleanup);
+        await barrier('stop-fault');
+        await budget.stopTestAdmission();
+        const stopped=await budget.readTestBudget();
+        await publish('fault-stopped',{budgetId:stopped.id,admissionStopped:stopped.admissionStopped,
+          nativeCleanup,originalCode:original.code,originalMessage:original.message});
+        await barrier('release-fault');
+        throw original;
+      }
+      await barrier('release-peer');
+      const finished=await budget.readTestBudget();
+      await publish('peer-finished',{budgetId:finished.id,admissionStopped:finished.admissionStopped});
+    });
+  }
+}finally{
+  lease?.close();
+  clearTimeout(failsafe);
+}
+`);
+  const launch = (mode, producer) => {
+    const env = { ...process.env, ...producer.environment, HOME: home, USERPROFILE: home,
+      TEMP: home, TMP: home };
+    delete env.NODE_TEST_CONTEXT;
+    const child = spawn(process.execPath, ['--test-reporter=tap', script, root, mode], {
+      cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+      env,
+    });
+    let stdout = '';
+    let stderr = '';
+    let spawnError;
+    child.stdout.on('data', data => { stdout += data; });
+    child.stderr.on('data', data => { stderr += data; });
+    child.once('error', error => { spawnError = error.code; });
+    const completed = new Promise(resolve => {
+      child.once('close', (code, signal) => resolve({ code, signal, stdout, stderr, spawnError }));
+    });
+    const owned = { process: child, completed };
+    children.push(owned);
+    return owned;
+  };
+  owner = await enterTestBudget({ workers: 2, fileCount: 2, inherited: null, parent: null, slot: null });
+  const initial = await owner.snapshot();
+  assert.equal(initial.admissionStopped, false);
+  const fault = launch('fault', owner);
+  const peer = launch('peer', owner);
+  for (const name of ['fault-ready', 'peer-ready']) {
+    assert.deepEqual(await record(name), { budgetId: owner.id, admissionStopped: false });
+  }
+  queuedProducer = await enterTestBudget({
+    workers: 1, fileCount: 1, inherited: owner.inherited, parent: null, slot: null,
+  });
+  const queued = launch('queued', queuedProducer);
+  await waitFor('original queued worker registration', async () => {
+    const state = await owner.snapshot();
+    return state.activeWorkers === 2 && state.residentWorkers === 3 && !state.admissionStopped;
+  });
+  await fs.writeFile(path.join(root, 'stop-fault'), 'release');
+  const stopped = await record('fault-stopped');
+  assert.deepEqual(stopped, {
+    budgetId: owner.id, admissionStopped: true,
+    nativeCleanup: { cleanup: 'unknown', compilerSettled: false },
+    originalCode: 'OWNED_RUNTIME_UNCERTAINTY', originalMessage: 'owned original native cleanup failure',
+  });
+  assert.deepEqual(await record('queued-rejected'), {
+    code: 'BUDGET', budgetId: owner.id, admissionStopped: true,
+  });
+  const rejected = await queued.completed;
+  assert.deepEqual([rejected.code, rejected.signal], [0, null]);
+  assert.equal(fault.process.exitCode, null, 'Queued admission must stop before the failing worker closes');
+  assert.equal(peer.process.exitCode, null, 'Stopping admission must not cancel an already-running peer');
+  await fs.writeFile(path.join(root, 'release-fault'), 'release');
+  const failed = await fault.completed;
+  assert.deepEqual([failed.code, failed.signal], [1, null]);
+  const failureOutput = failed.stdout + failed.stderr;
+  assert.ok(/owned original native cleanup failure/u.test(failureOutput), 'Original fixture error message is retained');
+  assert.ok(/OWNED_RUNTIME_UNCERTAINTY/u.test(failureOutput), 'Original fixture error code is retained');
+  assert.ok(/not ok 1 - owned original runtime failure/u.test(failureOutput), 'Original Node root remains failed');
+  await waitFor('failed original worker closure', async () => {
+    const state = await owner.snapshot();
+    return state.admissionStopped && state.activeWorkers === 1 && state.residentWorkers === 1;
+  });
+  await assert.rejects(enterTestBudget({
+    workers: 1, fileCount: 1, inherited: owner.inherited, parent: null, slot: null,
+  }), { code: 'BUDGET' });
+  const fresh = launch('new', queuedProducer);
+  assert.deepEqual(await record('new-rejected'), {
+    code: 'BUDGET', budgetId: owner.id, admissionStopped: true,
+  });
+  const freshRejected = await fresh.completed;
+  assert.deepEqual([freshRejected.code, freshRejected.signal], [0, null]);
+  for (const name of ['queued-started', 'new-started']) {
+    assert.equal(await exists(path.join(root, `${name}.json`)), false);
+  }
+  await fs.writeFile(path.join(root, 'release-peer'), 'release');
+  const finished = await peer.completed;
+  assert.deepEqual([finished.code, finished.signal], [0, null]);
+  assert.deepEqual(await record('peer-finished'), { budgetId: owner.id, admissionStopped: true });
+  await waitFor('all original worker closures', async () => {
+    const state = await owner.snapshot();
+    return state.activeWorkers === 0 && state.residentWorkers === 0;
+  });
+  const terminal = await owner.snapshot();
+  assert.equal(terminal.admissionStopped, true, 'Worker closure cannot reopen aggregate admission');
+  assert.deepEqual(await record('uncertain-cleanup'), { cleanup: 'unknown', compilerSettled: false });
+  assert.ok(terminal.peakActiveWorkers <= 2);
+  t.diagnostic(JSON.stringify({ admissionStopped: terminal.admissionStopped,
+    originalFailureExit: failed.code, originalFailureCode: stopped.originalCode, peerExit: finished.code,
+    queuedAdmission: 'BUDGET', freshWorkerAdmission: 'BUDGET', freshProducerAdmission: 'BUDGET',
+    cleanup: 'unknown', compilerSettled: false, peakActiveWorkers: terminal.peakActiveWorkers,
+    maximumOwnedChildren: 3, minimumSlots: 4, nativeCompilerOrTargetCreated: false }));
 });
 
 test('T-PRD005 affected planned units without a unit suffix keep their root closure before all integration work', async t => {
@@ -1775,6 +2057,98 @@ test('T-PRD010 same-file roots overlap in isolated processes while ordered child
     'A failed prerequisite cannot create a passing or cancelled observation for an unstarted dependent');
 });
 
+async function captureOwnedReady(labels, entered, capture, { exclusive = false, signal } = {}) {
+  const wait = async pending => {
+    const deadline = Date.now() + 10000;
+    while (true) {
+      signal?.throwIfAborted();
+      for (const label of pending) {
+        try {
+          const owned = JSON.parse(await fs.readFile(path.join(entered, `${label}.ready`), 'utf8'));
+          return { label, owned };
+        } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      }
+      assert.ok(Date.now() < deadline, `Owned worker never reached its identity barrier: ${pending.join(', ')}`);
+      await delay(10);
+    }
+  };
+  if (exclusive) {
+    const pending = new Set(labels);
+    while (pending.size) {
+      const { label, owned } = await wait([...pending]);
+      await capture(label, owned);
+      pending.delete(label);
+    }
+  } else {
+    const outcomes = await Promise.allSettled(labels.map(async label => {
+      const ready = await wait([label]);
+      await capture(label, ready.owned);
+    }));
+    const failure = outcomes.find(outcome => outcome.status === 'rejected');
+    if (failure) throw failure.reason;
+  }
+}
+
+test('T-PRD011 exclusive ready clocks exclude the previous holder capture without hiding eligible failures', async () => {
+  for (const mode of ['ready', 'never-ready', 'capture-error', 'producer-error']) {
+    const result = await controlledReadyClock(captureOwnedReady, mode);
+    if (mode === 'ready') {
+      assert.equal(result.status, 'Passed');
+      assert.deepEqual(result.captured, ['exclusive right', 'exclusive left']);
+      assert.equal(result.clock, 13030);
+    } else if (mode === 'never-ready') {
+      assert.equal(result.status, 'Failed');
+      assert.match(result.message, /identity barrier: exclusive left/u);
+      assert.equal(result.clock, 23000);
+    } else {
+      assert.equal(result.status, 'Failed');
+      assert.equal(result.message, `original ${mode}`);
+    }
+  }
+});
+
+async function controlledReadyClock(implementation, mode = 'ready') {
+  let clock = 0;
+  let releaseAt = null;
+  const timers = [];
+  const captured = [];
+  const controller = new AbortController();
+  const pause = milliseconds => new Promise(resolve => timers.push({ at: clock + milliseconds, resolve }));
+  const readFile = async file => {
+    const right = path.basename(file) === 'exclusive right.ready';
+    const ready = right ? clock >= 9000 :
+      releaseAt !== null && clock >= releaseAt + 30 && mode !== 'never-ready';
+    if (!ready) throw Object.assign(new Error('not ready'), { code: 'ENOENT' });
+    return JSON.stringify({ pid: right ? 2 : 1, observedAtMs: clock });
+  };
+  const context = createContext({ Date: { now: () => clock }, fs: { readFile, async writeFile() {} },
+    path, assert, delay: pause });
+  const run = runInContext(`(${implementation.toString()})`, context);
+  let result;
+  const pending = run(['exclusive left', 'exclusive right'], 'owned', async label => {
+    captured.push(label);
+    if (label === 'exclusive right') {
+      await pause(4000);
+      if (mode === 'capture-error') throw new Error('original capture-error');
+      releaseAt = clock;
+      if (mode === 'producer-error') controller.abort(new Error('original producer-error'));
+    }
+  }, { exclusive: true, signal: controller.signal }).then(() => { result = { status: 'Passed' }; },
+    error => { result = { status: 'Failed', message: error.message }; });
+  for (let step = 0; !result && step < 4000; step++) {
+    for (let flush = 0; flush < 128; flush++) await Promise.resolve();
+    if (result) break;
+    assert.ok(timers.length, 'Controlled readiness must yield to an observable clock event');
+    clock = Math.min(...timers.map(timer => timer.at));
+    for (let index = timers.length - 1; index >= 0; index--) {
+      if (timers[index].at <= clock) timers.splice(index, 1)[0].resolve();
+    }
+  }
+  assert.ok(result, 'Controlled readiness must settle within its unchanged allowances');
+  await pending;
+  return { ...result, clock, captured };
+}
+
 test('T-PRD011 sibling producers dynamically consume freed aggregate capacity without token multiplication', async t => {
   const f = await runnerFixture(t);
   const inheritedBudget = Boolean(process.env.SDLC_TEST_BUDGET);
@@ -1803,23 +2177,13 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
         catch(error){if(error.code!=='ENOENT')throw error;}
         await delay(10);}
     }`;
-  const runOwnedPhase = async (files, paths, labels) => {
+  const runOwnedPhase = async (files, paths, labels, { exclusive = false } = {}) => {
     const monitors = new Map();
+    const readiness = new AbortController();
     const releases = labels.flat().map(label => path.join(entered, `${label}.release`));
     const releaseAll = () => Promise.all(releases.map(file => fs.writeFile(file, 'released')));
     const capture = process.platform !== 'win32' ? Promise.resolve(null) :
-      Promise.allSettled(labels.flat().map(async label => {
-        const ready = path.join(entered, `${label}.ready`);
-        const deadline = Date.now() + 10000;
-        let owned;
-        while (!owned) {
-          try { owned = JSON.parse(await fs.readFile(ready, 'utf8')); }
-          catch (error) {
-            if (error.code !== 'ENOENT') throw error;
-            assert.ok(Date.now() < deadline, `Owned worker never reached its identity barrier: ${label}`);
-            await delay(10);
-          }
-        }
+      captureOwnedReady(labels.flat(), entered, async (label, owned) => {
         assert.ok(Number.isSafeInteger(owned.observedAtMs),
           'The live worker ready observation must establish its creation bound');
         const exitPath = path.join(entered, `${label}.exit.json`);
@@ -1828,14 +2192,14 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
         t.diagnostic(JSON.stringify({ kind: 'owned-worker-identity-captured',
           owned: monitor.identity, capturedBeforeTrigger: true, label }));
         await fs.writeFile(path.join(entered, `${label}.release`), 'captured');
-      })).then(async outcomes => {
-        const failure = outcomes.find(outcome => outcome.status === 'rejected');
-        if (failure) await releaseAll();
-        return failure?.reason ?? null;
+      }, { exclusive, signal: readiness.signal }).then(() => null, async error => {
+        await releaseAll();
+        return error;
       });
     const producers = files.map((file, index) =>
       f.invoke(['targeted', '--workers', '2', file],
         { ...budget.environment, SDLC_TEST_REPORT_FILE: paths[index] }).then(result => {
+        if (exclusive && result.exitCode !== 0) readiness.abort(new Error(result.stdout + result.stderr));
         t.diagnostic(JSON.stringify({ kind: 'owned-producer-completed', index,
           completedAtMs: result.completedAtMs, completionClockPrecisionMs: 1,
           independentProducer: independent.parent, independentProducerActive: !independent.signal.aborted }));
@@ -1928,7 +2292,7 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
   }));
   const exclusiveReports = exclusiveFiles.map((_, index) => path.join(entered, `exclusive-${index}.json`));
   const exclusive = await runOwnedPhase(exclusiveFiles, exclusiveReports,
-    [['exclusive left'], ['exclusive right']]);
+    [['exclusive left'], ['exclusive right']], { exclusive: true });
   const exclusiveGroups = exclusive.reports.map(report => report.groupExecution.groups[0]);
   const ordered = exclusiveGroups.sort((left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt));
   assert.ok(Date.parse(ordered[0].finishedAt) <= Date.parse(ordered[1].startedAt),

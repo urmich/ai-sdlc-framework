@@ -340,6 +340,15 @@ fast path and every redaction rule, and never cache objects, evidence or current
 eligibility. Retained-payload node, depth, byte and decoded-work budgets still run
 independently. The PR-only regression observes actual parsing work and checks
 fresh calls, sensitive keys, high-cardinality input and oversized-text fallback.
+Retained-payload object children are already fully sanitized before their own
+summary-key redaction. Use the same summary rules in shallow-object mode at that
+boundary instead of recursively summarizing each completed subtree again for
+every ancestor. Keep ordinary summary callers deep by default, both payload
+sanitization and retained-output validation passes, exact redaction digests and
+all structure, depth, byte and decoded-work guards. Reuse no object result,
+verification outcome or previous invocation. The PR-only regression observes
+constant per-object visits across nested objects/arrays and compares exact
+legacy redaction, fresh-input rejection and capacity boundaries.
 ASCII alphanumeric/space-only values cannot match the existing scalar text
 redaction markers, so return them unchanged before rich-text scans or text-map
 lookup. Sensitive object keys still redact their values first. Punctuation,
@@ -396,7 +405,9 @@ observed part results. Require source-, platform-, job-, run- and attempt-bound
 unit evidence before regression shards execute. Independently verify every
 part's SDK context, complete assertion union and allocated-prefix cleanup;
 missing, duplicated, overlapping or swapped parts cannot produce completeness.
-The source-adopted `native-framework-shards-v4-split-intel-units` protocol uses four
+The current implementation candidate
+`native-framework-shards-v13-catalog-process-reservation` retains
+v4's four
 explicit platform-specific unit-to-regression job groups. A platform's unit
 producers must all complete successfully, including retention and cleanup, before
 its own regression jobs start. Unrelated unit producers may finish later, but
@@ -408,6 +419,232 @@ execute only on the original `units` producer; `units-1` executes only its
 nonempty extended-unit subset. Both Intel unit jobs share `native-units-mi`'s
 standard runner matrix, each with its own four-worker budget and prefix. No waiting
 regression host is started early merely to overlap provisioning.
+For body placement, derive complete root groups from the existing scheduler,
+then join dependency and shared-exclusive-resource edges transitively. V9 retains
+v7/v6's qualified observed root costs to place whole connected components, with a
+separate stable planning identity derived from exact file/root identities rather
+than whole-file source hashes. Preserve actual source-bound assertion, group,
+configuration and execution identities independently of planning keys.
+The source-declared cost table retains original run/attempt/source, native
+target, runtime and requested-worker provenance. Matching closure and resource
+shape can retain an explicitly historical-source scheduling lead; it cannot
+grant execution credit or establish matched current-host service time.
+Unknown or incompatible costs remain explicit and use count-based fallback
+with stable planning ties, not invented millisecond estimates. Summed work
+weights are not a prediction of concurrent lane duration. Independent roots
+from one file may execute on different hosts; a root's descendants and connected
+components may not. Body file lists may overlap, but source-bound escaped
+full-name selectors must execute each assigned assertion exactly once.
+Ambiguous selectors fail rather than executing an unassigned closure.
+Preserve the published v6 `nativePlacementCosts` table unchanged. V7 adds the
+separate `nativePlacementCostsV7` overlay for ten completed Intel body-0 group
+observations from source `6cc595a1a12cc71a6e7fbba2ae72f3696303acea`,
+run `41803553551`, attempt 1, Node 24.20.0 and fourteen Intel workers.
+Qualified target/runtime/closure/resource matches supply scheduling leads only;
+source changes transfer no passing execution credit. Roots without a v7
+target sample retain v6 cost lookup; incompatible or unknown leads retain
+explicit count-based fallback. Neither summed weights nor overlapping original
+group durations predict a concurrent lane duration.
+V8 adds the separate strict `nativePlacementCostsV8` literal containing thirty
+completed Intel body observations from source
+`90ae1e4ae10620e12897a5f79be03b4225d2b928`, run `41817138524`, attempt 1,
+Node 24.20.0 and fourteen workers. Preserve the v6/v7 literals unchanged.
+Qualify target, runtime, capacity, complete closure and resources before using
+these historical leads; missing v8 samples retain v7/v6 lookup, and incompatible
+or unknown leads retain explicit count fallback without execution credit.
+After cost placement, v7's `nativePlacementAffinities` may move only the qualified
+standalone ARM retained-identity component to the existing standalone catalog
+component's host. Require the declared ARM target, runtime, seven-slot capacity and complete
+closure/resource/component shape. Preserve retained minimum four plus catalog
+minimum one within those seven slots; these remain independent ready-pool
+groups, not a merged callback or dependency chain. Record source qualification
+and explicit nonapplication for incompatible inputs or an emptied source body.
+No Intel affinity or new host is introduced. This is a source-qualified placement
+hypothesis, not a predicted saving, actual overlap or latency pass.
+V8 separately qualifies `nativePlacementIsolationV8` against the exact
+source-bound standalone Intel catalog component, Node 24.20.0 and fourteen-slot
+body capacity. If qualified, reserve existing body-0 exclusively for that
+complete component and partition all remaining connected components across
+existing body-1/body-2. Incompatible source, closure, resource, runtime or
+capacity leaves ordinary component partitioning; never split a component or
+empty a required body. Four-worker unit producers retain their existing capacity
+validation and barriers. Derive catalog-only Go/Python omissions from the actual
+selected closure through existing bootstrap requirements, retaining genuine
+absence/nonallocation evidence and all required tool assertions elsewhere.
+Isolation is a measurement hypothesis: fresh native results must establish
+both the catalog service and non-starved secondary tails within the lane limit.
+Historical v9 replaces permanent catalog-only primary ownership with a qualified,
+two-phase assignment on the same existing Intel body-0. The first phase executes
+the complete catalog component alone. Only after its successful owned process
+execution and verified cleanup settlement may the second phase execute the
+entire retained-identity component alone, retaining its existing four-wide
+children. Keep fourteen-worker body capacity and four-worker unit barriers;
+do not batch causal callbacks or add a physical producer.
+Qualify both complete components, source, target, runtime, capacity and resources.
+Changed or incompatible inputs must retain explicit safe fallback without
+splitting a connected component, emptying a required body or inventing a phase.
+Repartition all remaining whole components across body-1/body-2 with separately
+authenticated C66 scheduling leads. Preserve every v6/v7/v8 literal and authentic
+v1-v8 assignment and serialized identity.
+Each phase retains its own original execution report and journal, exact source,
+configuration and full regression context. Their disjoint assertion union must
+equal the entire assigned producer closure. A failed phase, incomplete process
+settlement or uncertain cleanup prevents dispatch of the next phase and prevents
+producer completeness. Phase labels, elapsed timestamps or partial passing
+reports cannot substitute for the causal settlement barrier.
+Derive SDK requirements from the union of the actual selected phase closures,
+not the earlier catalog-only omission. Keep timing retention bounded to ten
+notices per producer, not ten per phase; offsets and the terminal-group capsule
+must describe the actual producer-wide sequence.
+Sequential isolation is a falsifiable placement hypothesis, not a sufficient
+latency proof: unchanged observed service sums can still exceed the Intel limit,
+and longer primary allocation can affect secondary provider queues. Require
+fresh measurements of all three bodies and the complete lane.
+Derive the complete validated root-group inventory once per planning invocation,
+index it by file and project each shard's exact complete selection in original
+file order. Check the assertion union and prerequisites for each projection.
+Reuse never crosses an invocation or caches mutable inventory inputs; a later
+call must observe changed resource declarations. Within each authentic protocol,
+identical inputs reproduce its deterministic component placement.
+Historical v5-v8 placement changes cross-host assignment only. V9 additionally
+orders producer phases outside the unchanged within-phase scheduling policy v9.
+Verify the workflow's selected protocol against the
+captured native planner and SDK reconstruction; old source cannot be relabelled
+as v7, v8 or v9. Keep v4's exact historical file assignments and v5's original count/hash
+component assignments and serialized identities, each with its twenty-five-part
+topology. Replay `native-framework-shards-v6-stable-cost-components` with its exact
+original cost table, assignments, serialized identities and SDK source without
+borrowing v7 overlays or affinities.
+Replay historical v7 through `nativeResourceAffinityFrameworkShardProtocol`
+with its original assignments, serialized identities, literals and SDK source,
+without borrowing v8 leads or isolation.
+Historical v8 retains its catalog-only primary without borrowing v9 phases or
+C66 leads. Authenticate the v9 phase and cost contracts from captured source;
+a protocol label or successful phase cannot relabel historical execution.
+The new strict JSON literals are `nativePlacementCostsV9` and
+`nativePlacementPhasesV9`; the historical v8 alias is
+`nativeCatalogIsolationFrameworkShardProtocol`. The phase contract
+`native-intel-primary-phases-v1` orders `regression-catalog` then
+`regression-retained`, both with regression context. Each phase retains its
+original report, report journal, command, command journal and settlement receipt.
+`verifyNativePhaseSettlement` binds the phase, context, command, report and
+command-journal digests to actual successful owned-process settlement before
+the successor can start. Missing or borrowed originals cannot establish it.
+V10 preserves v9 through `nativePhasedIsolationFrameworkShardProtocol` and adds
+the strict `nativePlacementPhasesV10` literal and
+`native-intel-primary-phases-v2` contract. Its source-qualified third phase,
+`regression-observer`, moves only the complete standalone observer component
+from an existing secondary onto the same primary after retained-phase success
+and verified owned-process/worker/cleanup settlement. Authenticate the C70
+source/run/attempt, exact observer source and full assertion/resource/component
+shape, Intel target, Node 24.20.0 and fourteen-slot capacity. The component has
+one root, one assertion, minimum one slot and no dependency or exclusive-resource
+edges; a changed source, descendant, resource or connected component prevents
+the qualified phase assignment and retains explicit safe fallback.
+The unrelated protocol-row count changes the observer file's current digest:
+authenticate that exact current file separately from C70's observed source
+digest and retain the byte-identical selected callback digest as provenance.
+This count-only maintenance transfers no historical passing or timing credit.
+Repartition the remaining whole components across the existing secondaries.
+No producer, worker allowance, original assertion or within-phase scheduling
+policy changes. Preserve v1-v9 assignments, serialized identities and literals;
+captured v9 requires neither the v10 phase literal nor its third phase.
+Derive SDK requirements from all three selected closures: the qualified observer
+requires Python, so the primary cannot retain the former Python omission.
+Keep separate original reports/journals, command journals and settlement receipts
+for every phase, with the same disjoint complete producer union, failure barriers
+and producer-wide ten-notice bound. The bounded data-only artifact reader must
+admit the observer report and command journals through its closed stage allowlist,
+without accepting arbitrary names or changing byte/path/content limits.
+Preserve all nineteen existing protocol/bootstrap scenarios, including historical
+v9, and append the current v10 twentieth scenario rather than replacing a row.
+The source-qualified move is a placement hypothesis motivated by C70's observed
+primary/secondary imbalance, not a predicted saving or native timing pass.
+Require fresh complete native correctness and the unchanged whole-lane limits.
+The independent v9/v10 phase-settlement controls bind selection writers to each
+existing per-mode owned fixture root. Check descriptor bytes below that root
+after actual commands settle; cleanup removes only the owned fixture after
+verified process settlement, never checkout-global paths inferred absent earlier.
+Historical v11 replaces the Intel primary's sequential phase isolation with the
+source-qualified `native-intel-parallel-ready-pool-v1` rule. Authenticate the
+strict JSON `nativePlacementCostsV11` and `nativePlacementReadyPoolV11` literals.
+The complete catalog, retained-identity and observer components may share the
+ordinary `regression` ready pool with transferred complete components; their
+minimum allocations remain one, four and one slots. Each independent root
+still executes in its own owned process. Preserve transitive dependency and
+exclusive-resource closures, the fourteen-slot body limit, four-slot units,
+actual selected SDK requirements and all twenty-five producers. This is not
+blanket callback concurrency or a new phase, journal or physical producer.
+Qualify current source, complete closure, resources, target, runtime and capacity;
+incompatible or unknown inputs retain explicit safe fallback, not invented
+current service times or partially moved components.
+Keep genuine v1-v10 assignment, literal, SDK and serialized-identity replay.
+Historical v9/v10 still require their own original phase reports, journals and
+settlement barriers; a v11 regression report cannot stand in for them.
+Append the v11 causal protocol/bootstrap scenario after all twenty historical
+rows. C74 observations and conservative quantized intervals are historical
+scheduling leads only: changed callbacks, new controls and shared-host contention
+remain unmeasured. Neither the placement projection nor local controls establish
+current native overlap, correctness or whole-lane timing. Require fresh native
+correctness and the unchanged non-Intel fifteen-minute and strict Intel
+under-twenty-five-minute limits.
+V12 retains authentic v11 through `nativeParallelReadyPoolFrameworkShardProtocol`
+and adds the strict `nativePlacementTransfersV12` literal with
+`native-intel-service-balance-v1`. After the qualified parallel base placement,
+move six complete single-root connected components, with their complete
+123-assertion union, from existing Intel body-1 to body-2. Authenticate the original v11
+cost literal and root order, current inventory/callback/resource bindings,
+runtime, fourteen-slot capacity and destination SDK compatibility. Validate the
+whole batch before modifying partitions; changed, unmeasured, joined, missing or
+misplaced components retain explicit nonapplication, never a partial transfer.
+The corrected cancellation reservation and changed capture-admission callback
+lose their incompatible historical leads. Seven unknown roots retain explicit
+count fallback; no unqualified C76 durations are imported as scheduling costs.
+Keep all twenty-five producers, four-slot units, fourteen-slot Intel bodies,
+thirteen Mac cleanup roles, unchanged ready-pool execution and genuine v1-v11
+assignment/literal/SDK replay. Append v12 as causal protocol row twenty-two;
+captured v11 does not need the new transfer literal. This is a bounded placement
+hypothesis, not a future timing guarantee: diagnostic fixed-C76 queue/setup
+assumptions and the unresolved producer-source preimage grant no native credit.
+Fresh complete correctness and whole-lane measurement remain required.
+V13 preserves authentic v12 as `nativeServiceBalanceFrameworkShardProtocol`
+and adds only the strict `nativePlacementReservationV13` resource rule.
+Reserve seven slots for the complete catalog callback: one isolated worker,
+one CLI and up to five concurrently awaited candidate-snapshot Git readers.
+The direct arithmetic child and sequential fixture setup have smaller process
+trees. This source audit is not a measured hosted PID peak or an explanation
+of C79's slowdown. Preserve every catalog assertion, prerequisite and deadline.
+The existing capture-admission regression uses the real selected catalog group:
+six slots reject before callback/child dispatch, seven admit its complete
+reservation, and an actual owned lease settles before peer capacity reuse.
+Keep its original cancellation and capture/peer controls; its declaration is
+seven slots, within the unchanged ARM allocation, and it remains PR-only.
+Changing catalog's minimum invalidates its historical one-slot service lead.
+Authenticate the new complete inventory/root binding and explicit unknowns;
+catalog remains null/unmeasured-resources, never a borrowed C74/C76/C79 cost.
+A duration-free root-order ownership vector preserves the existing C79 Intel
+component assignments before the unchanged six-component v12 transfer. This
+avoids interpreting an unknown catalog as zero-cost backfill capacity and adds
+no search, phase, producer, worker or execution architecture. Validate every
+complete dependency/exclusive-resource component and selected SDK destination
+before applying any ownership. Changed source, callback, resource, anchor,
+ordering or SDK capability retains atomic safe fallback. The old v12 null-anchor
+rejection and every v1-v12 literal/assignment/SDK replay remain unchanged;
+historical fixtures reconstruct and authenticate their exact original catalog
+source instead of relabelling the new declaration as a historical pass.
+Append the actual v13/bootstrap scenario after all twenty-two original causal
+rows. Preserve all twenty-five producers, thirteen Mac cleanups, fourteen-slot
+Intel bodies, four-slot units and the finite twenty-seven critical budget.
+Current whole-candidate validation, Review and native timing remain NotRun.
+The source-correct admission candidate provides no under-twenty-five-minute
+guarantee; original C79 correctness success and 27:37 timing failure are immutable.
+Captured v6 planner source must carry the authentic adopted `nativePlacementCosts`
+literal. V7 additionally requires authentic `nativePlacementAffinities` and
+`nativePlacementCostsV7` strict JSON literals. Reject missing, computed, duplicate
+or altered declarations without executing captured code. V8 additionally
+requires authentic `nativePlacementCostsV8` and `nativePlacementIsolationV8`
+strict literals. Historical v7 requires neither v8 addition; historical v1-v5
+replay requires no v6 table, and v6 requires neither v7 declaration.
 Preserve the original `native-framework-shards-v1` global-barrier and
 `native-framework-shards-v2-platform-units` twenty-part proof and archive
 semantics, and the `native-framework-shards-v3-four-body-platform-units`
@@ -425,13 +662,17 @@ diagnostic artifacts, as specified below; no producer may borrow another's recei
 Bootstrap v5 requires two genuine Homebrew owners and eleven source-bound
 nonallocation proofs, retaining all thirteen diagnostic artifacts and steps.
 Keep default whole-native execution and release prepublication compatible.
-The required logical lane span is at most 460 seconds on Linux, 665 seconds on
-Windows and 627 seconds on Apple Silicon, and strictly under 1,200 seconds on
-Intel macOS. Measure from the earliest required unit/framework/Homebrew worker
-start through the last evidence/cleanup completion, including unit barriers,
-repeated provisioning and internal queues. Intel's former fifteen-minute target
-is a stretch goal. Its observation cutoff moves from sixteen to twenty minutes,
-without changing command watchdogs, owned-process settlement or other limits.
+The required logical lane span is at most 900 seconds (15 minutes) on each of
+Linux, Windows and Apple Silicon, and strictly under 1,500 seconds (25 minutes)
+on Intel macOS. Shorter recorded durations are historical measurements, not
+acceptance limits. Measure from the earliest required unit/framework/Homebrew
+worker start through the last evidence/cleanup completion, including unit barriers,
+repeated provisioning and internal queues. Intel's earlier fifteen- and
+twenty-minute targets do not remain additional acceptance requirements.
+V9 uses the new twenty-five-minute limit; historical v1-v8 timing interpretation
+retains its original twenty-minute limit without retrospective passing credit.
+Its delivery observation cutoff is twenty-five minutes, without changing command watchdogs,
+owned-process settlement or other limits.
 Configured host fan-out, an isolated shard time or an elapsed-work estimate is
 not a passing latency result; fresh complete hosted measurements are required.
 Keep the existing observation refresh/regression and observer priorities first.
@@ -441,7 +682,7 @@ facts/archive recovery, distribution lifecycle and runner probes, in that order,
 where those files belong to the selected shard, before shorter families.
 Distribution stays ahead of runner probes because its measured long roots are
 longer; this ordering is a lead, not a predicted latency gain.
-File/group selection metadata is unchanged. Parallel admission considers
+Within-host file/group scheduling metadata is unchanged. Parallel admission considers
 declared demand first, so strict actual start order across unequal demands is
 not promised; equal-demand ties retain the input order.
 Preserve the relative retained-identity acceptance, catalog, native
@@ -458,51 +699,84 @@ live observations, separate slots and shared producer/budget checks.
 The catalog's independent long root can use the three remaining ARM slots while
 the retained guard reserves four of the existing seven. Retain the complete
 38-assertion closure, callback ordering/concurrency and every catalog root.
-This changes neither host capacity, shard ownership nor explicit targeted
+The within-host priority policy changes neither host capacity, shard ownership nor explicit targeted
 caller order. Actual overlap and whole-lane improvement require native proof.
 Immediately after PR-description work, admit the measured long
 `public-readiness-native.test.mjs` family before the shorter queued remainder.
-This advances bootstrap validation on its unchanged source-assigned shard;
+This advances bootstrap validation on the shard owning each selected root;
 the bootstrap commands, assertions and resource allowance remain intact.
 Policy v9 adds only this source-adopted file-priority entry and retains v8's
-demand-first admission, declared minima, workloads and shard ownership.
+demand-first admission, declared minima and workloads; it does not itself
+change cross-host ownership.
 Historical v2-v8 identities and captured-source replay remain unchanged.
 It does not cache cold Go builds, prune lifecycle/failure probes or alter assertions.
 
 The PR workflow uses five Linux read-only allocation coordinators under
-`arm-regression-allocation-v6-all-critical-bodies-first`. After ARM's own unit barrier,
-`mac-admission` observes its three long body workers before releasing Intel's
-measured critical body-0 producer, still behind both Intel unit jobs. The
-`intel-retained-admission` coordinator observes that actual worker before
-releasing ARM's separate short refresh, which retains its own ARM unit barrier.
-The coordinator retains its historical job/artifact identifier, while its
-current closed `intel-primary-body` group requires body-0 allocation.
-Then `arm-refresh-admission` observes the refresh worker before Intel body-1
-and body-2 become eligible, retaining both Intel unit jobs and no Homebrew
-dependency. ARM's genuine Homebrew producer retains its initial schedule.
-The existing `intel-homebrew-admission` coordinator now observes allocation
-of all three Intel bodies through the closed `intel-bodies` group before
-releasing Intel's genuine Homebrew producer. This lets eligible critical bodies
-take available Mac capacity first, without reserving an extra VM or waiting
-for a body to finish. `intel-admission` independently observes those same
-allocations before releasing the separate short Intel refresh. No gate waits for a Homebrew command or any
-producer's completion. Native part names, recipes, assertions, retention and
-cleanup remain unchanged.
+`arm-regression-allocation-v10-intel-primary-first`. Intel primary/body-0 and
+the existing `intel-retained-admission` observer remain eligible after both
+successful Intel unit jobs. Only the existing `native-mi` secondary body-1/body-2
+matrix additionally waits for that observer's actual primary allocation.
+It never waits for primary completion, ARM allocation or future foreign units.
+This makes primary request priority source-controlled rather than assuming
+which matrix entry a provider allocates first. Preserve the existing job
+separation, all twenty-five producers and thirty-four expanded jobs, including
+the five coordinators. Keep seven ARM and fourteen Intel regression workers
+and four workers on each Intel unit host.
+V10 otherwise preserves v9's readiness fairness and both platforms' own complete
+unit barriers.
+After ARM's own unit barrier, `mac-admission` selects `arm-refresh-ready`:
+the mandatory short refresh receives a fair turn after the first actual body
+allocation on each currently-ready architecture, rather than after the entire
+ARM body and Intel-primary allocation chain. Preserve real own-unit/data
+prerequisites. A foreign architecture whose units are not yet complete does not
+reserve future capacity. Readiness is reevaluated from complete attempt-scoped
+metadata, not a queued timestamp placeholder.
+The `intel-retained-admission` coordinator observes Intel's actual body-0 worker
+to release only Intel secondaries and for completeness, not to gate ARM refresh.
+Its historical job/artifact identifier and closed `intel-primary-body` group
+retain their authentic meaning.
+`arm-refresh-admission` still observes the refresh worker and is required for
+producer completeness, but no longer gates independent Intel critical requests.
+ARM's genuine Homebrew producer retains its initial schedule.
+The existing `intel-homebrew-admission` and `intel-admission` coordinators select
+`intel-auxiliaries-ready`. After both own Intel units succeed, Intel Homebrew and
+short refresh yield to all three actual body allocations on every
+currently-ready architecture. The finite ready-body cohort prevents auxiliary
+work overtaking already-ready ARM bodies without blocking independent Intel
+primary requests or primary-allocated secondaries, waiting for future units or
+waiting for body completion.
+No coordinator reserves a waiting Mac VM. Native part names, recipes,
+assertions, retention and cleanup remain unchanged.
 A queued `started_at` placeholder is not allocation evidence; a runner or
 started step is required. Completed allocated parts also satisfy admission; no stage
 waits for its allocated parts to finish. Each helper invocation selects only
-the closed `arm-bodies`, `intel-primary-body`, `arm-refresh`,
-`intel-homebrew` or `intel-bodies` group. The historical `arm-regressions`
-group remains the default for existing callers. Current v6 and historical v5
+its closed role group. V10 retains v9's `arm-refresh-ready` and
+`intel-auxiliaries-ready` while retaining `arm-bodies`, `intel-primary-body`,
+`arm-refresh`, `intel-homebrew` and `intel-bodies`. The historical `arm-regressions`
+group remains the default for existing callers. Current v10 and historical v5-v9
 use `intel-primary-body`; historical v4 retains `intel-retained-body` and its
 original body-1 receipt semantics. Preserve v5's original Homebrew-allocation
-dependency only as historical v5, never relabel it as current v6.
-Retain the exact historical v1-v5 resource graphs and unmarked native v1-v4 replay rather than
-silently adopting new dependencies.
+dependency only as historical v5, never relabel it as admission v6 or newer.
+Retain the exact historical v1-v9 resource graphs and receipts, including v8's
+own-platform critical graph and `arm-regression-allocation-v9-ready-critical-fairness`
+with simultaneous own-unit-ready Intel critical requests.
+Reject v9/v10 label substitution in either direction and preserve
+unmarked native v1-v4 replay rather than silently adopting new dependencies.
+The helper's v9 readiness algorithm and receipt semantics remain unchanged;
+v10 identifies the distinct source request graph.
 No coordinator occupies a Mac VM while waiting or adds a native producer
 part. The policy does not change the twenty-five-part assertion union,
-architecture coverage, resource allowances or command watchdogs. Their
-same-run metadata reads use ephemeral read-only CI tokens, bounded polling
+architecture coverage, resource allowances or native command watchdogs. V8
+retains v7's twenty-minute allocation observation budget,
+with five-second polling and a twenty-two-minute coordinator
+job watchdog for setup and receipt retention; v9/v10 preserve those bounds.
+The previous eight-minute cutoff
+failed before the measured eleven-minute provider allocation and suppressed
+mandatory downstream roles. This observation budget is not a delivery limit:
+late allocation still counts in an already running lane and can fail its
+unchanged latency requirement. Historical v1-v6 retain their original
+ten-minute coordinator watchdogs.
+Their same-run metadata reads use ephemeral read-only CI tokens, bounded polling
 and complete pagination;
 identity mismatches, unavailable reads and incomplete allocation fail explicitly.
 All five gates are included in producer completeness. Bind the split ARM
@@ -514,6 +788,14 @@ Release prepublication and default whole-native execution remain separate and
 unchanged. Fresh complete hosted measurements still decide delivery success.
 This prioritizes owned work within the existing shared pool; it does not claim
 that Intel Homebrew is the only provider bottleneck or erase provisioning gaps.
+Original readiness, request, allocation and bounded changing-decision
+observations distinguish source eligibility from provider worker availability.
+Observed concurrency and historical five-job planning assumptions do not
+establish an exact provider quota. Fairness configuration or an unchanged-source
+lucky rerun is not a performance pass.
+Primary-first eligibility cannot establish that the long catalog service fits
+the strict Intel delivery limit. New-source local, Review and native acceptance
+remain NotRun until their applicable complete executions.
 The existing Homebrew command trace also records a monotonic `elapsedMs` for
 each awaited subprocess, including rejected commands. This measures service
 time, not surrounding snapshot checks, bootstrap, evidence retention or cleanup.
@@ -525,6 +807,15 @@ build. Keep transactions, durability flushes, lock races, archival and cleanup
 real. Any runtime optimization of repeated reads/indexing must preserve revision,
 containment, invalidation and crash guarantees and receive its affected regression
 coverage. Do not add a test-only switch disabling fsync or reducing stress limits.
+Publish independent immutable validation objects in batches of at most four.
+Retain every real atomic write, file/directory flush and fresh hash-checked
+readback. Drain the entire active batch before reporting its first
+input-ordered failure or starting a later batch; publication faults also stop
+later batches. Commit the Store transaction only after all objects publish
+successfully. This is bounded file I/O, not additional process capacity,
+shared callback concurrency or a cache across mutation boundaries.
+Fresh object reads retain their existing bounded overlap and causal
+containment/identity/post-read checks; no synchronous public API is rewritten.
 When a purge lock's owner file changes during its bounded read, treat the
 unresolved concurrent owner as `LOCK_BUSY`, not as permission to remove the lock.
 Preserve owner bytes and runtime contents without retrying or weakening the
@@ -598,16 +889,16 @@ only setup that has no semantic consumer in the complete selected closure:
 
 | Producer on the current source | Go | CPython runtime | Schema packages | Brew/core/Ruby/owned prefix |
 | --- | --- | --- | --- | --- |
-| Every framework `body-0` | Required | Required | Required | Not required |
-| Linux/Windows `body-1` and `body-2` | Not required | Required | Not required | Not required |
-| Linux/Windows `body-3` | Not required | Not required | Not required | Not required |
-| Both Mac `body-1` and `body-2` | Not required | Required | Not required | Not required |
+| Framework body owning the Go/schema/calculator procedures | Required | Required | Required | Not required |
+| Other framework bodies owning Go-dependent Node roots | Required | Required | Not required | Not required |
+| Remaining current framework bodies | Not required | Required | Not required | Not required |
 | All current unit partitions | Not required | Required | Not required | Not required |
 | Refresh | Not required | Not required | Not required | Not required |
 | Genuine Homebrew on both Mac architectures | Not required | Not required | Not required | Required |
 
-The implementation follows the existing source-selected root closures rather
-than hardcoding body order. The real pinned Go/schema root and native launcher
+Derive these owners from each frozen source-selected root closure, not fixed
+body numbers: protocol v5 can place roots from one file on different hosts.
+The real pinned Go/schema root and native launcher
 roots retain their tests, vet, native executable behavior and two independent
 cold-cache builds. Artifact consumers retain stdlib CPython subprocess readers;
 consumer roots retain the real non-Node producer. Even Intel's main unit partition
@@ -643,8 +934,9 @@ owner, pinned Sigstore inputs and npm 11.16.0 prerequisite; a missing or unknown
 declaration fails closed. Unrecognized verifier/crypto prerequisites retain
 acquisition rather than authorizing omission.
 
-On the current 25-role source inventory, Linux/Windows `body-0` and both Mac
-`body-2` closures require the authentic fixture. The other 21 roles, including
+On the current 25-role source inventory, the one closure owning the authentic
+root on each platform requires the fixture. Derive its body index from the
+selected source plan, not a historical affinity. The other 21 roles, including
 both genuine Homebrew roles, have no semantic consumer of that fixture. V6 alone
 omits their bundle/trust/npm acquisition, install, version probe and setup
 verification, as well as their fixture directories, exported inputs and
@@ -685,11 +977,11 @@ The four-body Linux/Windows matrices can provide five regression hosts per
 platform while at most five Mac hosts run, fitting fifteen native jobs within
 the conservative twenty-job standard personal allowance. Use standard runners
 in this public repository without paid larger runners or a billing change.
-If a required non-Intel lane remains active at 16 minutes, or Intel remains
-active at 20 minutes, cancel that attempt and retain its non-passing originals.
-Report misses of the tighter delivery limits separately; they do not cancel an
-Intel measurement before its cutoff. Revise the measured bottleneck rather than
-waiting for a late green result.
+If a required lane remains active beyond its delivery limit, record the timing
+miss immediately and retain its original execution through natural settlement.
+Do not cancel or retry unchanged source merely because a lane is late. Report
+native correctness separately from latency, then revise the measured bottleneck;
+a late green correctness result cannot pass the delivery limit.
 Reject a non-improving iteration as an unsuccessful optimization and revise its
 measured critical path; neither a configured allocation nor a passing local
 regression demonstrates a hosted speedup.
@@ -865,8 +1157,15 @@ The cross-platform Windows VM fixture composes its exact mock executable path
 with the supplied host path module. Identify its termination watchdog through
 owned dispatch and registration, not platform-specific separators or error-stack
 text. Neither portability control changes the real termination implementation.
-The command-capture root reserves four process slots; its writer/producer peers
+The command-capture root reserves five process slots; its writer/producer peers
 reserve their actual two- or three-process minima before timed work begins.
+The separate CI tool-cancellation root reserves four: its worker, command,
+descendant and Windows termination controller or POSIX observation query.
+The public source-derived selection must reject a three-slot pool before
+dispatch and remain admissible with four. This changes neither the host worker
+limit nor the cancellation deadline, process-absence probe or stop-race cases.
+Historical costs with the former one-slot resource shape cannot supply a
+qualified lead for the corrected group.
 The native ownership fixture reserves four aggregate worker slots for its
 test process and three real child processes, without changing host capacities
 or the one-second settlement bound.
@@ -958,7 +1257,7 @@ The dedicated history regression proves representative fixture/beforehook
 execution without the old object or alternates and guards an owned visible
 untracked canary against filesystem access and copying.
 
-The seventeen versioned protocol/bootstrap scenarios stay within their existing
+The nineteen versioned protocol/bootstrap scenarios stay within their existing
 logical root but execute as whole isolated Node children. Its four-slot
 reservation precedes setup; one existing shared producer and ready pool bound
 dispatch to the smaller of four and the actual caller/broker allocation.
@@ -967,8 +1266,16 @@ scratch, including temporary-environment changes. Only source-bound scalar
 completion and actual process/lease identity cross the boundary. Reject
 incomplete or mismatched row closures, stop new dispatch on observed failure,
 drain all started siblings, report the source-order primary error and await
-scratch cleanup before restoring the parent budget. Retain all seventeen rows,
-all original assertions and historical protocol semantics.
+scratch cleanup before restoring the parent budget. Retain all original
+seventeen rows and the historical v8/bootstrap eighteenth row in order, then
+append the current v9/bootstrap scenario as row nineteen, preserving every
+assertion and historical protocol semantic.
+Match each child's live lease with the same authoritative closed broker lease
+after actual owned process exit, using the explicit producer environment rather
+than changing the controller's process-global environment. Worker, command
+observer and broker each validate their own finite, nonreversed interval;
+never order timestamps across these independent clocks or add a skew tolerance.
+Retain the closed lease and command-side inspection timestamp with each report.
 
 The standalone syntax checker uses one common bounded ready-work policy across
 hosts, limited by available CPUs and the existing 32-slot ceiling. It remains
@@ -1334,6 +1641,25 @@ the original observations. Inline and referenced cycles share that rule.
 Fresh-Store regressions cover each missing/corrupt graph class while old
 snapshot/decision/execution bytes remain unchanged.
 
+The referenced-assertion preparation regression observes both its required read
+barrier and the actual replay outcome. An early replay rejection preserves its
+original cause instead of becoming a misleading barrier timeout; successful
+completion before the required barrier fails explicitly. The first original
+assertion read closes only after the common normalized import is fully verified.
+The later reservation batch must also prepare its genuine large parents before
+its expected child reads can open. Wait for both the original read to close and
+the first expected child read to open under the same thirty-second setup
+watchdog before arming the unchanged five-second concurrent-read deadline.
+Do not preload or reuse a previous context. Controlled import and large-parent
+reads with mocked clock advances reproduce premature deadline consumption
+without waiting on wall-clock latency; report the expired watchdog duration
+without attributing an unmeasured native CPU or filesystem cause. All fifteen
+original modes and the four-handle ceiling, serialized reservation, ordered
+authority, failure-drain, cache and alias checks remain, alongside this new
+slow-setup mode. Restore real timers before releasing each controlled setup read so
+the subsequent overlap watchdog remains live. No native command watchdog or
+whole-lane limit changes.
+
 ### 5.5 Sanitization and retention
 
 Reuse the existing bounded text/JSON sanitizer and content-addressed object
@@ -1478,8 +1804,275 @@ NotRun totals, raw skip/cancellation diagnostics, per-test success/failure lists
 and links to job/step logs and the complete sanitized readable/machine reports.
 PR check/status details link to the matching run. Emit escaped `::error`
 annotations for failures where a real source location is available; ordinary
-runner logs retain the assertion diagnostics. Render/upload the retained output
+runner logs retain the assertion diagnostics. Include the protected evaluation's
+required assertion identity even when diagnostic text was replaced by a retention
+rejection placeholder. Do not expose the rejected original text or change its
+failure outcome. Render/upload the retained output
 after failed producers too, with interruption limitations explicit.
+
+Rejected failure text additionally retains only closed Node failure codes/types
+and available owned-settlement mode/phase/rounded elapsed facts. Inspect at most
+three error/cause objects, retain at most one fact for each of the six declared
+modes, and exclude arbitrary messages, field values and oversized assertion
+arrays. The TOOL02 fixture attaches its observed mode/phase to the original
+error before rethrowing, including cleanup failures, without replacing that
+error. Retain the original message digest, rejection cause, incomplete evidence
+and Failed outcome. These facts diagnose an execution; they neither explain the
+historical Intel failure nor change process ownership, assertions or deadlines.
+
+TOOL02 records separate closed phases for cancellation return or watchdog,
+cleanup lifetime, retention/result checks, retained report/stdout and controller
+dispatch/stop. A phase timestamp describes entry into that assertion block, not
+the duration or cause of a termination failure. Preserve the six real scenarios,
+their assertions, controller ownership and original budgets.
+
+For the recurring Windows capture root, keep native observation test-only.
+Interpose `spawn` only in its isolated controller, invoke the original function
+unchanged, and observe only the exact SystemRoot `System32/taskkill.exe` child.
+Publish the actual PID and spawn-event UTC bound atomically to the prestarted
+observer's nonce request. Do not await it inside `executeValidationCommand` or
+alter the unchanged 1000ms stop deadline. Complete existing command/controller
+cleanup before awaiting native finalization; append compact validated facts to
+the same assertion error, preserving a concurrent cleanup failure separately.
+Retain the exact spawn request bound, target binding reason/capture timestamp,
+attempt count and late/truncated-sample flags before removing owned files.
+Absent facts remain unknown.
+
+The repository-local observer uses stock Windows PowerShell 5.1 `Add-Type`,
+with only its own TEMP/TMP and assembly output redirected into its new owned
+compiler directory. Compilation completes before readiness and command creation;
+compiler/policy failures remain unavailable without an alternate compiler or
+policy workaround. If a readiness polling wake crosses its deadline, inspect
+the marker once more without adding another wait or extending the deadline.
+Published readiness still requires the unchanged schema, pinned-owner and
+source-bound compiler-settlement proofs; absence or invalid proof fails closed.
+Best-effort nonce-owned startup markers retain only source-bound closed phases,
+bounded elapsed/UTC observations and enumerated failures. Capture the return
+from synchronous `Add-Type` separately from later receipt/ready publication.
+Readiness failures include a closed diagnostic snapshot in the failure message
+itself, so existing sanitized provider failure annotations expose it without
+requiring log or artifact payload access. On either optional or mandatory startup failure, append a
+separate closed post-finalization snapshot to that same error before requesting
+aggregate admission stop. If admission stop also fails, preserve the enriched
+original message and both original errors in the aggregate failure. These facts
+may establish later settlement but cannot change the earlier failed decision.
+The mandatory native-positive path settles before rethrowing and never falls
+back to passing execution; successful readiness leaves its original target
+creation, observations and cleanup unchanged. The existing one-slot modeled
+readiness control verifies this error boundary without a compiler or target.
+Affirmatively settled optional unavailability already permits the original
+functional capture assertions; this is not a fallback-policy correction or a
+waiver of the separate mandatory real native-observation control.
+These markers never establish readiness, compiler settlement, CPU/scheduling
+attribution or a correction of the unexplained hosted startup failure.
+Pin each supplied owner/target .NET `Process.Handle` once.
+Subsequent reads use that saved handle through `QueryFullProcessImageNameW`,
+`GetProcessTimes`, `WaitForSingleObject(handle, 0)` and `GetExitCodeProcess`.
+Do not refresh PID-backed .NET properties or enumerate threads. Retain only the
+closed image basename, exact decimal FILETIME/CPU ticks, bounded UTC/monotonic
+read intervals and native wait/exit facts, never paths, arguments or raw output.
+Require creation ticks strictly before the original UTC upper bound using
+integer arithmetic; same-ms ambiguity, reuse and inaccessible binding stay
+unverified. Read exit time/code only after a signaled original handle; code 259
+alone never establishes liveness.
+
+Limit attempts to 32, retained samples to first four/latest four and the closed
+record to 8192 bytes, with truncation/late drops explicit. Root-native observation
+and thread waits remain unavailable. This sampling window is spawn-bound and
+must not be interpreted as the backend's stop-entry clock or an atomic kernel
+snapshot. Zero CPU or absent capture cannot identify a loader/scheduling cause.
+Finalization is idempotent and signals only the original observer child on its
+own bounded cleanup timeout. A strict post-compilation marker bound to captured
+PowerShell/bridge source hashes, or proven failure before observer dispatch,
+establishes compiler settlement; PowerShell
+closure or a post-spawn error alone does not. Unknown observer or compiler
+lifetime prevents fixture removal. On readiness failure, await this settlement
+before creating any controller or command; otherwise rethrow the original
+startup failure without admitting additional processes. Injected startup/close
+regressions exercise these boundaries without a native compiler or target and
+restore their process-local spawn instrumentation. Wrong-source markers never
+establish settlement. A subsequent finalization can refine an unknown snapshot
+from late affirmative proof without repeating signals or mutating old results.
+For runtime-observer readiness, bound shell/module preparation separately from
+compilation and readiness. One source-verified compiling marker observed before
+the initial five-second deadline arms exactly one further five-second window.
+Missing, invalid, foreign-source or late markers cannot rearm it. This changes
+maximum startup polling from five to ten seconds; it does not change the
+one-second observation window, 1500ms capture wait or thirty-second native root
+timeout. A preparation marker is neither readiness nor compiler-settlement
+proof. Preserve the final delayed-wake inspection and all affirmative native
+proof, target-lifetime, fail-stop and unknown-cleanup requirements. Controlled
+clock regressions and a local native-positive result do not establish the
+cause or cure of the historical hosted startup failure.
+If cleanup or compiler settlement remains unknown, the original acquired worker
+requests persistent aggregate admission stop over its existing authenticated
+socket. Mark the broker stopped before acknowledgement and reject queued/new
+producer, registration and not-yet-started worker entries before released slots
+can admit another root. Worker closure never clears that flag; already-started
+peers, resumptions, inspection and cleanup may settle without cancellation or
+signals. Persist the original group failure before stopping the producer's ready
+pool, preserving a concurrent admission-stop error separately. No PID discovery,
+compiler/target signal or inferred compiler exit is introduced. The isolated
+four-slot PR-only broker regression models uncertain cleanup with owned stock
+Node roots; it checks queued/fresh rejection across failing-worker closure,
+original failure retention and independent peer completion. This fail-stop
+contains uncertainty but does not resolve it or fix native cancellation.
+Keep the original worker socket referenced while its admission-stop request
+awaits acknowledgement, restoring its idle unreferenced state after settlement.
+Otherwise the preload's `beforeExit` cleanup can close that same connection
+before the response arrives. A separate two-slot, process-isolated PR regression
+delays delivery of the real broker response and requires acknowledged stop on
+the original worker. This correction does not establish why a hosted native
+observer failed readiness or relax compiler-settlement requirements.
+Reserve five slots for the original root and three for the separate Windows
+native-fact regression, with compilation and target lifetime non-overlapping.
+The six-slot admission regression preserves independent peer reuse and refusal
+of multi-process overlap. No production termination correction, native failure
+cause, timing waiver, critical-profile growth or passing current CI is claimed.
+
+The native-toolchain CLI catches request/provisioning/cleanup errors after
+module loading, emits an escaped check annotation, then rethrows the same error.
+Bound sanitized diagnostic JSON to 8192 bytes and retain only an original-byte
+digest/length if that representation is unsafe or oversized. Include the closed
+bootstrap/cleanup stage and actual Node/platform/architecture so an early
+failure remains observable before toolchain evidence exists. Do not retain raw
+subprocess streams or claim that this boundary catches module-import errors.
+This changes diagnostics only, not prerequisite selection, prefix ownership,
+cleanup authority, execution outcome or the unproven cause of a hosted failure.
+
+Windows owned-process capture emits a closed startup marker before opening the
+native process identity. Its unchanged five-second first-record deadline retains
+only the observed marker phase, exit/code/allowlisted signal and capped stdout
+and stderr byte counts. Never include raw output, error-file contents or spawn
+arguments. An exit event records state but does not discard an identity still
+draining from stdout. These facts distinguish observations, not the unproven
+cause of an earlier hosted timeout.
+
+The Windows sibling-producer test captures and releases whichever exclusive
+holder becomes ready first, then starts the remaining contender's unchanged
+ten-second ready allowance. Do not spend that allowance while the previous
+holder is legitimately being captured and released. Nonexclusive ready capture
+remains concurrent; failed exclusive producers abort pending readiness.
+Keep native identity capture, stop budgets, resource bounds, exit proofs and
+overall watchdogs unchanged. This corrects controlled clock accounting, not
+the unproven cause of a historical hosted failure.
+
+The Windows command-settlement fixture must also finish preparation before
+starting its cancellation clock. Writer provenance alone does not establish
+that the initial running checkpoint is durable: the command awaits that write
+before its stop/close race. Await the actual first running `atomicWrite` under
+the remaining original five-second preparation allowance, racing early command
+settlement. A controlled clock advance models cold preparation without sleeps.
+Keep the original production stop deadline, physical 1500ms watchdog, all six
+settlement modes and real writer-drain/retention/controller cleanup proofs.
+No production termination behavior changes, and later persistence remains part
+of actual return latency; this fixture correction does not prove a hosted cure.
+
+The standalone simultaneous-activation fixture similarly separates cold staging
+from the contender's lock-wait allowance. Hold the first real promotion after
+staging, observe an actual competing `mkdir` returning `EEXIST`, then release and
+settle both activations. Preserve successful serialization, foreign-lock
+retention, busy refusal and tampered-version rejection. Restore filesystem
+observation only after both operations settle. A process-isolated PR regression
+exercises the actual fixture and activation source with controlled slow staging;
+it does not replace native distribution acceptance or alter production locking,
+timeouts, critical membership or whole-lane delivery limits.
+
+Native timing publication is diagnostic scheduling metadata, not another evidence
+ledger or an assertion-acceptance input. Keep the existing maximum of ten notices,
+strictly below 4096 total UTF-8 bytes, with the first notice below 1024 bytes and
+each later notice below 400. The production finalizer evolves those notices to
+version-one `numeric-rle-v1`; the low-level legacy formatter remains available
+unchanged. No placement, SDK, phase-authentication or typed admission protocol is
+relabelled.
+
+Derive ordered groups independently from the actual stage declarations.
+Verify the original command envelope, runtime, context, selected source and
+resources independently of command success, then bind report group order and
+clocks to its original ordered runner journal. This diagnostic path never admits
+evidence or releases a later phase. Retain coordinates on original failed
+producers without changing their failed decision or cleanup.
+Bound inputs to 2048 declared groups, 8192 executions, 32768 journal events,
+8 MiB of journal text and seven days for each original offset/root duration.
+Missing, rejected or unbound observations become unknown, never reconstructed.
+
+The closed JSON header contains `version`, `source`, `selection`, `policy`,
+`order`, `origin`, `producer`, `count`, `encoding`, `quantumMs`, `base`, `longest`
+and `terminal`. Bind `source` to the context source-map digest, `selection` to
+the public preimage below, `policy` to the scheduling-policy digest and `order`
+to the ordered group/root/source identities.
+Coordinates never supply their own identities. State 0 means unknown; 1 means
+explicitly unstarted; 2 means observed start without end; 3, 4 and 5 mean complete
+original process/root intervals with reported Passed, Failed and NotRun outcomes.
+These states describe original observations, not accepted evidence or cleanup
+proof. Producer partial/completed status remains separate.
+
+Independently reconstruct the normalized source map from public repository ID,
+the exact selected producer commit and its Git tree:
+`[{repositoryId: "repository-" + repository.id, revision, contentDigest: digest(treeSha)}]`.
+Use that map's digest as `source`. For PR merge validation, resolve the exact
+merge revision selected for the observed producer; do not blindly substitute
+`run.head_sha`, current branch HEAD or a later PR merge SHA.
+The diagnostic selection preimage is
+`{kind: "native-timing-selection-v1", source, runId: String(run.id), attempt: String(run.run_attempt), target, component, shard, jobRef: job.name, stages}`.
+Derive target/component/shard from the pinned source part matched to the actual
+attempt job; absent shard is null. Derive ordered `stages` from that same source
+as `[stage.name, stage.files, stage.name === "unit" ? [] : [stage.selectorName]]`.
+No execution payload, private bootstrap prefix, executable identity or
+frozen-artifact fact enters this diagnostic hash. The existing independent
+full-context/runtime/resource/evidence/SDK validation retains all those checks;
+a stable public diagnostic selection cannot make a mismatched original valid.
+
+Use origin `producer.startedAt`. For a known original offset, encode
+`tick = floor(offsetMs / quantumMs) + 1`; zero denotes an unavailable clock.
+Encode each row as `((startTick * base + endTick) * 6) + state`.
+Start at one-millisecond precision and double the quantum only until the entire
+vector fits the unchanged notice budget. A decoded nonnegative tick after
+subtracting one bounds the original offset in
+`[tick * quantumMs, (tick + 1) * quantumMs)`; it is not an exact timestamp.
+Duration bounds must account for both intervals, not treat tick subtraction as
+a measured duration.
+
+Later closed JSON notices carry `start` and `coordinates`. A nonnegative integer
+appends one code; a negative `-n` repeats the preceding code `n` additional times
+and cannot begin a chunk. Preserve whole runs within chunks. A consumer must
+validate consecutive expanded indices, exact count, bounded safe integers,
+valid states/ticks and independently matching header digests before using them.
+Keep up to ten longest observed group/root durations exactly in `longest`;
+publish an exact indexed terminal-group capsule only when all declared intervals
+are complete. Never silently truncate a vector. Formatting rejection first
+attempts the independently declared all-unknown vector, then emits no unsafe
+notice if that also exceeds bounds; retain a closed presentation diagnostic
+without changing readiness or the original failure.
+
+Public timing-preimage derivation is itself presentation work. Keep it inside
+the same exception boundary as coordinate formatting so a legacy partial-stage
+selection cannot replace its original nonpassing evaluation with a diagnostic
+exception. Only an independently valid binding permits the all-unknown
+coordinate fallback. Otherwise emit no notices and retain the closed
+presentation-unavailable diagnostic, original journal and evidence bundle.
+Do not manufacture stage defaults or relax full-context evidence admission.
+
+No names, paths, commands, error bodies or original report payloads are encoded.
+Coarse coordinates and synthetic formatting-capacity controls neither prove a
+native speedup nor replace original SDK/cleanup reconciliation or the unchanged
+whole-lane delivery limits. The earlier failed placement models remain
+insufficient; this publication correction supplies no timing acceptance.
+
+The entry consumer treats absent or non-array optional timing metadata as no
+notices, including legacy partial and blocked finalizer responses. Preserve the
+original evaluation, diagnostics and Markdown, and propagate actual finalizer
+errors unchanged; presentation cannot mask the primary result.
+
+The detached-writer boundary fixture publishes readiness only after its first
+real writes to both owned ambient and prefix streams succeed. Preserve its four
+original failure/cancellation scenarios and exact cleanup-decision identity
+challenge. A fifth controller-exit scenario holds periodic writing before the
+decision and after its acknowledgement until the parent observes both streams.
+This proves readiness without relying on child scheduling, an fsync finishing
+after acknowledgement visibility, or a grace period. Quarantine, original
+leases, exact writer liveness, release/drain and owned cleanup remain required;
+the fixture does not relax production cleanup decisions or deadlines.
 
 GitHub renders Markdown summaries, not arbitrary result JSON automatically.
 Reuse the runner records and generic report projection for this small adapter;

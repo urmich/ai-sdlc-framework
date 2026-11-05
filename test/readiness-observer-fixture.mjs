@@ -17,7 +17,17 @@ import { compileValidationSourceInventory, validationPlatforms, validationSource
 import { nativeSpecification, nativeConfigurationDigest, nativeArtifacts, nativeGoObservations,
   nativeWorkflowContract, nativeStageSelections, nativeProducerRole } from '../scripts/native-validation.mjs';
 import { nativeLegacyPrParts, nativeFrameworkShardPlan, nativeFrameworkShardProtocol,
-  nativeLegacyFrameworkShardProtocol, nativePartJobKey, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
+  nativeLegacyFrameworkShardProtocol, nativeSplitUnitFrameworkShardProtocol,
+  nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
+  nativePlacementCosts, nativePlacementAffinities, nativePlacementCostsV7,
+  nativeResourceAffinityFrameworkShardProtocol, nativePlacementCostsV8, nativePlacementIsolationV8,
+  nativeCatalogIsolationFrameworkShardProtocol, nativePlacementCostsV9, nativePlacementPhasesV9,
+  nativePhasedIsolationFrameworkShardProtocol, nativePlacementPhasesV10,
+  nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
+  nativeServiceBalanceFrameworkShardProtocol,
+  nativePlacementCostsV11, nativePlacementReadyPoolV11, nativePlacementTransfersV12, nativePlacementReservationV13,
+  verifyNativePhaseSettlement,
+  nativePartJobKey, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
 import { nativeResourceFacts, nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
 import { repositoryRoot, unitFiles } from '../scripts/test-runner.mjs';
 import { createReadinessGitHubClient } from '../scripts/github-readiness-host.mjs';
@@ -86,7 +96,7 @@ jobs:
 `;
 }
 
-function sourceTree(files) {
+export function sourceTree(files) {
   const blobs = new Map();
   const tree = [...files].sort(([left], [right]) => left.localeCompare(right, 'en'))
     .map(([file, contents]) => {
@@ -132,7 +142,8 @@ function fixturePlan(names, additionalTests = []) {
 
 function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = false, docsOnly = false,
   narrowedRequiredScope = false, additionalTests = [], producerChange, bootstrapProtocol = null,
-  admissionHelper = 'source', schedulingSource = currentSchedulingSource, priorityFixture = false } = {}) {
+  admissionHelper = 'source', schedulingSource = currentSchedulingSource, priorityFixture = false,
+  shardProtocol = nativeFrameworkShardProtocol } = {}) {
   const names = [
     ...unitFiles.map((file, index) => ({ file, stage: 'unit', id: `T-FIX-CANONICAL-${index + 1}`,
       name: `T-FIX-CANONICAL-${index + 1} controlled canonical assertion` })),
@@ -180,13 +191,60 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
   });
   const files = new Map(reporterPaths.map(file => [file,
     file.endsWith('.yml') ? ci : 'throw new Error("candidate reporter must never execute in the observer");\n']));
+  files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
+    `export const nativeFrameworkShardProtocol = '${shardProtocol}';\n`);
+  if ([nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
+    nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
+    nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
+    nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
+    files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
+      `export const nativePlacementCosts = Object.freeze(${JSON.stringify(nativePlacementCosts)});\n`);
+  }
+  if ([nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
+    nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
+    nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
+    files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
+      `export const nativePlacementAffinities = Object.freeze(${JSON.stringify(nativePlacementAffinities)});\n` +
+      `export const nativePlacementCostsV7 = Object.freeze(${JSON.stringify(nativePlacementCostsV7)});\n`);
+  }
+  if ([nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
+    nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
+    nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
+    files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
+      `export const nativePlacementCostsV8 = Object.freeze(${JSON.stringify(nativePlacementCostsV8)});\n` +
+      `export const nativePlacementIsolationV8 = Object.freeze(${JSON.stringify(nativePlacementIsolationV8)});\n`);
+  }
+  if ([nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
+    nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
+    files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
+      `export const nativePlacementCostsV9 = Object.freeze(${JSON.stringify(nativePlacementCostsV9)});\n` +
+      `export const nativePlacementPhasesV9 = Object.freeze(${JSON.stringify(nativePlacementPhasesV9)});\n`);
+  }
+  if ([nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
+    nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
+    files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
+      `export const nativePlacementPhasesV10 = Object.freeze(${JSON.stringify(nativePlacementPhasesV10)});\n`);
+  }
+  if ([nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
+    files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
+      `export const nativePlacementCostsV11 = Object.freeze(${JSON.stringify(nativePlacementCostsV11)});\n` +
+      `export const nativePlacementReadyPoolV11 = Object.freeze(${JSON.stringify(nativePlacementReadyPoolV11)});\n`);
+  }
+  if ([nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol))
+    files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
+      `export const nativePlacementTransfersV12 = Object.freeze(${JSON.stringify(nativePlacementTransfersV12)});\n`);
+  if (shardProtocol === nativeFrameworkShardProtocol)
+    files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
+      `export const nativePlacementReservationV13 = Object.freeze(${JSON.stringify(nativePlacementReservationV13)});\n`);
   files.set('scripts/test-scheduling.mjs', schedulingSource);
   const schedulingPolicy = sourceValidationSchedulingPolicy([{ file: 'scripts/test-scheduling.mjs', contents: schedulingSource }]);
   assert.ok(['source', 'missing', 'mutated'].includes(admissionHelper));
   const workflow = parseWorkflow({ file: nativeWorkflowContract.path, contents: ci });
   if (['arm-regression-allocation-v1', 'arm-regression-allocation-v2-priority-intel-bodies',
     'arm-regression-allocation-v3-intel-homebrew-first', 'arm-regression-allocation-v4-retained-first',
-    'arm-regression-allocation-v5-critical-body-first', 'arm-regression-allocation-v6-all-critical-bodies-first']
+    'arm-regression-allocation-v5-critical-body-first', 'arm-regression-allocation-v6-all-critical-bodies-first',
+    'arm-regression-allocation-v7-bounded-queue-wait', 'arm-regression-allocation-v8-own-platform-critical',
+    'arm-regression-allocation-v9-ready-critical-fairness', 'arm-regression-allocation-v10-intel-primary-first']
     .includes(workflow.env?.SDLC_MAC_ADMISSION_POLICY) && admissionHelper !== 'missing') {
     const macAdmissionHelper = readFileSync(
       new URL('../scripts/macos-runner-admission.mjs', import.meta.url), 'utf8');
@@ -376,10 +434,10 @@ function bundleFromOriginal(raw, specification, independentlyCapturedContext, as
   return createEvidenceBundle(evaluation);
 }
 
-function laneData(source, candidate, revisions, target, { prNumber = 1, executionId = runId,
+export function laneData(source, candidate, revisions, target, { prNumber = 1, executionId = runId,
   profile = 'pr', releaseIntentId = 'controlled-release-intent', startTime = epoch,
   previousMetadata = nativeReplayPreviousFixture(), component = 'full', shard = null, frameworkShards = false,
-  shardProtocol = nativeFrameworkShardProtocol, bootstrapProtocol = null } = {}) {
+  shardProtocol = nativeFrameworkShardProtocol, bootstrapProtocol = null, configuredWorkers = null } = {}) {
   const role = nativeProducerRole(target, component, shard);
   const assignment = shard === null ? null : nativeFrameworkShardPlan({
     inventory: source.inventory, plan: source.plan, target, protocol: shardProtocol, schedulingPolicy: source.schedulingPolicy,
@@ -398,7 +456,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
   const ImageVersion = `controlled-${target}-image-1`;
   const go = `go version go1.27.1 ${{ linux: 'linux', win32: 'windows', darwin: 'darwin' }[platforms[target]]}/${architecture === 'x64' ? 'amd64' : architecture}`;
   const resources = nativeResourceFacts({ availableParallelism: 4, totalMemoryBytes: 8 * 1024 ** 3,
-    configuredWorkers: null }, source.schedulingPolicy);
+    configuredWorkers }, source.schedulingPolicy);
   const bootstrap = { schemaVersion: 1, status: 'Passed', target,
     native: { platform: platforms[target], architecture, node: nativeToolchain.node, go,
       resources,
@@ -486,7 +544,7 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
     testSpecDigest: testSpecificationDigest(source.plan),
     configDigest: nativeConfigurationDigest({ inventory: source.inventory, plan: source.plan, assignment,
       profile, target, component, shard, shardProtocol, bootstrapProtocol,
-      shardPlanDigest: assignment?.digest ?? null, schedulingPolicy: source.schedulingPolicy }),
+      shardPlanDigest: assignment?.digest ?? null, schedulingPolicy: source.schedulingPolicy, configuredWorkers }),
     inventoryDigest: validationInventoryDigest(specification),
     sources: [{ repositoryId: `repository-${repositoryId}`, revision: revisions.merge,
       contentDigest: digest(source.sha) }],
@@ -516,18 +574,24 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
   const selectedStages = part?.stages ?? nativeStageSelections(source.inventory, source.plan, source.schedulingPolicy);
   for (const selectedStage of selectedStages) {
     const stage = selectedStage.name;
-    const index = nativeWorkflowContract.stages.indexOf(stage);
-    const selected = source.names.filter(test => selectedStage.cases.some(assertion =>
-      assertion.file === test.file && assertion.name === test.name));
+    const index = nativeWorkflowContract.stages.indexOf(selectedStage.kind ?? stage);
+    const selected = selectedStage.phase ? selectedStage.cases :
+      source.names.filter(test => selectedStage.cases.some(assertion =>
+        assertion.file === test.file && assertion.name === test.name));
     const { files, args, selectorName } = selectedStage;
     const pattern = stage === 'unit' ? undefined : selectorName;
-    const [start, finish] = [[7, 10], [11, 14], [15, 50]][index];
+    const [start, finish] = selectedStage.phase ?
+      selectedStage.phase.protocol === nativePlacementPhasesV10.protocol ?
+        [[15, 26], [27, 38], [39, 50]][selectedStage.phase.index] :
+        selectedStage.phase.index === 0 ? [15, 30] : [31, 50] :
+      [[7, 10], [11, 14], [15, 50]][index];
     const expectedGroups = validationExecutionGroups(source.inventory, { files, pattern, preserveOrder: true });
     const concurrency = Math.min(resources.workerCapacity, expectedGroups.length);
     const executions = selected.map(({ file, name }, offset) => {
       const definition = source.inventory.cases.find(test => test.file === file && test.name === name);
-      const row = { file, name, parents: [], nameDigest: digest(name), parentDigests: [],
-        nesting: 0, line: definition.line, column: definition.column, type: 'test',
+      const parents = selectedStage.phase ? definition.parents : [];
+      const row = { file, name, parents, nameDigest: digest(name), parentDigests: parents.map(digest),
+        nesting: parents.length, line: definition.line, column: definition.column, type: 'test',
         groupId: expectedGroups.find(group => group.assertionIds.includes(definition.id)).id,
         sequence: expectedGroups.length + 4 + offset * 3, status: 'Passed', observedAt: at(finish),
         skipReason: null, todoReason: null, durationMs: 1 };
@@ -544,7 +608,8 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
       files, node: `v${nativeToolchain.node}`, executable: '/controlled-fixture/node',
       command: ['/controlled-fixture/node', '/controlled-fixture/source/scripts/test-runner.mjs', ...args],
       workerCommand: ['/controlled-fixture/node', '/controlled-fixture/source/scripts/test-worker.mjs'],
-      platform: platforms[target], architecture, context: stage === 'regression' ? context : smallContext,
+      platform: platforms[target], architecture,
+      context: stage === 'regression' || selectedStage.kind === 'regression' ? context : smallContext,
       selection: { namePatterns: pattern === undefined ? [] : [pattern], concurrency, coverage: false },
       resources: { availableParallelism: resources.availableParallelism, totalMemoryBytes: resources.totalMemoryBytes,
         fileConcurrency: concurrency, budget: {
@@ -555,6 +620,8 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
           residentLimit: resources.workerCapacity * 3, peakActiveWorkers: concurrency,
           peakResidentWorkers: concurrency, peakPotentialResidentWorkers: concurrency,
           peakProducers: 1, peakControls: 1,
+          ...(selectedStage.phase ? { admissionStopped: false, activeWorkers: 0, residentWorkers: 0,
+            potentialResidentWorkers: 1, pendingParentRestorations: 0, controls: 0, producers: 1 } : {}),
         } },
       startedAt: at(start), finishedAt: at(finish), complete: true, exitCode: 0, executions,
       groupExecution: { schemaVersion: 1, protocol: validationGroupProtocol,
@@ -562,11 +629,12 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
       diagnostics: [], summary: { success: true, counts: {
         tests: executions.length, cancelled: 0, failed: 0, passed: executions.length,
         suites: 0, skipped: 0, todo: 0 }, durationMs: (finish - start) * 1000 } });
-    data.set(`${stage}-command.json`, commandReport(stage, target, stage === 'regression' ? context : smallContext,
+    data.set(`${stage}-command.json`, commandReport(stage, target,
+      stage === 'regression' || selectedStage.kind === 'regression' ? context : smallContext,
       ['scripts/test-runner.mjs', ...args], start, finish));
     data.set(`${stage}.json.journal.ndjson`, [
       { sequence: 1, kind: 'execution-start', observedAt: at(start), profile: stage === 'unit' ? 'unit' : 'targeted',
-        files, context: stage === 'regression' ? context : smallContext },
+        files, context: stage === 'regression' || selectedStage.kind === 'regression' ? context : smallContext },
       ...groups.map(group => ({ kind: 'group-start', observedAt: group.startedAt, groupId: group.id,
         rootId: group.rootId, startedAt: group.startedAt, processIds: group.processIds,
         minimumSlots: group.minimumSlots, exclusiveResources: group.exclusiveResources })),
@@ -579,7 +647,22 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
         rootId: group.rootId, finishedAt: group.finishedAt, processIds: group.processIds,
         status: group.status, summary: group.summary })),
     ].map((event, index) => JSON.stringify({ ...event, sequence: index + 1 })).join('\n') + '\n');
-    data.set(`${stage}-command.journal.ndjson`, `${JSON.stringify({ sequence: 1, kind: 'command-end', complete: true })}\n`);
+    if (selectedStage.phase) {
+      const command = data.get(`${stage}-command.json`);
+      command.pid = 4000 + selectedStage.phase.index;
+      const journal = [
+        { sequence: 1, kind: 'command-dispatched', observedAt: at(start), pid: command.pid },
+        { sequence: 2, kind: 'command-end', observedAt: at(finish), complete: true, exitCode: 0,
+          cleanup: { requested: false, survivorsVerified: false, rootExitObserved: true } },
+      ].map(event => JSON.stringify(event)).join('\n') + '\n';
+      command.checkpoint = { journalDurable: true,
+        originalJournalPrefix: { sha256: digest(Buffer.from(journal)), bytes: Buffer.byteLength(journal) } };
+      data.set(`${stage}-command.journal.ndjson`, journal);
+      data.set(`${stage}-settlement.json`, { ...verifyNativePhaseSettlement({
+        stage: selectedStage, report: data.get(`${stage}.json`), command, journal, capacity: resources.workerCapacity,
+      }), observedAt: at(finish) });
+    } else data.set(`${stage}-command.journal.ndjson`,
+      `${JSON.stringify({ sequence: 1, kind: 'command-end', complete: true })}\n`);
   }
   const goNames = ['TestContract', 'TestContract/minimum', 'TestIntegrity'];
   const stdout = [{ Time: at(31), Action: 'start', Package: 'controlled/launcher' }, ...goNames.flatMap(Test => [
@@ -689,7 +772,8 @@ function laneData(source, candidate, revisions, target, { prNumber = 1, executio
   data.set('producer.json', { status: 'Passed', complete: true, diagnostics: [] });
   data.set('readiness.md', '# Controlled provider fixture\nNot actual native acceptance.\n');
   for (const [file, report] of [...data]) {
-    if (file.endsWith('.json') && report.kind === 'validation-command') {
+    if (file.endsWith('.json') && report.kind === 'validation-command' &&
+      !selectedStages.some(stage => stage.phase && file === `${stage.name}-command.json`)) {
       data.set(`${file.slice(0, -5)}.journal.ndjson`, [
         { sequence: 1, observedAt: report.startedAt, kind: 'command-start',
           command: report.command, cwd: report.cwd, context: report.context },
@@ -824,7 +908,52 @@ export async function observerApiFixture(t, options = {}) {
     }).join('') + (shardProtocol === nativeLegacyFrameworkShardProtocol ? '' :
       `  producer-summary:\n    permissions: {}\n    needs: ${JSON.stringify(['intent', 'minimum-node', 'source', ...protocolKeys])}\n` +
       '    steps:\n      - run: echo "Controlled historical summary; never execute"\n');
-  const ci = options.frameworkShards ? shardProtocol === nativeFrameworkShardProtocol ? currentCi : historicalCi : `name: CI
+  let splitHistoricalCi;
+  const splitHistoricalProtocols = [nativeSplitUnitFrameworkShardProtocol, nativeRootComponentFrameworkShardProtocol,
+    nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol];
+  if (options.frameworkShards &&
+    splitHistoricalProtocols.includes(shardProtocol)) {
+    const historical = parseWorkflow({ file: nativeWorkflowContract.path, contents: currentCi });
+    if (shardProtocol !== nativeResourceAffinityFrameworkShardProtocol)
+      historical.jobs['native-mi'].needs = ['intent', 'source', 'native-units-mi'];
+    if (shardProtocol === nativeResourceAffinityFrameworkShardProtocol) {
+      historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = shardProtocol;
+    } else if (shardProtocol === nativeStableCostFrameworkShardProtocol) {
+      historical.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v9-ready-critical-fairness';
+      historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = shardProtocol;
+    } else {
+      historical.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v8-own-platform-critical';
+      for (const key of ['native-ma-refresh', 'arm-refresh-admission']) {
+        historical.jobs[key].needs = ['intent', 'source', 'native-units-ma', 'intel-retained-admission', 'mac-admission'];
+      }
+      historical.jobs['mac-admission'].steps[4].name = 'Wait for actual ARM body worker allocation';
+      historical.jobs['mac-admission'].steps[4].run =
+        historical.jobs['mac-admission'].steps[4].run.replace('--group arm-refresh-ready', '--group arm-bodies');
+      for (const key of ['intel-admission', 'intel-homebrew-admission']) {
+        const step = historical.jobs[key].steps[4];
+        step.name = `Wait for actual Intel ${key === 'intel-admission' ? '' : 'critical '}body worker allocation`;
+        step.run = step.run.replace('--group intel-auxiliaries-ready', '--group intel-bodies');
+      }
+      if (shardProtocol === nativeRootComponentFrameworkShardProtocol) {
+        historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL = nativeRootComponentFrameworkShardProtocol;
+      } else delete historical.env.SDLC_NATIVE_FRAMEWORK_SHARD_PROTOCOL;
+    }
+    splitHistoricalCi = Object.entries(historical)
+      .map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n';
+  }
+  const ci = options.frameworkShards ? shardProtocol === nativeFrameworkShardProtocol ? currentCi :
+    shardProtocol === nativeServiceBalanceFrameworkShardProtocol ? currentCi.replaceAll(
+      nativeFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol) :
+    shardProtocol === nativeParallelReadyPoolFrameworkShardProtocol ? currentCi.replaceAll(
+      nativeFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol) :
+    shardProtocol === nativeComponentRebalanceFrameworkShardProtocol ? currentCi.replaceAll(
+      nativeFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol) :
+    shardProtocol === nativePhasedIsolationFrameworkShardProtocol ? currentCi.replaceAll(
+      nativeFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol) :
+    shardProtocol === nativeCatalogIsolationFrameworkShardProtocol ? currentCi.replace(
+      nativeFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol) :
+    splitHistoricalProtocols.includes(shardProtocol) ?
+      splitHistoricalCi : historicalCi : `name: CI
 on: pull_request
 permissions:
   contents: read
@@ -842,7 +971,7 @@ jobs:
           persist-credentials: false
 `;
   const revisions = { head: 'a'.repeat(40), base: 'b'.repeat(40), merge: 'c'.repeat(40), trusted: 'd'.repeat(40) };
-  const adopted = fixtureSources(ci, { bootstrapProtocol: options.bootstrapProtocol,
+  const adopted = fixtureSources(ci, { bootstrapProtocol: options.bootstrapProtocol, shardProtocol,
     admissionHelper: options.adoptedAdmissionHelper });
   const source = fixtureSources(ci, options);
   const { candidate, entries } = candidateData(revisions.merge);

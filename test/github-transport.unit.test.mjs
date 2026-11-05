@@ -1,6 +1,13 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [{"coverage": "direct", "paths": ["src/github/transport.mjs", "src/github/connection.mjs"]}],
+  "applicability": [{
+    "names": ["T-PRD037 GitHub transport redacts every token family in captured headers and injected errors"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "github-transport",
+    "reason": "PR-only F01 compatibility regression for AC-207.5: existing transport redaction agrees with runtime/evidence token families while preserving benign selected headers. Pure injected fetch responses, process isolation, no network or credentials, no shared resources or critical promotion.",
+    "prerequisites": ["Node"]
+  }],
   "variants": [
     {"expression": "`write preflight binds the actual resolved authorization before HTTP: ${Object.keys(changed)[0]}`", "domains": {"Object.keys(changed)[0]": ["generation", "actorVisibility", "permissions"]}},
     {"expression": "`current ${state} entitlement cannot reuse an available preflight to dispatch`", "domains": {"state": ["unknown", "unavailable", "omitted"]}},
@@ -845,6 +852,31 @@ test('injected errors and allowed response headers are sanitized without raw low
   assert.equal(capture.headers.link, '[redacted]');
   assert.equal(JSON.stringify(capture).includes(token), false);
   assert.equal(JSON.stringify(capture).includes('private-value'), false);
+});
+
+test('T-PRD037 GitHub transport redacts every token family in captured headers and injected errors', async () => {
+  for (const prefix of ['ghp_', 'ghs_', 'gho_', 'ghu_', 'ghr_', 'github_pat_']) {
+    const synthetic = prefix + 'A'.repeat(36);
+    const transport = createGitHubTransport({ connection: connection(),
+      fetch: async () => response({}, 200, {
+        'x-github-request-id': `request failed using ${synthetic}`,
+        link: `<https://example.invalid/runs?trace=${synthetic}>; rel="next"`,
+        'x-ratelimit-remaining': '42',
+      }) });
+    const capture = await transport.execute(rest(transport, { tokenClasses: ['anonymous'] }));
+    assert.equal(capture.headers['x-github-request-id'], '[redacted]', prefix);
+    assert.equal(capture.headers.link, '[redacted]', prefix);
+    assert.equal(capture.headers['x-ratelimit-remaining'], '42');
+    assert.equal(JSON.stringify(capture).includes(synthetic), false, prefix);
+    const failed = createGitHubTransport({ connection: connection(), fetch: async () => {
+      throw new Error(`Provider failed using ${synthetic}`);
+    } });
+    await assert.rejects(failed.execute(rest(failed, { tokenClasses: ['anonymous'] })), error => {
+      assert.equal(error.code, 'TRANSPORT');
+      assert.equal(`${error.message}${JSON.stringify(error)}`.includes(synthetic), false, prefix);
+      return true;
+    });
+  }
 });
 
 test('response and request byte bounds enforce the exact boundary, not merely a large fixture', async () => {

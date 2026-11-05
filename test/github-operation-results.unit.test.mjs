@@ -117,12 +117,21 @@ export const validationDeclarations = {
         ]
       }
     }
+  ],
+  "groups": [
+    {
+      "root": "GH37 artifact proof fits bounded records beneath a long owned checkout path",
+      "dependsOn": [],
+      "minimumSlots": 1,
+      "exclusiveResources": []
+    }
   ]
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import path from 'node:path';
-import { digest } from '../src/core.mjs';
+import { LIMITS, byteSize, digest } from '../src/core.mjs';
 import { createGitHubStoreBridge } from '../src/github/store-bridge.mjs';
 import { bridgeFixture, durableBytes } from './fixtures/github-store-bridge.mjs';
 
@@ -155,6 +164,41 @@ const deniedRequests = {
   policy: ['POST', '/graphql'],
   notification: ['POST', '/issues/1/comments', { body: 'fixture publication' }],
 };
+
+test('GH37 artifact proof fits bounded records beneath a long owned checkout path', async t => {
+  const previous = process.cwd();
+  const parent = path.resolve('.test-data');
+  await fs.mkdir(parent, { recursive: true });
+  const owned = await fs.mkdtemp(path.join(parent, 'p'.repeat(Math.max(1, 84 - parent.length - 7))));
+  try {
+    process.chdir(owned);
+    await t.test('complete terminal proof survives the longer native checkout binding', async child => {
+      const f = await bridgeFixture(child);
+      const build = await f.prepare('execution');
+      const producer = await f.record(build, await f.result(build), { reconcile: true });
+      await f.selectArtifact(producer);
+      const prepared = await f.prepare('artifact');
+      const acquisition = await f.result(prepared);
+      const pending = f.pendingResult(acquisition);
+      await f.record(prepared, pending, { status: f.verified(pending).observation.status });
+      const operation = await f.record(prepared, acquisition, { reconcile: true });
+      assert.equal(operation.status, 'succeeded');
+      assert.equal(operation.resultGap, undefined);
+      assert.match(operation.action.configDigest, /^[a-f0-9]{64}$/u);
+      assert.equal(operation.resultProof.dispatchId, prepared.claim.operation.id);
+      assert.equal(operation.resultProof.intendedOutcomeDigest, prepared.claim.operation.intendedOutcome.digest);
+      assert.equal(operation.resultProof.resultDigest, digest(f.verified(acquisition).observation));
+      assert.ok(byteSize(operation) <= LIMITS.record);
+      const retained = (await f.store.records(f.workItemId)).find(value => value.id === operation.id);
+      assert.deepEqual(retained.resultProof, operation.resultProof);
+    });
+  } finally {
+    process.chdir(previous);
+    assert.equal(path.dirname(owned), parent);
+    await fs.rm(owned, { recursive: true });
+    await assert.rejects(fs.stat(owned), { code: 'ENOENT' });
+  }
+});
 
 test('GH-37 exact mandatory family quartets and non-success outcomes', async t => {
   const f = await bridgeFixture(t);
@@ -260,6 +304,7 @@ test('GH-37 exact mandatory family quartets and non-success outcomes', async t =
     await t.test(`T-GH-37-${family}-P`, async () => {
       const operation = await f.record(prepared, acquisition, { reconcile: true });
       assert.equal(operation.status, 'succeeded');
+      assert.equal(operation.resultGap, undefined);
       assert.equal(operation.resultProof.providerResultId, f.verified(acquisition).observation.providerResultId);
       assert.equal(operation.resultProof.resultDigest, digest(f.verified(acquisition).observation));
       assert.equal(operation.resultProof.dispatchId, prepared.claim.operation.id);

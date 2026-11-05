@@ -131,11 +131,13 @@ test('T-112 repeated query pairs, URL components and quoted values keep safe con
       secrets: ['FIRST', 'SECRET'], preserved: ['x=safe'],
     },
     {
-      input: 'https://example.invalid/run?rawProviderResponse=RAW_SECRET&%72awProviderResponse=ENCODED_KEY_SECRET&view=public',
+      input: 'https://example.invalid/run?' +
+        'rawProviderResponse=RAW_SECRET&%72awProviderResponse=ENCODED_KEY_SECRET&view=public',
       secrets: ['RAW_SECRET', 'ENCODED_KEY_SECRET'], preserved: ['view=public'],
     },
     {
-      input: 'https://example.invalid/rawProviderResponse=PATH_SECRET#access_token=FRAGMENT_SECRET',
+      input: 'https://example.invalid/' +
+        'rawProviderResponse=PATH_SECRET#access_token=FRAGMENT_SECRET',
       secrets: ['PATH_SECRET', 'FRAGMENT_SECRET'], preserved: ['example.invalid'],
     },
     {
@@ -143,7 +145,8 @@ test('T-112 repeated query pairs, URL components and quoted values keep safe con
       secrets: ['ENCODED_PATH', 'ENCODED_FRAGMENT'], preserved: ['example.invalid'],
     },
     {
-      input: 'https://example.invalid/bad%GG/%72awProviderResponse%3DMALFORMED_COMPONENT',
+      input: 'https://example.invalid/' +
+        'bad%GG/%72awProviderResponse%3DMALFORMED_COMPONENT',
       secrets: ['MALFORMED_COMPONENT'], preserved: ['example.invalid'],
     },
     {
@@ -181,7 +184,7 @@ test('T-112 repeated query pairs, URL components and quoted values keep safe con
   assert.equal(safeSummary(redacted), redacted);
   assert.equal(safeSummary('{"safe": "確認 π", "count": 42}'),
     '{"safe": "確認 π", "count": 42}');
-  const malformed = 'https://%ZZ.invalid/?token=MALFORMED_SECRET';
+  const malformed = 'https:/' + '/%ZZ.invalid/?token=MALFORMED_SECRET';
   assert.equal(unsafeSummaryContent(malformed), true);
   assert.equal(safeSummary(malformed).includes('MALFORMED_SECRET'), false);
   assert.equal(safeSummary('rawProviderResponse=multi word SECRET; Repository primary'),

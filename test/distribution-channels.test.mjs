@@ -848,14 +848,49 @@ test('T-51 activation failures preserve prior current and release locks with bou
   });
 
 test('T-51 simultaneous installs serialize; a busy channel times out without deleting its lock',
-  { skip: !hostTarget || process.platform === 'win32' && !windowsLauncher }, async () => {
+  { skip: !hostTarget || process.platform === 'win32' && !windowsLauncher }, async t => {
     const f = await fixture();
-    const [first, second] = await Promise.all([
-      activateChannel({ sourceRoot: f.source, channelRoot: f.channelRoot }),
-      activateChannel({ sourceRoot: f.source, channelRoot: f.channelRoot }),
-    ]);
-    assert.equal(first.launcher, second.launcher);
     const lock = path.join(f.channelRoot, '.channel-lock');
+    const staged = Promise.withResolvers();
+    const contending = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const mkdir = fs.mkdir;
+    const observed = t.mock.method(fs.default, 'mkdir', async (...args) => {
+      try { return await mkdir(...args); }
+      catch (error) {
+        if (args[0] === lock && error.code === 'EEXIST') contending.resolve();
+        throw error;
+      }
+    });
+    syncBuiltinESMExports();
+    let firstAttempt;
+    let secondAttempt;
+    let first;
+    let second;
+    try {
+      firstAttempt = activateChannel({ sourceRoot: f.source, channelRoot: f.channelRoot,
+        beforeStep: async step => {
+          if (step === 'promote-current') {
+            staged.resolve();
+            await release.promise;
+          }
+        } });
+      await Promise.race([staged.promise, firstAttempt.then(() => {
+        assert.fail('The first activation must retain its lock at the promotion barrier');
+      })]);
+      secondAttempt = activateChannel({ sourceRoot: f.source, channelRoot: f.channelRoot });
+      await Promise.race([contending.promise, secondAttempt.then(() => {
+        assert.fail('The contender must observe the still-held channel lock');
+      })]);
+      release.resolve();
+      [first, second] = await Promise.all([firstAttempt, secondAttempt]);
+      assert.equal(first.launcher, second.launcher);
+    } finally {
+      release.resolve();
+      await Promise.allSettled([firstAttempt, secondAttempt].filter(Boolean));
+      observed.mock.restore();
+      syncBuiltinESMExports();
+    }
     await fs.mkdir(lock);
     await fs.writeFile(path.join(lock, 'retain'), 'not ours');
     await assert.rejects(activateChannel({ sourceRoot: f.source, channelRoot: f.channelRoot, lockTimeoutMs: 20 }), /timeout/u);

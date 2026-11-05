@@ -33,18 +33,14 @@ export function stageValidationObject(context, value) {
   context.validationObjects.set(ref.sha256, Buffer.from(canonical(value)));
   return ref;
 }
-export async function readValidationObject(store, workItemId, ref, context) {
-  validateObjectReference(ref);
-  const cached = context?.validationReadObjects?.get(ref.sha256);
-  if (cached) {
-    requireThat(cached.bytes === ref.bytes, 'DIGEST', 'Reference length differs from checked object bytes');
-    return structuredClone(cached.value);
-  }
+async function readUncachedValidationObject(store, workItemId, ref, context) {
   const file = validationObjectPath(store, workItemId, ref);
-  requireThat(sameNativePath(await canonicalPath(file), file), 'PATH',
-    'Validation storage cannot traverse links');
-  const bytes = context?.validationObjects?.get(ref.sha256) ??
-    await readBytes(file, LIMITS.artifact);
+  const staged = context?.validationObjects?.get(ref.sha256);
+  if (staged !== undefined && staged !== null) {
+    requireThat(sameNativePath(await canonicalPath(file), file), 'PATH',
+      'Validation storage cannot traverse links');
+  }
+  const bytes = staged ?? await readBytes(file, LIMITS.artifact);
   requireThat(bytes.length === ref.bytes && digest(bytes) === ref.sha256,
     'DIGEST', 'Immutable validation object bytes differ from their reference');
   let contents;
@@ -54,11 +50,79 @@ export async function readValidationObject(store, workItemId, ref, context) {
   requireThat(value.workItemId === workItemId, 'BINDING',
     'Immutable validation object belongs to another work item');
   validateSafeObject(value);
+  return { value, bytes: bytes.length };
+}
+function publishValidationObject(context, ref, checked) {
   if (context) {
     context.validationReadObjects ??= new Map();
-    context.validationReadObjects.set(ref.sha256, { bytes: bytes.length, value: structuredClone(value) });
+    context.validationReadObjects.set(ref.sha256,
+      { bytes: checked.bytes, value: structuredClone(checked.value) });
   }
-  return value;
+  return checked.value;
+}
+export async function readValidationObject(store, workItemId, ref, context) {
+  validateObjectReference(ref);
+  const cached = context?.validationReadObjects?.get(ref.sha256);
+  if (cached) {
+    requireThat(cached.bytes === ref.bytes, 'DIGEST', 'Reference length differs from checked object bytes');
+    return structuredClone(cached.value);
+  }
+  const checked = await readUncachedValidationObject(store, workItemId, ref, context);
+  return publishValidationObject(context, ref, checked);
+}
+export async function prepareValidationObjectRead(store, workItemId, ref, context) {
+  requireThat(context && typeof context === 'object', 'RECOVERY',
+    'Prepared validation reads require their owning invocation context');
+  let boundRef;
+  let result;
+  try {
+    validateObjectReference(ref);
+    boundRef = { sha256: ref.sha256, bytes: ref.bytes };
+    const staged = context.validationObjects?.get(boundRef.sha256);
+    if (context.validationReadObjects?.get(boundRef.sha256) ||
+        staged !== undefined && staged !== null) result = { status: 'deferred' };
+    else result = { status: 'fulfilled',
+      value: await readUncachedValidationObject(store, workItemId, boundRef) };
+  } catch (reason) { result = { status: 'rejected', reason }; }
+  let consumed = false;
+  const consume = async (selectedRef, selectedContext) => {
+    requireThat(!consumed, 'RECOVERY', 'Prepared validation reads can only be consumed once');
+    consumed = true;
+    try {
+      requireThat(selectedContext === context, 'BINDING',
+        'Prepared validation read belongs to another invocation context');
+      validateObjectReference(selectedRef);
+      requireThat(boundRef && selectedRef.sha256 === boundRef.sha256 &&
+        selectedRef.bytes === boundRef.bytes, 'BINDING',
+      'Prepared validation read belongs to another immutable reference');
+      const staged = context.validationObjects?.get(selectedRef.sha256);
+      // Earlier ordered replay remains authoritative, even over a failed preparation.
+      if (context.validationReadObjects?.get(selectedRef.sha256) ||
+          staged !== undefined && staged !== null || result.status === 'deferred') {
+        return readValidationObject(store, workItemId, selectedRef, context);
+      }
+      if (result.status === 'rejected') throw result.reason;
+      return publishValidationObject(context, selectedRef, result.value);
+    } finally { result = undefined; }
+  };
+  Object.defineProperty(consume, 'projectAssertionPage', { value: selectedContext => {
+    requireThat(!consumed, 'RECOVERY', 'Consumed validation reads cannot project dependencies');
+    requireThat(selectedContext === context, 'BINDING',
+      'Prepared validation read belongs to another invocation context');
+    if (result.status !== 'fulfilled') return;
+    const projection = { bytes: result.value.bytes };
+    const payload = result.value.value;
+    const admission = payload.content;
+    if (payload.kind !== 'execution-payload' || admission?.kind !== 'normalized-case-admission' ||
+        !Array.isArray(admission.assertionPageRefs) || !admission.assertionPageRefs.length) return projection;
+    try {
+      validateObjectReference(admission.importRef);
+      validateObjectReference(admission.assertionPageRefs[0]);
+    } catch { return projection; }
+    return { ...projection, importRef: { ...admission.importRef },
+      ref: { ...admission.assertionPageRefs[0] } };
+  } });
+  return consume;
 }
 function validateSafeObject(value) {
   if (value.kind === 'execution-payload') {
@@ -67,15 +131,26 @@ function validateSafeObject(value) {
   } else safeRecord(value, LIMITS.artifact);
 }
 export async function flushValidationObjects(store, workItemId, context) {
-  for (const [sha256, bytes] of context.validationObjects) {
-    const ref = { sha256, bytes: bytes.length };
-    const file = validationObjectPath(store, workItemId, ref);
-    if (await exists(file)) await readValidationObject(store, workItemId, ref);
-    else {
-      await atomicWrite(file, bytes);
-      await readValidationObject(store, workItemId, ref);
+  const entries = context.validationObjects.entries();
+  while (true) {
+    const batch = [];
+    for (let index = 0; index < 4; index++) {
+      const entry = entries.next();
+      if (entry.done) break;
+      batch.push(entry.value);
     }
-    await store.fault('validation:object');
+    if (!batch.length) return;
+    // Independent immutable objects drain before ordered faults or a transaction commit.
+    const results = await Promise.allSettled(batch.map(async ([sha256, bytes]) => {
+      const ref = { sha256, bytes: bytes.length };
+      const file = validationObjectPath(store, workItemId, ref);
+      if (!await exists(file)) await atomicWrite(file, bytes);
+      await readValidationObject(store, workItemId, ref);
+    }));
+    for (const result of results) {
+      if (result.status === 'rejected') throw result.reason;
+      await store.fault('validation:object');
+    }
   }
 }
 export function validateTestDefinitions(tests, { inline = false, requireUnitFirst = true } = {}) {

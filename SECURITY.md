@@ -3,7 +3,8 @@
 ## Scope and supported versions
 
 [urmich](https://github.com/urmich) maintains this personal third-party MIT project on a
-best-effort basis. Current published version: **0.4.0**. The project does not
+best-effort basis. Release candidate: **0.5.0**, not yet published; current npm
+`latest`: **0.4.0**. The project does not
 promise LTS, support for every older release, a response SLA, corporate approval,
 first-party status, CFS exemption or guaranteed availability.
 Node >=22 is external to the shipped dependency-free JavaScript runtime.

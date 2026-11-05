@@ -1,11 +1,21 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
-  "assertionNamespace": "test/github-operation-results.unit.test.mjs"
+  "assertionNamespace": "test/github-operation-results.unit.test.mjs",
+  "applicability": [
+    {
+      "names": ["bridge atomic dispatch regressions"],
+      "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+      "owner": "maintainer",
+      "reason": "PR-only atomic dispatch and evidence regression; an isolated local-test Store cannot invalidate the independently executed fixture prerequisite for hosted acknowledgement. Sequential owned fixtures require no live home or provider.",
+      "prerequisites": ["Node >=22 and Git"]
+    }
+  ]
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
+import { currentCycle, stagePassed } from '../src/authority.mjs';
 import { candidateStamp } from '../src/validation.mjs';
 import { orient } from './helpers.mjs';
 import { bridgeFixture, durableBytes } from './fixtures/github-store-bridge.mjs';
@@ -54,7 +64,8 @@ test('bridge atomic dispatch regressions', async t => {
     assert.equal(result.intendedOutcome, undefined);
     assert.equal(result.resultProof, undefined);
   });
-  await t.test('local selected test remains local without a hosted identity or deployment', async () => {
+  await t.test('local selected test remains local without a hosted identity or deployment', async localTest => {
+    const f = await bridgeFixture(localTest);
     const preparation = await f.bridge.legacyOperations.prepare({
       workItemId: f.workItemId, sessionId: f.sessionId, operationId: 'local-selected-test',
       action: { class: 'test', repositoryId: 'primary', environment: 'local', target: 'local',
@@ -76,6 +87,8 @@ test('bridge atomic dispatch regressions', async t => {
     assert.equal(result.resultProof, undefined);
     assert.equal(result.action.deploymentId, undefined);
     assert.equal(f.calls.length, calls);
+    const state = await f.store.load(f.workItemId);
+    assert.equal(stagePassed(currentCycle(state.records, state.checkpoint), state.records, 'local', f.clock), false);
   });
   await t.test('T-GHC08-G empty acknowledgement cannot invent a causal hosted execution or redispatch', async () => {
     const prepared = await f.prepare('execution', '-empty-acknowledgement');

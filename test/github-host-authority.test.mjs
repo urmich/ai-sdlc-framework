@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { createGitHubHost, createGitHubStore } from 'ai-sdlc-framework/github';
 import { bridgeFixture, durableBytes, families } from './fixtures/github-store-bridge.mjs';
 import { digest } from '../src/core.mjs';
-import { recordTest } from '../src/validation.mjs';
+import { recordFixtureTest as recordTest } from './helpers.mjs';
 import { claimOperationDispatch } from '../src/operations.mjs';
 
 function trustedVerifiers(f) {

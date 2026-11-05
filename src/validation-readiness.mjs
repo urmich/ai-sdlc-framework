@@ -669,6 +669,27 @@ export function readinessCaseProof(evaluation, testId) {
     contextMatches(report.context, execution.context, state.context.policy))
     .map(report => ({ report, state: normalizedReport(report) }));
   const snapshot = currentSnapshot(candidates, state.context).current?.report ?? null;
+  return caseProof(state, definition, result, execution, snapshot);
+}
+export function readinessCaseProofs(evaluation) {
+  const state = requireReadinessEvaluation(evaluation);
+  // The evaluation and its producer reports are frozen. Check each whole report
+  // once within this synchronous batch, not again for every case it contains.
+  const checked = state.reports.map(report => ({ report, state: normalizedReport(report) }));
+  const executions = new Map(state.context.executions.map(execution => [execution.id, execution]));
+  const definitions = new Map(state.spec.cases.map(test => [test.id, test]));
+  const snapshots = new Map(state.context.executions.map(execution => [
+    execution.id, currentSnapshot(checked.filter(item =>
+      contextMatches(item.report.context, execution.context, state.context.policy)),
+    state.context).current?.report ?? null,
+  ]));
+  return evaluation.cases.map(result => {
+    const definition = definitions.get(result.testId);
+    return caseProof(state, definition, result, executions.get(definition.executionId),
+      snapshots.get(definition.executionId));
+  });
+}
+function caseProof(state, definition, result, execution, snapshot) {
   const selected = result.assertions.filter(assertion => assertion.evidenceId).map(assertion => {
     const report = state.reports.find(report => report.id === assertion.reportId);
     const observation = report?.observations.find(row => row.id === assertion.evidenceId);

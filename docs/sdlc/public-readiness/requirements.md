@@ -180,9 +180,12 @@ counts.
   the applicable PR environment. Report worker utilization, critical-path and
   remaining serial-tail measurements. Configured concurrency or valid YAML is
   not execution proof and is not advertised as full optimization. Each complete
-  logical native PR lane must meet its release-candidate limit: Linux at most
-  7 minutes 40 seconds, Windows at most 11 minutes 5 seconds, Apple Silicon at
-  most 10 minutes 27 seconds, and Intel macOS strictly under 20 minutes.
+  logical native PR lane must meet its release-candidate limit: Linux, Windows
+  and Apple Silicon each at most 15 minutes (900 seconds), and Intel macOS
+  strictly under 25 minutes (1,500 seconds). The owner's revised Intel target
+  replaces the earlier twenty-minute acceptance limit without rewriting its
+  historical execution records. Shorter recorded lane durations
+  are historical measurements, not acceptance limits.
   Include toolchain setup, required tests/procedures, evidence retention and
   owned-resource cleanup. Intel's former 15-minute target remains a stretch
   goal, not the current release-candidate limit.

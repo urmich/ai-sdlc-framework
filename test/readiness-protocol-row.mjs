@@ -6,8 +6,11 @@ import { observerApiFixture } from './readiness-observer-fixture.mjs';
 import { inspectWorkflowTrust, verifyOriginalNativeRows, verifyNativeCleanup,
   retainObserverResult } from '../scripts/pr-observer.mjs';
 import { nativePrPartsForProtocol, nativeWorkflowContract,
-  nativeFrameworkShardProtocol, nativeFourBodyFrameworkShardProtocol,
+  nativeSplitUnitFrameworkShardProtocol, nativeFourBodyFrameworkShardProtocol,
   nativePlatformUnitFrameworkShardProtocol, nativeLegacyFrameworkShardProtocol,
+  nativeFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
+  nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
+  nativeServiceBalanceFrameworkShardProtocol,
   nativeFrameworkShardPlan, replayNativeEvidence, verifyNativeShardUnitOrder } from '../scripts/native-validation.mjs';
 import { nativeUnitBootstrapProtocol, nativeBodyBootstrapProtocol,
   nativeBootstrapProtocol } from '../scripts/toolchain-baseline.mjs';
@@ -16,31 +19,40 @@ import { deriveNativeComponentSpecification, projectNativeComponentEvidence,
 import { normalizeExecutionReport, evaluateReadiness } from 'ai-sdlc-framework/evidence';
 import { calculatorFiles } from '../scripts/pr-calculator.mjs';
 
-export const protocolPairs = Object.freeze([[nativeFrameworkShardProtocol, null],
+export const protocolPairs = Object.freeze([[nativeSplitUnitFrameworkShardProtocol, null],
   [nativeFourBodyFrameworkShardProtocol, null],
   [nativePlatformUnitFrameworkShardProtocol, null], [nativeLegacyFrameworkShardProtocol, null],
   [nativeFourBodyFrameworkShardProtocol, 'native-bootstrap-role-capabilities-v2'],
-  [nativeFrameworkShardProtocol, 'native-bootstrap-role-capabilities-v3'],
+  [nativeSplitUnitFrameworkShardProtocol, 'native-bootstrap-role-capabilities-v3'],
   [nativeFourBodyFrameworkShardProtocol, nativeUnitBootstrapProtocol],
-  [nativeFrameworkShardProtocol, 'native-bootstrap-role-capabilities-v2'],
-  [nativeFrameworkShardProtocol, nativeUnitBootstrapProtocol],
-  [nativeFrameworkShardProtocol, nativeBodyBootstrapProtocol],
+  [nativeSplitUnitFrameworkShardProtocol, 'native-bootstrap-role-capabilities-v2'],
+  [nativeSplitUnitFrameworkShardProtocol, nativeUnitBootstrapProtocol],
+  [nativeSplitUnitFrameworkShardProtocol, nativeBodyBootstrapProtocol],
   [nativeFourBodyFrameworkShardProtocol, nativeBodyBootstrapProtocol],
   [nativePlatformUnitFrameworkShardProtocol, nativeBodyBootstrapProtocol],
   [nativeLegacyFrameworkShardProtocol, nativeBodyBootstrapProtocol],
-  [nativeFrameworkShardProtocol, nativeBootstrapProtocol],
+  [nativeSplitUnitFrameworkShardProtocol, nativeBootstrapProtocol],
   [nativeFourBodyFrameworkShardProtocol, nativeBootstrapProtocol],
   [nativePlatformUnitFrameworkShardProtocol, nativeBootstrapProtocol],
-  [nativeLegacyFrameworkShardProtocol, nativeBootstrapProtocol]].map(pair => Object.freeze(pair)));
+  [nativeLegacyFrameworkShardProtocol, nativeBootstrapProtocol],
+  [nativeCatalogIsolationFrameworkShardProtocol, nativeBootstrapProtocol],
+  [nativePhasedIsolationFrameworkShardProtocol, nativeBootstrapProtocol],
+  [nativeComponentRebalanceFrameworkShardProtocol, nativeBootstrapProtocol],
+  [nativeParallelReadyPoolFrameworkShardProtocol, nativeBootstrapProtocol],
+  [nativeServiceBalanceFrameworkShardProtocol, nativeBootstrapProtocol],
+  [nativeFrameworkShardProtocol, nativeBootstrapProtocol]].map(pair => Object.freeze(pair)));
 
 // SDK verifier capabilities and every causal assertion stay in the same child.
 export async function runProtocolRow(t, [shardProtocol, bootstrapProtocol]) {
   const f = await observerApiFixture(t, { frameworkShards: true, shardProtocol, bootstrapProtocol,
-    ambient: shardProtocol === nativeFrameworkShardProtocol, rootParent: t.fixtureParent });
+    ambient: shardProtocol === nativeSplitUnitFrameworkShardProtocol, rootParent: t.fixtureParent });
   const expectedCount = nativePrPartsForProtocol(shardProtocol).length;
+  const splitUnits = [nativeSplitUnitFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
+    nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
+    nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol);
   const frameworkCount = expectedCount - 2;
   assert.equal(f.parts.size, expectedCount);
-  assert.equal(expectedCount, shardProtocol === nativeFrameworkShardProtocol ? 25 :
+  assert.equal(expectedCount, splitUnits ? 25 :
     shardProtocol === nativeFourBodyFrameworkShardProtocol ? 24 : 20);
   const trust = inspectWorkflowTrust([{ file: nativeWorkflowContract.path,
     contents: f.source.files.get(nativeWorkflowContract.path) }]);
@@ -66,10 +78,10 @@ export async function runProtocolRow(t, [shardProtocol, bootstrapProtocol]) {
   }
   const expectedMacCount = [nativeBodyBootstrapProtocol, nativeBootstrapProtocol].includes(bootstrapProtocol) ? 2 :
     bootstrapProtocol === nativeUnitBootstrapProtocol ? 8 :
-    shardProtocol === nativeFrameworkShardProtocol ? 13 : 12;
+    splitUnits ? 13 : 12;
   assert.equal(prefixes.length, expectedMacCount);
   assert.equal(new Set(prefixes).size, expectedMacCount);
-  assert.equal(f.cleanupReports.size, shardProtocol === nativeFrameworkShardProtocol ? 13 : 12);
+  assert.equal(f.cleanupReports.size, splitUnits ? 13 : 12);
   const executions = [...f.parts.values()].map(part => ({ ...part,
     job: f.jobs.find(job => job.name === `native-${part.role}`) }));
   const unitOrder = verifyNativeShardUnitOrder(executions, { protocol: shardProtocol });
@@ -113,7 +125,7 @@ export async function runProtocolRow(t, [shardProtocol, bootstrapProtocol]) {
     } };
   const projection = projectNativeComponentEvidence(inputs);
   assert.equal(projection.evaluation.status, 'Passed');
-  assert.equal(definition.policy.protocol, shardProtocol === nativeFrameworkShardProtocol ?
+  assert.equal(definition.policy.protocol, splitUnits ?
     'native-component-projection-shards-v3' : shardProtocol === nativeFourBodyFrameworkShardProtocol ?
       'native-component-projection-shards-v2' : 'native-component-projection-shards-v1');
   assert.equal(projection.provenance.length, frameworkCount);
@@ -184,14 +196,14 @@ export async function runProtocolRow(t, [shardProtocol, bootstrapProtocol]) {
     { code: 'EVIDENCE' });
   }
   await assert.rejects(replayNativeEvidence({ definition: { ...archived,
-    frameworkShards: shardProtocol === nativeFrameworkShardProtocol ?
-      nativePlatformUnitFrameworkShardProtocol : nativeFrameworkShardProtocol },
+    frameworkShards: splitUnits ?
+      nativePlatformUnitFrameworkShardProtocol : nativeSplitUnitFrameworkShardProtocol },
     data: dictionary(refresh.data), candidate: f.candidate, asOf: inputs.now,
     verifyArchive: () => { throw new Error('Protocol mismatch must fail before archive verification'); } }),
   { code: 'EVIDENCE' });
   assert.throws(() => verifyNativeShardUnitOrder(executions, { protocol:
-    shardProtocol === nativeFrameworkShardProtocol ? nativePlatformUnitFrameworkShardProtocol :
-      nativeFrameworkShardProtocol }), { code: 'EVIDENCE' });
+    splitUnits ? nativePlatformUnitFrameworkShardProtocol :
+      nativeSplitUnitFrameworkShardProtocol }), { code: 'EVIDENCE' });
   const borrowed = new Map(refresh.data);
   const units = framework.find(part => part.target === refresh.target && part.shard === 'units');
   borrowed.set('unit.json', units.data.get('unit.json'));
