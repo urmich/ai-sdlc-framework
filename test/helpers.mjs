@@ -21,7 +21,7 @@ import { prepareOperation, markDispatching, recordOperation } from '../src/opera
 import { validateCurrentExecutionIdentity } from '../src/provider-adapters.mjs';
 const execute = promisify(execFile);
 export async function executeFixtureReadiness(store, cycle, tests, statuses = {}, { operation } = {}) {
-  const state = await store.load(cycle.workItemId);
+  const { metadata } = await store.manifest(cycle.workItemId);
   const specification = await resolveTestSpecification(store, cycle.workItemId);
   const groups = new Map();
   for (const definition of tests) {
@@ -76,8 +76,8 @@ process.exitCode = rows.every(row => row.passed) ? 0 : 1;`;
     const args = ['--input-type=module', '-e', program];
     const input = JSON.stringify(group.tests.map(row =>
       ({ testId: row.id, fail: statuses[row.id] === 'Failed' })));
-    const cwd = state.metadata.members.find(member =>
-      member.repositoryId === state.metadata.coordinatorId).root;
+    const cwd = metadata.members.find(member =>
+      member.repositoryId === metadata.coordinatorId).root;
     let result;
     try {
       const pending = execute(process.execPath, args, { cwd });

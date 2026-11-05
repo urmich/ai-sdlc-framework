@@ -13,6 +13,7 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 $clock = [Diagnostics.Stopwatch]::StartNew()
 $owner = $null
 $primary = $null
+$compilerStarted = $false
 
 function UtcMs {
     return [long]([Math]::Floor(([DateTime]::UtcNow.Ticks - $epochTicks) / 10000.0))
@@ -60,6 +61,16 @@ function Startup([string]$Kind, [string]$Phase, [string]$Reason,
 
 function Released {
     return [IO.File]::Exists([IO.Path]::Combine($Directory, "$Nonce.release.json"))
+}
+
+function ReleaseBeforeCompiler {
+    if ($compilerStarted -or -not (Released)) { return $false }
+    $result.reason = 'released'
+    Publish 'compiler-not-started' ([ordered]@{
+        schema=1; compilerStarted=$false; reason='released'
+        observerSha256=$observerSha256; bridgeSha256=$bridgeSha256
+    })
+    return $true
 }
 
 function Binding([int]$ProcessId, [long]$Bound, [string[]]$Images, $Record) {
@@ -156,9 +167,13 @@ try {
         $source = $utf8.GetString($sourceBytes)
         $bridgeSha256 = SourceHash $sourceBytes
         $observerSha256 = SourceHash ([IO.File]::ReadAllBytes($PSCommandPath))
+        if (ReleaseBeforeCompiler) { return }
         try { Startup 'entered' 'entered' 'none' } catch {}
+        if (ReleaseBeforeCompiler) { return }
         $startupPhase = 'compile'
         try { Startup 'compiling' 'compiling' 'none' } catch {}
+        if (ReleaseBeforeCompiler) { return }
+        $compilerStarted = $true
         Add-Type -TypeDefinition $source -Language CSharp -OutputAssembly $assembly -ErrorAction Stop
         $compilerReturnedElapsedMs = $clock.Elapsed.TotalMilliseconds
         $compilerReturnedUtcMs = UtcMs

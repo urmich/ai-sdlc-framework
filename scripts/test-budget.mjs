@@ -349,9 +349,11 @@ async function broker(capacity) {
             reply(request, { processes: groupProcesses.get(`${input.producer}:${input.groupId}`) ?? [] });
           }
           else if (input.op === 'begin') {
-            requireThat(!admissionStopped && !socket.producerId && !socket.controlId &&
+            requireThat(!socket.producerId && !socket.controlId &&
               !socket.workerId && !socket.pendingWorker,
               'BUDGET', 'A budget connection already owns an allocation');
+            requireThat(!admissionStopped,
+              'BUDGET', 'Test admission stopped after unsettled owned resources');
             const parent = input.parent ?? null;
             const ancestor = resourceNode(parent);
             requireThat(!parent || ancestor && !ancestor.cancelled && !ancestor.closing,

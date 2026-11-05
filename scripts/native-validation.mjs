@@ -66,7 +66,8 @@ export const nativePhasedIsolationFrameworkShardProtocol = 'native-framework-sha
 export const nativeComponentRebalanceFrameworkShardProtocol = 'native-framework-shards-v10-phased-intel-component-rebalance';
 export const nativeParallelReadyPoolFrameworkShardProtocol = 'native-framework-shards-v11-parallel-intel-ready-pool';
 export const nativeServiceBalanceFrameworkShardProtocol = 'native-framework-shards-v12-intel-service-balance';
-export const nativeFrameworkShardProtocol = 'native-framework-shards-v13-catalog-process-reservation';
+export const nativeCatalogReservationFrameworkShardProtocol = 'native-framework-shards-v13-catalog-process-reservation';
+export const nativeFrameworkShardProtocol = 'native-framework-shards-v14-catalog-fixture-service';
 // Partial original group timings are placement leads, never current execution evidence.
 export const nativePlacementCosts = Object.freeze({
   "schemaVersion": 1,
@@ -427,13 +428,60 @@ export const nativePlacementReservationV13 = Object.freeze({
 });
 Object.freeze(nativePlacementReservationV13.catalog);
 Object.freeze(nativePlacementReservationV13.unknownRoots);
+export const nativePlacementServiceV14 = Object.freeze({
+  "schemaVersion": 1,
+  "protocol": "native-intel-catalog-fixture-service-v1",
+  "target": "macos-x64",
+  "node": "24.20.0",
+  "capacity": 14,
+  "baseCostsDigest": "786677996667903383bcc8f0fd135eb2c45ca9783aa5dbc6d2ecbd9da03958bb",
+  "baseTransfersDigest": "e00b3e325fffe871a3e47d679d52b98ed553bb3e5f40d17ae3105d7d9fffeb85",
+  "baseReservationDigest": "087ca43a82737b3cf82d73bde152f9dcc913e32392719ac2f30ceea44a063372",
+  "baseRootOrderDigest": "588bce3088f11005413c036687d1b11b9905b6b3975455ce59724a9d08586dbd",
+  "currentRootOrderDigest": "0e08c465172e47f3cb1645e56a5d069d8fbeab8668f14b2ad489f316e2ac0f49",
+  "inventoryDigest": "ee53d6383cc22512c53c4183d4e1d29fe6fff0d9b111534bc0577709ea8eebab",
+  "rootBindingDigest": "4bfdbc6211239981c2858df25e05a056d32c5cda25ff3bcb9912a33dcb4716fb",
+  "ownershipSourceRevision": "9f29a31d84119a07e082dd7d438f59f9e4ce05ff",
+  "ownershipSourceProtocol": "native-framework-shards-v13-catalog-process-reservation",
+  "catalog": {
+    "rootId": "assertion-0f5721a6329b2ef16d4f48e70ef01d0f0715e6a4f3cefeedc3449361fa57e8e5",
+    "definitionDigest": "5ad28b4f4848309b54fb9650eb1a4021163b23f5caf5a53fd8594817bef51df3",
+    "sourceDigest": "b02f5b6d88f2d54a5cec8d2a586f48a1781bdb124a2856c3f809500bd7845519",
+    "shapeDigest": "67a78cebfc67220b840c4c1a5083372569277b5c60ef9845a87fb7278dd8398d",
+    "minimumSlots": 7
+  },
+  "additionalRoots": [{
+    "rootId": "assertion-0ac04224a6b64b1e7dd457ce996c953de76df4b549c9af3634eff098829070f3",
+    "shard": "body-2"
+  }],
+  "unknownRoots": [
+    "assertion-0ac04224a6b64b1e7dd457ce996c953de76df4b549c9af3634eff098829070f3",
+    "assertion-0f5721a6329b2ef16d4f48e70ef01d0f0715e6a4f3cefeedc3449361fa57e8e5",
+    "assertion-150c7bc6c9f0dddd0620cec5148fbed8d64ba35976405723578b06528b5e5047",
+    "assertion-3e6dd22dc326d8b6ed30a052848f7a49a0f12768e6bd964b2a1b9b415a266f3e",
+    "assertion-583587077cd3503a4387cce4058358a61651710ff9f49d837189dbfe8c0596af",
+    "assertion-68345f06baf336a7a48e0e0e47c5206a09e27a6d20659f23740bdbefdd15eed2",
+    "assertion-6a2d4f126609d3bee285469a4b94d1c2cb0e82c84442090c6dc5b256cf36f1d6",
+    "assertion-7db60410fe853de36bd473c60d4f8b4b1035bf6fa18b7c5cd83a1ae60e4c46c8",
+    "assertion-807d82cab4e37ed911a2678cff21eb90b367045e7aaf5d0c95337588d7a94495",
+    "assertion-8a258f8e02bad65e421a093dd0bf08ac52540d6e5956e67c2710a69b83b00278",
+    "assertion-a14e69248877b8d940c6555e2dd391a891bc3639b8cc923781614f272789c571",
+    "assertion-ae62135c83d676d2db6d13a3b7cdfd189adab6a9145d95a58d51d6113e79a06a",
+    "assertion-d33dd92ab0ef357c66eced91ec8ed8b491ac4c48b19b4f5543935ea2f64f37e7"
+  ]
+});
+Object.freeze(nativePlacementServiceV14.catalog);
+nativePlacementServiceV14.additionalRoots.forEach(Object.freeze);
+Object.freeze(nativePlacementServiceV14.additionalRoots);
+Object.freeze(nativePlacementServiceV14.unknownRoots);
 export const nativeFrameworkShardProtocols = Object.freeze([
   nativeLegacyFrameworkShardProtocol, nativePlatformUnitFrameworkShardProtocol,
   nativeFourBodyFrameworkShardProtocol, nativeSplitUnitFrameworkShardProtocol,
   nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
   nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
   nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
-  nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol,
+  nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+  nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol,
 ]);
 function requireNativePlacementLiteral(source, name, adopted) {
   const tokens = declarationTokens(source);
@@ -468,36 +516,45 @@ export function sourceNativeFrameworkShardProtocol(sourceFiles) {
   if ([nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
     nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
     nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-    nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(declarations[0][1]))
+    nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(declarations[0][1]))
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementCosts', nativePlacementCosts);
   if ([nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
     nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
-    nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(declarations[0][1])) {
+    nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+    nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(declarations[0][1])) {
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementAffinities', nativePlacementAffinities);
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementCostsV7', nativePlacementCostsV7);
   }
   if ([nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
     nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-    nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(declarations[0][1])) {
+    nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(declarations[0][1])) {
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementCostsV8', nativePlacementCostsV8);
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementIsolationV8', nativePlacementIsolationV8);
   }
   if ([nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
-    nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(declarations[0][1])) {
+    nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+    nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(declarations[0][1])) {
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementCostsV9', nativePlacementCostsV9);
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementPhasesV9', nativePlacementPhasesV9);
   }
   if ([nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-    nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(declarations[0][1]))
+    nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(declarations[0][1]))
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementPhasesV10', nativePlacementPhasesV10);
-  if ([nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(declarations[0][1])) {
+  if ([nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+    nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(declarations[0][1])) {
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementCostsV11', nativePlacementCostsV11);
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementReadyPoolV11', nativePlacementReadyPoolV11);
   }
-  if ([nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(declarations[0][1]))
+  if ([nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(declarations[0][1]))
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementTransfersV12', nativePlacementTransfersV12);
-  if (declarations[0][1] === nativeFrameworkShardProtocol)
+  if ([nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(declarations[0][1]))
     requireNativePlacementLiteral(sources[0].contents, 'nativePlacementReservationV13', nativePlacementReservationV13);
+  if (declarations[0][1] === nativeFrameworkShardProtocol)
+    requireNativePlacementLiteral(sources[0].contents, 'nativePlacementServiceV14', nativePlacementServiceV14);
   return declarations[0][1];
 }
 export const nativeLegacyPrParts = Object.freeze(validationPlatforms.flatMap(target =>
@@ -526,7 +583,8 @@ export function nativeFrameworkShardNames(target, protocol = nativeFrameworkShar
         nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
         nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
         nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
-        nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? 4 : 2,
+        nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+        nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? 4 : 2,
   },
     (_, index) => `body-${index}`)];
 }
@@ -539,7 +597,8 @@ export function nativeFrameworkUnitShardNames(target, protocol = nativeFramework
       nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
       nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
       nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-      nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? 2 : 1;
+      nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+      nativeFrameworkShardProtocol].includes(protocol) ? 2 : 1;
   return Array.from({ length: count }, (_, index) => index === 0 ? 'units' : `units-${index}`);
 }
 
@@ -808,15 +867,18 @@ function nativePlacementGroups(groups, target, protocol) {
   const byId = new Map(groups.map(group => [group.id, group]));
   return groups.map(group => {
     const phased = [nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
-      nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
+      nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+      nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
       nativePlacementCostsV9.roots.find(hint => hint.rootId === group.rootId && hint.samples[target]) : null;
     const isolated = [nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
       nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-      nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
+      nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+      nativeFrameworkShardProtocol].includes(protocol) ?
       nativePlacementCostsV8.roots.find(hint => hint.rootId === group.rootId && hint.samples[target]) : null;
     const updated = [nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
       nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
-      nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
+      nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+      nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
       nativePlacementCostsV7.roots.find(hint => hint.rootId === group.rootId && hint.samples[target]) : null;
     const costs = phased ? nativePlacementCostsV9 : isolated ? nativePlacementCostsV8 :
       updated ? nativePlacementCostsV7 : nativePlacementCosts;
@@ -836,43 +898,59 @@ function nativePlacementGroups(groups, target, protocol) {
       rootId: group.rootId, shapeDigest, costStatus, durationMs: eligible ? sample[0] : null,
       ...([nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
         nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
-        nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
+        nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+        nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
         { costSource: phased ? 'v9-observed-lead' : isolated ? 'v8-observed-lead' :
           updated ? 'v7-observed-lead' : 'v6-historical-lead' } : {}),
       ...(sample ? { observedSourceDigest: hint.sourceDigest, jobId: sample[1] } : {}) };
   });
 }
 
+function nativeReservationRule(placement) {
+  return placement.reservation.protocol === nativePlacementServiceV14.protocol ?
+    nativePlacementServiceV14 : nativePlacementReservationV13;
+}
+
 function qualifyNativeParallelPlacement(placement, groups, inventory, plan) {
   const rule = nativePlacementReadyPoolV11;
   const costs = nativePlacementCostsV11;
   const transfer = placement.transfers ? nativePlacementTransfersV12 : null;
-  const reservation = placement.reservation ? nativePlacementReservationV13 : null;
+  const reservation = placement.reservation ? nativeReservationRule(placement) : null;
   const binding = reservation ?? transfer ?? costs;
   const definitions = new Map(inventory.cases.filter(test => !test.parents.length).map(test => [test.id, test]));
   const planning = new Map(placement.groups.map(group => [group.rootId, group]));
   const ordered = [...groups].sort((left, right) => left.rootId.localeCompare(right.rootId, 'en'));
+  const additions = reservation === nativePlacementServiceV14 ? reservation.additionalRoots : [];
+  const original = ordered.filter(group => !additions.some(added => added.rootId === group.rootId));
+  // New roots must not shift indices in the immutable historical duration vector.
+  const costIndexes = new Map(original.map((group, index) => [group.rootId, index]));
   const bindingDigest = digest(ordered.map(group => [group.rootId, group.sourceDigest,
     definitions.get(group.rootId)?.definitionDigest, planning.get(group.rootId).shapeDigest]));
   const status = nativeToolchain.node !== rule.node || nativeToolchain.node !== costs.node ?
     'unsupported-runtime' : nativePlacementCosts.workers[rule.target] !== rule.capacity ||
       costs.capacity !== rule.capacity ? 'unsupported-capacity' :
       (reservation ?? transfer) && (binding.baseCostsDigest !== digest(costs) ||
-        binding.baseRootOrderDigest !== digest(ordered.map(group => group.rootId)) ||
-        reservation && reservation.baseTransfersDigest !== digest(transfer)) ?
+        binding.baseRootOrderDigest !== digest(original.map(group => group.rootId)) ||
+        reservation && reservation.baseTransfersDigest !== digest(transfer) ||
+        reservation === nativePlacementServiceV14 &&
+          (reservation.baseReservationDigest !== digest(nativePlacementReservationV13) ||
+            reservation.currentRootOrderDigest !== digest(ordered.map(group => group.rootId)) ||
+            new Set(additions.map(added => added.rootId)).size !== additions.length ||
+            additions.some(added => !ordered.some(group => group.rootId === added.rootId) ||
+              !reservation.unknownRoots.includes(added.rootId)))) ?
         'changed-historical-costs-or-order' :
       inventory.digest !== binding.inventoryDigest || bindingDigest !== binding.rootBindingDigest ||
-        ordered.length !== costs.durations.length ? 'changed-source-callback-or-resources' : 'qualified';
+        original.length !== costs.durations.length ? 'changed-source-callback-or-resources' : 'qualified';
   placement.parallel.status = status;
   if (status !== 'qualified') return;
-  for (const [index, group] of ordered.entries()) {
+  for (const group of ordered) {
     const selectedCases = group.assertionIds.map(id => inventory.cases.find(test => test.id === id));
     const tools = nativeBootstrapRequirements({ inventory, plan, target: rule.target, profile: 'pr',
       component: 'framework', shard: 'body-0', protocol: nativeBootstrapProtocol,
       assignment: { parts: [{ shard: 'body-0', stages: [{ cases: selectedCases }] }] } });
     const allowedShards = rule.shards.filter(shard => Object.entries(tools)
       .every(([tool, required]) => !required || shard.tools[tool])).map(shard => shard.shard);
-    const duration = binding.unknownRoots?.includes(group.rootId) ? null : costs.durations[index];
+    const duration = binding.unknownRoots?.includes(group.rootId) ? null : costs.durations[costIndexes.get(group.rootId)];
     const reservedCatalog = group.rootId === reservation?.catalog.rootId;
     const entry = planning.get(group.rootId);
     delete entry.jobId;
@@ -880,7 +958,8 @@ function qualifyNativeParallelPlacement(placement, groups, inventory, plan) {
     Object.assign(entry, { durationMs: duration, allowedShards,
       costStatus: duration === null ? reservedCatalog ? 'unmeasured-resources' : 'unmeasured-callback' :
         'qualified-historical-callback-lead',
-      costSource: reservedCatalog ? 'v13-reservation-without-duration' : 'v11-original-diagnostic-upper-bound',
+      costSource: reservedCatalog ? reservation === nativePlacementServiceV14 ?
+        'v14-fixture-service-without-duration' : 'v13-reservation-without-duration' : 'v11-original-diagnostic-upper-bound',
       ...(duration === null ? {} : { observedSourceRevision: costs.sourceRevision,
         observedInventoryDigest: costs.observedInventoryDigest, observedRunId: costs.runId }) });
   }
@@ -959,11 +1038,16 @@ function partitionNativeBodyGroups(groups, count, placement = null) {
   }
   let reservedOwners = null;
   if (placement?.reservation) {
-    const rule = nativePlacementReservationV13;
+    const rule = nativeReservationRule(placement);
     const ordered = [...groups].sort((left, right) => left.rootId.localeCompare(right.rootId, 'en'));
-    const owners = new Map(ordered.map((group, index) => [group.rootId, Number(rule.baseOwners[index])]));
+    const additions = rule === nativePlacementServiceV14 ? rule.additionalRoots : [];
+    const original = ordered.filter(group => !additions.some(added => added.rootId === group.rootId));
+    const baseOwners = nativePlacementReservationV13.baseOwners;
+    const owners = new Map(original.map((group, index) => [group.rootId, Number(baseOwners[index])]));
+    for (const added of additions) owners.set(added.rootId, Number(added.shard.slice(5)));
     const status = placement.parallel.status !== 'applied' ? 'base-placement-unqualified' :
-      rule.baseOwners.length !== ordered.length || !/^[012]+$/u.test(rule.baseOwners) ||
+      baseOwners.length !== original.length || !/^[012]+$/u.test(baseOwners) ||
+        additions.some(added => !/^body-[012]$/u.test(added.shard)) ||
         count !== nativePlacementReadyPoolV11.shards.length ? 'changed-ownership-order' :
         ranked.some(component => new Set(component.groups.map(group => owners.get(group.rootId))).size !== 1) ?
           'changed-connected-ownership' :
@@ -1197,7 +1281,8 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
     nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
     nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
     nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-    nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
+    nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(protocol) ?
     completeGroups : selectedGroups(regression.files, regression.selectorName);
   const bodyCount = nativeFrameworkShardNames(target, protocol).filter(shard => shard.startsWith('body-')).length;
   const bodyIds = new Set(bodyCases.map(test => test.id));
@@ -1208,22 +1293,28 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
   const { roots: phasedRoots, ...phasedConditions } = nativePlacementCostsV9;
   const phaseRule = protocol === nativePhasedIsolationFrameworkShardProtocol ?
     nativePlacementPhasesV9 : nativePlacementPhasesV10;
+  const reservationRule = protocol === nativeCatalogReservationFrameworkShardProtocol ?
+    nativePlacementReservationV13 : nativePlacementServiceV14;
   const placement = [nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
     nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
     nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-    nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? {
+    nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(protocol) ? {
     protocol: 'native-stable-component-cost-leads-v1', evidenceCredit: false,
     costs: { ...costConditions, digest: digest(nativePlacementCosts),
       ...([nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
         nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
-        nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
+        nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+        nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
         { updates: { ...updateConditions, digest: digest(nativePlacementCostsV7) } } : {}),
       ...([nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
         nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-        nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
+        nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+        nativeFrameworkShardProtocol].includes(protocol) ?
         { intelUpdates: { ...isolationConditions, digest: digest(nativePlacementCostsV8) } } : {}),
       ...([nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
-        nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
+        nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+        nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
         { phasedUpdates: { ...phasedConditions, digest: digest(nativePlacementCostsV9) } } : {}) },
     groups: nativePlacementGroups(bodyGroups, target, protocol), components: [],
     ...(protocol === nativeCatalogIsolationFrameworkShardProtocol && target === nativePlacementIsolationV8.target ? {
@@ -1237,22 +1328,25 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
         protocol: phaseRule.protocol, target, capacity: phaseRule.capacity,
         shard: phaseRule.shard, roots: phaseRule.phases.map(phase => phase.rootId) },
     } : {}),
-    ...([nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) &&
+    ...([nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+      nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) &&
       target === nativePlacementReadyPoolV11.target ? {
       parallel: { protocol: nativePlacementReadyPoolV11.protocol, capacity: nativePlacementReadyPoolV11.capacity,
         declarationDigest: digest(nativePlacementReadyPoolV11), costsDigest: digest(nativePlacementCostsV11),
         evidenceCredit: false, predictedSavingMs: null },
     } : {}),
-    ...([nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) &&
+    ...([nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+      nativeFrameworkShardProtocol].includes(protocol) &&
       target === nativePlacementTransfersV12.target ? {
       transfers: { protocol: nativePlacementTransfersV12.protocol,
         declarationDigest: digest(nativePlacementTransfersV12), evidenceCredit: false, predictedSavingMs: null },
     } : {}),
-    ...(protocol === nativeFrameworkShardProtocol && target === nativePlacementReservationV13.target ? {
-      reservation: { protocol: nativePlacementReservationV13.protocol,
-        declarationDigest: digest(nativePlacementReservationV13),
-        ownershipSourceRevision: nativePlacementReservationV13.ownershipSourceRevision,
-        ownershipSourceProtocol: nativePlacementReservationV13.ownershipSourceProtocol,
+    ...([nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) &&
+      target === reservationRule.target ? {
+      reservation: { protocol: reservationRule.protocol,
+        declarationDigest: digest(reservationRule),
+        ownershipSourceRevision: reservationRule.ownershipSourceRevision,
+        ownershipSourceProtocol: reservationRule.ownershipSourceProtocol,
         evidenceCredit: false, predictedSavingMs: null },
     } : {}),
   } : null;
@@ -1260,13 +1354,15 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
   const partitions = [nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
     nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
     nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
-    nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
+    nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+    nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
     partitionNativeBodyGroups(bodyGroups, bodyCount, placement) :
     partitionValidationInventory({ ...inventory, cases: bodyCases,
       files: inventory.files.filter(file => bodyFiles.has(file.file)) }, bodyCount);
   if ([nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
     nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
-    nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol))
+    nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+    nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol))
     applyNativePlacementAffinities(bodyGroups, partitions, placement, target);
   if (placement?.transfers) applyNativeServiceTransfers(bodyGroups, partitions, placement);
   const procedureFile = 'test/public-readiness-ci.test.mjs';
@@ -1301,7 +1397,8 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
       const selectorName = [nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
         nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
         nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
-        nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) &&
+        nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+        nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) &&
         shard.startsWith('body-') ?
         exactPattern(stage.cases.map(test => [...test.parents, test.name].join(' '))) : stage.selectorName;
       requireThat(files.length > 0 && stage.cases.some(test => test.applicability.platforms.includes(target)),

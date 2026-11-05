@@ -49,7 +49,7 @@ export const validationDeclarations = {
     "names": ["T-PRD010 uncertain native cleanup stops aggregate admission after its original worker closes"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "runner-resource-contract",
-    "reason": "PR-only authenticated aggregate fail-stop regression with an isolated broker, original failing worker, running peer and queued stock Node worker; modeled uncertainty creates no compiler or native target.",
+    "reason": "PR-only authenticated aggregate fail-stop regression with an isolated broker, original failing worker, running peer and queued stock Node worker; fresh stopped admission and true repeated begin retain distinct diagnostics without reopening admission. Modeled uncertainty creates no compiler or native target.",
     "prerequisites": ["Node and four aggregate worker slots; owned repository-local fixtures"]
   }, {
     "names": ["T-PRD010 admission stop retains its original worker until delayed acknowledgement"],
@@ -999,11 +999,15 @@ test('T-PRD010 uncertain native cleanup stops aggregate admission after its orig
   const children = [];
   let owner;
   let queuedProducer;
+  let duplicateSocket;
+  let duplicateClosed;
   t.after(async () => {
     await Promise.all(['stop-fault', 'release-fault', 'release-peer']
       .map(name => fs.writeFile(path.join(root, name), 'release')));
     await Promise.all(children.map(child => child.completed));
     await queuedProducer?.close();
+    duplicateSocket?.destroy();
+    await duplicateClosed;
     await owner?.close();
     assert.equal(path.dirname(root), path.join(repositoryRoot, '.test-data'));
     await fs.rm(root, { recursive: true });
@@ -1116,6 +1120,31 @@ try{
   owner = await enterTestBudget({ workers: 2, fileCount: 2, inherited: null, parent: null, slot: null });
   const initial = await owner.snapshot();
   assert.equal(initial.admissionStopped, false);
+  const endpoint = JSON.parse(owner.inherited);
+  duplicateSocket = net.connect({ host: endpoint.host, port: endpoint.port });
+  duplicateClosed = new Promise(resolve => duplicateSocket.once('close', resolve));
+  await new Promise((resolve, reject) => {
+    duplicateSocket.once('connect', resolve);
+    duplicateSocket.once('error', reject);
+  });
+  let sequence = 0;
+  const begin = () => new Promise((resolve, reject) => {
+    let response = '';
+    const data = chunk => {
+      response += chunk;
+      if (!response.includes('\n')) return;
+      duplicateSocket.off('data', data);
+      duplicateSocket.off('error', reject);
+      resolve(JSON.parse(response.slice(0, response.indexOf('\n'))));
+    };
+    duplicateSocket.on('data', data);
+    duplicateSocket.once('error', reject);
+    duplicateSocket.write(`${JSON.stringify({
+      op: 'begin', key: endpoint.key, request: ++sequence, workers: 1, fileCount: 1, control: true,
+    })}\n`);
+  });
+  assert.ok((await begin()).control, 'The same socket must genuinely own an allocation before duplicate rejection');
+  assert.equal((await begin()).error, 'A budget connection already owns an allocation');
   const fault = launch('fault', owner);
   const peer = launch('peer', owner);
   for (const name of ['fault-ready', 'peer-ready']) {
@@ -1156,7 +1185,9 @@ try{
   });
   await assert.rejects(enterTestBudget({
     workers: 1, fileCount: 1, inherited: owner.inherited, parent: null, slot: null,
-  }), { code: 'BUDGET' });
+  }), { code: 'BUDGET', message: 'Test admission stopped after unsettled owned resources' });
+  assert.equal((await begin()).error, 'A budget connection already owns an allocation',
+    'An actual repeated begin remains distinct even after admission stops');
   const fresh = launch('new', queuedProducer);
   assert.deepEqual(await record('new-rejected'), {
     code: 'BUDGET', budgetId: owner.id, admissionStopped: true,

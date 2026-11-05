@@ -193,6 +193,13 @@ counts.
   start to the latest part's completion; timing one part alone does not satisfy
   this target. Report provider queueing separately without hiding a queued part
   inside an otherwise running lane.
+  Windows runtime-observer preparation may use a longer finite allowance for
+  cold shell startup; five seconds is not a product requirement. Keep
+  compilation/readiness separately bounded, retain the actual target
+  observation/capture/termination deadlines and affirmative compiler cleanup,
+  and include all preparation in the complete lane measurement. A longer setup
+  allowance does not authorize retries, unknown-cleanup success or omitted
+  assertions.
 
 ### FR-203: Require complete PR validation without trusting local claims
 

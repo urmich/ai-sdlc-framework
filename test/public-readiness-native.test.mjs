@@ -3955,7 +3955,26 @@ function authenticV10ObserverSource(contents) {
   return original;
 }
 
+function authenticV13CatalogSource(contents) {
+  const control = '\n  }, {\n    "root": "published references are fresh-checked after cache use and missing/corrupt pages cannot become success",\n    "minimumSlots": 6';
+  const classification = '\n  }, {\n    "names": ["published references are fresh-checked after cache use and missing/corrupt pages cannot become success"],\n' +
+    '    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],\n' +
+    '    "owner": "catalog-service-contract",\n' +
+    '    "reason": "PR-only owned producer/admission boundary. Starting a real new fixture execution needs the bound working directory, not replay of prior outcomes; immutable-page corruption and loss still fail closed at admission and fresh reload.",\n' +
+    '    "prerequisites": ["Node, Git and six aggregate worker slots; owned repository-local repository and Copilot home"]';
+  const restored = contents.replace(control, '').replace(classification, '');
+  const root = restored.indexOf("test('published references are fresh-checked after cache use and missing/corrupt pages cannot become success',");
+  const end = restored.indexOf('\n});', root);
+  const start = restored.indexOf("  const unit = cycleTests(cycle).find(test => test.level === 'unit');", root);
+  assert.ok(root > 0 && start > root && end > start);
+  const original = restored.slice(0, start) + restored.slice(end + 1);
+  assert.equal(createHash('sha256').update(original).digest('hex'),
+    nativePass.nativePlacementReservationV13.catalog.sourceDigest);
+  return original;
+}
+
 function authenticV12CatalogSource(contents) {
+  contents = authenticV13CatalogSource(contents);
   const start = contents.indexOf('  "groups": [{');
   const end = contents.indexOf('  "variants": [', start);
   assert.ok(start > 0 && end > start);
@@ -4003,7 +4022,8 @@ test('T-PRD017 native v13 reserves the complete catalog without inheriting its o
   const inventory = await intelGitSourceInventory();
   const plan = await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
   const options = { inventory, plan, target: 'macos-x64' };
-  const rule = nativePass.nativePlacementReservationV13;
+  const rule = nativePass.nativePlacementServiceV14;
+  const historicalRule = nativePass.nativePlacementReservationV13;
   const current = nativeFrameworkShardPlan(options);
   const primary = current.parts.find(part => part.shard === 'body-0');
   const catalog = primary.stages.flatMap(stage => stage.groups).find(group => group.rootId === rule.catalog.rootId);
@@ -4023,14 +4043,21 @@ test('T-PRD017 native v13 reserves the complete catalog without inheriting its o
     current.placement.groups.find(group => group.rootId === id).durationMs === null));
   const ordered = current.parts.filter(part => part.shard.startsWith('body-'))
     .flatMap(part => part.stages.flatMap(stage => stage.groups))
+    .filter(group => !rule.additionalRoots.some(added => added.rootId === group.rootId))
     .sort((left, right) => left.rootId.localeCompare(right.rootId, 'en'));
   assert.equal(digest(ordered.map(group => group.rootId)), rule.baseRootOrderDigest);
-  assert.equal(ordered.length, rule.baseOwners.length);
+  assert.equal(ordered.length, historicalRule.baseOwners.length);
   for (const [index, group] of ordered.entries()) {
     const owner = current.parts.find(part => part.assertionIds.includes(group.rootId));
     assert.equal(owner.shard, nativePass.nativePlacementTransfersV12.roots.includes(group.rootId) ?
-      'body-2' : `body-${rule.baseOwners[index]}`,
+      'body-2' : `body-${historicalRule.baseOwners[index]}`,
     'Correct reservation without cost-zero backfill or a new placement search');
+  }
+  for (const added of rule.additionalRoots) {
+    assert.equal(current.parts.find(part => part.assertionIds.includes(added.rootId)).shard, added.shard);
+    const unknown = current.placement.groups.find(group => group.rootId === added.rootId);
+    assert.equal(unknown.durationMs, null, 'A new source root has no historical service duration');
+    assert.equal(Object.hasOwn(unknown, 'observedSourceRevision'), false);
   }
   for (const minimumSlots of [1, 6, 8]) {
     const changed = structuredClone(inventory);
@@ -4052,16 +4079,40 @@ test('T-PRD017 native v13 reserves the complete catalog without inheriting its o
   const start = source.indexOf(`${declaration} Object.freeze({`);
   const end = source.indexOf('\n});', start) + 4;
   for (const altered of [
-    { ...rule, baseOwners: `2${rule.baseOwners.slice(1)}` },
-    { ...rule, catalog: { ...rule.catalog, minimumSlots: 1 } },
-    { ...rule, unknownRoots: rule.unknownRoots.filter(id => id !== catalog.rootId) },
+    { ...historicalRule, baseOwners: `2${historicalRule.baseOwners.slice(1)}` },
+    { ...historicalRule, catalog: { ...historicalRule.catalog, minimumSlots: 1 } },
+    { ...historicalRule, unknownRoots: historicalRule.unknownRoots.filter(id => id !== catalog.rootId) },
   ]) {
     assert.throws(() => select(source.slice(0, start) +
       `${declaration} Object.freeze(${JSON.stringify(altered)});\n` + source.slice(end)), { code: 'EVIDENCE' });
   }
   assert.throws(() => select(source.slice(0, start) +
-    `${declaration} Object.freeze(JSON.parse(${JSON.stringify(JSON.stringify(rule))}));\n` + source.slice(end)),
+    `${declaration} Object.freeze(JSON.parse(${JSON.stringify(JSON.stringify(historicalRule))}));\n` + source.slice(end)),
   { code: 'EVIDENCE' });
+  const serviceDeclaration = 'export const nativePlacementServiceV14 =';
+  assert.throws(() => select(source.replace(serviceDeclaration, 'const nativePlacementServiceV14 =')), { code: 'EVIDENCE' });
+  assert.throws(() => select(source + `\n${serviceDeclaration} Object.freeze({});\n`), { code: 'EVIDENCE' });
+  const serviceStart = source.indexOf(`${serviceDeclaration} Object.freeze({`);
+  const serviceEnd = source.indexOf('\n});', serviceStart) + 4;
+  for (const altered of [
+    { ...rule, additionalRoots: rule.additionalRoots.map(added => ({ ...added, shard: 'body-0' })) },
+    { ...rule, catalog: { ...rule.catalog, minimumSlots: 1 } },
+    { ...rule, unknownRoots: rule.unknownRoots.filter(id => id !== rule.additionalRoots[0].rootId) },
+  ]) {
+    assert.throws(() => select(source.slice(0, serviceStart) +
+      `${serviceDeclaration} Object.freeze(${JSON.stringify(altered)});\n` + source.slice(serviceEnd)), { code: 'EVIDENCE' });
+  }
+  const v13 = source.replace(
+    `export const nativeFrameworkShardProtocol = '${nativeFrameworkShardProtocol}';`,
+    `export const nativeFrameworkShardProtocol = '${nativePass.nativeCatalogReservationFrameworkShardProtocol}';`);
+  const v13Start = v13.indexOf(`${serviceDeclaration} Object.freeze({`);
+  const v13End = v13.indexOf('\n});', v13Start) + 4;
+  assert.equal(select(v13.slice(0, v13Start) + v13.slice(v13End)),
+    nativePass.nativeCatalogReservationFrameworkShardProtocol,
+    'Authentic v13 source never acquires the v14 source qualification');
+  const changedV13 = nativeFrameworkShardPlan({ ...options, protocol: nativePass.nativeCatalogReservationFrameworkShardProtocol });
+  assert.notEqual(changedV13.placement.parallel.status, 'applied',
+    'Do not relabel changed root order or helper/source resources as v13 execution');
   const old = source.replace(
     `export const nativeFrameworkShardProtocol = '${nativeFrameworkShardProtocol}';`,
     `export const nativeFrameworkShardProtocol = '${nativePass.nativeServiceBalanceFrameworkShardProtocol}';`);
@@ -4245,7 +4296,7 @@ test('T-PRD017 native v11 authenticates current costs and preserves historical s
     connected.parts.find(part => part.assertionIds.includes(connectedRoots[1].id)),
   'Fallback still places the entire shared-resource component on one host');
   const current = nativeFrameworkShardPlan(options);
-  const from = source.indexOf('function qualifyNativeParallelPlacement(');
+  const from = source.indexOf('function nativeReservationRule(');
   const end = source.indexOf('\nfunction partitionNativeBodyGroups(', from);
   const groups = current.parts.filter(part => part.shard.startsWith('body-'))
     .flatMap(part => part.stages.flatMap(stage => stage.groups));
@@ -4258,6 +4309,7 @@ test('T-PRD017 native v11 authenticates current costs and preserves historical s
         nativePlacementCostsV11: nativePass.nativePlacementCostsV11,
         nativePlacementTransfersV12: nativePass.nativePlacementTransfersV12,
         nativePlacementReservationV13: nativePass.nativePlacementReservationV13,
+        nativePlacementServiceV14: nativePass.nativePlacementServiceV14,
         nativePlacementCosts: { workers: { 'macos-x64': capacity } },
         nativeBootstrapRequirements: () => { throw new Error('Unsupported runtime/capacity must fail before SDK adoption'); } }));
     const placement = structuredClone(current.placement);
@@ -5487,7 +5539,8 @@ test('T-PRD017 native placement v6 requires adopted literal cost source and pres
 test('T-PRD017 native protocol5 spreads independent same-file roots and executes connected complete closures exactly once', async t => {
   const protocols = ['native-framework-shards-v5-root-components',
     'native-framework-shards-v6-stable-cost-components', nativePass.nativeParallelReadyPoolFrameworkShardProtocol,
-    nativePass.nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol];
+    nativePass.nativeServiceBalanceFrameworkShardProtocol, nativePass.nativeCatalogReservationFrameworkShardProtocol,
+    nativeFrameworkShardProtocol];
   const f = await observerApiFixture(t);
   const files = [...f.source.files].map(([file, contents]) => ({ file,
     contents: f.source.names.some(test => test.file === file && test.stage === 'regression') ?
@@ -5565,7 +5618,7 @@ test('T-PRD017 native protocol5 spreads independent same-file roots and executes
 
 test('T-PRD017 native protocol5 and historical4 retain source-bound observer and SDK reconstruction', async t => {
   const { protocolPairs, runProtocolRow } = await import('./readiness-protocol-row.mjs');
-  assert.equal(protocolPairs.length, 23, 'Append v13 without replacing any original complete causal row');
+  assert.equal(protocolPairs.length, 24, 'Append v14 without replacing any original complete causal row');
   assert.deepEqual(protocolPairs.slice(17, 22), [
     [nativePass.nativeCatalogIsolationFrameworkShardProtocol, nativeCryptoBootstrapProtocol],
     [nativePass.nativePhasedIsolationFrameworkShardProtocol, nativeCryptoBootstrapProtocol],
@@ -5573,14 +5626,16 @@ test('T-PRD017 native protocol5 and historical4 retain source-bound observer and
     [nativePass.nativeParallelReadyPoolFrameworkShardProtocol, nativeCryptoBootstrapProtocol],
     [nativePass.nativeServiceBalanceFrameworkShardProtocol, nativeCryptoBootstrapProtocol],
   ]);
-  assert.deepEqual(protocolPairs[22], [nativeFrameworkShardProtocol, nativeCryptoBootstrapProtocol]);
+  assert.deepEqual(protocolPairs[22], [nativePass.nativeCatalogReservationFrameworkShardProtocol, nativeCryptoBootstrapProtocol]);
+  assert.deepEqual(protocolPairs[23], [nativeFrameworkShardProtocol, nativeCryptoBootstrapProtocol]);
   await runProtocolRow(t, protocolPairs[18]);
   const protocols = ['native-framework-shards-v4-split-intel-units', 'native-framework-shards-v5-root-components',
     'native-framework-shards-v6-stable-cost-components', 'native-framework-shards-v7-resource-affinity-components',
     'native-framework-shards-v8-intel-catalog-isolation',
     'native-framework-shards-v9-phased-intel-isolation',
     nativePass.nativeComponentRebalanceFrameworkShardProtocol, nativePass.nativeParallelReadyPoolFrameworkShardProtocol,
-    nativePass.nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol];
+    nativePass.nativeServiceBalanceFrameworkShardProtocol, nativePass.nativeCatalogReservationFrameworkShardProtocol,
+    nativeFrameworkShardProtocol];
   for (const shardProtocol of protocols) {
     const f = await observerApiFixture(t, { frameworkShards: true, shardProtocol,
       bootstrapProtocol: nativeCryptoBootstrapProtocol, nodeArtifactReader: true });

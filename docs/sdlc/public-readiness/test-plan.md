@@ -107,8 +107,9 @@ seventeen original complete protocol/bootstrap scenarios, plus the historical
 v8/bootstrap eighteenth row, historical v9/bootstrap nineteenth row,
 v10/bootstrap twentieth row and v11/bootstrap twenty-first row, retaining all
 twenty-one when appending the historical v12/bootstrap twenty-second row.
-Append the current v13/bootstrap twenty-third row without replacing those
-twenty-two actual scenarios.
+Retain the historical v13/bootstrap twenty-third row and append the current
+v14/bootstrap twenty-fourth row without replacing those twenty-three actual
+scenarios.
 Reserve four root slots before
 setup, then run whole scenarios in isolated children under the existing shared
 producer budget, bounded to four and the actual caller allocation. Environment
@@ -1206,14 +1207,31 @@ not reproduce or clear the historical hosted timeout.
 The existing PR-only Windows readiness root in
 `test/public-readiness-inventory.test.mjs` also verifies separate bounded
 preparation and compilation/readiness windows. Only a source-verified compiling
-marker observed within the five-second preparation allowance arms one further
+marker observed within the fifteen-second preparation allowance arms one further
 five-second window; absent, wrong-source or late markers cannot extend it.
-This intentionally permits at most ten seconds of startup polling, not the
-previous single five-second dispatch allowance. Preserve delayed-wake proof,
+This intentionally permits at most twenty seconds of startup polling. Include
+successful preparation past the old five-second boundary and rejection at the
+actual new boundary. Preserve delayed-wake proof,
 affirmative compiler settlement, failed admission, one-second native observation,
-1500ms capture, the mandatory real native-positive root and its thirty-second
-timeout. Its controlled marker/spawn instrumentation remains process-local,
+1500ms capture and the mandatory real native-positive root. Bound its complete
+multi-observer scenario with a 120-second watchdog and command capture with a
+sixty-second watchdog; these setup allowances do not change actual target
+termination deadlines or the complete native lane limits.
+Verify that pre-existing release and release while preparation is blocked
+prevent compiler dispatch and produce affirmative source-bound no-writer
+cleanup, never readiness credit. A genuinely started compiler with missing
+settlement must retain the original failure and stop aggregate admission.
+Distinguish a stopped fresh connection from actual duplicate allocation without
+changing the BUDGET code or allowing queued work to start.
+The controlled marker/spawn instrumentation remains process-local,
 Node-only and one-slot, with no critical promotion or native execution credit.
+The new maintainer-owned `T-PRD018 Windows observer release before compiler
+dispatch proves no writer and graceful owned cleanup` root is PR-only on
+Windows x64 with two slots and no added dependencies. Use owned observer paths
+and the stock shell to prove both release boundaries, source-bound no-writer
+cleanup, no compiler dispatch and refusal of readiness credit. This control
+does not replace the required real native-positive root or permit unverified
+settlement of a compiler that started.
 
 The existing PR-only `TOOL02 Windows validation settlement bounds exited roots
 and failed or stalled tree termination` root in
@@ -1464,6 +1482,19 @@ object publication, actual grouped execution, normalization, evaluation and
 admission separately. Distinguish nonoverlapping elapsed phases from inclusive
 or summed concurrent service times. Keep the authentic original root and
 2066/2245/2265 exhaustion boundaries; account for new regressions separately.
+The fixture readiness helper may read the validated bound manifest to obtain
+the working directory without eagerly replaying old outcome pages before a
+fresh producer starts. Production admission and fresh `Store.load` must still
+verify every original retained page. The existing PR-only
+`published references are fresh-checked after cache use and missing/corrupt pages cannot become success`
+root adds a real producer against a temporarily missing previous page, rejected
+admission, exact-byte restoration, admission of the same evaluation and a fresh
+reopen retaining exactly one Passed result with aggregate completion still false.
+Its catalog-service maintainer owns a unique repository/home and guarded
+cleanup; reserve six slots, no added dependency or external exclusive resource,
+on all four native lanes. Do not promote it to critical or replace the complete
+catalog root with this smaller control. A single local baseline/corrected
+measurement is developmental, not a native timing guarantee.
 The PR-only `immutable validation publication bounds overlap and drains ordered
 failures before later batches` root in `test/validation-catalog.test.mjs`
 belongs to the validation/catalog persistence maintainer. It uses owned
@@ -1792,7 +1823,8 @@ the original subset. A new legitimate test must not erase preservation checks.
    supply the prerequisite. Include the unit barrier, every part's provisioning,
    evidence retention and cleanup in the whole-lane elapsed time.
    For current implementation candidate
-   `native-framework-shards-v13-catalog-process-reservation` and historical
+   `native-framework-shards-v14-catalog-fixture-service` and historical
+   `native-framework-shards-v13-catalog-process-reservation` and
    `native-framework-shards-v12-intel-service-balance` and
    `native-framework-shards-v11-parallel-intel-ready-pool` and
    `native-framework-shards-v10-phased-intel-component-rebalance` and
@@ -2037,6 +2069,20 @@ the original subset. A new legitimate test must not erase preservation checks.
    timing cure. Fresh current-candidate local validation, Review and native
    correctness/whole-lane timing remain NotRun; C79's 27:37 timing failure and
    all original execution evidence remain historical and immutable.
+   V14 adds the source-qualified `nativePlacementServiceV14` rule for the
+   fixture-only service change. Authenticate its historical v13 literals,
+   current catalog callback/source, complete inventory/root order, resources,
+   components and selected SDK destinations before retaining ownership.
+   Preserve every pre-existing Intel body assignment and the six v12 component
+   transfers; place only the new complete Windows release-control component on
+   body-2. Keep changed-callback/resource leads explicitly unknown and catalog
+   unmeasured, rather than importing a local or old one-slot duration.
+   Preserve authentic v1-v13 assignment/literal/SDK reconstruction and append
+   the real v14/bootstrap twenty-fourth causal row. All twenty-five producers,
+   thirteen Mac cleanups, fourteen-slot Intel bodies, four-slot units and the
+   twenty-seven critical budget remain unchanged. The existing PR-only native
+   qualification roots retain their isolated Node fixtures and classifications;
+   no current native overlap, timing or acceptance follows from those fixtures.
    The three PR-only roots in `test/public-readiness-native.test.mjs` are
    `T-PRD017 native protocol4 retains its exact historical file and assertion assignments`,
    `T-PRD017 native protocol5 spreads independent same-file roots and executes connected complete closures exactly once`,

@@ -10,6 +10,9 @@ export const validationDeclarations = {
     "root": "T-PRD018 Windows native runtime observations retain original handle facts without changing target lifetime",
     "minimumSlots": 3
   }, {
+    "root": "T-PRD018 Windows observer release before compiler dispatch proves no writer and graceful owned cleanup",
+    "minimumSlots": 2
+  }, {
     "root": "T-PRD018 command checkpoint capacity retains safe original streams without manufacturing completion",
     "minimumSlots": 2
   }, {
@@ -45,13 +48,19 @@ export const validationDeclarations = {
     "names": ["T-PRD018 Windows native runtime observations retain original handle facts without changing target lifetime"],
     "platforms": ["windows-x64"],
     "owner": "runner-termination-evidence-contract",
-    "reason": "PR-only live/exit259/image-mismatch native facts plus isolated injected startup/cleanup boundaries; original child/compiler uncertainty stays unknown. No critical promotion or cancellation-success credit; process-local spawn instrumentation is restored.",
+    "reason": "PR-only live/exit259/image-mismatch native facts, real compiler return with deliberately unpublishable settlement, and isolated injected startup/cleanup boundaries; original child/compiler uncertainty stays unknown and stops admission. No critical promotion or cancellation-success credit; process-local spawn instrumentation is restored.",
     "prerequisites": ["Node; stock Windows PowerShell 5.1 and .NET Framework compiler; three aggregate slots and new owned repository-local directories"]
+  }, {
+    "names": ["T-PRD018 Windows observer release before compiler dispatch proves no writer and graceful owned cleanup"],
+    "platforms": ["windows-x64"],
+    "owner": "runner-termination-evidence-contract",
+    "reason": "PR-only actual PowerShell observer with an inherited compiler-dispatch trap: owned release before entry or during either preparation publication prevents compilation and retains source-bound no-writer proof. Two owned processes, no compiler or target and no critical promotion; spawn instrumentation is restored.",
+    "prerequisites": ["Node; stock Windows PowerShell 5.1; two aggregate slots and new owned repository-local directories"]
   }, {
     "names": ["T-PRD018 Windows observer readiness retains published proof when its polling wake crosses the deadline"],
     "platforms": ["windows-x64"],
     "owner": "runner-termination-evidence-contract",
-    "reason": "PR-only deterministic controller regression: delayed polling retains valid proof, bounded preparation does not consume compilation/readiness time, and absent/invalid/wrong-source preparation cannot extend waiting. Missing/unsettled/wrong-source readiness still fails. The actual settlement helper is evaluated with controlled observer/admission boundaries to retain final error facts before fail-stop, including stop failure. No real descendant, compiler or critical promotion.",
+    "reason": "PR-only deterministic controller regression: delayed polling retains valid proof, preparation beyond the former five-second bound retains the separate five-second compilation/readiness window, and absent/invalid/wrong-source preparation cannot extend the fifteen-second preparation bound. Missing/unsettled/wrong-source readiness still fails. The actual settlement helper retains started-but-unsettled compiler failure and global fail-stop, including stop failure. No real descendant, compiler or critical promotion.",
     "prerequisites": ["Node; independent process-isolated root and owned repository-local marker fixtures"]
   }, {
     "names": ["T-PRD018 capture admission reserves its complete process tree while independent peers progress"],
@@ -407,7 +416,7 @@ test('T-PRD018 Windows termination observations durably distinguish dispatch and
   });
 
 test('T-PRD018 Windows native runtime observations retain original handle facts without changing target lifetime',
-  { timeout: 30000, skip: process.platform !== 'win32' }, async t => {
+  { timeout: 120000, skip: process.platform !== 'win32' }, async t => {
     const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'native-runtime-observation-'));
     const observers = [];
     t.after(async () => {
@@ -517,6 +526,64 @@ setTimeout(()=>{clearInterval(barrier);process.exitCode=91;},8000).unref();
         }
       }
     }
+    const receiptFailureWrapper = path.join(directory, 'unreceipted-compiler.ps1');
+    const observerSource = path.resolve('test', 'windows-runtime-observer', 'observer.ps1');
+    await fs.writeFile(receiptFailureWrapper, `param($Directory,$Nonce,$OwnerPid,$OwnerCreatedBeforeMs,$ExpectedImage)
+function ConvertTo-Json($InputObject,$Depth,[switch]$Compress) {
+    if ($InputObject.compilerSettled -eq $true) {
+        [IO.File]::WriteAllText([IO.Path]::Combine($Directory,"$Nonce.compiler-returned"),'returned')
+        throw 'Owned compiler settlement publication failure'
+    }
+    Microsoft.PowerShell.Utility\\ConvertTo-Json -InputObject $InputObject -Depth $Depth -Compress:$Compress
+}
+& '${observerSource.replaceAll("'", "''")}' -Directory $Directory -Nonce $Nonce -OwnerPid $OwnerPid -OwnerCreatedBeforeMs $OwnerCreatedBeforeMs -ExpectedImage $ExpectedImage
+`);
+    const originalSpawn = childProcess.spawn;
+    let unreceiptedChild;
+    let unreceiptedClosed;
+    let unreceipted;
+    childProcess.spawn = (command, args, options) => {
+      assert.equal(args[4], observerSource);
+      unreceiptedChild = originalSpawn(command, [...args.slice(0, 4), receiptFailureWrapper, ...args.slice(5)], options);
+      unreceiptedClosed = new Promise(resolve => unreceiptedChild.once('close', resolve));
+      return unreceiptedChild;
+    };
+    syncBuiltinESMExports();
+    try {
+      unreceipted = await startWindowsRuntimeObserver({
+        directory: path.join(directory, 'unreceipted-compiler'), ownerPid: process.pid, expectedImage: 'node',
+      });
+    } finally {
+      childProcess.spawn = originalSpawn;
+      syncBuiltinESMExports();
+    }
+    try {
+      const readinessError = await unreceipted.ready.then(() => null, error => error);
+      assert.match(readinessError?.message ?? '', /^observer-not-ready;/);
+      await unreceiptedClosed;
+      assert.equal(unreceiptedChild.exitCode, 0);
+      assert.ok((await fs.stat(unreceipted.files.bridgeAssembly)).size > 0,
+        'The actual .NET compiler must have produced its owned assembly before settlement publication fails');
+      assert.equal(await fs.readFile(unreceipted.files.release.replace('.release.json', '.compiler-returned'), 'utf8'),
+        'returned');
+      await assert.rejects(fs.stat(unreceipted.files.compilerSettled), { code: 'ENOENT' });
+      await assert.rejects(fs.stat(unreceipted.files.compilerNotStarted), { code: 'ENOENT' });
+      const currentSource = await fs.readFile(fileURLToPath(import.meta.url), 'utf8');
+      const helper = currentSource.slice(currentSource.indexOf('async function settleRuntimeObserver('),
+        currentSource.indexOf('function specification()'));
+      let admissionStopped = false;
+      const settle = runInContext(`${helper}\nsettleRuntimeObserver;`,
+        createContext({ stopTestAdmission: async () => { admissionStopped = true; } }));
+      const result = await settle(unreceipted, null, readinessError);
+      assert.equal(result.cleanup, 'unknown', 'Observer closure cannot replace missing compiler-settlement proof');
+      assert.equal(result.compilerSettled, false);
+      assert.equal(result.forcedObserverStop, false);
+      assert.equal(admissionStopped, true, 'An actual dispatched compiler without a receipt must retain fail-stop');
+      assert.equal((await unreceipted.startupFacts()).failed.phase, 'settlementPublish');
+    } finally {
+      if (unreceiptedChild.exitCode === null && unreceiptedChild.signalCode === null) unreceiptedChild.kill('SIGKILL');
+      await unreceiptedClosed;
+    }
     const settlementProof = {
       schema: 1, compilerSettled: true,
       observerSha256: digest(await fs.readFile(path.resolve('test', 'windows-runtime-observer', 'observer.ps1'))),
@@ -587,6 +654,100 @@ setTimeout(()=>{clearInterval(barrier);process.exitCode=91;},8000).unref();
     }
   });
 
+test('T-PRD018 Windows observer release before compiler dispatch proves no writer and graceful owned cleanup',
+  { timeout: 60000, skip: process.platform !== 'win32' }, async t => {
+    const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'native-runtime-release-'));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const sourcePath = path.resolve('test', 'windows-runtime-observer', 'observer.ps1');
+    const expectedProof = {
+      schema: 1, compilerStarted: false, reason: 'released',
+      observerSha256: digest(await fs.readFile(sourcePath)),
+      bridgeSha256: digest(await fs.readFile(path.resolve('test', 'windows-runtime-observer', 'bridge.cs'))),
+    };
+    for (const mode of ['pre-existing', 'entered', 'compiling']) {
+      const wrapper = path.join(directory, `${mode}.ps1`);
+      await fs.writeFile(wrapper, `param($Directory,$Nonce,$OwnerPid,$OwnerCreatedBeforeMs,$ExpectedImage)
+$ErrorActionPreference='Stop'
+$release=[IO.Path]::Combine($Directory,"$Nonce.release.json")
+$blocked=[IO.Path]::Combine($Directory,"$Nonce.preparation-blocked")
+$dispatch=[IO.Path]::Combine($Directory,"$Nonce.compiler-dispatched")
+function Add-Type {
+    [IO.File]::WriteAllText($dispatch,'unexpected compiler dispatch')
+    throw 'Owned compiler trap: no compiler may execute'
+}
+function ConvertTo-Json($InputObject,$Depth,[switch]$Compress) {
+    if ($InputObject.phase -eq '${mode}') {
+        [IO.File]::WriteAllText($blocked,'preparation')
+        $wait=[Diagnostics.Stopwatch]::StartNew()
+        while (-not [IO.File]::Exists($release)) {
+            if ($wait.ElapsedMilliseconds -ge 15000) { throw 'Owned preparation release expired' }
+            [Threading.Thread]::Sleep(10)
+        }
+    }
+    Microsoft.PowerShell.Utility\\ConvertTo-Json -InputObject $InputObject -Depth $Depth -Compress:$Compress
+}
+${mode === 'pre-existing' ? "[IO.File]::WriteAllText($release,'{\"schema\":1}')" : ''}
+& '${sourcePath.replaceAll("'", "''")}' -Directory $Directory -Nonce $Nonce -OwnerPid $OwnerPid -OwnerCreatedBeforeMs $OwnerCreatedBeforeMs -ExpectedImage $ExpectedImage
+`);
+      const originalSpawn = childProcess.spawn;
+      let child;
+      let closed;
+      childProcess.spawn = (command, args, options) => {
+        assert.equal(args[4], path.resolve(sourcePath));
+        child = originalSpawn(command, [...args.slice(0, 4), wrapper, ...args.slice(5)], options);
+        closed = new Promise(resolve => child.once('close', resolve));
+        return child;
+      };
+      syncBuiltinESMExports();
+      let observer;
+      try {
+        observer = await startWindowsRuntimeObserver({
+          directory: path.join(directory, mode), ownerPid: process.pid, expectedImage: 'node',
+        });
+      } finally {
+        childProcess.spawn = originalSpawn;
+        syncBuiltinESMExports();
+      }
+      const readiness = observer.ready.then(value => ({ value }), error => ({ error }));
+      try {
+        if (mode !== 'pre-existing') {
+          const blocked = observer.files.release.replace('.release.json', '.preparation-blocked');
+          const deadline = performance.now() + 15000;
+          while (!await fs.stat(blocked).catch(error => {
+            if (error.code !== 'ENOENT') throw error;
+            return null;
+          })) {
+            assert.ok(performance.now() < deadline, `${mode}: actual preparation must reach its owned barrier`);
+            await delay(10);
+          }
+        } else await readiness;
+        const result = await observer.finalize();
+        await closed;
+        assert.equal(result.cleanup, 'awaited', `${mode}: proven no-writer cleanup must be affirmative`);
+        assert.equal(result.compilerSettled, true);
+        assert.equal(result.forcedObserverStop, false);
+        assert.equal(result.observerExit.code, 0);
+        assert.equal(result.observation.reason, 'released');
+        assert.equal(result.observation.compilerSandboxed, false);
+        assert.equal(result.observation.ownerHandlePinned, false);
+        assert.equal(result.observation.target.status, 'unverified');
+        await assert.rejects(fs.stat(observer.files.release.replace('.release.json', '.compiler-dispatched')),
+          { code: 'ENOENT' }, `${mode}: released preparation must not dispatch the compiler`);
+        await assert.rejects(fs.stat(observer.files.compilerSettled), { code: 'ENOENT' },
+          'No compiler-returned receipt may be manufactured when no compiler ran');
+        assert.deepEqual(JSON.parse(await fs.readFile(observer.files.compilerNotStarted, 'utf8')), expectedProof);
+        const facts = await observer.startupFacts();
+        assert.equal(facts.compilerReceipt, 'notStarted');
+        assert.equal(facts.compilerSettled, true);
+        assert.match((await readiness).error?.message ?? '', /^observer-not-ready;/);
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+        await closed;
+        await readiness;
+      }
+    }
+  });
+
 test('T-PRD018 Windows observer readiness retains published proof when its polling wake crosses the deadline',
   { timeout: 10000, skip: process.platform !== 'win32' }, async t => {
     const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'native-runtime-poll-'));
@@ -597,6 +758,7 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
       bridgeSha256: digest(await fs.readFile(path.resolve('test', 'windows-runtime-observer', 'bridge.cs'))),
     };
     for (const mode of ['published', 'unsettled', 'wrong-source', 'missing',
+      'not-started', 'wrong-not-started', 'not-started-with-ready',
       'pending-compiler', 'compile-failure', 'owner-rejected', 'private-failure']) {
       const originalSpawn = childProcess.spawn;
       const originalStat = fsPromises.stat;
@@ -656,13 +818,20 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
             ...proof, ...(mode === 'wrong-source' ? { observerSha256: '0'.repeat(64) } : {}),
           }));
         }
-        if (['published', 'unsettled', 'wrong-source'].includes(mode)) {
+        if (mode.includes('not-started')) {
+          await atomicWrite(observer.files.compilerNotStarted, JSON.stringify({
+            schema: 1, compilerStarted: false, reason: 'released',
+            observerSha256: mode === 'wrong-not-started' ? '0'.repeat(64) : proof.observerSha256,
+            bridgeSha256: proof.bridgeSha256,
+          }));
+        }
+        if (['published', 'unsettled', 'wrong-source', 'not-started-with-ready'].includes(mode)) {
           await atomicWrite(observer.files.ready, JSON.stringify({
             schema: 2, ownerHandlePinned: true, compilerSandboxed: true,
           }));
         }
         // The markers precede the deadline; only delivery of the absent probe is late.
-        now = 5001;
+        now = 15001;
         releaseProbe.resolve();
         const result = await readiness;
         if (mode === 'published') {
@@ -675,7 +844,7 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
           const retained = JSON.parse(result.error.message.slice(prefix.length));
           assert.equal(retained.scope, 'diagnostic-only');
           assert.equal(retained.readiness.status,
-            ['unsettled', 'wrong-source'].includes(mode) ? 'rejected' : 'missing');
+            ['unsettled', 'wrong-source', 'not-started-with-ready'].includes(mode) ? 'rejected' : 'missing');
           assert.ok(Buffer.byteLength(result.error.message) <= 4096);
           assert.ok(!result.error.message.includes(directory));
           assert.ok(!result.error.message.includes('caller-private-startup-value'));
@@ -687,13 +856,25 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
         const facts = await observer.startupFacts();
         assert.equal(facts.scope, 'diagnostic-only');
         assert.equal(facts.readiness.status, mode === 'published' ? 'verified' :
-          ['unsettled', 'wrong-source'].includes(mode) ? 'rejected' : 'missing');
+          ['unsettled', 'wrong-source', 'not-started-with-ready'].includes(mode) ? 'rejected' : 'missing');
         assert.equal(facts.compilerReceipt, ['published', 'owner-rejected'].includes(mode) ? 'verified' :
-          mode === 'wrong-source' ? 'wrongSource' : 'missing');
+          ['wrong-source', 'wrong-not-started'].includes(mode) ? 'wrongSource' :
+            ['not-started', 'not-started-with-ready'].includes(mode) ? 'notStarted' : 'missing');
         if (mode === 'pending-compiler') {
           assert.equal(facts.compiling.status, 'verified');
           assert.equal(facts.failed.status, 'missing');
           assert.equal(facts.compilerSettled, false, 'A compiling diagnostic is not compiler settlement');
+          child.emit('close', 0, null);
+          const currentSource = await fs.readFile(fileURLToPath(import.meta.url), 'utf8');
+          const helper = currentSource.slice(currentSource.indexOf('async function settleRuntimeObserver('),
+            currentSource.indexOf('function specification()'));
+          let admissionStopped = false;
+          const context = createContext({ stopTestAdmission: async () => { admissionStopped = true; } });
+          const settle = runInContext(`${helper}\nsettleRuntimeObserver;`, context);
+          const unsettled = await settle(observer, null, result.error);
+          assert.equal(unsettled.cleanup, 'unknown');
+          assert.equal(unsettled.compilerSettled, false);
+          assert.equal(admissionStopped, true, 'An entered compiler without settlement must stop aggregate admission');
           await atomicWrite(observer.files.compilerSettled, JSON.stringify(proof));
           await atomicWrite(observer.files.startupCompiled, JSON.stringify({
             schema: 1, phase: 'compiled', reason: 'none', elapsedMs: 6000, utcMs: Date.now(),
@@ -723,7 +904,8 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
         syncBuiltinESMExports();
         if (observer) {
           const result = await observer.finalize();
-          const settled = ['published', 'owner-rejected', 'pending-compiler'].includes(mode);
+          const settled = ['published', 'owner-rejected', 'pending-compiler',
+            'not-started', 'not-started-with-ready'].includes(mode);
           assert.equal(result.compilerSettled, settled);
           assert.equal(result.cleanup, settled ? 'awaited' : 'unknown');
           assert.equal(result.forcedObserverStop, false);
@@ -747,6 +929,7 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
       let now = 0;
       let observer;
       let readiness;
+      let proofPublished = false;
       childProcess.spawn = () => { dispatched = true; return child; };
       fsPromises.stat = async filename => {
         if (filename.endsWith('.ready.json') && probeIndex < probes.length) {
@@ -769,7 +952,7 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
         readiness = observer.ready.then(value => ({ value }), error => ({ error }));
         child.emit('spawn');
         await probes[0].entered.promise;
-        now = mode === 'preparation-expired' ? 5001 : 3500;
+        now = mode === 'preparation-expired' ? 15001 : 12000;
         await atomicWrite(observer.files.startupCompiling, JSON.stringify({
           schema: 1, phase: 'compiling', reason: 'none', elapsedMs: 1369, utcMs: Date.now(),
           observerSha256: mode === 'wrong-preparation-source' ? '0'.repeat(64) : proof.observerSha256,
@@ -777,15 +960,18 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
         }));
         probes[0].release.resolve();
         await probes[1].entered.promise;
-        now = mode === 'readiness-expired' ? 8501 : 6500;
+        now = mode === 'readiness-expired' ? 17001 : 16000;
         probes[1].release.resolve();
         if (mode === 'prepared' || mode === 'readiness-expired') {
-          await probes[2].entered.promise;
+          assert.equal(await Promise.race([
+            probes[2].entered.promise.then(() => true), readiness.then(() => false),
+          ]), true, `${mode}: the permitted preparation budget must retain the separate readiness probe`);
           if (mode === 'prepared') {
             await atomicWrite(observer.files.compilerSettled, JSON.stringify(proof));
             await atomicWrite(observer.files.ready, JSON.stringify({
               schema: 2, ownerHandlePinned: true, compilerSandboxed: true,
             }));
+            proofPublished = true;
           }
           probes[2].release.resolve();
         } else probes[2].release.resolve();
@@ -793,7 +979,7 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
         if (mode === 'prepared') {
           assert.deepEqual(result.value, {
             ready: true, ownerHandlePinned: true, compilerSandboxed: true, compilerSettled: true,
-          }, `Verified preparation at 3500ms must leave the complete 5000ms compilation/readiness window; ${
+          }, `Verified preparation at 12000ms must leave the complete 5000ms compilation/readiness window; ${
             result.error?.message ?? 'no startup failure'}`);
           await assert.rejects(observer.request({ pid: process.pid, createdBeforeMs: Date.now() }),
             /observer-invalid-request/);
@@ -812,8 +998,8 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
         syncBuiltinESMExports();
         if (observer) {
           const result = await observer.finalize();
-          assert.equal(result.compilerSettled, mode === 'prepared');
-          assert.equal(result.cleanup, mode === 'prepared' ? 'awaited' : 'unknown');
+          assert.equal(result.compilerSettled, proofPublished);
+          assert.equal(result.cleanup, proofPublished ? 'awaited' : 'unknown');
           assert.equal(result.forcedObserverStop, false);
           assert.equal(result.observation, null, 'Preparation markers supply no native observation credit');
         }
@@ -1076,7 +1262,7 @@ worker.close();process.disconnect();
   });
 
 test('T-PRD018 command capture durably retains dispatched identity and sanitized progress before cancellation or abrupt termination',
-  { timeout: 30000 }, async t => {
+  { timeout: 60000 }, async t => {
     const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'command-checkpoint-'));
     const observers = [];
     t.after(async () => {

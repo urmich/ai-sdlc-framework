@@ -406,7 +406,7 @@ unit evidence before regression shards execute. Independently verify every
 part's SDK context, complete assertion union and allocated-prefix cleanup;
 missing, duplicated, overlapping or swapped parts cannot produce completeness.
 The current implementation candidate
-`native-framework-shards-v13-catalog-process-reservation` retains
+`native-framework-shards-v14-catalog-fixture-service` retains
 v4's four
 explicit platform-specific unit-to-regression job groups. A platform's unit
 producers must all complete successfully, including retention and cleanup, before
@@ -638,6 +638,30 @@ Intel bodies, four-slot units and the finite twenty-seven critical budget.
 Current whole-candidate validation, Review and native timing remain NotRun.
 The source-correct admission candidate provides no under-twenty-five-minute
 guarantee; original C79 correctness success and 27:37 timing failure are immutable.
+V14 preserves authentic v13 and adds the strict `nativePlacementServiceV14`
+qualification. The fixture readiness producer obtains its working directory
+from the validated bound manifest instead of eagerly replaying every previous
+retained outcome merely to find that directory. Actual production admission
+and fresh `Store.load` still verify the complete original immutable records;
+no retention, durability, integrity or outcome requirement is bypassed.
+Preserve the complete catalog callback, all 2066 unit prerequisites, 2245
+pre-review outcomes, seven-slot reservation and original exhaustion boundaries.
+The existing published-reference regression starts a real owned producer with
+a previous page temporarily missing, requires admission to reject that missing
+page, restores its exact bytes and admits the same evaluation. Freshly reopened
+storage must retain the exact result; aggregate stage completion remains false.
+Authenticate the v13 cost/transfer/reservation literals, current source,
+callback/resource closures, inventory and root order before retaining whole
+component ownership. Keep every pre-existing Intel body assignment and extend
+body-2 only with the new independent Windows release control. Changed callbacks
+and resources remain explicit unknowns; catalog retains no borrowed duration.
+Preserve all twenty-five producers, thirteen Mac cleanups, fourteen-slot Intel
+bodies, four-slot units, actual selected SDKs and the finite critical budget.
+Historical v1-v13 assignments, source literals and SDK envelopes remain genuine.
+Append the actual v14/bootstrap twenty-fourth causal row without replacing its
+twenty-three predecessors. Local fixture timings are developmental observations,
+not native scaling predictions or proof of the complete lane limit. Current
+whole-candidate validation, Review and native acceptance remain NotRun.
 Captured v6 planner source must carry the authentic adopted `nativePlacementCosts`
 literal. V7 additionally requires authentic `nativePlacementAffinities` and
 `nativePlacementCostsV7` strict JSON literals. Reject missing, computed, duplicate
@@ -1883,7 +1907,8 @@ must not be interpreted as the backend's stop-entry clock or an atomic kernel
 snapshot. Zero CPU or absent capture cannot identify a loader/scheduling cause.
 Finalization is idempotent and signals only the original observer child on its
 own bounded cleanup timeout. A strict post-compilation marker bound to captured
-PowerShell/bridge source hashes, or proven failure before observer dispatch,
+PowerShell/bridge source hashes, separate source-bound proof that a released
+observer never dispatched a compiler, or proven failure before observer dispatch
 establishes compiler settlement; PowerShell
 closure or a post-spawn error alone does not. Unknown observer or compiler
 lifetime prevents fixture removal. On readiness failure, await this settlement
@@ -1893,17 +1918,32 @@ regressions exercise these boundaries without a native compiler or target and
 restore their process-local spawn instrumentation. Wrong-source markers never
 establish settlement. A subsequent finalization can refine an unknown snapshot
 from late affirmative proof without repeating signals or mutating old results.
-For runtime-observer readiness, bound shell/module preparation separately from
-compilation and readiness. One source-verified compiling marker observed before
-the initial five-second deadline arms exactly one further five-second window.
+For runtime-observer readiness, allow fifteen seconds for shell/module
+preparation, separately from compilation and readiness. One source-verified
+compiling marker observed before that preparation deadline arms exactly one
+further five-second window.
 Missing, invalid, foreign-source or late markers cannot rearm it. This changes
-maximum startup polling from five to ten seconds; it does not change the
-one-second observation window, 1500ms capture wait or thirty-second native root
-timeout. A preparation marker is neither readiness nor compiler-settlement
+maximum startup polling to twenty seconds; it does not change the one-second
+observation window, 1500ms capture wait or actual target termination deadlines.
+The native multi-observer root has a 120-second watchdog and command capture
+has a sixty-second watchdog, including their finite setup and owned cleanup.
+A preparation marker is neither readiness nor compiler-settlement
 proof. Preserve the final delayed-wake inspection and all affirmative native
 proof, target-lifetime, fail-stop and unknown-cleanup requirements. Controlled
 clock regressions and a local native-positive result do not establish the
 cause or cure of the historical hosted startup failure.
+Inspect owned release before compiler dispatch, including after preparation
+has blocked. A released observer may provide no-writer proof only when it has
+not invoked the compiler and cannot do so later; this is cleanup proof, never
+readiness or native observation credit. A compiler that actually started still
+requires affirmative settlement. Neither a release marker nor observer closure
+alone permits an unknown compiler to be treated as stopped.
+The separate `<nonce>.compiler-not-started.json` proof has exactly `schema: 1`,
+`compilerStarted: false`, `reason: "released"` and the two captured source
+hashes. It is considered only when the ordinary compiler-settlement receipt is
+missing. Its `notStarted` receipt means no outstanding compiler writer; only
+the ordinary `verified` compiler receipt can contribute to readiness.
+Await original observer closure before calling cleanup complete.
 If cleanup or compiler settlement remains unknown, the original acquired worker
 requests persistent aggregate admission stop over its existing authenticated
 socket. Mark the broker stopped before acknowledgement and reject queued/new
@@ -1917,6 +1957,10 @@ four-slot PR-only broker regression models uncertain cleanup with owned stock
 Node roots; it checks queued/fresh rejection across failing-worker closure,
 original failure retention and independent peer completion. This fail-stop
 contains uncertainty but does not resolve it or fix native cancellation.
+Report stopped admission separately from a socket that already owns an
+allocation, retaining the existing BUDGET code and rejection/cleanup semantics.
+The isolated regression covers fresh and queued admissions after stop as well
+as actual repeated allocation; a stopped fresh connection is not socket reuse.
 Keep the original worker socket referenced while its admission-stop request
 awaits acknowledgement, restoring its idle unreferenced state after settlement.
 Otherwise the preload's `beforeExit` cleanup can close that same connection

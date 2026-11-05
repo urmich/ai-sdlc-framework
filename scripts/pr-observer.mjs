@@ -369,7 +369,8 @@ function macAdmissionPolicyMatches(document, protocol, priority, homebrewFirst, 
     native.nativeStableCostFrameworkShardProtocol, native.nativeResourceAffinityFrameworkShardProtocol,
     native.nativeCatalogIsolationFrameworkShardProtocol, native.nativePhasedIsolationFrameworkShardProtocol,
     native.nativeComponentRebalanceFrameworkShardProtocol, native.nativeParallelReadyPoolFrameworkShardProtocol,
-    native.nativeServiceBalanceFrameworkShardProtocol, native.nativeFrameworkShardProtocol].includes(protocol) &&
+    native.nativeServiceBalanceFrameworkShardProtocol, native.nativeCatalogReservationFrameworkShardProtocol,
+    native.nativeFrameworkShardProtocol].includes(protocol) &&
     digest(document.jobs?.['mac-admission'] ?? null) ===
       digest(expectedMacAdmissionJob(retainedFirst ? 'arm-bodies' : 'arm-regressions', false, false,
         boundedQueue, false, readyCritical)) &&
@@ -418,7 +419,8 @@ export function inspectWorkflowTrust(workflows) {
       native.nativeStableCostFrameworkShardProtocol, native.nativeResourceAffinityFrameworkShardProtocol,
       native.nativeCatalogIsolationFrameworkShardProtocol, native.nativePhasedIsolationFrameworkShardProtocol,
       native.nativeComponentRebalanceFrameworkShardProtocol, native.nativeParallelReadyPoolFrameworkShardProtocol,
-      native.nativeServiceBalanceFrameworkShardProtocol, native.nativeFrameworkShardProtocol].includes(marker) &&
+      native.nativeServiceBalanceFrameworkShardProtocol, native.nativeCatalogReservationFrameworkShardProtocol,
+      native.nativeFrameworkShardProtocol].includes(marker) &&
       topologyProtocol === native.nativeSplitUnitFrameworkShardProtocol;
     if (marker !== undefined && !rootComponents) {
       result.blockers.push({ file: selected.file, code: 'NATIVE_SHARD_PROTOCOL_DIFFERS' });
@@ -650,7 +652,7 @@ export function nativeLaneTimings(parts, { frameworkShards = true,
     const { maximumMs, maximumInclusive } = frameworkShards &&
       [native.nativePhasedIsolationFrameworkShardProtocol, native.nativeComponentRebalanceFrameworkShardProtocol,
         native.nativeParallelReadyPoolFrameworkShardProtocol, native.nativeServiceBalanceFrameworkShardProtocol,
-        native.nativeFrameworkShardProtocol].includes(shardProtocol) &&
+        native.nativeCatalogReservationFrameworkShardProtocol, native.nativeFrameworkShardProtocol].includes(shardProtocol) &&
         target === 'macos-x64' ?
       nativePhasedIntelLaneLimit : nativeLaneLimits[target];
     return { target, startedAt, completedAt, durationMs, maximumMs, maximumInclusive,

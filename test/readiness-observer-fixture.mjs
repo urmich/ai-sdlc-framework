@@ -24,8 +24,9 @@ import { nativeLegacyPrParts, nativeFrameworkShardPlan, nativeFrameworkShardProt
   nativeCatalogIsolationFrameworkShardProtocol, nativePlacementCostsV9, nativePlacementPhasesV9,
   nativePhasedIsolationFrameworkShardProtocol, nativePlacementPhasesV10,
   nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-  nativeServiceBalanceFrameworkShardProtocol,
+  nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
   nativePlacementCostsV11, nativePlacementReadyPoolV11, nativePlacementTransfersV12, nativePlacementReservationV13,
+  nativePlacementServiceV14,
   verifyNativePhaseSettlement,
   nativePartJobKey, nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
 import { nativeResourceFacts, nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
@@ -196,46 +197,56 @@ function fixtureSources(ci, { unadoptedReporter = false, unadoptedAssertion = fa
   if ([nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
     nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
     nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-    nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
+    nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementCosts = Object.freeze(${JSON.stringify(nativePlacementCosts)});\n`);
   }
   if ([nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
     nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
-    nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
+    nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+    nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementAffinities = Object.freeze(${JSON.stringify(nativePlacementAffinities)});\n` +
       `export const nativePlacementCostsV7 = Object.freeze(${JSON.stringify(nativePlacementCostsV7)});\n`);
   }
   if ([nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
     nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-    nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
+    nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementCostsV8 = Object.freeze(${JSON.stringify(nativePlacementCostsV8)});\n` +
       `export const nativePlacementIsolationV8 = Object.freeze(${JSON.stringify(nativePlacementIsolationV8)});\n`);
   }
   if ([nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
-    nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
+    nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+    nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementCostsV9 = Object.freeze(${JSON.stringify(nativePlacementCostsV9)});\n` +
       `export const nativePlacementPhasesV9 = Object.freeze(${JSON.stringify(nativePlacementPhasesV9)});\n`);
   }
   if ([nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-    nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
+    nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementPhasesV10 = Object.freeze(${JSON.stringify(nativePlacementPhasesV10)});\n`);
   }
-  if ([nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
+  if ([nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+    nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol)) {
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementCostsV11 = Object.freeze(${JSON.stringify(nativePlacementCostsV11)});\n` +
       `export const nativePlacementReadyPoolV11 = Object.freeze(${JSON.stringify(nativePlacementReadyPoolV11)});\n`);
   }
-  if ([nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol))
+  if ([nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
+    nativeFrameworkShardProtocol].includes(shardProtocol))
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementTransfersV12 = Object.freeze(${JSON.stringify(nativePlacementTransfersV12)});\n`);
-  if (shardProtocol === nativeFrameworkShardProtocol)
+  if ([nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol))
     files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
       `export const nativePlacementReservationV13 = Object.freeze(${JSON.stringify(nativePlacementReservationV13)});\n`);
+  if (shardProtocol === nativeFrameworkShardProtocol)
+    files.set('scripts/native-validation.mjs', `${files.get('scripts/native-validation.mjs')}` +
+      `export const nativePlacementServiceV14 = Object.freeze(${JSON.stringify(nativePlacementServiceV14)});\n`);
   files.set('scripts/test-scheduling.mjs', schedulingSource);
   const schedulingPolicy = sourceValidationSchedulingPolicy([{ file: 'scripts/test-scheduling.mjs', contents: schedulingSource }]);
   assert.ok(['source', 'missing', 'mutated'].includes(admissionHelper));
@@ -942,6 +953,8 @@ export async function observerApiFixture(t, options = {}) {
       .map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n';
   }
   const ci = options.frameworkShards ? shardProtocol === nativeFrameworkShardProtocol ? currentCi :
+    shardProtocol === nativeCatalogReservationFrameworkShardProtocol ? currentCi.replaceAll(
+      nativeFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol) :
     shardProtocol === nativeServiceBalanceFrameworkShardProtocol ? currentCi.replaceAll(
       nativeFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol) :
     shardProtocol === nativeParallelReadyPoolFrameworkShardProtocol ? currentCi.replaceAll(

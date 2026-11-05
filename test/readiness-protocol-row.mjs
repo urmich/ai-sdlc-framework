@@ -10,7 +10,7 @@ import { nativePrPartsForProtocol, nativeWorkflowContract,
   nativePlatformUnitFrameworkShardProtocol, nativeLegacyFrameworkShardProtocol,
   nativeFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
   nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-  nativeServiceBalanceFrameworkShardProtocol,
+  nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
   nativeFrameworkShardPlan, replayNativeEvidence, verifyNativeShardUnitOrder } from '../scripts/native-validation.mjs';
 import { nativeUnitBootstrapProtocol, nativeBodyBootstrapProtocol,
   nativeBootstrapProtocol } from '../scripts/toolchain-baseline.mjs';
@@ -40,6 +40,7 @@ export const protocolPairs = Object.freeze([[nativeSplitUnitFrameworkShardProtoc
   [nativeComponentRebalanceFrameworkShardProtocol, nativeBootstrapProtocol],
   [nativeParallelReadyPoolFrameworkShardProtocol, nativeBootstrapProtocol],
   [nativeServiceBalanceFrameworkShardProtocol, nativeBootstrapProtocol],
+  [nativeCatalogReservationFrameworkShardProtocol, nativeBootstrapProtocol],
   [nativeFrameworkShardProtocol, nativeBootstrapProtocol]].map(pair => Object.freeze(pair)));
 
 // SDK verifier capabilities and every causal assertion stay in the same child.
@@ -49,7 +50,8 @@ export async function runProtocolRow(t, [shardProtocol, bootstrapProtocol]) {
   const expectedCount = nativePrPartsForProtocol(shardProtocol).length;
   const splitUnits = [nativeSplitUnitFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
     nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
-    nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol);
+    nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+    nativeCatalogReservationFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(shardProtocol);
   const frameworkCount = expectedCount - 2;
   assert.equal(f.parts.size, expectedCount);
   assert.equal(expectedCount, splitUnits ? 25 :

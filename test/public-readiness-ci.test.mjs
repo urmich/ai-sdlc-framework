@@ -42,7 +42,7 @@ import { nativePrParts, nativeLegacyPrParts, nativePartJobKey, nativeFrameworkSh
   nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
   nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
   nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
-  nativeServiceBalanceFrameworkShardProtocol,
+  nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol,
   nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
 import { compileValidationInventory } from '../scripts/validation-inventory.mjs';
 import { expectedBodySdkRequirements } from './native-sdk-expectations.mjs';
@@ -2405,7 +2405,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.equal(previousResource.nativeResourcePolicy, 'arm-regression-allocation-v1');
   for (const protocol of nativeFrameworkShardProtocols) {
     const historical = structuredClone(historicalV8);
-    if ([nativeFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
+    if ([nativeFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
       nativeParallelReadyPoolFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
       nativePhasedIsolationFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
       nativeResourceAffinityFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
