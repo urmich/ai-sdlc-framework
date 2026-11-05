@@ -683,7 +683,7 @@ test('T-PRD020 RC66 CI01 current twenty-five-part observer admits Intel 1185s an
 
 test('T-PRD021 versioned twenty-five twenty-four and twenty-part originals require exact closures cleanup and protected SDK replay', async t => {
   const result = await runProtocolPool(t);
-  assert.equal(result.rows.length, 21);
+  assert.equal(result.rows.length, protocolPairs.length);
   t.diagnostic(JSON.stringify({ protocolPool: result }));
 });
 

@@ -57,7 +57,7 @@ export const validationDeclarations = {
     "names": ["T-PRD018 capture admission reserves its complete process tree while independent peers progress"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "runner-resource-contract",
-    "reason": "PR-only capture admission regression: controlled capacity pressure plus real isolated worker leases and peer capacity reuse; no critical promotion.",
+    "reason": "PR-only capture admission regression: real cancellation selection rejects fewer than four process slots before dispatch, controlled capacity pressure plus real isolated worker leases and peer capacity reuse; no critical promotion.",
     "prerequisites": ["Node and six aggregate worker slots; owned repository-local process fixtures"]
   }, {
     "names": ["T-PRD018 command capture durably retains dispatched identity and sanitized progress before cancellation or abrupt termination"],
@@ -881,6 +881,30 @@ globalThis.requireReady = requireRuntimeObserverReady;`, context);
 
 test('T-PRD018 capture admission reserves its complete process tree while independent peers progress',
   { timeout: 30000 }, async t => {
+    const cancellationPlan = await createPlan(parseOptions(['targeted', '--workers', '4', '--name',
+      '^T-PRD018 tool processes retain failures, sanitized partial output and cancellation without surviving children$',
+      'test/public-readiness-ci.test.mjs']));
+    assert.equal(cancellationPlan.groups.length, 1);
+    let underfundedDispatch = false;
+    await assert.rejects(runValidationReadyPool(cancellationPlan.groups, {
+      concurrency: 3, capacity: 3, signal: t.signal, execute: async () => {
+        underfundedDispatch = true;
+        return 'Passed';
+      },
+    }), { code: 'BUDGET' });
+    assert.equal(underfundedDispatch, false,
+      'Cancellation must reserve its worker, command, descendant and native stop/query controller before dispatch');
+    let cancellationSlots;
+    const admittedCancellation = await runValidationReadyPool(cancellationPlan.groups, {
+      concurrency: 4, capacity: 4, signal: t.signal, execute: async selected => {
+        cancellationSlots = selected.minimumSlots;
+        return 'Passed';
+      },
+    });
+    assert.equal(cancellationSlots, 4);
+    assert.deepEqual([...admittedCancellation.completed.values()], ['Passed']);
+    assert.deepEqual(admittedCancellation.notRun, []);
+
     const root = 'T-PRD018 command capture durably retains dispatched identity and sanitized progress before cancellation or abrupt termination';
     const plan = await createPlan(parseOptions(['targeted', '--workers', '6', '--name',
       '^T-PRD018 command capture durably', 'test/public-readiness-inventory.test.mjs']));

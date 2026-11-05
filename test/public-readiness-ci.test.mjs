@@ -5,10 +5,18 @@ export const validationDeclarations = {
     {"coverage": "direct", "paths": ["scripts/pr-readiness.mjs", "scripts/github-readiness-host.mjs", "scripts/pr-observer.mjs", "scripts/workflow-policy.mjs", "scripts/native-toolchain.mjs", "scripts/native-homebrew-prefix.mjs"]}
   ],
   "groups": [
+    {"root": "T-PRD018 tool processes retain failures, sanitized partial output and cancellation without surviving children", "dependsOn": [], "minimumSlots": 4, "exclusiveResources": []},
     {"root": "T-PRD020 actual CI schedules twenty-five producer parts behind both Intel unit jobs and distinguishes edited base retargets", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD022 actual workflow graph applies semantic YAML, effective permissions and immutable action policy", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD020 required source safety scans complete committed definitions before native bootstrap", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}
-  ]
+  ],
+  "applicability": [{
+    "names": ["T-PRD018 tool processes retain failures, sanitized partial output and cancellation without surviving children"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "PR-only cancellation coverage reserves the worker, command, descendant and native stop/query controller. Existing cancellation, sanitation, original journal, process absence and controlled stop-race assertions remain unchanged; no critical promotion.",
+    "prerequisites": ["Node and four aggregate worker slots; owned repository-local process fixtures; stock taskkill on Windows or ps on POSIX"]
+  }]
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -33,7 +41,7 @@ import { nativePrParts, nativeLegacyPrParts, nativePartJobKey, nativeFrameworkSh
   nativeResourceFacts, nativePrPartsForProtocol, nativeFrameworkShardProtocols, nativeFrameworkShardProtocol,
   nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
   nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
-  nativeComponentRebalanceFrameworkShardProtocol,
+  nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
   nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
 import { compileValidationInventory } from '../scripts/validation-inventory.mjs';
 import { expectedBodySdkRequirements } from './native-sdk-expectations.mjs';
@@ -2396,7 +2404,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.equal(previousResource.nativeResourcePolicy, 'arm-regression-allocation-v1');
   for (const protocol of nativeFrameworkShardProtocols) {
     const historical = structuredClone(historicalV8);
-    if ([nativeFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
+    if ([nativeFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
       nativePhasedIsolationFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
       nativeResourceAffinityFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
       'native-framework-shards-v5-root-components'].includes(protocol)) {

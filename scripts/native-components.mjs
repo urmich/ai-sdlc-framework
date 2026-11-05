@@ -11,7 +11,7 @@ import { nativeFrameworkShardProtocols, nativeFourBodyFrameworkShardProtocol,
   nativeSplitUnitFrameworkShardProtocol, nativeRootComponentFrameworkShardProtocol,
   nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
   nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
-  nativeComponentRebalanceFrameworkShardProtocol } from './native-validation.mjs';
+  nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol } from './native-validation.mjs';
 import { calculatorCapability, calculatorBaselineCapability } from './pr-calculator.mjs';
 import { nativeBootstrapProtocol, nativeBodyBootstrapProtocol } from './toolchain-baseline.mjs';
 import { nativeBootstrapRequirements } from './native-bootstrap-capability.mjs';
@@ -46,7 +46,7 @@ const componentPolicy = protocol => !protocol ? nativeComponentPolicy :
   [nativeSplitUnitFrameworkShardProtocol, nativeRootComponentFrameworkShardProtocol,
     nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
     nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
-    nativeComponentRebalanceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? splitUnitShardPolicy :
+    nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ? splitUnitShardPolicy :
     protocol === nativeFourBodyFrameworkShardProtocol ? fourBodyShardPolicy : shardPolicy;
 const sourceTimes = values => [...values].sort((a, b) => Date.parse(a) - Date.parse(b));
 const prefix = name => /^(T-[A-Z0-9]+(?:-[A-Z0-9]+)*)(?:\s|$)/u.exec(name)?.[1];

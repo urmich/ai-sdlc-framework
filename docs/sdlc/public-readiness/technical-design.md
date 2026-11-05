@@ -406,7 +406,7 @@ unit evidence before regression shards execute. Independently verify every
 part's SDK context, complete assertion union and allocated-prefix cleanup;
 missing, duplicated, overlapping or swapped parts cannot produce completeness.
 The current implementation candidate
-`native-framework-shards-v11-parallel-intel-ready-pool` retains
+`native-framework-shards-v12-intel-service-balance` retains
 v4's four
 explicit platform-specific unit-to-regression job groups. A platform's unit
 producers must all complete successfully, including retention and cleanup, before
@@ -565,7 +565,7 @@ The independent v9/v10 phase-settlement controls bind selection writers to each
 existing per-mode owned fixture root. Check descriptor bytes below that root
 after actual commands settle; cleanup removes only the owned fixture after
 verified process settlement, never checkout-global paths inferred absent earlier.
-V11 replaces the current Intel primary's sequential phase isolation with the
+Historical v11 replaces the Intel primary's sequential phase isolation with the
 source-qualified `native-intel-parallel-ready-pool-v1` rule. Authenticate the
 strict JSON `nativePlacementCostsV11` and `nativePlacementReadyPoolV11` literals.
 The complete catalog, retained-identity and observer components may share the
@@ -588,6 +588,25 @@ remain unmeasured. Neither the placement projection nor local controls establish
 current native overlap, correctness or whole-lane timing. Require fresh native
 correctness and the unchanged non-Intel fifteen-minute and strict Intel
 under-twenty-five-minute limits.
+V12 retains authentic v11 through `nativeParallelReadyPoolFrameworkShardProtocol`
+and adds the strict `nativePlacementTransfersV12` literal with
+`native-intel-service-balance-v1`. After the qualified parallel base placement,
+move six complete single-root connected components, with their complete
+123-assertion union, from existing Intel body-1 to body-2. Authenticate the original v11
+cost literal and root order, current inventory/callback/resource bindings,
+runtime, fourteen-slot capacity and destination SDK compatibility. Validate the
+whole batch before modifying partitions; changed, unmeasured, joined, missing or
+misplaced components retain explicit nonapplication, never a partial transfer.
+The corrected cancellation reservation and changed capture-admission callback
+lose their incompatible historical leads. Seven unknown roots retain explicit
+count fallback; no unqualified C76 durations are imported as scheduling costs.
+Keep all twenty-five producers, four-slot units, fourteen-slot Intel bodies,
+thirteen Mac cleanup roles, unchanged ready-pool execution and genuine v1-v11
+assignment/literal/SDK replay. Append v12 as causal protocol row twenty-two;
+captured v11 does not need the new transfer literal. This is a bounded placement
+hypothesis, not a future timing guarantee: diagnostic fixed-C76 queue/setup
+assumptions and the unresolved producer-source preimage grant no native credit.
+Fresh complete correctness and whole-lane measurement remain required.
 Captured v6 planner source must carry the authentic adopted `nativePlacementCosts`
 literal. V7 additionally requires authentic `nativePlacementAffinities` and
 `nativePlacementCostsV7` strict JSON literals. Reject missing, computed, duplicate
@@ -1107,8 +1126,15 @@ The cross-platform Windows VM fixture composes its exact mock executable path
 with the supplied host path module. Identify its termination watchdog through
 owned dispatch and registration, not platform-specific separators or error-stack
 text. Neither portability control changes the real termination implementation.
-The command-capture root reserves four process slots; its writer/producer peers
+The command-capture root reserves five process slots; its writer/producer peers
 reserve their actual two- or three-process minima before timed work begins.
+The separate CI tool-cancellation root reserves four: its worker, command,
+descendant and Windows termination controller or POSIX observation query.
+The public source-derived selection must reject a three-slot pool before
+dispatch and remain admissible with four. This changes neither the host worker
+limit nor the cancellation deadline, process-absence probe or stop-race cases.
+Historical costs with the former one-slot resource shape cannot supply a
+qualified lead for the corrected group.
 The native ownership fixture reserves four aggregate worker slots for its
 test process and three real child processes, without changing host capacities
 or the one-second settlement bound.
