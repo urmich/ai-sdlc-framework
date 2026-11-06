@@ -163,6 +163,7 @@ import { Session } from 'node:inspector';
 import { PassThrough } from 'node:stream';
 import { finished } from 'node:stream/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { inflateSync } from 'node:zlib';
 import { isDeepStrictEqual, promisify } from 'node:util';
 import { execFile, spawn } from 'node:child_process';
 import fsSync from 'node:fs';
@@ -4032,9 +4033,113 @@ async function intelGitSourceInventory() {
     surfacePaths: [...new Set(inventory.surfaces.map(surface => surface.path))] });
 }
 
-test('T-PRD017 native v13 reserves the complete catalog without inheriting its one-slot duration or changing ownership', async () => {
-  const inventory = await intelGitSourceInventory();
+async function qualifiedIntelSourceFixture(protocol) {
+  // Data-only source splices preserve authentic qualification inputs without requiring Git history in CI.
+  // Compiling the reconstructed text must satisfy the immutable inventory and original planner qualifiers;
+  // neither stored results nor digest substitutions can make a changed source qualify.
+  const snapshots = JSON.parse(inflateSync(Buffer.from(
+    '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',
+    'base64'), { maxOutputLength: 128 * 1024 }).toString('utf8'));
+  const snapshot = snapshots[protocol];
+  assert.ok(snapshot, 'Select an explicitly captured historical source fixture');
+  const actual = await compileValidationInventory(repositoryRoot);
+  assert.equal(actual.complete, true, JSON.stringify(actual.unresolved));
+  const files = await Promise.all(snapshot.paths.map(async file => {
+    let contents = (await fs.readFile(path.join(repositoryRoot, ...file.split('/')), 'utf8')).replace(/\r\n/gu, '\n');
+    if (file === 'test/public-readiness-native.test.mjs') {
+      const start = contents.indexOf('async function qualifiedIntelSourceFixture(');
+      const end = contents.indexOf("\ntest('T-PRD017 native v13 reserves", start);
+      assert.ok(start > 0 && end > start);
+      contents = contents.slice(0, start) + contents.slice(end + 1);
+    }
+    const lines = contents.split(/(?<=\n)/u);
+    const splices = snapshot.splices[file];
+    return { file, contents: splices ? splices.map(part =>
+      typeof part === 'string' ? part : lines.slice(part[0], part[0] + part[1]).join('')).join('') : contents };
+  }));
+  const inventory = compileValidationSourceInventory({ files,
+    surfacePaths: [...new Set(actual.surfaces.map(surface => surface.path))] });
+  assert.equal(inventory.complete, true, JSON.stringify(inventory.unresolved));
+  const binding = protocol === nativePass.nativeParallelReadyPoolFrameworkShardProtocol ?
+    nativePass.nativePlacementCostsV11 : protocol === nativePass.nativeServiceBalanceFrameworkShardProtocol ?
+      nativePass.nativePlacementTransfersV12 : nativePass.nativePlacementOwnershipV15;
+  assert.equal(inventory.digest, binding.inventoryDigest,
+    `Reconstructed ${snapshot.revision} must match the immutable complete source inventory, not rebound metadata`);
   const plan = await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
+  const assignment = nativeFrameworkShardPlan({ inventory, plan, target: 'macos-x64', protocol });
+  assert.equal(assignment.placement.parallel.status, 'applied',
+    'The original source/callback/resource/SDK qualifiers must pass before any positive control');
+  if (protocol === nativePass.nativeParallelReadyPoolFrameworkShardProtocol) {
+    const changedCallback = assignment.placement.groups.find(group =>
+      group.rootId === 'assertion-d33dd92ab0ef357c66eced91ec8ed8b491ac4c48b19b4f5543935ea2f64f37e7');
+    assert.equal(changedCallback.durationMs, null, 'Authentic v11 cannot inherit the changed finalizer C74 duration');
+    assert.equal(changedCallback.costStatus, 'unmeasured-callback');
+    assert.equal(Object.hasOwn(changedCallback, 'observedSourceRevision'), false);
+  }
+  if (protocol === nativePass.nativeServiceBalanceFrameworkShardProtocol) {
+    const selected = assignment.parts.find(part => part.shard === 'body-2').stages.flatMap(stage => stage.groups)
+      .filter(group => nativePass.nativePlacementTransfersV12.roots.includes(group.rootId));
+    assert.equal(selected.reduce((sum, group) => sum + group.assertionIds.length, 0), 123,
+      'Authentic v12 transfers every descendant of the original six complete components');
+  }
+  return { inventory, plan, assignment, protocol, revision: snapshot.revision };
+}
+
+function assertCurrentIntelFallback(inventory, plan) {
+  const current = nativeFrameworkShardPlan({ inventory, plan, target: 'macos-x64' });
+  assert.notEqual(inventory.digest, nativePass.nativePlacementOwnershipV15.inventoryDigest);
+  const groups = current.parts.filter(part => part.shard.startsWith('body-'))
+    .flatMap(part => part.stages.flatMap(stage => stage.groups));
+  assert.notEqual(digest([...groups].sort((left, right) => left.rootId.localeCompare(right.rootId, 'en'))
+    .map(group => group.rootId)), nativePass.nativePlacementOwnershipV15.rootOrderDigest,
+  'The actual new idle-observer root must remain outside the frozen ownership qualification');
+  assert.equal(current.placement.parallel.status, 'base-placement-unqualified');
+  assert.equal(current.placement.reservation.status, 'base-placement-unqualified');
+  assert.equal(current.placement.parallel.capacity, 14);
+  for (const placement of [current.placement, current.placement.parallel, current.placement.reservation]) {
+    assert.equal(placement.evidenceCredit, false);
+    if (placement !== current.placement) assert.equal(placement.predictedSavingMs, null);
+  }
+  const ids = current.parts.flatMap(part => part.assertionIds);
+  assert.deepEqual([...ids].sort(), inventory.cases.map(test => test.id).sort());
+  assert.equal(new Set(ids).size, ids.length);
+  assert.ok(current.parts.every(part => part.assertionIds.length > 0 &&
+    part.stages.every(stage => !stage.phase)));
+  const byId = new Map(groups.map(group => [group.id, group]));
+  const resourceOwners = new Map();
+  for (const group of groups) {
+    const owner = current.parts.find(part => part.assertionIds.includes(group.rootId));
+    assert.ok(group.assertionIds.every(id => owner.assertionIds.includes(id)));
+    assert.ok(group.dependsOn.every(id => owner.assertionIds.includes(byId.get(id)?.rootId)));
+    for (const resource of group.exclusiveResources) {
+      if (resourceOwners.has(resource)) assert.equal(resourceOwners.get(resource), owner.shard);
+      else resourceOwners.set(resource, owner.shard);
+    }
+    assert.ok(group.minimumSlots <= 14);
+  }
+  const catalog = groups.find(group => group.rootId === nativePass.nativePlacementOwnershipV15.catalog.rootId);
+  assert.ok(catalog, 'Fallback must locate the complete catalog by actual owner, not assume body-0');
+  assert.equal(catalog.minimumSlots, 7);
+  const catalogCost = current.placement.groups.find(group => group.rootId === catalog.rootId);
+  assert.equal(catalogCost.durationMs, null);
+  assert.equal(catalogCost.costStatus, 'stale-closure-or-resources');
+  assert.ok(current.placement.groups.every(group => !Object.hasOwn(group, 'observedSourceRevision') &&
+    !Object.hasOwn(group, 'observedRunId')), 'Current fallback cannot inherit qualified C74 service attribution');
+  for (const part of current.parts.filter(part => part.shard.startsWith('body-'))) {
+    const tools = nativeBootstrapRequirements({ inventory, plan, target: 'macos-x64',
+      assignment: current, profile: 'pr', component: 'framework', shard: part.shard,
+      protocol: nativeCryptoBootstrapProtocol });
+    const permitted = nativePass.nativePlacementReadyPoolV11.shards.find(shard => shard.shard === part.shard).tools;
+    assert.deepEqual(tools, { ...expectedBodySdkRequirements(inventory, 'macos-x64', part),
+      homebrew: false, ownedPrefix: false, crypto: permitted.crypto });
+  }
+  return current;
+}
+
+test('T-PRD017 native v13 reserves the complete catalog without inheriting its one-slot duration or changing ownership', async () => {
+  const f = await qualifiedIntelSourceFixture(nativeFrameworkShardProtocol);
+  const { inventory, plan } = f;
+  assertCurrentIntelFallback(await intelGitSourceInventory(), plan);
   const options = { inventory, plan, target: 'macos-x64' };
   const rule = nativePass.nativePlacementOwnershipV15;
   const serviceRule = nativePass.nativePlacementServiceV14;
@@ -4047,7 +4152,7 @@ test('T-PRD017 native v13 reserves the complete catalog without inheriting its o
   assert.equal(current.placement.reservation.status, 'applied');
   assert.equal(current.placement.parallel.status, 'applied');
   assert.equal(Object.hasOwn(current.placement, 'transfers'), false,
-    'Current unmeasured source preserves C81 ownership instead of claiming another measured transfer');
+    'Authentic qualified v15 source preserves C81 ownership instead of claiming another measured transfer');
   assert.equal(current.placement.reservation.evidenceCredit, false);
   assert.equal(current.placement.reservation.predictedSavingMs, null);
   assert.equal(catalog.minimumSlots, 7);
@@ -4057,7 +4162,7 @@ test('T-PRD017 native v13 reserves the complete catalog without inheriting its o
   assert.equal(Object.hasOwn(lead, 'observedSourceRevision'), false);
   assert.ok(current.placement.groups.every(group => group.durationMs === null &&
     !Object.hasOwn(group, 'observedSourceRevision') && !Object.hasOwn(group, 'observedRunId')),
-  'Source qualification is not a service measurement for any current component');
+  'Historical v15 source qualification is not a service measurement for any component');
   assert.equal(rule.baseServiceDigest, digest(serviceRule));
   assert.equal(rule.ownershipSourceProtocol, nativePass.nativeCatalogServiceFrameworkShardProtocol);
   assert.ok(nativePass.nativePlacementTransfersV12.unknownRoots.every(id =>
@@ -4166,8 +4271,9 @@ test('T-PRD017 native v13 reserves the complete catalog without inheriting its o
 });
 
 test('T-PRD017 native v12 transfers only six qualified complete Intel components with atomic fallback', async () => {
-  const inventory = await intelGitSourceInventory();
-  const plan = await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
+  const f = await qualifiedIntelSourceFixture(nativeFrameworkShardProtocol);
+  const { inventory, plan } = f;
+  assertCurrentIntelFallback(await intelGitSourceInventory(), plan);
   const options = { inventory, plan, target: 'macos-x64' };
   const current = nativeFrameworkShardPlan(options);
   const roots = [
@@ -4178,7 +4284,7 @@ test('T-PRD017 native v12 transfers only six qualified complete Intel components
     'assertion-c2a43c05e4202501b37d4e84c30eaa04e590c2df67cddbb50735e949c8873e04',
     'assertion-c937700e1f02501d67f93f8500acf29607768a75116ffa5c809237413d2c1505',
   ];
-  assert.equal(current.placement.parallel.status, 'applied', 'The complete current binding must qualify first');
+  assert.equal(current.placement.parallel.status, 'applied', 'The authentic complete historical binding must qualify first');
   assert.deepEqual(roots.map(id => current.parts.find(part => part.assertionIds.includes(id))?.shard),
     roots.map(() => 'body-2'), 'Transfer all six complete closures, not only the terminal callback');
   assert.equal(current.placement.reservation.status, 'applied');
@@ -4191,6 +4297,13 @@ test('T-PRD017 native v12 transfers only six qualified complete Intel components
   const selected = current.parts.find(part => part.shard === 'body-2').stages[0].groups
     .filter(group => roots.includes(group.rootId));
   assert.equal(selected.reduce((sum, group) => sum + group.assertionIds.length, 0), 123);
+  const v12 = await qualifiedIntelSourceFixture(nativePass.nativeServiceBalanceFrameworkShardProtocol);
+  assert.equal(v12.assignment.placement.transfers.status, 'applied');
+  assert.deepEqual(v12.assignment.placement.transfers.roots, roots);
+  assert.deepEqual(roots.map(id => v12.assignment.parts.find(part => part.assertionIds.includes(id))?.shard),
+    roots.map(() => 'body-2'), 'Authentic v12 must still apply its complete original six-component transfer');
+  assert.equal(v12.assignment.placement.transfers.evidenceCredit, false);
+  assert.equal(v12.assignment.placement.transfers.predictedSavingMs, null);
   const ids = current.parts.flatMap(part => part.assertionIds);
   assert.deepEqual([...ids].sort(), inventory.cases.map(test => test.id).sort());
   assert.equal(new Set(ids).size, ids.length);
@@ -4247,6 +4360,25 @@ test('T-PRD017 native v11 pools qualified complete Intel components within uncha
     'assertion-30a06918b0d6d26eed9773acffe13e64087e7a1ec315a6a5c60d6a026fb52d22',
     'assertion-b1b032561853815caa7a039f5c020e573a19067118dec177cae55e2d89dc1092',
   ];
+  const v11 = await qualifiedIntelSourceFixture(nativePass.nativeParallelReadyPoolFrameworkShardProtocol);
+  const pooled = v11.assignment.parts.find(part => part.shard === 'body-0');
+  assert.deepEqual(pooled.stages.map(stage => stage.name), ['regression']);
+  assert.ok(anchors.every(id => pooled.stages[0].groups.some(group => group.rootId === id)),
+    'Authentic qualified v11 must pool all three complete primary anchors, not merely replay v10 phases');
+  assert.ok(pooled.stages[0].groups.length > anchors.length);
+  assert.deepEqual(anchors.map(id => pooled.stages[0].groups.find(group => group.rootId === id).minimumSlots),
+    [1, 4, 1]);
+  assert.equal(v11.assignment.placement.parallel.capacity, 14);
+  assert.equal(v11.assignment.placement.parallel.evidenceCredit, false);
+  assert.equal(v11.assignment.placement.parallel.predictedSavingMs, null);
+  assert.ok(v11.assignment.parts.every(part => part.stages.every(stage => !stage.phase)));
+  for (const shard of ['body-0', 'body-1', 'body-2']) {
+    const tools = nativeBootstrapRequirements({ ...v11, target: 'macos-x64',
+      profile: 'pr', component: 'framework', shard, protocol: nativeCryptoBootstrapProtocol });
+    const permitted = nativePass.nativePlacementReadyPoolV11.shards.find(part => part.shard === shard).tools;
+    assert.ok(Object.entries(tools).every(([tool, required]) => !required || permitted[tool]),
+      'The genuinely qualified v11 pool retains every original destination SDK omission');
+  }
   assert.ok(primary.stages[0].groups.length > anchors.length);
   assert.notEqual(f.inventory.digest, nativePass.nativePlacementOwnershipV15.inventoryDigest,
     'Changed source cannot inherit the frozen v15 qualification');
@@ -4321,9 +4453,9 @@ test('T-PRD017 native v11 pools qualified complete Intel components within uncha
 });
 
 test('T-PRD017 native v11 authenticates current costs and preserves historical source and fallback', async t => {
-  const f = { inventory: await intelGitSourceInventory(),
-    plan: await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8') };
-  const options = { inventory: f.inventory, plan: f.plan, target: 'macos-x64' };
+  const f = await qualifiedIntelSourceFixture(nativePass.nativeParallelReadyPoolFrameworkShardProtocol);
+  assertCurrentIntelFallback(await intelGitSourceInventory(), f.plan);
+  const options = { inventory: f.inventory, plan: f.plan, target: 'macos-x64', protocol: f.protocol };
   const source = await fs.readFile(path.join(repositoryRoot, 'scripts', 'native-validation.mjs'), 'utf8');
   const select = contents => nativePass.sourceNativeFrameworkShardProtocol([
     { file: 'scripts/native-validation.mjs', contents }]);
@@ -4349,8 +4481,12 @@ test('T-PRD017 native v11 authenticates current costs and preserves historical s
   for (const mutate of [
     inventory => { inventory.cases.find(test => test.id === rootId).definitionDigest = 'a'.repeat(64); },
     inventory => { inventory.cases.find(test => test.id === rootId).sourceDigest = 'b'.repeat(64); },
-    inventory => { inventory.groupDeclarations.find(group => group.file === 'test/validation-catalog.test.mjs' &&
-      group.root === inventory.cases.find(test => test.id === rootId).name).minimumSlots = 2; },
+    inventory => {
+      const root = inventory.cases.find(test => test.id === rootId);
+      const declaration = inventory.groupDeclarations.find(group => group.file === root.file && group.root === root.name);
+      if (declaration) declaration.minimumSlots = 2;
+      else inventory.groupDeclarations.push({ file: root.file, root: root.name, minimumSlots: 2 });
+    },
   ]) {
     const inventory = structuredClone(f.inventory);
     mutate(inventory);

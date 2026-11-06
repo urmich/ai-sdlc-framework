@@ -311,6 +311,11 @@ primary anchors and SDK limits. Changed current source must instead prove
 unqualified fallback, complete disjoint root closures, actual source-derived
 SDK requirements and no borrowed timing or execution credit. A new root cannot
 inherit the frozen complete ownership vector.
+Compile the captured historical source text and require its original inventory
+digest and planner qualifiers before positive v11 pooling/SDK, v12 complete
+six-component transfer and seven-slot catalog-reservation controls. Keep the
+current-source fallback and mutation-negative controls separate; reconstructed
+fixture success is not current native execution or performance evidence.
 
 The observer pins original owner/target process handles once, then uses only
 handle-based image, creation/CPU/exit-time, wait and exit-code queries. Retain at

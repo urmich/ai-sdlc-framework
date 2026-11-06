@@ -1219,6 +1219,10 @@ their original pinned digests. New or changed roots invalidate the complete
 source-qualified ownership vector; current placement falls back with complete
 closures and source-derived SDKs, not historical primary-placement or cost credit.
 Keep authenticated historical placement controls separate from that fallback.
+Data-only source reconstructions must compile to their immutable inventory
+digests and pass the original callback/resource/SDK qualifiers before exercising
+qualified pooling, transfers or reservations. Never substitute digest metadata
+or transfer historical execution/performance credit to current source.
 The original hosted failure occupied all fifteen slots on four CPUs, but its
 kernel cause is unproven; reduced concurrency is a mitigation requiring fresh hosted CI,
 not demonstrated cancellation repair.
