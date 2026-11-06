@@ -4247,16 +4247,39 @@ test('T-PRD017 native v11 pools qualified complete Intel components within uncha
     'assertion-30a06918b0d6d26eed9773acffe13e64087e7a1ec315a6a5c60d6a026fb52d22',
     'assertion-b1b032561853815caa7a039f5c020e573a19067118dec177cae55e2d89dc1092',
   ];
-  assert.ok(anchors.every(id => primary.stages[0].groups.some(group => group.rootId === id)));
   assert.ok(primary.stages[0].groups.length > anchors.length);
-  assert.equal(current.placement.parallel.status, 'applied');
+  assert.notEqual(f.inventory.digest, nativePass.nativePlacementOwnershipV15.inventoryDigest,
+    'Changed source cannot inherit the frozen v15 qualification');
+  const groups = current.parts.filter(part => part.shard.startsWith('body-'))
+    .flatMap(part => part.stages.flatMap(stage => stage.groups))
+    .sort((left, right) => left.rootId.localeCompare(right.rootId, 'en'));
+  assert.notEqual(digest(groups.map(group => group.rootId)), nativePass.nativePlacementOwnershipV15.rootOrderDigest,
+    'The new idle-observer root invalidates the complete historical ownership vector');
+  assert.equal(current.placement.parallel.status, 'base-placement-unqualified');
+  assert.equal(current.placement.reservation.status, 'base-placement-unqualified');
   assert.equal(current.placement.parallel.capacity, 14);
   assert.equal(current.placement.parallel.evidenceCredit, false);
   assert.equal(current.placement.parallel.predictedSavingMs, null);
+  assert.equal(current.placement.reservation.evidenceCredit, false);
+  assert.equal(current.placement.reservation.predictedSavingMs, null);
+  assert.equal(current.placement.evidenceCredit, false);
+  for (const [index, id] of anchors.entries()) {
+    const group = groups.find(group => group.rootId === id);
+    const owner = current.parts.find(part => part.assertionIds.includes(id));
+    assert.equal(groups.filter(group => group.rootId === id).length, 1);
+    assert.ok(group.assertionIds.every(assertion => owner.assertionIds.includes(assertion)),
+      'Fallback must retain every anchor descendant on its root owner');
+    assert.equal(group.minimumSlots, [7, 4, 1][index]);
+    assert.deepEqual(group.dependsOn, []);
+    assert.deepEqual(group.exclusiveResources, []);
+  }
+  assert.ok(groups.every(group => group.minimumSlots <= 14));
   const changedCallback = current.placement.groups.find(group =>
     group.rootId === 'assertion-d33dd92ab0ef357c66eced91ec8ed8b491ac4c48b19b4f5543935ea2f64f37e7');
   assert.equal(changedCallback.durationMs, null, 'The changed finalizer regression cannot inherit C74 timing');
-  assert.equal(changedCallback.costStatus, 'unmeasured-callback');
+  assert.equal(changedCallback.costStatus, 'unknown-root');
+  assert.equal(Object.hasOwn(changedCallback, 'observedSourceRevision'), false);
+  assert.equal(Object.hasOwn(changedCallback, 'observedRunId'), false);
   assert.ok(current.parts.every(part => part.stages.every(stage => !stage.phase)));
   const ids = current.parts.flatMap(part => part.assertionIds);
   assert.deepEqual([...ids].sort(), f.inventory.cases.map(test => test.id).sort());
@@ -4268,6 +4291,13 @@ test('T-PRD017 native v11 pools qualified complete Intel components within uncha
     protocol: 'native-framework-shards-v10-phased-intel-component-rebalance' });
   assert.deepEqual(authentic.parts.find(part => part.shard === 'body-0').stages.map(stage => stage.name),
     ['regression-catalog', 'regression-retained', 'regression-observer']);
+  const authenticGroups = authentic.parts.find(part => part.shard === 'body-0').stages.flatMap(stage => stage.groups);
+  assert.ok(anchors.every(id => authenticGroups.some(group => group.rootId === id)),
+    'Exact historical source still qualifies all three original primary anchors');
+  assert.equal(authentic.placement.phases.status, 'applied');
+  assert.equal(authentic.placement.phases.capacity, 14);
+  assert.equal(authentic.placement.phases.evidenceCredit, false);
+  assert.equal(authentic.placement.phases.predictedSavingMs, null);
   assert.deepEqual(current.parts.filter(part => !part.shard.startsWith('body-')),
     historical.parts.filter(part => !part.shard.startsWith('body-')));
   const requests = { ...options, assignment: current, profile: 'pr', component: 'framework',
@@ -4275,7 +4305,13 @@ test('T-PRD017 native v11 pools qualified complete Intel components within uncha
   for (const shard of ['body-0', 'body-1', 'body-2']) {
     const tools = nativeBootstrapRequirements({ ...requests, shard });
     const permitted = nativePass.nativePlacementReadyPoolV11.shards.find(part => part.shard === shard).tools;
-    assert.ok(Object.entries(tools).every(([tool, required]) => !required || permitted[tool]));
+    assert.deepEqual(tools, { ...expectedBodySdkRequirements(f.inventory, options.target,
+      current.parts.find(part => part.shard === shard)), homebrew: false, ownedPrefix: false,
+    crypto: permitted.crypto }, 'Fallback SDKs must follow actual current closures, not qualified historical omissions');
+    const originalTools = nativeBootstrapRequirements({ ...requests, inventory: old.inventory,
+      plan: old.plan, assignment: authentic, shard });
+    assert.ok(Object.entries(originalTools).every(([tool, required]) => !required || permitted[tool]),
+      'Authentic historical primary placement retains its original SDK envelope');
   }
   for (const target of ['linux-x64', 'windows-x64', 'macos-arm64']) {
     assert.deepEqual(nativeFrameworkShardPlan({ ...options, target }).parts,

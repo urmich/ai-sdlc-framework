@@ -304,6 +304,14 @@ main-attempt failures; this contention reduction is not full cancellation
 isolation or a proven hosted cure until fresh
 matching CI completes.
 
+Historical protocol controls reconstruct the original literal Windows budget
+before checking the unchanged archived workflow and admission-helper digests.
+The existing PR-only T-PRD016/T-PRD017 controls retain authentic historical
+primary anchors and SDK limits. Changed current source must instead prove
+unqualified fallback, complete disjoint root closures, actual source-derived
+SDK requirements and no borrowed timing or execution credit. A new root cannot
+inherit the frozen complete ownership vector.
+
 The observer pins original owner/target process handles once, then uses only
 handle-based image, creation/CPU/exit-time, wait and exit-code queries. Retain at
 most eight samples, 32 attempts and 8192 bytes; unknown, late, inaccessible and

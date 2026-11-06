@@ -1214,6 +1214,11 @@ from the existing closed shard identity; no matrix metadata or trusted-parser
 extension is introduced. Requested workers remain in the native configuration
 digest and actual bootstrap/resource proof.
 Historical literal-budget definitions and measurements remain unchanged.
+Historical fixtures reconstruct the archived Windows budget before verifying
+their original pinned digests. New or changed roots invalidate the complete
+source-qualified ownership vector; current placement falls back with complete
+closures and source-derived SDKs, not historical primary-placement or cost credit.
+Keep authenticated historical placement controls separate from that fallback.
 The original hosted failure occupied all fifteen slots on four CPUs, but its
 kernel cause is unproven; reduced concurrency is a mitigation requiring fresh hosted CI,
 not demonstrated cancellation repair.
