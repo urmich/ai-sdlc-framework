@@ -1203,8 +1203,13 @@ The Windows capture fixture retains the original root and taskkill handles
 through cleanup. Await controller closure before any subsequent owned-root
 cleanup; do not repeat a requested stop. Unverified stop or close prevents
 directory removal and preserves the primary failed command and diagnostics.
-The separate five-second cleanup bound does not extend the one-second production
-stop deadline or make the original failed cancellation pass.
+The separate five-second fixture-cleanup bound neither extends the production
+settlement deadline nor makes an original failed cancellation pass.
+Production stop dispatch is immediate. Its shared settlement window is five
+seconds on Windows and one second on POSIX, for both raw owned commands and
+validation commands. The Windows change accommodates the observed native
+controller latency without retries, relaxed ownership or uncertain-cleanup
+success. Whole return latency still includes awaited durable retention.
 
 Windows body-3 requests seven shared slots, admitting its complete selected
 closure, including six- and seven-slot roots. The five-slot cancellation root
@@ -1246,7 +1251,7 @@ The raw denial-boundary executor shares the existing owned-group stop and
 settlement policy with validation commands, without substituting sanitized
 reports for its raw stream/Error contract. A live tracked child anchors its
 dedicated POSIX group; one 15,000ms watchdog requests synchronous owned
-termination. The 1,000ms settlement bound includes root close and observed group
+termination. The POSIX 1,000ms settlement bound includes root close and observed group
 disappearance. No delayed destructive signal follows ownership loss. Uncertain
 writers keep the primary timeout/overflow failure and prevent fixture deletion;
 the raw 4MiB stream limits and native negative-control outcomes stay intact.
@@ -1285,8 +1290,8 @@ The controlled Windows settlement fixture separately reserves five slots for
 its test process and at most two independent owned root/writer pairs. Fresh
 VM contexts and unique paths isolate all six scenarios; each pair settles
 before another is admitted. Real peer provenance proves overlap, all six
-cleanup closures remain required, and the existing twenty-second test and
-one-second stop deadlines remain unchanged. Retain per-mode phase diagnostics
+cleanup closures remain required. Its enclosing test watchdog is sixty seconds,
+and Windows production termination settlement is five seconds. Retain per-mode phase diagnostics
 so a later timeout identifies the unfinished boundary.
 The publication fixture arms its five-second ready deadline only when the
 parent releases the intentional write barrier, not while that barrier forbids
@@ -1943,7 +1948,7 @@ Interpose `spawn` only in its isolated controller, invoke the original function
 unchanged, and observe only the exact SystemRoot `System32/taskkill.exe` child.
 Publish the actual PID and spawn-event UTC bound atomically to the prestarted
 observer's nonce request. Do not await it inside `executeValidationCommand` or
-alter the unchanged 1000ms stop deadline. Complete existing command/controller
+alter stop dispatch or the platform settlement deadline. Complete existing command/controller
 cleanup before awaiting native finalization; append compact validated facts to
 the same assertion error, preserving a concurrent cleanup failure separately.
 Retain the exact spawn request bound, target binding reason/capture timestamp,
@@ -2100,19 +2105,24 @@ that the initial running checkpoint is durable: the command awaits that write
 before its stop/close race. Await the actual first running `atomicWrite` under
 the remaining original five-second preparation allowance, racing early command
 settlement. A controlled clock advance models cold preparation without sleeps.
-Keep the original one-second production stop deadline, all six settlement modes
+Keep immediate production stop dispatch, all six settlement modes
 and real writer-drain/retention/controller cleanup proofs. The separate physical
-and command-clock test watchdogs allow five seconds for cancellation plus durable
+and command-clock test watchdogs allow ten seconds for cancellation plus durable
 retention, under a sixty-second enclosing test timeout. The earlier 1500ms test
-guard left only half a second after the production termination budget for real
+guard left only half a second after the earlier production termination budget for real
 journal/report I/O; a native-host observation exceeded that allowance without
 establishing the sole hosted cause. This test-only correctness-first allowance
-does not extend production termination or T-PRD018's separate capture deadline.
+does not define production termination or T-PRD018's separate diagnostic capture
+deadline. Under the owner's subsequent direction to resolve the native blocker,
+the shared Windows production settlement budget is five seconds, while POSIX
+retains one second. Both preserve affirmative closure, timeout failure and
+single-dispatch ownership; the original failed one-second observations remain
+historical, not passing evidence for the changed candidate.
 Block the stalled mode's actual final report write and verify its prior durable
 uncertain checkpoint, original `STOP_TIMEOUT` and watchdog facts while the command
 remains pending. Release in `finally`, await the real retained report and preserve
 the single-stop/controller, unchanged preparation-clock offset and complete
-owned cleanup assertions. No production termination or durability code changes;
+owned cleanup assertions. No dispatch, ownership or durability algorithm changes;
 later persistence remains part of actual return latency, not proof of a hosted
 cure or permission to return before retention.
 

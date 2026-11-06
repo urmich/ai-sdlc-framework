@@ -183,8 +183,8 @@ syncBuiltinESMExports();
 
 test('TOOL02 Windows validation settlement bounds exited roots and failed or stalled tree termination',
   { timeout: 60000 }, async t => {
-    // The production stop has a 1000ms budget; this guard also encloses real durable I/O.
-    const cancellationGuardMs = 5000;
+    // The Windows stop has a 5000ms budget; this guard also encloses real durable I/O.
+    const cancellationGuardMs = 10000;
     const failures = [];
     const phases = new Map();
     const completedModes = [];
@@ -206,7 +206,13 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
       const releaseFinalReport = Promise.withResolvers();
       let firstRunning = true;
       let preparationAdvance = 0;
-      const clock = { now: () => performance.now() + preparationAdvance };
+      const stopClockReads = [];
+      let observingStop = false;
+      const clock = { now() {
+        const now = performance.now() + preparationAdvance;
+        if (observingStop) stopClockReads.push(now);
+        return now;
+      } };
       const lifetime = { cleanupSafe: true, unsettledCommands: [] };
       const retentionFailure = Object.assign(new Error('Owned final report persistence failed'), { code: 'OWNED_PERSISTENCE' });
       let child;
@@ -337,7 +343,9 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
         const commandStarted = clock.now();
         const preparedAdvance = preparationAdvance;
         phase('cancellation-settlement');
-        cancellation.abort();
+        observingStop = true;
+        try { cancellation.abort(); }
+        finally { observingStop = false; }
         const sentinel = Symbol('unsettled');
         let timer;
         const settlement = Promise.race([observed, new Promise(resolve => {
@@ -376,6 +384,11 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
         assert.equal(lifetime.cleanupSafe, false, 'A bounded return must not authorize deletion under the owned writer');
         assert.equal(lifetime.unsettledCommands[0].pid, child.pid);
         assert.equal(lifetime.unsettledCommands[0].reportPath, path.join(directory, 'owned.json'));
+        // The first two stop-clock reads establish the deadline and backend entry.
+        assert.ok(stopClockReads.length >= 2);
+        assert.equal(lifetime.unsettledCommands[0].cleanup.terminationObservation.budgetRemainingMsAtEntry,
+          stopClockReads[0] + 5000 - stopClockReads[1],
+          'The actual Windows backend must receive the five-second settlement budget');
         phase('retention-result');
         if (mode === 'retention-failed') {
           assert.equal(outcome.error, retentionFailure);

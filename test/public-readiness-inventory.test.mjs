@@ -1587,6 +1587,14 @@ if(failure)throw failure;
             causes: cancelled.causes, originalOutput: cancelled.originalOutput }));
           assert.equal(cancelled.cleanup.rootExitObserved, true,
             `Cancellation must observe root closure: ${JSON.stringify(cancelled.cleanup)}`);
+          if (process.platform === 'win32') {
+            const termination = cancelled.cleanup.terminationObservation;
+            assert.ok(termination.budgetRemainingMsAtEntry > 0 &&
+              termination.budgetRemainingMsAtEntry <= 5000);
+            assert.equal(termination.controller.close.exitCode, 0);
+            assert.notEqual(termination.root.close, null);
+            assert.equal(termination.watchdog, null);
+          }
           assert.equal(cancelled.checkpoint.phase, 'finished');
           const finalJournal = await fs.readFile(journalPath);
           assert.equal(digest(finalJournal), cancelled.checkpoint.originalJournalPrefix.sha256);

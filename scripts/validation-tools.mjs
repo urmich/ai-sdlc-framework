@@ -13,6 +13,7 @@ import { declarationTokens } from './validation-inventory.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const maxOutputBytes = 4 * 1024 * 1024;
 const maxInspectionBytes = 64 * 1024;
+const ownedTerminationBudgetMs = process.platform === 'win32' ? 5000 : 1000;
 
 function assertionInspectionJson(text) {
   if (Buffer.byteLength(text) > maxInspectionBytes) return null;
@@ -437,7 +438,7 @@ async function executeOwnedRawCommand(command, args, {
     clearTimeout(timer);
     Object.assign(cleanup, { requested: true, pid: child.pid ?? null,
       mechanism: process.platform === 'win32' ? 'owned-pid-tree' : 'owned-process-group', outcome: 'pending' });
-    const deadline = performance.now() + 1000;
+    const deadline = performance.now() + ownedTerminationBudgetMs;
     const termination = !receipt.dispatched ? Promise.reject(Object.assign(
       new Error('Owned command has no established process identity.'), { code: 'STOP_UNVERIFIED' })) :
       process.platform === 'win32' ?
@@ -606,7 +607,7 @@ export async function executeValidationCommand({
       cleanup.outcome = 'pending';
       retain('command-stop-request', { pid: child.pid, cleanup });
       if (!finalizing) requestCheckpoint('cancelling', { force: true });
-      const stopDeadline = performance.now() + 1000;
+      const stopDeadline = performance.now() + ownedTerminationBudgetMs;
       const termination = process.platform === 'win32' ?
         stopOwnedProcessTree(child, childClosed, cleanup, stopDeadline) :
         stopOwnedProcessGroup(child, childClosed, cleanup, stopDeadline);

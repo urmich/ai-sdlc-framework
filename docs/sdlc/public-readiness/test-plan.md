@@ -190,7 +190,8 @@ descendant and Windows termination controller or POSIX observation query.
 The existing admission regression uses that real source selection: three slots
 must reject before callback dispatch, while four admit the complete group.
 Retain every strict process-absence, cancellation, sanitization, journal and
-stop-race assertion and the original one-second stop deadline. Correcting this
+stop-race assertion and the platform settlement deadline: five seconds on
+Windows, one second on POSIX. Correcting this
 under-reservation does not establish the cause of an earlier native failure or
 grant a current native correctness or timing pass.
 The PR-only Windows termination-observation regression exercises controlled
@@ -198,7 +199,7 @@ controller/root completion orders and timeout/error paths. Require bounded
 dispatch/event observations and the immutable pre-cleanup snapshot in both the
 final report and durable journal; unobserved events stay null and caller source,
 arguments and secrets stay absent. Preserve real cancellation, strict root
-closure, the one-second stop bound and every original failure outcome. Passing
+closure, the five-second Windows settlement bound and every original failure outcome. Passing
 diagnostics do not attribute the historical C18 timeout or prove native cleanup.
 Run the Windows VM root with POSIX path composition and without error-stack
 labels. Both controlled variants must preserve the exact backend, flags, PID,
@@ -266,7 +267,9 @@ establishes their causes; diagnostic changes do not claim to fix those causes.
 
 The original Windows capture/cancellation root additionally observes the actual
 `taskkill.exe` spawn without changing that invocation, the production backend or
-its one-second stop budget. Before creating the controller or command, an optional
+its immediate stop dispatch. Windows termination settlement allows five seconds;
+POSIX retains one second. This bounded wait still requires affirmative closure
+and never converts a timeout into successful cleanup. Before creating the controller or command, an optional
 owned PowerShell 5.1 observer compiles a small C# bridge inside its new
 repository-local compiler directory. The isolated controller atomically publishes
 only the dispatched PID and original spawn-event UTC bound to the observer's
@@ -284,7 +287,8 @@ The same maintainer-owned, five-slot Windows PR root uses
 cleanup. Controlled cases require controller close before owned-root cleanup,
 one stop when a stop is refused, and refusal of removal on unsettled closure.
 Keep the original failed outcome and diagnostics; cleanup completion is not
-passing cancellation. Preserve the one-second production stop and all original
+passing cancellation. Preserve immediate stop dispatch, the platform production
+settlement bounds and all original
 native, journal, redaction and closure assertions. No critical promotion or
 new native-positive substitute is introduced.
 
@@ -744,14 +748,15 @@ The separate TOOL02 controlled Windows settlement root retains all six modes
 under its sixty-second test ceiling. Its pre-cancellation root-exit observation
 has a separate five-second window after writer/peer readiness; preparation
 cannot consume that observation window. Preserve native ownership/drain checks,
-the cancellation settlement assertion and the one-second production stop budget.
+the cancellation settlement assertion and the five-second Windows production
+settlement budget.
 Admit at most two independent VM/root/writer
 scopes together and declare five slots for the test process plus their four
 children. Require both first-pair provenance announcements before release;
 serial-execution mutation must fail this bounded overlap check. Drain every
 in-flight scope before surfacing cleanup failure, verify all six modes cleaned,
 and preserve the original cancellation, controller, persistence, owner and
-one-second settlement assertions. This changes no native host capacity.
+platform settlement assertions. This changes no native host capacity.
 For atomic writer publication, advance the test clock while the writer is
 intentionally blocked: the post-release ready deadline must not yet expire.
 Arm the same five-second ready allowance immediately before release, retain
@@ -1291,11 +1296,12 @@ and failed or stalled tree termination` root in
 `test/distribution-boundary-lifetime.test.mjs` must await its first durable running
 checkpoint before starting cancellation accounting. Model cold preparation with
 an injected clock advance and retain physical and command-clock assertions.
-The bounded outer test watchdog allows five seconds for cancellation and durable
-journal/report I/O; it is not the unchanged one-second production termination
-budget or the separate T-PRD018 1500ms capture contract. The owner's correctness-
-first CI direction permits this test-only allowance instead of a half-second
-assumption about filesystem flush latency.
+The bounded outer test watchdog allows ten seconds for cancellation and durable
+journal/report I/O; it is not the five-second Windows production termination
+budget or the separate T-PRD018 1500ms diagnostic capture contract. The owner's
+direction to resolve the reported blocker authorizes the Windows-only production
+settlement change; dispatch remains immediate, POSIX retains one second, and
+missing closure or timeout still fails. Retain the original failed evidence.
 Keep all six modes, five-second preparation bound, sixty-second enclosing test
 timeout, five-slot declaration and owned writer/controller/retention cleanup
 proofs. In the stalled mode, block the final report write, inspect the actual
