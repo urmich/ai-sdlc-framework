@@ -1274,6 +1274,13 @@ The cross-platform Windows VM fixture composes its exact mock executable path
 with the supplied host path module. Identify its termination watchdog through
 owned dispatch and registration, not platform-specific separators or error-stack
 text. Neither portability control changes the real termination implementation.
+Its ten-scenario evidence root models the actual five-second Windows budget,
+including dispatch latency, without extending its ten-second outer watchdog.
+Drive active settlement-drain timers even beyond the former one-second boundary,
+but keep passive progress checkpoints idle. Failure-path teardown closes both
+owned handles and awaits settlement so a primary assertion is not masked by
+hung cleanup. Preserve the existing privacy, ordering and uncertainty checks;
+this is a VM fixture correction, not a production or native-acceptance change.
 The command-capture root reserves five process slots; its writer/producer peers
 reserve their actual two- or three-process minima before timed work begins.
 The separate CI tool-cancellation root reserves four: its worker, command,
@@ -1285,7 +1292,7 @@ Historical costs with the former one-slot resource shape cannot supply a
 qualified lead for the corrected group.
 The native ownership fixture reserves four aggregate worker slots for its
 test process and three real child processes, without changing host capacities
-or the one-second settlement bound.
+or the platform settlement contract.
 The controlled Windows settlement fixture separately reserves five slots for
 its test process and at most two independent owned root/writer pairs. Fresh
 VM contexts and unique paths isolate all six scenarios; each pair settles

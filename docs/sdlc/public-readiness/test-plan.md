@@ -1246,6 +1246,16 @@ to its original error only on failure; all six real modes, assertions, five-slot
 allocation, deadlines and cleanup remain unchanged. No critical promotion,
 historical Intel-cause claim or native pass follows from these diagnostic tests.
 
+The existing PR-only `T-PRD018 Windows termination observations durably
+distinguish dispatch and original handle settlement without exposing caller
+data` VM root keeps all ten scenarios and its ten-second outer watchdog on all
+four lanes. Its controlled clock must model the five-second Windows settlement
+budget, including dispatch that consumes that budget. Drive active settlement
+drain timers while leaving passive progress checkpoints idle, and settle both
+owned handles during failed-assertion teardown. Preserve dispatch, privacy,
+event-ordering and fail-closed assertions; no production deadline, critical
+membership or real-native cleanup credit changes.
+
 The maintainer-owned, PR-only `T-PRD018 native failure annotations escape
 workflow-command injection without changing the underlying failure` root also
 requires the exact failed assertion identity when the retained diagnostic is a
