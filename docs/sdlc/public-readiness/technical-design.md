@@ -2100,10 +2100,21 @@ that the initial running checkpoint is durable: the command awaits that write
 before its stop/close race. Await the actual first running `atomicWrite` under
 the remaining original five-second preparation allowance, racing early command
 settlement. A controlled clock advance models cold preparation without sleeps.
-Keep the original production stop deadline, physical 1500ms watchdog, all six
-settlement modes and real writer-drain/retention/controller cleanup proofs.
-No production termination behavior changes, and later persistence remains part
-of actual return latency; this fixture correction does not prove a hosted cure.
+Keep the original one-second production stop deadline, all six settlement modes
+and real writer-drain/retention/controller cleanup proofs. The separate physical
+and command-clock test watchdogs allow five seconds for cancellation plus durable
+retention, under a sixty-second enclosing test timeout. The earlier 1500ms test
+guard left only half a second after the production termination budget for real
+journal/report I/O; a native-host observation exceeded that allowance without
+establishing the sole hosted cause. This test-only correctness-first allowance
+does not extend production termination or T-PRD018's separate capture deadline.
+Block the stalled mode's actual final report write and verify its prior durable
+uncertain checkpoint, original `STOP_TIMEOUT` and watchdog facts while the command
+remains pending. Release in `finally`, await the real retained report and preserve
+the single-stop/controller, unchanged preparation-clock offset and complete
+owned cleanup assertions. No production termination or durability code changes;
+later persistence remains part of actual return latency, not proof of a hosted
+cure or permission to return before retention.
 
 The standalone simultaneous-activation fixture similarly separates cold staging
 from the contender's lock-wait allowance. Hold the first real promotion after

@@ -182,7 +182,9 @@ syncBuiltinESMExports();
 });
 
 test('TOOL02 Windows validation settlement bounds exited roots and failed or stalled tree termination',
-  { timeout: 20000 }, async t => {
+  { timeout: 60000 }, async t => {
+    // The production stop has a 1000ms budget; this guard also encloses real durable I/O.
+    const cancellationGuardMs = 5000;
     const failures = [];
     const phases = new Map();
     const completedModes = [];
@@ -200,6 +202,8 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
       const cancellation = new AbortController();
       const writerReady = Promise.withResolvers();
       const runningDurable = Promise.withResolvers();
+      const finalReportStarted = Promise.withResolvers();
+      const releaseFinalReport = Promise.withResolvers();
       let firstRunning = true;
       let preparationAdvance = 0;
       const clock = { now: () => performance.now() + preparationAdvance };
@@ -215,8 +219,15 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
         Buffer, TextDecoder, path, performance: clock, setTimeout, clearTimeout, delay, console,
         createHash, digest, SdlcError, sanitizeExecutionPayload, root,
         atomicWrite: async (file, bytes) => {
-          if (mode === 'retention-failed' && JSON.parse(bytes).checkpoint.phase === 'finished') throw retentionFailure;
-          if (firstRunning && JSON.parse(bytes).checkpoint.phase === 'running') {
+          const checkpoint = JSON.parse(bytes).checkpoint.phase;
+          if (checkpoint === 'finished') {
+            if (mode === 'retention-failed') throw retentionFailure;
+            if (mode === 'stalled') {
+              finalReportStarted.resolve();
+              await releaseFinalReport.promise;
+            }
+          }
+          if (firstRunning && checkpoint === 'running') {
             firstRunning = false;
             if (mode === 'stalled') {
               await writerReady.promise;
@@ -259,7 +270,10 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
           mode === 'root-exit' ? mode : 'root-open', directory, token],
         cwd: root, outputDir: directory, environment: process.env, signal: cancellation.signal, lifetime });
       pending.catch(() => {});
-      const observed = pending.then(report => ({ report }), error => ({ error }));
+      let commandSettled = false;
+      const observed = pending.then(
+        report => { commandSettled = true; return { report }; },
+        error => { commandSettled = true; return { error }; });
       try {
         phase('writer-provenance');
         const deadline = performance.now() + 5000;
@@ -321,17 +335,42 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
         }
         const started = performance.now();
         const commandStarted = clock.now();
+        const preparedAdvance = preparationAdvance;
         phase('cancellation-settlement');
         cancellation.abort();
         const sentinel = Symbol('unsettled');
         let timer;
-        const outcome = await Promise.race([observed, new Promise(resolve => {
-          timer = setTimeout(() => resolve(sentinel), 1500);
-        })]).finally(() => clearTimeout(timer));
+        const settlement = Promise.race([observed, new Promise(resolve => {
+          timer = setTimeout(() => resolve(sentinel), cancellationGuardMs);
+        })]);
+        let outcome;
+        try {
+          if (mode === 'stalled') {
+            const retaining = await Promise.race([
+              finalReportStarted.promise.then(() => true),
+              settlement.then(() => false),
+            ]);
+            assert.equal(retaining, true, 'A stalled stop must reach final report retention');
+            const retained = JSON.parse(await fs.readFile(path.join(directory, 'owned.json'), 'utf8'));
+            assert.equal(retained.checkpoint.phase, 'cancelling');
+            assert.equal(retained.complete, false);
+            assert.equal(retained.cleanup.outcome, 'uncertain');
+            assert.equal(retained.cleanup.survivorsVerified, false);
+            assert.equal(retained.cleanup.error.code, 'STOP_TIMEOUT');
+            assert.notEqual(retained.cleanup.terminationObservation.watchdog, null);
+            assert.equal(commandSettled, false, 'Finalization must await the retained final report write');
+            releaseFinalReport.resolve();
+          }
+          outcome = await settlement;
+        } finally {
+          releaseFinalReport.resolve();
+          clearTimeout(timer);
+        }
         phase(outcome === sentinel ? 'cancellation-watchdog' : 'cancellation-return');
-        assert.notEqual(outcome, sentinel, `${mode}: cancellation must settle inside its original one-second stop window`);
-        assert.ok(performance.now() - started < 1500);
-        assert.ok(clock.now() - commandStarted < 1500,
+        assert.notEqual(outcome, sentinel, `${mode}: cancellation and durable retention must settle inside the harness guard`);
+        assert.ok(performance.now() - started < cancellationGuardMs);
+        assert.ok(clock.now() - commandStarted < cancellationGuardMs);
+        assert.equal(preparationAdvance, preparedAdvance,
           'Cold running-checkpoint preparation must finish before the cancellation deadline starts');
         phase('cleanup-lifetime');
         assert.equal(lifetime.cleanupSafe, false, 'A bounded return must not authorize deletion under the owned writer');
@@ -366,6 +405,8 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
         }
         if (mode === 'stalled') {
           phase('controller-stop');
+          assert.equal(result.cleanup.error.code, 'STOP_TIMEOUT');
+          assert.notEqual(result.cleanup.terminationObservation.watchdog, null);
           assert.equal(killerSignals, 1, 'Stop the owned controller before it can issue a late tree request');
         }
         t.diagnostic(JSON.stringify({ mode, pid: child.pid, complete: result.complete,
@@ -378,6 +419,7 @@ test('TOOL02 Windows validation settlement bounds exited roots and failed or sta
         failures.push({ mode, message: error.message, ...phases.get(mode) });
       } finally {
         writerReady.resolve();
+        releaseFinalReport.resolve();
         phase('writer-drain');
         await fs.writeFile(path.join(directory, `${token}.release`), '');
         const deadline = performance.now() + 5000;

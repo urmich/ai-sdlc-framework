@@ -741,7 +741,7 @@ before assertions. The real-kernel root reserves four aggregate slots for its
 test worker, owned root, descendant writer and unrelated sibling; host worker
 limits and the one-second settlement bound remain unchanged.
 The separate TOOL02 controlled Windows settlement root retains all six modes
-under its twenty-second ceiling. Its pre-cancellation root-exit observation
+under its sixty-second test ceiling. Its pre-cancellation root-exit observation
 has a separate five-second window after writer/peer readiness; preparation
 cannot consume that observation window. Preserve native ownership/drain checks,
 the cancellation settlement assertion and the one-second production stop budget.
@@ -1290,11 +1290,21 @@ The existing PR-only `TOOL02 Windows validation settlement bounds exited roots
 and failed or stalled tree termination` root in
 `test/distribution-boundary-lifetime.test.mjs` must await its first durable running
 checkpoint before starting cancellation accounting. Model cold preparation with
-an injected clock advance and retain the real 1500ms watchdog plus a command-clock
-assertion. Keep all six modes, the original one-second production stop deadline,
-five-second preparation bound, twenty-second root timeout, five-slot declaration
-and owned writer/controller/retention cleanup proofs. This fixes a fixture race,
-not a demonstrated sole cause or fresh cure of the hosted cancellation failure.
+an injected clock advance and retain physical and command-clock assertions.
+The bounded outer test watchdog allows five seconds for cancellation and durable
+journal/report I/O; it is not the unchanged one-second production termination
+budget or the separate T-PRD018 1500ms capture contract. The owner's correctness-
+first CI direction permits this test-only allowance instead of a half-second
+assumption about filesystem flush latency.
+Keep all six modes, five-second preparation bound, sixty-second enclosing test
+timeout, five-slot declaration and owned writer/controller/retention cleanup
+proofs. In the stalled mode, block the final report write, inspect the actual
+durable uncertain checkpoint and `STOP_TIMEOUT`/watchdog facts, prove the command
+has not returned, then release and await retention. Release the barrier in
+`finally`; require the original single stop and all six cleanups. Retain the cold
+preparation clock offset unchanged during cancellation. Preserve the original
+hosted and local failures; observed local flush latency is not proof of the
+sole hosted cause, and a controlled fixture pass is not fresh native CI credit.
 
 `T-PRD018 native timing notices retain only ten source-bound actual group and
 root durations` in `test/public-readiness-native.test.mjs` is maintainer-owned,
