@@ -8,7 +8,8 @@ export const validationDeclarations = {
     {"root": "T-PRD018 tool processes retain failures, sanitized partial output and cancellation without surviving children", "dependsOn": [], "minimumSlots": 4, "exclusiveResources": []},
     {"root": "T-PRD020 actual CI schedules twenty-five producer parts behind both Intel unit jobs and distinguishes edited base retargets", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD022 actual workflow graph applies semantic YAML, effective permissions and immutable action policy", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
-    {"root": "T-PRD020 required source safety scans complete committed definitions before native bootstrap", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}
+    {"root": "T-PRD020 required source safety scans complete committed definitions before native bootstrap", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD085 idle observer reconciliation completes without granting validation credit", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}
   ],
   "applicability": [{
     "names": ["T-PRD018 tool processes retain failures, sanitized partial output and cancellation without surviving children"],
@@ -16,6 +17,12 @@ export const validationDeclarations = {
     "owner": "runner-resource-contract",
     "reason": "PR-only cancellation coverage reserves the worker, command, descendant and native stop/query controller. Existing cancellation, sanitation, original journal, process absence and controlled stop-race assertions remain unchanged; no critical promotion.",
     "prerequisites": ["Node and four aggregate worker slots; owned repository-local process fixtures; stock taskkill on Windows or ps on POSIX"]
+  }, {
+    "names": ["T-PRD085 idle observer reconciliation completes without granting validation credit"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "pr-status-coordinator",
+    "reason": "PR-only complete-empty membership regression distinguishes successful idle operation from validation evidence; incomplete acquisition, errors and blocked current PRs remain non-passing.",
+    "prerequisites": ["Node; in-process owned status fixtures without credentials, network or shared resources"]
   }]
 };
 import test from 'node:test';
@@ -52,7 +59,7 @@ import { evaluateApproval, evaluateConversations, sharedStatusKeys, planStatusUp
   runDisposablePolicyProbe } from '../scripts/pr-readiness.mjs';
 import { createReadinessGitHubClient } from '../scripts/github-readiness-host.mjs';
 import { createPrReadinessHost, inspectWorkflowTrust, readTrustedJobContext,
-  readTrustedValidationIntent, renderObserverSummary, statusConcurrencyGroup } from '../scripts/pr-observer.mjs';
+  readTrustedValidationIntent, renderObserverSummary, observerExitCode, statusConcurrencyGroup } from '../scripts/pr-observer.mjs';
 import { prepareCoverage, renderCoverageSection } from '../src/coverage.mjs';
 import { inspectWorkflowPolicy, readWorkflowPolicySources } from '../scripts/workflow-policy.mjs';
 import { nativeBootstrapEnvironment, portableRubyBootstrapEnvironment,
@@ -1248,6 +1255,45 @@ test('T-PRD085 shared membership, metadata changes, pagination and stale events 
   assert.equal(f.writes.length, before);
 });
 
+test('T-PRD085 idle observer reconciliation completes without granting validation credit', async () => {
+  const empty = statusFixture();
+  empty.snapshot.prs = [];
+  const idle = await reconcilePrReadiness(empty.host, empty.policy);
+  assert.equal(observerExitCode(idle), 0);
+  assert.equal(idle.status, 'NotRun');
+  assert.equal(idle.noWork, true);
+  assert.deepEqual(idle.results, []);
+  assert.equal(empty.writes.length, 0);
+  const summary = renderObserverSummary(idle, {
+    completeReportRef: 'https://github.com/urmich/ai-sdlc-framework/actions/runs/1/attempts/1',
+  });
+  assert.match(summary, /No current in-scope PRs/u);
+  assert.match(summary, /\*\*NotRun\*\*/u);
+
+  empty.snapshot.complete = false;
+  const incomplete = await reconcilePrReadiness(empty.host, empty.policy);
+  assert.equal(incomplete.status, 'NotRun');
+  assert.equal(incomplete.noWork, undefined);
+  assert.equal(observerExitCode(incomplete), 2);
+  assert.equal(empty.writes.length, 0);
+  assert.equal(observerExitCode({ ...idle, diagnostic: { code: 'HOST' } }), 2);
+  assert.equal(observerExitCode({ ...idle, status: 'Failed' }), 2);
+  assert.equal(observerExitCode({ ...idle, results: [{ status: 'NotRun' }] }), 2);
+  assert.equal(observerExitCode({ ...idle, conversations: [{ status: 'NotRun' }] }), 2);
+  assert.equal(observerExitCode({ status: 'Passed', results: [], diagnostic: { code: 'HOST' } }), 2);
+
+  const required = statusFixture();
+  required.snapshot.prs[0].verdicts['framework/validation'].status = 'NotRun';
+  const blocked = await reconcilePrReadiness(required.host, required.policy);
+  assert.equal(blocked.status, 'NotRun');
+  assert.equal(blocked.noWork, undefined);
+  assert.equal(observerExitCode(blocked), 2);
+  const complete = await reconcilePrReadiness(statusFixture().host, required.policy);
+  assert.equal(complete.status, 'Passed');
+  assert.equal(complete.noWork, undefined);
+  assert.equal(observerExitCode(complete), 0);
+});
+
 test('T-PRD027 unavailable writer controls or foreign repository scope dispatch no status mutation or enforcement claim', async () => {
   const denied = statusFixture();
   denied.host.verifyWriterControl = async () => false;
@@ -1342,6 +1388,42 @@ test('T-PRD022 actual workflow graph applies semantic YAML, effective permission
     { actions: 'read', contents: 'read' });
   assert.deepEqual(producer.jobs.find(job => job.id === 'intel-homebrew-admission').effectivePermissions,
     { actions: 'read', contents: 'read' });
+  const windows = producer.document.jobs['native-wx'];
+  assert.equal(windows.env.SDLC_TEST_WORKERS, '${{ matrix.worker_budget }}');
+  assert.equal(windows.strategy.matrix.include.find(row => row.shard === 'body-3').worker_budget, 5);
+  assert.ok(windows.strategy.matrix.include.filter(row => row.shard !== 'body-3')
+    .every(row => row.worker_budget === 15));
+  const renderDocument = document => Object.entries(document)
+    .map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n';
+  for (const workers of [undefined, 0, 5.5, 33]) {
+    const changed = structuredClone(workflows);
+    const selected = changed.find(item => item.file === '.github/workflows/ci.yml');
+    const document = structuredClone(producer.document);
+    const row = document.jobs['native-wx'].strategy.matrix.include.find(row => row.shard === 'body-3');
+    if (workers === undefined) delete row.worker_budget;
+    else row.worker_budget = workers;
+    selected.contents = renderDocument(document);
+    const result = inspectWorkflowTrust(changed);
+    assert.ok(result.blockers.some(item => item.code === 'NATIVE_COMPONENT_MATRIX_DIFFERS'),
+      JSON.stringify({ workers, blockers: result.blockers }));
+  }
+  const legacy = structuredClone(workflows);
+  const legacyDocument = structuredClone(producer.document);
+  legacyDocument.jobs['native-wx'].env.SDLC_TEST_WORKERS = '15';
+  for (const row of legacyDocument.jobs['native-wx'].strategy.matrix.include) delete row.worker_budget;
+  legacy.find(item => item.file === '.github/workflows/ci.yml').contents = renderDocument(legacyDocument);
+  assert.equal(inspectWorkflowTrust(legacy).complete, true);
+  for (const edit of [
+    document => { document.jobs['native-wx'].strategy.matrix.include[0].unknown = true; },
+    document => { document.jobs['native-wx'].env.SDLC_TEST_WORKERS = '15'; },
+  ]) {
+    const changed = structuredClone(workflows);
+    const document = structuredClone(producer.document);
+    edit(document);
+    changed.find(item => item.file === '.github/workflows/ci.yml').contents = renderDocument(document);
+    assert.ok(inspectWorkflowTrust(changed).blockers.some(item =>
+      item.code === 'NATIVE_COMPONENT_MATRIX_DIFFERS'));
+  }
   for (const key of ['intel-retained-admission', 'arm-refresh-admission']) {
     assert.deepEqual(producer.jobs.find(job => job.id === key).effectivePermissions,
       { actions: 'read', contents: 'read' });
@@ -1980,13 +2062,15 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
         'macos-x64': { availableParallelism: 4, totalMemoryBytes: 15032385536 },
       };
       const host = hosts[part.target];
-      const configuredWorkers = ci.jobs[key].env.SDLC_TEST_WORKERS;
+      const configuredWorkers = ci.jobs[key].env.SDLC_TEST_WORKERS === '${{ matrix.worker_budget }}' ?
+        String(ci.jobs[key].strategy.matrix.include.find(row => row.role === part.role).worker_budget) :
+        ci.jobs[key].env.SDLC_TEST_WORKERS;
       assert.match(configuredWorkers ?? '', /^[1-9]\d*$/u);
       const resources = nativeResourceFacts({ ...host, configuredWorkers });
       const cpuMatched = part.target === 'macos-x64' && key === 'native-units-mi';
-      assert.equal(resources.workerCapacity, cpuMatched ? host.availableParallelism :
-        Math.min(32, Math.floor(host.totalMemoryBytes / (1024 ** 3))),
-      'Intel unit roles use the CPU-count budget; regression hosts use the observed memory budget');
+      assert.equal(resources.workerCapacity, Math.min(Number(configuredWorkers),
+        32, Math.floor(host.totalMemoryBytes / (1024 ** 3))),
+      'Explicit source-bound requests cap the observed memory budget without changing producer coverage');
       assert.equal(resources.workerCapacity > host.availableParallelism, !cpuMatched);
       assert.equal(resources.configuredWorkers, configuredWorkers);
       assert.ok(ci.jobs[key].steps.every(step => step.env?.SDLC_TEST_WORKERS === undefined),

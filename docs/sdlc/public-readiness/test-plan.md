@@ -279,6 +279,24 @@ additional processes. PowerShell closure alone never proves compiler settlement.
 Complete the original root/controller cleanup before awaiting observer
 finalization, so diagnostics add no delay before existing fixture cleanup.
 
+The same maintainer-owned, five-slot Windows PR root uses
+`test/command-capture-controller.mjs` to retain original process handles through
+cleanup. Controlled cases require controller close before owned-root cleanup,
+one stop when a stop is refused, and refusal of removal on unsettled closure.
+Keep the original failed outcome and diagnostics; cleanup completion is not
+passing cancellation. Preserve the one-second production stop and all original
+native, journal, redaction and closure assertions. No critical promotion or
+new native-positive substitute is introduced.
+
+The existing PR-only T-PRD020/T-PRD022 workflow controls verify source-bound
+per-part worker requests, legacy literal-budget compatibility, rejection of
+missing/noninteger/out-of-range requests, unknown fields and unused metadata.
+Windows body-3 requests five slots, its source-derived maximum root demand;
+other Windows parts retain fifteen. All twenty-five producers, thirty-four
+expanded jobs and thirteen Mac cleanup roles remain required. Preserve original
+main-attempt failures; this isolation is not a proven hosted cure until fresh
+matching CI completes.
+
 The observer pins original owner/target process handles once, then uses only
 handle-based image, creation/CPU/exit-time, wait and exit-code queries. Retain at
 most eight samples, 32 attempts and 8192 bytes; unknown, late, inaccessible and
@@ -1170,6 +1188,15 @@ a Test Design/review responsibility.
 
 ### 5.2 Complete PR coverage, trust and provider enforcement
 
+`T-PRD085 idle observer reconciliation completes without granting validation
+credit` in `test/public-readiness-ci.test.mjs` is maintainer-owned, PR-only,
+Node-only and process-isolated on all four existing native lanes. Its one-slot
+owned status fixture proves zero writes, retained `NotRun` and successful CLI
+completion only for completely acquired empty membership. Incomplete membership,
+diagnostics, failed results, required conversation work and blocked current PRs
+remain non-passing. Existing shared-key, pagination, capacity and publication
+race controls remain required; neither critical cap grows.
+
 `T-PRD018 rejected failure diagnostics retain only closed error and owned phase
 facts` in `test/test-runner.test.mjs` is maintainer-owned, PR-only and Node-only
 on all four native lanes. Its isolated actual formatter VM reserves one slot,
@@ -1226,6 +1253,11 @@ Distinguish a stopped fresh connection from actual duplicate allocation without
 changing the BUDGET code or allowing queued work to start.
 The controlled marker/spawn instrumentation remains process-local,
 Node-only and one-slot, with no critical promotion or native execution credit.
+The same controlled readiness root uses barriers to reproduce concurrent
+compiler-settlement refreshes and delayed ENOENT. Verified `notStarted`/settled
+proof cannot be downgraded to `missing`/settled; invalid or missing proof remains
+unsettled, and later valid proof can refine it. Preserve the separate real
+release-before-compiler root and its exact receipt assertion.
 The new maintainer-owned `T-PRD018 Windows observer release before compiler
 dispatch proves no writer and graceful owned cleanup` root is PR-only on
 Windows x64 with two slots and no added dependencies. Use owned observer paths
@@ -2566,6 +2598,14 @@ not mean the repository is flawless, attractive to every reader or publicly
 ready; the source-linked published walkthrough remains separate.
 
 ### 10.2 Primary-reference and published-experience assessment
+
+For the current README correction, verify four truthful value bullets, immediate
+placement of the existing explanatory image, release-neutral framework guidance
+linked to repository Releases, and source/doc evidence for each capability row.
+Distinguish framework work-item recovery and evidence from host-agent chat/session
+restoration and external review, monitoring and delivery execution. Required
+runtime constraints and historical release documents are not removed merely to
+make README version-neutral.
 
 T-PRD089 uses the five immutable reference revisions and adoption matrix in
 Requirements. For each selected practice, inspect its cited primary file and

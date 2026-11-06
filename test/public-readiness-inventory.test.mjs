@@ -751,14 +751,17 @@ ${mode === 'pre-existing' ? "[IO.File]::WriteAllText($release,'{\"schema\":1}')"
 test('T-PRD018 Windows observer readiness retains published proof when its polling wake crosses the deadline',
   { timeout: 10000, skip: process.platform !== 'win32' }, async t => {
     const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'native-runtime-poll-'));
-    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    t.after(async () => {
+      await fs.rm(directory, { recursive: true, force: true });
+      await assert.rejects(fs.stat(directory), { code: 'ENOENT' });
+    });
     const proof = {
       schema: 1, compilerSettled: true,
       observerSha256: digest(await fs.readFile(path.resolve('test', 'windows-runtime-observer', 'observer.ps1'))),
       bridgeSha256: digest(await fs.readFile(path.resolve('test', 'windows-runtime-observer', 'bridge.cs'))),
     };
     for (const mode of ['published', 'unsettled', 'wrong-source', 'missing',
-      'not-started', 'wrong-not-started', 'not-started-with-ready',
+      'not-started', 'wrong-not-started', 'invalid-not-started', 'not-started-with-ready',
       'pending-compiler', 'compile-failure', 'owner-rejected', 'private-failure']) {
       const originalSpawn = childProcess.spawn;
       const originalStat = fsPromises.stat;
@@ -820,7 +823,7 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
         }
         if (mode.includes('not-started')) {
           await atomicWrite(observer.files.compilerNotStarted, JSON.stringify({
-            schema: 1, compilerStarted: false, reason: 'released',
+            schema: 1, compilerStarted: mode === 'invalid-not-started', reason: 'released',
             observerSha256: mode === 'wrong-not-started' ? '0'.repeat(64) : proof.observerSha256,
             bridgeSha256: proof.bridgeSha256,
           }));
@@ -859,7 +862,11 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
           ['unsettled', 'wrong-source', 'not-started-with-ready'].includes(mode) ? 'rejected' : 'missing');
         assert.equal(facts.compilerReceipt, ['published', 'owner-rejected'].includes(mode) ? 'verified' :
           ['wrong-source', 'wrong-not-started'].includes(mode) ? 'wrongSource' :
-            ['not-started', 'not-started-with-ready'].includes(mode) ? 'notStarted' : 'missing');
+            ['not-started', 'not-started-with-ready'].includes(mode) ? 'notStarted' :
+              mode === 'invalid-not-started' ? 'invalid' : 'missing');
+        if (mode === 'invalid-not-started' || mode === 'wrong-not-started') {
+          assert.equal(facts.compilerSettled, false, `${mode}: rejected proof cannot settle a compiler`);
+        }
         if (mode === 'pending-compiler') {
           assert.equal(facts.compiling.status, 'verified');
           assert.equal(facts.failed.status, 'missing');
@@ -910,6 +917,102 @@ test('T-PRD018 Windows observer readiness retains published proof when its polli
           assert.equal(result.cleanup, settled ? 'awaited' : 'unknown');
           assert.equal(result.forcedObserverStop, false);
           assert.equal(result.observation, null, 'Injected markers supply no native observation credit');
+        }
+      }
+    }
+    {
+      const originalSpawn = childProcess.spawn;
+      const originalStat = fsPromises.stat;
+      const originalNow = performance.now;
+      const readyProbe = Promise.withResolvers();
+      const releaseReady = Promise.withResolvers();
+      const receiptProbe = Promise.withResolvers();
+      const releaseReceipt = Promise.withResolvers();
+      const child = new EventEmitter();
+      child.pid = 900001;
+      child.kill = () => { throw new Error('An injected observer must not be signaled'); };
+      child.unref = () => {};
+      let firstReadyProbe = true;
+      let holdReceipt = false;
+      let receiptReads = 0;
+      let now = 0;
+      let observer;
+      let readiness;
+      let delayedFacts;
+      let concurrentFacts;
+      let proofPublished = false;
+      childProcess.spawn = () => child;
+      fsPromises.stat = async filename => {
+        if (firstReadyProbe && filename.endsWith('.ready.json')) {
+          firstReadyProbe = false;
+          readyProbe.resolve();
+          await releaseReady.promise;
+          throw Object.assign(new Error('Controlled absent readiness marker'), { code: 'ENOENT' });
+        }
+        if (holdReceipt && filename.endsWith('.compiler-settled.json') && ++receiptReads === 1) {
+          receiptProbe.resolve();
+          await releaseReceipt.promise;
+          throw Object.assign(new Error('Controlled delayed absent compiler receipt'), { code: 'ENOENT' });
+        }
+        return originalStat(filename);
+      };
+      performance.now = () => now;
+      syncBuiltinESMExports();
+      try {
+        const { startWindowsRuntimeObserver: start } =
+          await import(new URL('./windows-runtime-observer/index.mjs?concurrent-refinement', import.meta.url));
+        observer = await start({
+          directory: path.join(directory, 'concurrent-refinement'), ownerPid: process.pid, expectedImage: 'node',
+        });
+        readiness = observer.ready.then(value => ({ value }), error => ({ error }));
+        child.emit('spawn');
+        await readyProbe.promise;
+        const missing = await observer.startupFacts();
+        assert.equal(missing.compilerReceipt, 'missing');
+        assert.equal(missing.compilerSettled, false);
+        await atomicWrite(observer.files.compilerNotStarted, JSON.stringify({
+          schema: 1, compilerStarted: false, reason: 'released',
+          observerSha256: proof.observerSha256, bridgeSha256: proof.bridgeSha256,
+        }));
+        proofPublished = true;
+        holdReceipt = true;
+        delayedFacts = observer.startupFacts();
+        await receiptProbe.promise;
+        concurrentFacts = observer.startupFacts();
+        // If refreshes are independent, settle the newer proof before delivering
+        // the older ENOENT; a shared refresh instead remains behind the barrier.
+        if (receiptReads > 1) await concurrentFacts;
+        releaseReceipt.resolve();
+        for (const facts of await Promise.all([delayedFacts, concurrentFacts, observer.startupFacts()])) {
+          assert.equal(facts.compilerReceipt, 'notStarted',
+            'A delayed ENOENT cannot downgrade affirmative source-bound no-writer proof');
+          assert.equal(facts.compilerSettled, true);
+          assert.equal(facts.readiness.status, 'pending', 'No-writer proof supplies no readiness credit');
+        }
+        assert.equal(missing.compilerSettled, false, 'Refinement cannot rewrite the original missing snapshot');
+        now = 15001;
+        releaseReady.resolve();
+        const result = await readiness;
+        assert.match(result.error?.message ?? '', /^observer-not-ready; startup=/);
+        const retained = JSON.parse(result.error.message.slice('observer-not-ready; startup='.length));
+        assert.equal(retained.compilerReceipt, 'notStarted');
+        assert.equal(retained.compilerSettled, true);
+        assert.equal(retained.readiness.status, 'missing');
+      } finally {
+        releaseReceipt.resolve();
+        releaseReady.resolve();
+        child.emit('close', 0, null);
+        await Promise.allSettled([delayedFacts, concurrentFacts, readiness]);
+        childProcess.spawn = originalSpawn;
+        fsPromises.stat = originalStat;
+        performance.now = originalNow;
+        syncBuiltinESMExports();
+        if (observer) {
+          const result = await observer.finalize();
+          assert.equal(result.compilerSettled, proofPublished);
+          assert.equal(result.cleanup, proofPublished ? 'awaited' : 'unknown');
+          assert.equal(result.forcedObserverStop, false);
+          assert.equal(result.observation, null, 'Controlled proof supplies no native observation credit');
         }
       }
     }
@@ -1265,11 +1368,13 @@ test('T-PRD018 command capture durably retains dispatched identity and sanitized
   { timeout: 60000 }, async t => {
     const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'command-checkpoint-'));
     const observers = [];
+    let cleanupSafe = true;
     t.after(async () => {
       for (const observer of observers) {
         assert.equal((await settleRuntimeObserver(observer, t)).cleanup, 'awaited',
           'An unsettled native observer prevents fixture removal');
       }
+      assert.equal(cleanupSafe, true, 'Unsettled original capture handles prevent fixture removal');
       await fs.rm(directory, { recursive: true, force: true });
     });
     const environment = { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' };
@@ -1277,6 +1382,52 @@ test('T-PRD018 command capture durably retains dispatched identity and sanitized
     delete environment.SDLC_TEST_REPORT_CONTEXT;
     const module = pathToFileURL(path.resolve('scripts', 'validation-tools.mjs')).href;
     const filesModule = pathToFileURL(path.resolve('src', 'files.mjs')).href;
+    const controllerModule = pathToFileURL(path.resolve('test', 'command-capture-controller.mjs')).href;
+    const { createCaptureProcessOwner } = await import(controllerModule);
+    const controlledOwner = createCaptureProcessOwner();
+    const stops = [];
+    const root = Object.assign(new EventEmitter(), { pid: 41001, exitCode: null, signalCode: null,
+      kill() { stops.push('root'); return true; } });
+    const terminator = Object.assign(new EventEmitter(), { pid: 41002, exitCode: null, signalCode: null,
+      kill() { stops.push('controller'); return true; } });
+    controlledOwner.track(root, 'root');
+    controlledOwner.track(terminator, 'controller');
+    terminator.kill('SIGTERM');
+    let completed = false;
+    const controlledSettlement = controlledOwner.settle().then(value => { completed = true; return value; });
+    try {
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(completed, false, 'An accepted stop signal is not original controller closure');
+      assert.deepEqual(stops, ['controller'], 'Do not retry the controller or stop its root before controller closure');
+      terminator.exitCode = 1;
+      terminator.emit('close', 1, null);
+      await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual(stops, ['controller', 'root']);
+      assert.equal(completed, false, 'Owner cleanup must affirmatively await original root closure');
+      root.exitCode = 1;
+      root.emit('close', 1, null);
+      assert.ok((await controlledSettlement).every(value => value.closeObserved === true));
+    } finally {
+      if (terminator.exitCode === null) { terminator.exitCode = 1; terminator.emit('close', 1, null); }
+      if (root.exitCode === null) { root.exitCode = 1; root.emit('close', 1, null); }
+      await controlledSettlement;
+    }
+    const refusedOwner = createCaptureProcessOwner();
+    const refusedStops = [];
+    const refusedController = Object.assign(new EventEmitter(), { pid: 41003, exitCode: null, signalCode: null,
+      kill() { refusedStops.push('controller'); return false; } });
+    const retainedRoot = Object.assign(new EventEmitter(), { pid: 41004, exitCode: null, signalCode: null,
+      kill() { refusedStops.push('root'); return true; } });
+    refusedOwner.track(refusedController, 'controller');
+    refusedOwner.track(retainedRoot, 'root');
+    try {
+      await assert.rejects(refusedOwner.settle(), error => error instanceof AggregateError &&
+        error.errors[0]?.code === 'STOP_UNVERIFIED');
+      assert.deepEqual(refusedStops, ['controller'], 'An unverified controller stop cannot permit a later root signal');
+    } finally {
+      refusedController.emit('close', 1, null);
+      retainedRoot.emit('close', 1, null);
+    }
     for (const abrupt of [false, true]) {
       const name = abrupt ? 'abrupt-command' : 'cancelled-command';
       const marker = path.join(directory, `${name}-entered.json`);
@@ -1322,10 +1473,13 @@ import {syncBuiltinESMExports} from 'node:module';
 import path from 'node:path';
 import {atomicWrite} from ${JSON.stringify(filesModule)};
 import {executeValidationCommand} from ${JSON.stringify(module)};
+import {createCaptureProcessOwner} from ${JSON.stringify(controllerModule)};
 const originalSpawn=childProcess.spawn;
+const owner=createCaptureProcessOwner();
 let dispatchRetained=Promise.resolve();
 childProcess.spawn=function(command,args,options){
   const child=originalSpawn(command,args,options);
+  owner.track(child,command===process.execPath?'root':'controller');
   if(process.platform==='win32'&&command===path.join(process.env.SystemRoot,'System32','taskkill.exe')){
     child.once('spawn',()=>{
       const observed={pid:child.pid,ownerPid:process.pid,rootPid:Number(args[1]),createdBeforeMs:Date.now()};
@@ -1342,16 +1496,31 @@ childProcess.spawn=function(command,args,options){
 syncBuiltinESMExports();
 const cancellation=new AbortController();
 process.once('message',()=>cancellation.abort());
-await executeValidationCommand({name:${JSON.stringify(name)},command:process.execPath,
-  args:[${JSON.stringify(source)}],outputDir:${JSON.stringify(directory)},signal:cancellation.signal});
-await dispatchRetained;
+let failure;
+try{
+  await executeValidationCommand({name:${JSON.stringify(name)},command:process.execPath,
+    args:[${JSON.stringify(source)}],outputDir:${JSON.stringify(directory)},signal:cancellation.signal});
+}catch(error){failure=error;}
+try{
+  const handles=await owner.settle();
+  await dispatchRetained;
+  if(process.connected)await new Promise((resolve,reject)=>process.send(
+    {kind:'capture-owned-cleanup',handles},error=>error?reject(error):resolve()));
+}catch(error){
+  failure=failure?new AggregateError([failure,error],'Capture execution and owned cleanup failed'):error;
+}
 if(process.connected)process.disconnect();
+if(failure)throw failure;
 `);
       const controller = spawn(process.execPath, [controllerSource], {
         cwd: process.cwd(), env: environment, shell: false, stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
       });
       let stderr = '';
       controller.stderr.on('data', data => { stderr += data; });
+      let ownedCleanup;
+      controller.on('message', value => {
+        if (value?.kind === 'capture-owned-cleanup') ownedCleanup = value.handles;
+      });
       const done = new Promise((resolve, reject) => {
         controller.once('error', reject);
         controller.once('close', (code, signal) => resolve({ code, signal }));
@@ -1425,13 +1594,21 @@ if(process.connected)process.disconnect();
         }
       } catch (error) {
         failure = error;
+        try {
+          const originalReport = await fs.readFile(reportPath);
+          const originalJournal = await fs.readFile(path.join(directory, `${name}.journal.ndjson`));
+          t.diagnostic(JSON.stringify({ boundary: 'capture-failed-original', variant: name,
+            originalReport: { sha256: digest(originalReport), bytes: originalReport.length },
+            originalJournal: { sha256: digest(originalJournal), bytes: originalJournal.length },
+            ...(originalReport.length <= 65536 ? { report: JSON.parse(originalReport) } : {}),
+            ...(originalJournal.length <= 65536 ?
+              { journal: originalJournal.toString('utf8').trim().split('\n').map(JSON.parse) } : {}) }));
+        } catch (retentionError) {
+          failure = new AggregateError([failure, retentionError], 'Capture assertion and original diagnostic retention failed');
+        }
       } finally {
         try {
           await fs.writeFile(release, '');
-          if (owned) {
-            try { process.kill(owned.pid, 'SIGKILL'); }
-            catch (error) { if (error.code !== 'ESRCH') throw error; }
-          }
           if (controller.exitCode === null && controller.signalCode === null) controller.kill('SIGKILL');
           await done;
           const deadline = Date.now() + 5000;
@@ -1441,7 +1618,14 @@ if(process.connected)process.disconnect();
             assert.ok(Date.now() < deadline, 'No owned capture process may survive cleanup');
             await delay(20);
           }
+          if (!abrupt) {
+            assert.ok(ownedCleanup?.some(value => value.role === 'root' && value.pid === owned?.pid));
+            assert.ok(ownedCleanup.every(value => value.closeObserved === true),
+              'Original command and termination controller handles must close before owner exit');
+            t.diagnostic(JSON.stringify({ boundary: 'capture-owned-cleanup', variant: name, handles: ownedCleanup }));
+          }
         } catch (error) {
+          cleanupSafe = false;
           failure = failure ? new AggregateError([failure, error], 'Capture assertion and cleanup failed') : error;
         } finally {
           if (observer) {

@@ -1199,6 +1199,24 @@ product-scale or hosted performance benchmark.
 
 ### 4.4 Producer output and cancellation
 
+The Windows capture fixture retains the original root and taskkill handles
+through cleanup. Await controller closure before any subsequent owned-root
+cleanup; do not repeat a requested stop. Unverified stop or close prevents
+directory removal and preserves the primary failed command and diagnostics.
+The separate five-second cleanup bound does not extend the one-second production
+stop deadline or make the original failed cancellation pass.
+
+Windows body-3 requests five shared slots, matching its maximum declared root
+demand and isolating that root from competing groups. Other Windows parts retain
+fifteen. The trusted workflow checker validates a bound `matrix.worker_budget`
+as an integer from 1 through 32 before comparing the unchanged closed producer
+identity; unknown fields and unbound requests remain invalid. Requested workers
+remain in the native configuration digest and actual bootstrap/resource proof.
+Historical literal-budget definitions and measurements remain unchanged.
+The original hosted failure occupied all fifteen slots on four CPUs, but its
+kernel cause is unproven; isolation is a mitigation requiring fresh hosted CI,
+not demonstrated cancellation repair.
+
 Installer timing observations are opt-in and use a strict non-secret
 `SDLC_INSTALL_TRACE_ID` UUID. A small shared observer emits bounded
 `sdlc-install-v1` fixed-format stderr records, never stdout JSON or file contents,
@@ -2004,6 +2022,11 @@ hashes. It is considered only when the ordinary compiler-settlement receipt is
 missing. Its `notStarted` receipt means no outstanding compiler writer; only
 the ordinary `verified` compiler receipt can contribute to readiness.
 Await original observer closure before calling cleanup complete.
+Serialize compiler-settlement refreshes through one pending promise. A delayed
+missing ordinary receipt must not overwrite an already verified no-writer
+receipt while another refresh is completing. Clear the pending promise on
+completion or rejection so later affirmative proof can still refine an
+unsettled observation; preserve all source, readiness and cleanup checks.
 If cleanup or compiler settlement remains unknown, the original acquired worker
 requests persistent aggregate admission stop over its existing authenticated
 socket. Mark the broker stopped before acknowledgement and reject queued/new
@@ -2257,6 +2280,12 @@ only the small status reconciler is serialized. Pending notifications may be
 coalesced/replaced by GitHub, so every admitted writer refreshes all current
 in-scope PRs and affected status keys, not just the triggering PR. Events are
 wakeups, not an ordered journal or commands to replay stale payloads.
+When complete acquisition finds no in-scope open PRs, retain `NotRun` with an
+explicit `noWork` operation marker and no status writes. The observer CLI may
+complete successfully for this idle operation only when it has no required
+results, conversation work or diagnostic. This is not native-validation,
+approval or provider-enforcement credit; incomplete/error/blocked observations
+remain non-passing.
 
 The provider status key is exactly `(repository identity, SHA, context)`, not
 PR number, description digest or target URL. For each actual head/eligible
@@ -2849,6 +2878,12 @@ fabricated ACK or budget change substitutes for that admission.
 Provide contributor, support, security-reporting, conduct, ownership/review and
 change/release guidance. Derive versions/commands/platforms from current metadata
 and tested examples; remove stale public pins and implementation-status claims.
+Use repository Releases links for framework-version guidance in README. Keep
+four outcome-oriented, source-supported value bullets immediately before the
+existing explanatory image. Audit every capability-table row against actual
+framework code/docs and explicitly separate host-agent session restoration,
+review execution, scheduler/provider infrastructure and external permissions
+from framework work-item/evidence/operation recordkeeping.
 
 Adopt the relevant reader/governance guidance from proposed FR-054 rather than
 duplicate it: public third-party identity, reporting/support/contribution routes

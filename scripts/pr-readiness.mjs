@@ -289,7 +289,8 @@ export async function reconcilePrReadiness(host, policy) {
     ({ number: pr.number, ...pr.conversations }));
   return { status: snapshot.complete && results.length && results.every(result => result.status === 'Passed') &&
     conversations.every(item => item.status === 'Passed') ? 'Passed' : 'NotRun',
-  results, ...(conversations.length ? { conversations } : {}) };
+  results, ...(conversations.length ? { conversations } : {}),
+  ...(snapshot.complete === true && snapshot.prs.length === 0 ? { noWork: true } : {}) };
 }
 
 async function probeDirectory(directory) {

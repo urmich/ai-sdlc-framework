@@ -671,15 +671,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: windows-x64, component: framework, shard: refresh, role: windows-x64-framework-refresh, os: windows-2022, architecture: x64 }
-          - { target: windows-x64, component: framework, shard: body-0, role: windows-x64-framework-body-0, os: windows-2022, architecture: x64 }
-          - { target: windows-x64, component: framework, shard: body-1, role: windows-x64-framework-body-1, os: windows-2022, architecture: x64 }
-          - { target: windows-x64, component: framework, shard: body-2, role: windows-x64-framework-body-2, os: windows-2022, architecture: x64 }
-          - { target: windows-x64, component: framework, shard: body-3, role: windows-x64-framework-body-3, os: windows-2022, architecture: x64 }
+          - { target: windows-x64, component: framework, shard: refresh, role: windows-x64-framework-refresh, os: windows-2022, architecture: x64, worker_budget: 15 }
+          - { target: windows-x64, component: framework, shard: body-0, role: windows-x64-framework-body-0, os: windows-2022, architecture: x64, worker_budget: 15 }
+          - { target: windows-x64, component: framework, shard: body-1, role: windows-x64-framework-body-1, os: windows-2022, architecture: x64, worker_budget: 15 }
+          - { target: windows-x64, component: framework, shard: body-2, role: windows-x64-framework-body-2, os: windows-2022, architecture: x64, worker_budget: 15 }
+          # Its five-slot cancellation root must not compete with sibling groups.
+          - { target: windows-x64, component: framework, shard: body-3, role: windows-x64-framework-body-3, os: windows-2022, architecture: x64, worker_budget: 5 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 360
     env:
-      SDLC_TEST_WORKERS: '15'
+      SDLC_TEST_WORKERS: '${{ matrix.worker_budget }}'
       SDLC_NATIVE_ROLE: ${{ matrix.role }}
       SDLC_NATIVE_COMPONENT: ${{ matrix.component }}
       SDLC_FRAMEWORK_SHARD: ${{ matrix.shard }}

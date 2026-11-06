@@ -218,6 +218,10 @@ merge, even when its author ran nothing locally.
 - AC-203.1: Pushes to a branch with an open PR, new PRs and relevant updates
   automatically run the complete required PR validation for the current
   candidate. A first PR cannot depend on a contributor's local result.
+  A completely acquired empty in-scope PR membership is a successful idle
+  reconciliation operation, not passing validation. Retain `NotRun` and explicit
+  no-work evidence without publishing statuses. Incomplete acquisition, errors
+  and blocked required PRs must not receive that idle-operation success.
 - AC-203.2: Linux, native Windows and native macOS jobs execute their applicable
   substantive tests and utilities, not just command-smoke tests. Windows x64,
   Apple Silicon macOS and Intel macOS native coverage is required. The Test Plan
@@ -429,6 +433,9 @@ maintain the project.
   examples and unqualified readiness claims. Verify navigation separately in
   source, packaged and installed layouts; essential offline guidance must have
   a shipped target or an explicitly identified online reference.
+  README links to the repository's Releases instead of hardcoding a framework
+  release version; required runtime constraints and immutable release history
+  remain accurate in their own documentation.
 - AC-210.2: Provide discoverable contribution, support, security-reporting,
   ownership/review and change/release guidance appropriate to this personal
   third-party OSS project.
@@ -447,6 +454,11 @@ maintain the project.
   paths. Keep transient test counters, internal work-item bookkeeping and
   implementation-recovery problems out of the public landing-page experience;
   retain their truthful evidence in the internal readiness records instead.
+  README presents four compelling, truthful value bullets followed immediately
+  by its explanatory image. Its capability table includes only implemented
+  framework features, supported by source/documentation; host-agent chat/session
+  restoration, review execution and external control infrastructure are not
+  presented as framework-provided capabilities.
 - AC-210.6: A professional/share-ready assessment identifies the exact published
   branch/revision and verifies its documentation links, current required CI,
   effective merge controls, usable private security route and released-channel
