@@ -1434,7 +1434,7 @@ failure or grants delivery-limit credit.
 
 | ID | Environment | Level | Checkpoint | Mode | Owner | Location | Requirements | Observe or assert | Implementation | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| T-PRD028 | local | unit | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.1 | F: missing/wrong destination, version/tag/source, toolchain, required setting or trust authority fails preflight with exact reason before any fake irreversible call is made. | test/release-ci.test.mjs#T-PRD028 | NotRun | |
+| T-PRD028 | local | unit | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.1 | F: missing/wrong destination, version/tag/source, toolchain, required setting or trust authority fails preflight with exact reason before any fake irreversible call is made. Preserve classic protection and accept equivalent effective active rulesets; reject missing/unknown enforcement and unsafe bypasses without relaxing successful source validation. These regressions are PR-only, not critical promotion. | test/release-ci.test.mjs#T-PRD028 | NotRun | |
 | T-PRD029 | local | integration | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.2 | F: build independent comparison artifacts, seal only after all exact native gates, and pass the same digest-bound bytes to both publisher fixtures; changed/repacked/swapped data is rejected. | test/release-ci.test.mjs#T-PRD029; four-native-profile, original NDJSON data-only transport and acyclic sealed-handoff assertions all required | NotRun | |
 | T-PRD030 | local | integration | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.3 | F: drive orchestration with fixture provider outcomes; successful publication schedules exact saved-ID acceptance automatically; missing public assets/acceptance handle yields incomplete release, not success or a manual-only hidden step. | test/release-ci.test.mjs#T-PRD030 | NotRun | |
 | T-PRD031 | local | unit | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.4 | F: reject PR events, wrong caller/environment/source, missing OIDC and token fallback; approved token-free exact caller gets only its declared publishing permissions. | test/npm-oidc.test.mjs#T-PRD031 | NotRun | |
@@ -2482,6 +2482,12 @@ exception removes only the requirement for another human to approve an owner's
 PR; it does not exempt CI or conversation resolution. A resolved thread is not
 an approval, and an approval is not evidence that all threads are resolved.
 This defines test expectations, not authority to apply provider settings.
+
+The owner's deliberate PR-only administrator capability is distinct from normal
+merge eligibility. Verify its actual scope without exercising a bypass or
+changing production settings as a test. It is not an author-based exemption,
+does not permit direct/force pushes or deletion, and does not satisfy release
+validation when checks are missing or failing.
 
 Read actual applicable branch/ruleset/review/check settings, including inherited
 rules and bypass actors. Establish repository identity and exact required check

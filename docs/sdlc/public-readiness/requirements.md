@@ -306,6 +306,11 @@ Required tests must be real merge prerequisites, not advisory green decorations.
   installing the framework elsewhere must not impose that repository policy.
 - AC-205.2: Direct pushes, force pushes, deletion and administrative bypasses
   follow the explicitly approved policy. Do not silently exempt maintainers.
+  The owner retains a deliberate PR-only administrator override without changing
+  the rules for each merge. Normal required validations apply equally to owner
+  and contributor PRs. Configuring that capability does not authorize an agent
+  to exercise it; a particular PR requires explicit owner direction. An override
+  does not turn missing or failing checks into passing release evidence.
 - AC-205.3: Verify that a failing, missing, stale or skipped required result
   prevents merge. Source configuration alone does not prove provider enforcement.
 - AC-205.4: Document unavailable account-tier controls and owner actions

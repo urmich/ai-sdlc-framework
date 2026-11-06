@@ -2435,6 +2435,14 @@ conversations; force push/deletion disabled; no silent CI exemption for
 administrators. Do not enable auto-merge or
 use admin merge flags as a substitute for policy.
 
+The owner-selected exception is a deliberate administrator bypass **for pull
+requests only**, not an always-allow bypass. Normal checks and conversation
+resolution still apply to every PR, including the owner's. The capability is
+actor-based, not an exemption based on PR authorship; configuring it neither
+authorizes an agent to use it nor makes failed validation admissible for release.
+Its exercise needs explicit direction for the particular PR. Do not add a
+direct-push, force-push or branch-deletion exception.
+
 Apply only after explicit owner consent and an actual successful observed status
 from the intended source; then verify positive/negative controlled PR/ref cases
 and effective settings. Read-only API access or this design grants no writes.
@@ -2644,6 +2652,15 @@ version consistency, required policy/checks, destination, tool pins, artifact
 retention, registry trust and necessary environment capabilities. Missing
 `RELEASE_REPOSITORY` or an inconsistent input gets an early actionable failure.
 No implicit version bump or existing-version replacement occurs.
+
+Release policy verification supports classic protection or an equivalent active
+ruleset actually applying to `main`; the ruleset name alone is not proof.
+The ruleset path must establish required current validation/approval/coverage
+contexts, strict up-to-date checks, PRs with resolved conversations and force-push/
+deletion restrictions. It admits no bypass or only the explicitly selected
+PR-only administrator capability, never an always-allow or unknown exemption.
+Unavailable or incomplete policy facts fail preflight. This compatibility does
+not replace the separate successful source/accepted-PR validation requirements.
 
 A single authorized release start covers the declared jobs; configure their
 normal environment policy accordingly. Do not programmatically approve or
