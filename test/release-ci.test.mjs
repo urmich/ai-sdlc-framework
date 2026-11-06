@@ -13,6 +13,14 @@ export const validationDeclarations = {
       "minimumSlots": 1, "exclusiveResources": []}
   ],
   "applicability": [
+    {"names": [
+      "T-PRD028 preflight rejects wrong source, destination, settings and trust before any publication mutation",
+      "T-PRD028 preflight accepts complete effective repository rulesets without classic protection",
+      "T-PRD028 preflight rejects incomplete unknown or unsafe effective ruleset policy",
+      "T-PRD028 PR-only admin override cannot substitute for successful release source checks"
+    ], "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer",
+      "reason": "PR-only release-preflight policy and source-evidence regressions; independent root processes use complete fake GitHub policy and read-only source configuration, never packaging, provider writes or critical-profile promotion.",
+      "prerequisites": ["Node >=22", "Read-only source package/workflow configuration; no npm, credentials or network"]},
     {"options": "{skip:packagePrerelease?'Stable Homebrew publication metadata is not generated for prereleases':false}", "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Stable-channel formula negatives remain required; a prerelease source cannot silently waive this declared profile.", "prerequisites": ["Stable source version for the required Homebrew release profile"]},
     {"options": "{skip:packagePrerelease?'Stable Homebrew acceptance is not applicable to prereleases':false}", "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Controlled public-consumer adapter tests do not substitute for actual later native consumers.", "prerequisites": ["Stable source version for the required Homebrew release profile"]}
   ],
@@ -162,8 +170,8 @@ const repository = NPM_TRUST.repository;
 const sourceCommit = 'a'.repeat(40);
 const releaseIntentId = 'unit-fixture-release-not-provider-proof';
 const candidateBaseUrl = 'http://127.0.0.1:8765/';
-const packagePrerelease = isPrerelease(
-  JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8')).version);
+const packageVersion = JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
+const packagePrerelease = isPrerelease(packageVersion);
 
 function fixtureFormula(descriptor, { mode = 'stable', candidateBaseUrl } = {}) {
   const base = mode === 'candidate' ? candidateBaseUrl :
@@ -274,7 +282,8 @@ const sealBundle = options => sealProductionBundle({ ...options, sourceCommit, r
 const verifyBundle = options => verifyProductionBundle({ ...options, verifyEvidence: unitNativeVerifier });
 
 test.beforeEach(async context => {
-  if (context.name === 'T-PRD057 two archive targets retain four mandatory native execution platforms without Linux standalone support') return;
+  if (context.name.startsWith('T-PRD028 ') ||
+      context.name === 'T-PRD057 two archive targets retain four mandatory native execution platforms without Linux standalone support') return;
   fixtureSetup ??= prepareReleaseFixture(context);
   await fixtureSetup;
 });
@@ -1777,7 +1786,7 @@ test('T-PRD028 preflight rejects wrong source, destination, settings and trust b
     if (route.includes('/git/ref/')) return { status: 404 };
     return { status: 200, value: { private: false } };
   };
-  const input = { sourceCommit, version: payload.version, repository, releaseIntentId, environment };
+  const input = { sourceCommit, version: packageVersion, repository, releaseIntentId, environment };
   for (const invalid of [
     { repository: '' }, { sourceCommit: 'f'.repeat(40) }, { version: '999.0.0' },
     { environment: { ...environment, GITHUB_EVENT_NAME: 'pull_request' } },
@@ -1789,6 +1798,166 @@ test('T-PRD028 preflight rejects wrong source, destination, settings and trust b
   wrongProtection = false;
   assert.equal((await preflightRelease(input, api, async () => null)).status, 'Passed');
   assert.ok(calls.every(call => !call.method), 'Preflight must never dispatch an irreversible effect');
+});
+
+function rulesetPreflightFixture() {
+  const contexts = ['framework/validation', 'framework/approval', 'framework/coverage'];
+  const ruleset = { id: 26728403, name: 'not-an-applicability-proof', target: 'branch',
+    source_type: 'Repository', source: repository, enforcement: 'active', bypass_actors: [],
+    conditions: { ref_name: { include: ['~DEFAULT_BRANCH'], exclude: [] } },
+    rules: [
+      { type: 'deletion' }, { type: 'non_fast_forward' },
+      { type: 'pull_request', parameters: { required_approving_review_count: 0,
+        dismiss_stale_reviews_on_push: false, require_code_owner_review: false,
+        require_last_push_approval: false, required_review_thread_resolution: true } },
+      { type: 'required_status_checks', parameters: { strict_required_status_checks_policy: true,
+        do_not_enforce_on_create: false, required_status_checks: contexts.map(context => ({ context })) } },
+    ] };
+  const state = { rulesets: [ruleset], protection: { status: 404 },
+    main: { protected: true, commit: { sha: sourceCommit } },
+    statuses: contexts.map(context => ({ context, state: 'success' })), pulls: [],
+    acceptedStatuses: contexts.map(context => ({ context, state: 'success' })) };
+  const calls = [];
+  const effective = () => state.rulesets.flatMap(item => item.rules.map(rule => ({
+    ...structuredClone(rule), ruleset_id: item.id, ruleset_source_type: 'Repository', ruleset_source: repository,
+  })));
+  const environment = {
+    GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/main',
+    GITHUB_REPOSITORY: repository, GITHUB_SHA: sourceCommit, GITHUB_ACTOR: 'fixture-maintainer',
+    GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', RELEASE_REPOSITORY: repository,
+    GITHUB_WORKFLOW_REF: `${repository}/.github/workflows/release.yml@refs/heads/main`,
+    NPM_TRUSTED_PUBLISHER_REPOSITORY: repository, NPM_TRUSTED_PUBLISHER_CALLER: 'release.yml',
+    NPM_TRUSTED_PUBLISHER_ENVIRONMENT: 'npm', SUPPORTED_PREVIOUS_VERSION: '0.3.0',
+    SUPPORTED_PREVIOUS_DESCRIPTOR_SHA256: 'b'.repeat(64), SUPPORTED_PREVIOUS_CHECKSUMS_SHA256: 'c'.repeat(64),
+  };
+  const api = async (route, options = {}) => {
+    calls.push({ route, ...options });
+    assert.equal(options.method, undefined, 'Policy inspection must never invoke a mutation or bypass');
+    const prefix = `/repos/${repository}`;
+    if (route === prefix) return { status: 200, value: { private: false, default_branch: 'main' } };
+    if (route.endsWith('/permission')) return { status: 200, value: { permission: 'admin' } };
+    if (route === `${prefix}/branches/main/protection`) {
+      if (state.protection instanceof Error) throw state.protection;
+      return state.protection;
+    }
+    if (route === `${prefix}/branches/main`) return { status: 200, value: state.main };
+    if (route.startsWith(`${prefix}/rules/branches/main?`)) {
+      const query = new URLSearchParams(route.split('?')[1]);
+      assert.equal(query.get('per_page'), '100');
+      const start = (Number(query.get('page')) - 1) * 100;
+      return state.effectiveResponse ?? { status: 200, value: (state.effective ?? effective()).slice(start, start + 100) };
+    }
+    if (route.startsWith(`${prefix}/rulesets/`)) {
+      return state.detailResponse ?? { status: 200, value: state.rulesets.find(item =>
+        item.id === Number(route.slice(route.lastIndexOf('/') + 1))) };
+    }
+    if (route === `${prefix}/commits/${sourceCommit}/status`) return { status: 200, value: { statuses: state.statuses } };
+    if (route.endsWith('/status')) return { status: 200, value: { statuses: state.acceptedStatuses } };
+    if (route.includes(`/commits/${sourceCommit}/pulls?`)) return { status: 200, value: state.pulls };
+    if (route.endsWith('/environments/npm')) return { status: 200, value: { protection_rules: [] } };
+    if (route.includes('/actions/artifacts?')) return { status: 200, value: { artifacts: [], total_count: 0 } };
+    if (route.includes('/git/ref/')) return { status: 404 };
+    throw new Error(`Unexpected fake provider read: ${route}`);
+  };
+  return { state, ruleset, calls, effective,
+    run: () => preflightRelease({ sourceCommit, version: packageVersion, repository, releaseIntentId, environment },
+      api, async () => null) };
+}
+
+test('T-PRD028 preflight accepts complete effective repository rulesets without classic protection', async () => {
+  const f = rulesetPreflightFixture();
+  assert.equal((await f.run()).status, 'Passed');
+  f.ruleset.bypass_actors = [{ actor_type: 'RepositoryRole', actor_id: 5, bypass_mode: 'pull_request' }];
+  assert.equal((await f.run()).status, 'Passed', 'An explicit admin PR-only capability is not an always-on exemption');
+  const checks = f.ruleset.rules.pop();
+  const second = { ...structuredClone(f.ruleset), id: f.ruleset.id + 1,
+    conditions: { ref_name: { include: ['refs/heads/main'], exclude: [] } }, rules: [checks] };
+  f.state.rulesets.push(second);
+  assert.equal((await f.run()).status, 'Passed', 'Independently effective safe sources can supply a complete policy');
+  f.state.rulesets = Array.from({ length: 25 }, (_, index) => ({
+    ...structuredClone(f.ruleset), id: f.ruleset.id + index, rules: [...structuredClone(f.ruleset.rules), structuredClone(checks)],
+  }));
+  f.state.rulesets.push({ ...second, id: f.ruleset.id + 25 });
+  assert.equal((await f.run()).status, 'Passed');
+  assert.ok(f.calls.some(call => call.route.endsWith('/rules/branches/main?per_page=100&page=2')),
+    'A full first page is not the complete effective policy');
+  f.state.rulesets.at(-1).bypass_actors = [{ actor_type: 'RepositoryRole', actor_id: 5, bypass_mode: 'always' }];
+  await assert.rejects(f.run(), /ruleset.*bypass/iu, 'Unsafe later-page policy cannot be hidden behind a complete first page');
+});
+
+test('T-PRD028 preflight rejects incomplete unknown or unsafe effective ruleset policy', async () => {
+  for (const [name, mutate] of [
+    ['missing checks', f => { f.ruleset.rules.pop(); }],
+    ['missing context', f => { f.ruleset.rules.at(-1).parameters.required_status_checks.pop(); }],
+    ['loose checks', f => { f.ruleset.rules.at(-1).parameters.strict_required_status_checks_policy = false; }],
+    ['unknown strict policy', f => { delete f.ruleset.rules.at(-1).parameters.strict_required_status_checks_policy; }],
+    ['unresolved conversations', f => { f.ruleset.rules[2].parameters.required_review_thread_resolution = false; }],
+    ['unknown conversations', f => { delete f.ruleset.rules[2].parameters.required_review_thread_resolution; }],
+    ['missing PR rule', f => { f.ruleset.rules.splice(2, 1); }],
+    ['missing force-push block', f => { f.ruleset.rules.splice(1, 1); }],
+    ['missing deletion block', f => { f.ruleset.rules.shift(); }],
+    ['inactive', f => { f.ruleset.enforcement = 'evaluate'; }],
+    ['not effective', f => { f.state.effective = []; }],
+    ['wrong target', f => { f.ruleset.target = 'tag'; }],
+    ['unapplied main name', f => { f.ruleset.name = 'main'; f.ruleset.conditions.ref_name.include = ['refs/heads/other']; }],
+    ['excluded main', f => { f.ruleset.conditions.ref_name.exclude = ['refs/heads/main']; }],
+    ['unknown bypass actors', f => { delete f.ruleset.bypass_actors; }],
+    ['unknown conditions', f => { delete f.ruleset.conditions; }],
+    ['unknown rule', f => { f.ruleset.rules.push({ type: 'future_policy' }); }],
+    ['unproven effective origin', f => { f.state.effective = f.effective(); delete f.state.effective[0].ruleset_source_type; }],
+    ['unsupported origin', f => { f.state.effective = f.effective(); f.state.effective[0].ruleset_source_type = 'Organization'; }],
+    ['mismatched detail', f => { f.state.effective = f.effective(); f.ruleset.rules.at(-1).parameters.strict_required_status_checks_policy = false; }],
+    ['malformed effective response', f => { f.state.effectiveResponse = { status: 200, value: {} }; }],
+    ['unavailable detail', f => { f.state.detailResponse = { status: 403, value: f.ruleset }; }],
+  ]) {
+    const f = rulesetPreflightFixture();
+    mutate(f);
+    await assert.rejects(f.run(), /ruleset/iu, name);
+  }
+  for (const actor of [
+    { actor_type: 'RepositoryRole', actor_id: 5, bypass_mode: 'always' },
+    { actor_type: 'RepositoryRole', actor_id: 4, bypass_mode: 'pull_request' },
+    { actor_type: 'RepositoryRole', actor_id: 2, bypass_mode: 'pull_request' },
+    { actor_type: 'RepositoryRole', actor_id: 999, bypass_mode: 'pull_request' },
+    { actor_type: 'Integration', actor_id: 5, bypass_mode: 'pull_request' },
+    { actor_type: 'User', actor_id: 5, bypass_mode: 'pull_request' },
+    { actor_type: 'RepositoryRole', actor_id: 5 },
+  ]) {
+    const f = rulesetPreflightFixture();
+    f.ruleset.bypass_actors = [actor];
+    await assert.rejects(f.run(), /ruleset.*bypass/iu, JSON.stringify(actor));
+  }
+  for (const protection of [{ status: 403 }, { status: 500 }, { status: 200 },
+    new Error('Fake network failure')]) {
+    const f = rulesetPreflightFixture();
+    f.state.protection = protection;
+    await assert.rejects(f.run());
+    assert.ok(!f.calls.some(call => call.route.includes('/rules/')), 'Only an explicit classic 404 permits fallback');
+  }
+});
+
+test('T-PRD028 PR-only admin override cannot substitute for successful release source checks', async () => {
+  const f = rulesetPreflightFixture();
+  f.ruleset.bypass_actors = [{ actor_type: 'RepositoryRole', actor_id: 5, bypass_mode: 'pull_request' }];
+  f.state.statuses[0].state = 'failure';
+  await assert.rejects(f.run(), /required current source status is non-passing/u);
+  f.state.statuses = [];
+  await assert.rejects(f.run(), /one accepted protected-main merge record/u);
+  f.state.pulls = [{ number: 123, merged_at: '2026-11-06T00:00:00Z', base: { ref: 'main' },
+    merge_commit_sha: sourceCommit, head: { sha: 'b'.repeat(40) } }];
+  const accepted = await f.run();
+  assert.deepEqual(accepted.sourceAcceptance, { kind: 'accepted-protected-main-merge', revision: sourceCommit,
+    pullRequest: 123, acceptedHead: 'b'.repeat(40), releaseNativeCredit: 'NotRun-fresh-R-PRE-required' });
+  const missing = f.state.acceptedStatuses.pop();
+  await assert.rejects(f.run(), /Accepted merge lacks/u);
+  f.state.acceptedStatuses.push(missing);
+  f.state.acceptedStatuses[0].state = 'failure';
+  await assert.rejects(f.run(), /Accepted merge lacks/u);
+  f.state.main.protected = false;
+  await assert.rejects(f.run(), /current accepted protected-main candidate/u);
+  f.state.main.protected = true;
+  f.state.main.commit.sha = 'c'.repeat(40);
+  await assert.rejects(f.run(), /current accepted protected-main candidate/u);
 });
 
 test('T-PRD030 successful publication preserves exact release IDs and schedules automatic saved-bundle acceptance', async t => {

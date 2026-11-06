@@ -1199,6 +1199,39 @@ product-scale or hosted performance benchmark.
 
 ### 4.4 Producer output and cancellation
 
+The Windows capture fixture retains the original root and taskkill handles
+through cleanup. Await controller closure before any subsequent owned-root
+cleanup; do not repeat a requested stop. Unverified stop or close prevents
+directory removal and preserves the primary failed command and diagnostics.
+The separate five-second fixture-cleanup bound neither extends the production
+settlement deadline nor makes an original failed cancellation pass.
+Production stop dispatch is immediate. Its shared settlement window is five
+seconds on Windows and one second on POSIX, for both raw owned commands and
+validation commands. The Windows change accommodates the observed native
+controller latency without retries, relaxed ownership or uncertain-cleanup
+success. Whole return latency still includes awaited durable retention.
+
+Windows body-3 requests seven shared slots, admitting its complete selected
+closure, including six- and seven-slot roots. The five-slot cancellation root
+can still overlap smaller peers; this reduces contention, not full isolation.
+Other Windows parts retain fifteen. A job-level expression selects the request
+from the existing closed shard identity; no matrix metadata or trusted-parser
+extension is introduced. Requested workers remain in the native configuration
+digest and actual bootstrap/resource proof.
+Historical literal-budget definitions and measurements remain unchanged.
+Historical fixtures reconstruct the archived Windows budget before verifying
+their original pinned digests. New or changed roots invalidate the complete
+source-qualified ownership vector; current placement falls back with complete
+closures and source-derived SDKs, not historical primary-placement or cost credit.
+Keep authenticated historical placement controls separate from that fallback.
+Data-only source reconstructions must compile to their immutable inventory
+digests and pass the original callback/resource/SDK qualifiers before exercising
+qualified pooling, transfers or reservations. Never substitute digest metadata
+or transfer historical execution/performance credit to current source.
+The original hosted failure occupied all fifteen slots on four CPUs, but its
+kernel cause is unproven; reduced concurrency is a mitigation requiring fresh hosted CI,
+not demonstrated cancellation repair.
+
 Installer timing observations are opt-in and use a strict non-secret
 `SDLC_INSTALL_TRACE_ID` UUID. A small shared observer emits bounded
 `sdlc-install-v1` fixed-format stderr records, never stdout JSON or file contents,
@@ -1218,7 +1251,7 @@ The raw denial-boundary executor shares the existing owned-group stop and
 settlement policy with validation commands, without substituting sanitized
 reports for its raw stream/Error contract. A live tracked child anchors its
 dedicated POSIX group; one 15,000ms watchdog requests synchronous owned
-termination. The 1,000ms settlement bound includes root close and observed group
+termination. The POSIX 1,000ms settlement bound includes root close and observed group
 disappearance. No delayed destructive signal follows ownership loss. Uncertain
 writers keep the primary timeout/overflow failure and prevent fixture deletion;
 the raw 4MiB stream limits and native negative-control outcomes stay intact.
@@ -1241,6 +1274,13 @@ The cross-platform Windows VM fixture composes its exact mock executable path
 with the supplied host path module. Identify its termination watchdog through
 owned dispatch and registration, not platform-specific separators or error-stack
 text. Neither portability control changes the real termination implementation.
+Its ten-scenario evidence root models the actual five-second Windows budget,
+including dispatch latency, without extending its ten-second outer watchdog.
+Drive active settlement-drain timers even beyond the former one-second boundary,
+but keep passive progress checkpoints idle. Failure-path teardown closes both
+owned handles and awaits settlement so a primary assertion is not masked by
+hung cleanup. Preserve the existing privacy, ordering and uncertainty checks;
+this is a VM fixture correction, not a production or native-acceptance change.
 The command-capture root reserves five process slots; its writer/producer peers
 reserve their actual two- or three-process minima before timed work begins.
 The separate CI tool-cancellation root reserves four: its worker, command,
@@ -1252,13 +1292,13 @@ Historical costs with the former one-slot resource shape cannot supply a
 qualified lead for the corrected group.
 The native ownership fixture reserves four aggregate worker slots for its
 test process and three real child processes, without changing host capacities
-or the one-second settlement bound.
+or the platform settlement contract.
 The controlled Windows settlement fixture separately reserves five slots for
 its test process and at most two independent owned root/writer pairs. Fresh
 VM contexts and unique paths isolate all six scenarios; each pair settles
 before another is admitted. Real peer provenance proves overlap, all six
-cleanup closures remain required, and the existing twenty-second test and
-one-second stop deadlines remain unchanged. Retain per-mode phase diagnostics
+cleanup closures remain required. Its enclosing test watchdog is sixty seconds,
+and Windows production termination settlement is five seconds. Retain per-mode phase diagnostics
 so a later timeout identifies the unfinished boundary.
 The publication fixture arms its five-second ready deadline only when the
 parent releases the intentional write barrier, not while that barrier forbids
@@ -1915,7 +1955,7 @@ Interpose `spawn` only in its isolated controller, invoke the original function
 unchanged, and observe only the exact SystemRoot `System32/taskkill.exe` child.
 Publish the actual PID and spawn-event UTC bound atomically to the prestarted
 observer's nonce request. Do not await it inside `executeValidationCommand` or
-alter the unchanged 1000ms stop deadline. Complete existing command/controller
+alter stop dispatch or the platform settlement deadline. Complete existing command/controller
 cleanup before awaiting native finalization; append compact validated facts to
 the same assertion error, preserving a concurrent cleanup failure separately.
 Retain the exact spawn request bound, target binding reason/capture timestamp,
@@ -2004,6 +2044,11 @@ hashes. It is considered only when the ordinary compiler-settlement receipt is
 missing. Its `notStarted` receipt means no outstanding compiler writer; only
 the ordinary `verified` compiler receipt can contribute to readiness.
 Await original observer closure before calling cleanup complete.
+Serialize compiler-settlement refreshes through one pending promise. A delayed
+missing ordinary receipt must not overwrite an already verified no-writer
+receipt while another refresh is completing. Clear the pending promise on
+completion or rejection so later affirmative proof can still refine an
+unsettled observation; preserve all source, readiness and cleanup checks.
 If cleanup or compiler settlement remains unknown, the original acquired worker
 requests persistent aggregate admission stop over its existing authenticated
 socket. Mark the broker stopped before acknowledgement and reject queued/new
@@ -2067,10 +2112,26 @@ that the initial running checkpoint is durable: the command awaits that write
 before its stop/close race. Await the actual first running `atomicWrite` under
 the remaining original five-second preparation allowance, racing early command
 settlement. A controlled clock advance models cold preparation without sleeps.
-Keep the original production stop deadline, physical 1500ms watchdog, all six
-settlement modes and real writer-drain/retention/controller cleanup proofs.
-No production termination behavior changes, and later persistence remains part
-of actual return latency; this fixture correction does not prove a hosted cure.
+Keep immediate production stop dispatch, all six settlement modes
+and real writer-drain/retention/controller cleanup proofs. The separate physical
+and command-clock test watchdogs allow ten seconds for cancellation plus durable
+retention, under a sixty-second enclosing test timeout. The earlier 1500ms test
+guard left only half a second after the earlier production termination budget for real
+journal/report I/O; a native-host observation exceeded that allowance without
+establishing the sole hosted cause. This test-only correctness-first allowance
+does not define production termination or T-PRD018's separate diagnostic capture
+deadline. Under the owner's subsequent direction to resolve the native blocker,
+the shared Windows production settlement budget is five seconds, while POSIX
+retains one second. Both preserve affirmative closure, timeout failure and
+single-dispatch ownership; the original failed one-second observations remain
+historical, not passing evidence for the changed candidate.
+Block the stalled mode's actual final report write and verify its prior durable
+uncertain checkpoint, original `STOP_TIMEOUT` and watchdog facts while the command
+remains pending. Release in `finally`, await the real retained report and preserve
+the single-stop/controller, unchanged preparation-clock offset and complete
+owned cleanup assertions. No dispatch, ownership or durability algorithm changes;
+later persistence remains part of actual return latency, not proof of a hosted
+cure or permission to return before retention.
 
 The standalone simultaneous-activation fixture similarly separates cold staging
 from the contender's lock-wait allowance. Hold the first real promotion after
@@ -2257,6 +2318,22 @@ only the small status reconciler is serialized. Pending notifications may be
 coalesced/replaced by GitHub, so every admitted writer refreshes all current
 in-scope PRs and affected status keys, not just the triggering PR. Events are
 wakeups, not an ordered journal or commands to replay stale payloads.
+When complete acquisition finds no in-scope open PRs, retain `NotRun` with an
+explicit `noWork` operation marker and no status writes. The observer CLI may
+complete successfully for this idle operation only when it has no required
+results, conversation work or diagnostic. This is not native-validation,
+approval or provider-enforcement credit; incomplete/error/blocked observations
+remain non-passing.
+
+The shared GitHub SDK applies HTTP `If-None-Match` weak comparison to a 304
+validator: optional `W/` strength may change while the case-sensitive opaque tag
+stays identical. Keep the original conditional header and all exact acquired
+request, credential, visibility, connection, epoch and scope bindings. A 304
+without compatible acquired cache or with a different opaque tag remains a
+proof gap. Reused data retains its old observation version and does not gain a
+fresh observation timestamp. This corrects the observed provider weak-to-strong
+transition; it does not grant a passing observer result or change trusted-source
+adoption.
 
 The provider status key is exactly `(repository identity, SHA, context)`, not
 PR number, description digest or target URL. For each actual head/eligible
@@ -2357,6 +2434,14 @@ validation/approval/coverage contexts, up-to-date branch and resolved
 conversations; force push/deletion disabled; no silent CI exemption for
 administrators. Do not enable auto-merge or
 use admin merge flags as a substitute for policy.
+
+The owner-selected exception is a deliberate administrator bypass **for pull
+requests only**, not an always-allow bypass. Normal checks and conversation
+resolution still apply to every PR, including the owner's. The capability is
+actor-based, not an exemption based on PR authorship; configuring it neither
+authorizes an agent to use it nor makes failed validation admissible for release.
+Its exercise needs explicit direction for the particular PR. Do not add a
+direct-push, force-push or branch-deletion exception.
 
 Apply only after explicit owner consent and an actual successful observed status
 from the intended source; then verify positive/negative controlled PR/ref cases
@@ -2567,6 +2652,15 @@ version consistency, required policy/checks, destination, tool pins, artifact
 retention, registry trust and necessary environment capabilities. Missing
 `RELEASE_REPOSITORY` or an inconsistent input gets an early actionable failure.
 No implicit version bump or existing-version replacement occurs.
+
+Release policy verification supports classic protection or an equivalent active
+ruleset actually applying to `main`; the ruleset name alone is not proof.
+The ruleset path must establish required current validation/approval/coverage
+contexts, strict up-to-date checks, PRs with resolved conversations and force-push/
+deletion restrictions. It admits no bypass or only the explicitly selected
+PR-only administrator capability, never an always-allow or unknown exemption.
+Unavailable or incomplete policy facts fail preflight. This compatibility does
+not replace the separate successful source/accepted-PR validation requirements.
 
 A single authorized release start covers the declared jobs; configure their
 normal environment policy accordingly. Do not programmatically approve or
@@ -2849,6 +2943,12 @@ fabricated ACK or budget change substitutes for that admission.
 Provide contributor, support, security-reporting, conduct, ownership/review and
 change/release guidance. Derive versions/commands/platforms from current metadata
 and tested examples; remove stale public pins and implementation-status claims.
+Use repository Releases links for framework-version guidance in README. Keep
+four outcome-oriented, source-supported value bullets immediately before the
+existing explanatory image. Audit every capability-table row against actual
+framework code/docs and explicitly separate host-agent session restoration,
+review execution, scheduler/provider infrastructure and external permissions
+from framework work-item/evidence/operation recordkeeping.
 
 Adopt the relevant reader/governance guidance from proposed FR-054 rather than
 duplicate it: public third-party identity, reporting/support/contribution routes

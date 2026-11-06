@@ -108,7 +108,7 @@ export function inspectReaderContracts(contents, pkg) {
       diagnostics.push(`${file}: ${field} claim conflicts with distribution contract`);
     }
   }
-  for (const file of ['README.md', 'SECURITY.md', 'docs/releases/README.md']) {
+  for (const file of ['SECURITY.md', 'docs/releases/README.md']) {
     if (!contents.get(file)?.includes(`**${pkg.version}**`)) {
       diagnostics.push(`${file}: current version differs from package.json`);
     }
@@ -117,6 +117,13 @@ export function inspectReaderContracts(contents, pkg) {
     diagnostics.push('README.md: Node minimum differs from package.json');
   }
   const repository = pkg.repository?.url?.replace(/\.git$/u, '').replace(/\/$/u, '');
+  const readme = contents.get('README.md') ?? '';
+  if (repository && !markdownLinks(readme).links.includes(`${repository}/releases`)) {
+    diagnostics.push('README.md: missing repository Releases link for version-neutral guidance');
+  }
+  if (/\bai-sdlc-framework@\d+\.\d+\.\d+|\*\*v?\d+\.\d+\.\d+|\bv\d+\.\d+\.\d+/u.test(readme)) {
+    diagnostics.push('README.md: pinned framework release; use repository Releases');
+  }
   if (repository && !markdownLinks(contents.get('SECURITY.md') ?? '').links.includes(
     `${repository}/security/advisories/new`)) {
     diagnostics.push('SECURITY.md: missing repository private reporting route; live availability requires provider verification');

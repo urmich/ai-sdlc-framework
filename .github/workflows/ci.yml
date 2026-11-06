@@ -679,7 +679,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 360
     env:
-      SDLC_TEST_WORKERS: '15'
+      SDLC_TEST_WORKERS: "${{ matrix.shard == 'body-3' && '7' || '15' }}"
       SDLC_NATIVE_ROLE: ${{ matrix.role }}
       SDLC_NATIVE_COMPONENT: ${{ matrix.component }}
       SDLC_FRAMEWORK_SHARD: ${{ matrix.shard }}

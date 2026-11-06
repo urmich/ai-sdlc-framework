@@ -1427,6 +1427,9 @@ export function renderObserverSummary(result, { completeReportRef, maxBytes = 90
   const lines = ['## Repository PR guardrails', '', `**${cell(result.status)}**`, '',
     'Coverage, maintainer approval and native execution are independent verdicts.',
     'NotRun/blocked is not a passing test or proof that provider enforcement is active.', '',
+    ...(result.noWork === true && observerExitCode(result) === 0 ? [
+      'No current in-scope PRs: reconciliation completed without publishing statuses or granting validation credit.', '',
+    ] : []),
     '| SHA / context | Verdict | PR members | Diagnostic |', '| --- | --- | --- | --- |'];
   const footer = ['', `Complete machine-readable outcomes: ${completeReportRef} (observer artifact).`];
   const reserve = Buffer.byteLength(footer.join('\n')) + 256;
@@ -1575,6 +1578,13 @@ export async function retainObserverResult(result, directory, { componentEvidenc
     `${JSON.stringify({ ...summary, requiredKeys: files.length, files, components })}\n`, { flag: 'wx' });
 }
 
+export function observerExitCode(result) {
+  const idle = result.status === 'NotRun' && result.noWork === true &&
+    Array.isArray(result.results) && result.results.length === 0 &&
+    !result.diagnostic && !result.conversations?.length;
+  return !result.diagnostic && (result.status === 'Passed' || idle) ? 0 : 2;
+}
+
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   const env = process.env;
   let result;
@@ -1623,6 +1633,6 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     }));
   }
   console.log(JSON.stringify({ status: safe.status, keys: safe.results.length,
-    diagnostic: safe.diagnostic ?? null }));
-  process.exitCode = safe.status === 'Passed' ? 0 : 2;
+    diagnostic: safe.diagnostic ?? null, ...(safe.noWork === true ? { noWork: true } : {}) }));
+  process.exitCode = observerExitCode(safe);
 }

@@ -19,58 +19,53 @@ sponsorship, approval or corporate support commitment.
 
 ## Why use it?
 
-- **Reduce solution-first coding.** Clarify requirements and observable
-  acceptance conditions, then plan tests and design before implementation.
-- **Make readiness explainable.** Connect requirements, actual test outcomes
-  and the reviewed candidate instead of relying on an agent's "done" claim.
-- **Continue without starting over.** Resume from canonical project documents,
-  retained decisions and original execution results rather than chat memory alone.
-- **Keep consequential choices yours.** Record approvals and scoped exceptions;
-  keep PR publication, merge and environment delivery separately authorized.
-  Stages remain advisory, and you can explicitly skip or reorder them.
+- **Reduce avoidable rework.** Clarify what success looks like and how to verify
+  it before committing effort to implementation.
+- **Make delivery decisions with confidence grounded in evidence.** Base readiness
+  on actual test outcomes and review of the candidate, not an agent's "done" claim.
+- **Avoid rebuilding project context.** Pick up from authoritative documents,
+  retained decisions and evidence rather than reconstructing the project from memory.
+- **Keep the important decisions yours.** Authorize publication, merge and
+  environment delivery separately, and choose when to follow, skip or reorder stages.
+
+![AI SDLC Framework lifecycle](docs/images/ai-sdlc-framework-overview.svg)
 
 ## Capabilities
 
-The table covers the implemented capability families in the **0.5.0 release
-candidate**. Provider-specific scopes and host prerequisites are linked below.
+The table describes framework-provided guidance, records and adapters in this
+source tree. Check [Releases](https://github.com/urmich/ai-sdlc-framework/releases)
+and the [release log](CHANGELOG.md) for availability in a selected release.
 
 | Capability | What it helps you do | Learn more |
 | --- | --- | --- |
 | Requirements, test planning and design | Clarify intent and acceptance conditions; maintain one living Test Plan and a Technical Design before implementation. | [Workflow](docs/usage/README.md) |
-| Implementation and unit-first validation | Guide Coding and candidate-changing fixes through the project's required local checks, with actual per-test outcomes. | [Validation](docs/reference/cli.md#local-validation-and-environment-records) |
-| Candidate code review | Use built-in Copilot `/review` for the validated candidate; corrections restart the required validation and review cycle. | [Candidate review](docs/reference/cli.md#candidate-review-through-copilot-cli-review) |
-| Session recovery | Recover authoritative documents, current work, pending execution handles and historical results after a restart or context loss. | [Resume and recovery](docs/usage/README.md#resume-from-authoritative-records) |
+| Validation cycle tracking | Track candidate-changing fixes, unit-first project checks and individual outcomes against the current Test Plan. Host tools run the checks. | [Validation](docs/reference/cli.md#local-validation-and-environment-records) |
+| Candidate review tracking | Record the candidate-bound result of Copilot's built-in `/review`; changed inputs invalidate prior review credit. Copilot provides the reviewer. | [Candidate review](docs/reference/cli.md#candidate-review-through-copilot-cli-review) |
+| Work-item, evidence and orientation recovery | Locate canonical documents, retained decisions/results and pending operation handles; track orientation to the current framework context. This does not restore host sessions or chat. | [Resume and recovery](docs/usage/README.md#resume-from-authoritative-records) |
 | Explicit user decisions | Record approvals, scoped overrides and receipt-backed decisions without treating tool success or document labels as consent. | [Decisions and receipts](docs/reference/cli.md#decisions-and-receipts) |
 | Multi-repository and multi-document work | Bind each repository/branch and track separate requirements, plans and designs under one coordinator. Local-only work needs no remote. | [Identity and artifacts](docs/reference/cli.md#identity-artifacts-and-recovery) |
-| Execution evidence and readiness | Normalize real producer results, retain individual outcomes and evaluate source/specification/configuration-bound readiness. Missing or stale evidence is not a pass. | [Evidence integration](docs/usage/evidence.md) |
+| Execution evidence and readiness | Normalize real results through trusted producer adapters, retain individual outcomes and evaluate source/specification/configuration-bound readiness. Missing, unverified or stale evidence is not a pass. | [Evidence integration](docs/usage/evidence.md) |
 | Requirements-to-tests traceability | Connect acceptance conditions to declared tests, expose coverage gaps and generate a PR-description coverage section. A mapping is not proof of execution. | [Coverage guide](docs/usage/evidence.md#1-author-canonical-definitions-and-compile-coverage-in-memory) |
-| GitHub integration | Use dedicated connection, transport and trusted-host/Store adapters for repository, PR, run, check and artifact observations. | [GitHub integration](docs/integrations/github-adapters.md) |
-| Azure DevOps integration | Use the built-in build identity/run-link adapter and provider-neutral PR, check, monitoring and evidence consumers. | [Azure DevOps adapter](docs/integrations/provider-adapters.md#azure-devops-reference-adapter) |
-| GitHub Actions and Azure Pipelines | Track authorized workflow/build runs, associate PR checks and retain execution/artifact evidence bound to the actual source and run. Provider tools own pipeline dispatch. | [Pipeline integration](docs/integrations/README.md#pipeline-integration) |
-| Pipeline monitoring | Follow GitHub Actions, Azure Pipelines and other supported reported runs with 60-second polling when a running host provides a scheduler and authorized provider-read tools. | [Monitoring prerequisites](docs/getting-started/README.md#monitoring-is-a-host-capability) |
-| PR and remote-operation tracking | Bind authorized pushes, PRs and provider results to exact source, destination and request identities; reconcile uncertain effects before retrying. | [Operations](docs/reference/cli.md#exact-external-operations) and [PR records](docs/reference/cli.md#pr-records) |
-| DEV and STAGING delivery | Track deployment-bound tests, separate environment permissions and explicit execution owner/location contracts. PROD is never automatic. | [Environment records](docs/reference/cli.md#local-validation-and-environment-records) |
-| Artifact and release handoffs | Carry supported artifact/version, producer, environment and destination identities into separately authorized delivery and release steps. | [Integration contracts](docs/integrations/provider-adapters.md) |
-| Provider and test-producer adapters | Extend trusted observation/result normalization and integrate the project's own runners without installing this repository's CI policy. | [Provider adapters](docs/integrations/provider-adapters.md) and [evidence adapters](docs/usage/evidence.md#3-normalize-actual-producer-output) |
-| Policy and notification result tracking | Record verified results of separately authorized policy or notification actions. Provider tools own the changes and sends. | [Supported result families](docs/integrations/provider-adapters.md) |
+| GitHub adapters | Provide connection, transport and trusted-host/Store interfaces for repository, PR, run, check and artifact observations. The authorized host supplies credentials and access. | [GitHub integration](docs/integrations/github-adapters.md) |
+| Azure DevOps adapter | Normalize build identity and summary links for provider-neutral monitoring, PR/check records and evidence consumers; this is not a full Azure DevOps client. | [Azure DevOps adapter](docs/integrations/provider-adapters.md#azure-devops-reference-adapter) |
+| Pipeline monitoring records | Track run identity, polling due times, verified links, interruptions and terminal notices for GitHub Actions, Azure Pipelines and supported adapters. The host supplies scheduling and reads. | [Monitoring prerequisites](docs/getting-started/README.md#monitoring-is-a-host-capability) |
+| PR and external-operation tracking | Bind authorized push, PR, pipeline and other supported provider outcomes to exact source, destination and request identities; retain uncertain effects for reconciliation. Host tools perform the operations. | [Operations](docs/reference/cli.md#exact-external-operations) and [PR records](docs/reference/cli.md#pr-records) |
+| Environment and artifact handoffs | Track artifact/version and deployment-bound tests, separate DEV/STAGING decisions and execution owner/location contracts. Host tools build and deploy; PROD is never automatic. | [Environment records](docs/reference/cli.md#local-validation-and-environment-records) and [integration contracts](docs/integrations/provider-adapters.md) |
 | Configuration and conflict resolution | Map project commands, tools and pipeline environments; record opposing rules and resolve them through explicit scoped decisions or verified corrections. | [Configuration and conflicts](docs/reference/cli.md#configuration-and-conflicts) |
 | Audit and conformance checks | Inspect recorded authority, replay supported Git audit trailers and diagnose state/history/evidence gaps without turning unknown results into passes. | [Audit and conformance](docs/reference/cli.md#audit-and-conformance) |
-| Offline core and local-only work | Use local Git projects without a remote; keep framework records in the selected Copilot home without a built-in cloud-provider client. | [Architecture](docs/architecture/README.md) |
+| Offline core and local-only work | Use local Git projects without a remote; keep runtime records in the selected Copilot home and thin work-item locators in the repository, without a built-in cloud-provider client. | [Architecture](docs/architecture/README.md) |
 | Installation, updates and diagnostics | Choose a Copilot home, run doctor, update or uninstall owned assets, and preserve runtime state and unrelated files during ordinary maintenance. | [Installation](docs/installation/README.md) |
-| Cross-platform distribution | Use npm on Windows, macOS and Linux; check standalone/Homebrew channel availability and external runtime requirements before choosing a release. | [Channels and homes](docs/installation/README.md#choose-a-channel-and-home) |
-
-**Availability:** The new reusable evidence/readiness and coverage interfaces
-above are included in the **0.5.0 release candidate**, not the published
-**0.4.0** package. See [runtime and installation](#runtime-and-installation)
-before choosing a version.
 
 Provider integrations have different adapter scopes, described in
-[integration support](docs/integrations/README.md). The framework guides work
-and records decisions/evidence. It does not replace
-Copilot permissions, OS/sandbox controls, provider access controls or repository
-rules, and installing it does not impose this repository's CI policy on yours.
-
-![AI SDLC Framework lifecycle](docs/images/ai-sdlc-framework-overview.svg)
+[integration support](docs/integrations/README.md). Monitoring needs a running
+host, a recurring scheduler and authorized provider-read tools for 60-second
+polling; the offline CLI does not start a timer or contact providers.
+Host-agent session/chat recovery belongs to Copilot, not this framework.
+Framework orientation records do not prove that the model read or understood
+the documents, and instructions/hooks do not guarantee model compliance.
+The framework does not replace Copilot permissions, OS/sandbox controls,
+provider access controls or repository rules. Installing it does not impose
+this repository's CI policy on yours.
 
 ## Start here
 
@@ -83,29 +78,26 @@ rules, and installing it does not impose this repository's CI policy on yours.
 
 ## Runtime and installation
 
-The release candidate is **0.5.0**, not yet published. The current npm `latest`
-is **0.4.0**; it does not include the new evidence/coverage interfaces.
 Node.js **22 or later**, Git, npm and
 GitHub Copilot CLI's documented instruction/skill/hook extension points are
 required. The offline CLI has no runtime package dependencies or built-in
 cloud-provider network client; authorized host tools own external operations.
 
-The primary npm channel works on Windows, macOS and Linux with a supported Node
-runtime. After 0.5.0 publication and public-consumer verification, use this exact
-version for a deliberate installation into your chosen Copilot home:
+The primary npm channel supports Windows, macOS and Linux with a supported Node
+runtime. Consult [Releases](https://github.com/urmich/ai-sdlc-framework/releases)
+and the [release log](CHANGELOG.md) before selecting a version. To install the
+published npm `latest` into the Copilot home selected by `COPILOT_HOME` (or the
+default home when unset):
 
 ```sh
-npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@0.5.0 sdlc install
+npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@latest sdlc install
 ```
 
-Until then, use the [source-candidate installation](docs/installation/README.md#choose-a-channel-and-home)
-in an isolated home, or install the existing release with its older capabilities:
-
-<!-- historical:start -->
-```sh
-npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@0.4.0 sdlc install
-```
-<!-- historical:end -->
+`latest` selects a published npm release, not this source tree or a promise
+that every capability above is included. See [channels and homes](docs/installation/README.md#choose-a-channel-and-home)
+for release-specific commands, explicit home selection and isolated
+source-candidate installation. Use only organization-approved registry/network
+routes; installation does not grant a policy exception.
 
 Next, run doctor through the **installed entry**, restart Copilot, and try a
 local-only request in a disposable repository:
@@ -116,14 +108,13 @@ Ordinary updates preserve runtime state.
 Destructive purge is not the default; see [installation](docs/installation/README.md).
 Never use your live Copilot home for contributor validation.
 
-Published **0.4.0 is immutable**. Its Windows x64 PE and separate Apple Silicon /
-Intel Mac standalone artifacts remain historical release content. The next
-release design uses **one shared macOS artifact** containing one portable
-JavaScript payload and shell launcher, with external native Node on each Mac.
-It is **not Universal 2** and includes **no bundled Node runtime**.
-Windows keeps its separate PE archive, npm
-remains the primary channel, and there is no Linux standalone distribution.
-Future distribution source is not proof of native or public-consumer acceptance.
+Standalone packaging in this source tree targets Windows x64 and macOS.
+The shared macOS payload uses portable JavaScript and a shell launcher with
+external native Node; it is **not Universal 2** and includes **no bundled Node
+runtime**. Node remains an external prerequisite for every channel, and there
+is no Linux standalone distribution. Archive layouts and channel availability
+are release-specific: use only assets listed in the selected release.
+Source packaging is not proof of native or public-consumer acceptance.
 
 ## Workflow and trust
 
@@ -140,10 +131,9 @@ user's completion confirmation. Effective enforcement belongs to real host and
 provider controls, not a framework hook.
 
 Candidate-bound observations, immutable evidence and approvals remain distinct.
-The 0.5.0 candidate's [generic evidence guide](docs/usage/evidence.md) describes
-the new reusable producer normalization, readiness and PR-description coverage
-interfaces. Those additions are included in the 0.5.0 source/package candidate but remain
-unreleased; the published 0.4.0 package does not contain them.
+The [generic evidence guide](docs/usage/evidence.md) describes reusable producer
+normalization, readiness and PR-description coverage interfaces. Release notes,
+not source presence, establish their availability in a published version.
 Installing the framework never imposes this repository's CI policy on consumers.
 
 ## Contributor validation
@@ -175,16 +165,13 @@ See [testing and CI reproduction](docs/contributing/README.md).
 
 ## Released versus unreleased
 
-The 0.5.0 installation command above is a postpublication command, not a claim
-that the version is already available. This source
-branch contains **unreleased** public-readiness work: reusable evidence and
-coverage interfaces, a bounded test scheduler, native CI/release changes and the
-shared Mac packaging design. Source presence is not publication, native
-acceptance or proof of effective repository enforcement.
-
-The [release guide](docs/releases/README.md#deferred-launch-limitations) lists
-known deferred contributor/platform defects and the remaining publication gates.
-Local validation and candidate review do not make this branch announcement-ready.
+Use [Releases](https://github.com/urmich/ai-sdlc-framework/releases) for published
+versions/assets and the [release log](CHANGELOG.md) for change history.
+This README describes the source tree; source presence is not publication,
+native acceptance or proof of effective repository enforcement.
+The [release guide](docs/releases/README.md#deferred-launch-limitations)
+documents deferred limitations and publication gates. Local validation and
+candidate review alone do not establish release readiness.
 
 Reader guides live under `docs/`; canonical internal specifications live only
 under `docs/sdlc/<feature>/`. Start with the [documentation map](docs/README.md)

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { isPrerelease } from '../packaging/standalone/protocol.mjs';
 import { sha256 } from '../packaging/standalone/archive.mjs';
 import { ROOT, options, readJson, releaseIntent, releaseRepository, requirePublicationReady,
@@ -67,6 +68,95 @@ export async function boundedReadback(check, { timeoutMs = 600_000, now = Date.n
   }
 }
 
+async function requireEffectiveMainRulesets(api, prefix, repository, defaultBranch) {
+  const fail = reason => { throw new Error(`Effective protected-main ruleset policy is unavailable or non-equivalent: ${reason}`); };
+  const read = async route => {
+    const response = await api(route);
+    if (response?.status !== 200 || response.value === null || typeof response.value !== 'object') {
+      fail(`required ruleset facts are unavailable: ${route}`);
+    }
+    return response.value;
+  };
+  const effective = [];
+  for (let page = 1; ; page++) {
+    if (page > 50) fail('effective rule pagination is incomplete');
+    const rules = await read(`${prefix}/rules/branches/main?per_page=100&page=${page}`);
+    if (!Array.isArray(rules) || rules.length > 100) fail('malformed effective branch rules');
+    effective.push(...rules);
+    if (rules.length < 100) break;
+  }
+  if (!effective.length) fail('no active rules apply to main');
+  const sources = new Map();
+  for (const rule of effective) {
+    if (!rule || !Number.isSafeInteger(rule.ruleset_id) || rule.ruleset_id <= 0 ||
+        rule.ruleset_source_type !== 'Repository' || rule.ruleset_source !== repository) {
+      fail('unsupported or unknown effective ruleset source');
+    }
+    if (!sources.has(rule.ruleset_id)) sources.set(rule.ruleset_id, []);
+    sources.get(rule.ruleset_id).push(rule);
+  }
+  const contexts = new Set();
+  let pullRequest = false;
+  let conversations = false;
+  let forcePushBlocked = false;
+  let deletionBlocked = false;
+  for (const [id, rules] of sources) {
+    const ruleset = await read(`${prefix}/rulesets/${id}`);
+    const refs = ruleset.conditions?.ref_name;
+    if (ruleset.id !== id || ruleset.source_type !== 'Repository' || ruleset.source !== repository ||
+        ruleset.target !== 'branch' || ruleset.enforcement !== 'active' ||
+        !Array.isArray(refs?.include) || !refs.include.every(ref => typeof ref === 'string') ||
+        !refs.include.some(ref => ref === 'refs/heads/main' || ref === '~ALL' ||
+          ref === '~DEFAULT_BRANCH' && defaultBranch === 'main') ||
+        !Array.isArray(refs.exclude) || refs.exclude.length !== 0) {
+      fail('inactive, unapplied or unsupported repository ruleset conditions');
+    }
+    // GitHub's documented RepositoryRole admin ID is 5; PR-only bypass is an explicit merge capability,
+    // not an exemption for direct pushes or permission to publish failed validation.
+    // https://github.com/integrations/terraform-provider-github/blob/main/docs/resources/repository_ruleset.md#bypass_actors
+    if (!Array.isArray(ruleset.bypass_actors) || ruleset.bypass_actors.some(actor =>
+      actor?.actor_type !== 'RepositoryRole' || actor.actor_id !== 5 || actor.bypass_mode !== 'pull_request')) {
+      fail('unknown or unsafe ruleset bypass actors; only explicit PR-only repository administrators are allowed');
+    }
+    if (!Array.isArray(ruleset.rules) || ruleset.rules.length !== rules.length ||
+        new Set(rules.map(rule => rule.type)).size !== rules.length) {
+      fail('incomplete or duplicate effective ruleset rules');
+    }
+    for (const rule of rules) {
+      const full = ruleset.rules.find(item => item?.type === rule.type);
+      if (!full || !isDeepStrictEqual(full.parameters, rule.parameters)) fail('effective ruleset and full policy facts differ');
+      const parameters = rule.parameters;
+      if (rule.type === 'required_status_checks') {
+        if (parameters?.strict_required_status_checks_policy !== true ||
+            parameters.do_not_enforce_on_create !== false ||
+            !Array.isArray(parameters.required_status_checks) || !parameters.required_status_checks.length ||
+            parameters.required_status_checks.some(check => typeof check?.context !== 'string' || !check.context ||
+              check.integration_id !== undefined && (!Number.isSafeInteger(check.integration_id) || check.integration_id <= 0))) {
+          fail('required checks or strict up-to-date enforcement are missing or malformed');
+        }
+        for (const check of parameters.required_status_checks) contexts.add(check.context);
+      } else if (rule.type === 'pull_request') {
+        if (!parameters || !Number.isSafeInteger(parameters.required_approving_review_count) ||
+            parameters.required_approving_review_count < 0 || parameters.required_approving_review_count > 10 ||
+            ['dismiss_stale_reviews_on_push', 'require_code_owner_review', 'require_last_push_approval',
+              'required_review_thread_resolution'].some(key => typeof parameters[key] !== 'boolean')) {
+          fail('pull-request review/conversation facts are missing or malformed');
+        }
+        pullRequest = true;
+        conversations ||= parameters.required_review_thread_resolution;
+      } else if (rule.type === 'non_fast_forward' && parameters === undefined) {
+        forcePushBlocked = true;
+      } else if (rule.type === 'deletion' && parameters === undefined) {
+        deletionBlocked = true;
+      } else fail(`unsupported ruleset rule: ${rule.type}`);
+    }
+  }
+  if (!pullRequest || !conversations || !forcePushBlocked || !deletionBlocked ||
+      !['framework/validation', 'framework/approval', 'framework/coverage'].every(context => contexts.has(context))) {
+    fail('required PR/check/conversation/force-push/deletion enforcement is incomplete');
+  }
+}
+
 export async function preflightRelease({ sourceCommit, version, repository, releaseIntentId,
   outputFile, environment = process.env }, api = githubRequest, readRegistry = registryPackage) {
   repository = releaseRepository(repository);
@@ -114,15 +204,23 @@ export async function preflightRelease({ sourceCommit, version, repository, rele
   if (!['admin', 'maintain'].includes(permission.permission)) throw new Error('Only an authorized maintainer may start this release intent');
   const main = await requireValue(api, `${prefix}/branches/main`);
   if (main.protected !== true || main.commit?.sha !== sourceCommit) throw new Error('Source must be the current accepted protected-main candidate');
-  const protection = await requireValue(api, `${prefix}/branches/main/protection`);
-  const contexts = protection.required_status_checks?.contexts ??
-    protection.required_status_checks?.checks?.map(check => check.context) ?? [];
-  if (protection.required_status_checks?.strict !== true ||
-      !['framework/validation', 'framework/approval', 'framework/coverage'].every(context => contexts.includes(context)) ||
-      !protection.required_pull_request_reviews || protection.required_conversation_resolution?.enabled !== true ||
-      protection.enforce_admins?.enabled !== true || protection.allow_force_pushes?.enabled !== false ||
-      protection.allow_deletions?.enabled !== false) {
-    throw new Error('Effective protected-main merge/review/check/conversation/bypass settings do not match the adopted release policy');
+  const classic = await api(`${prefix}/branches/main/protection`);
+  if (classic?.status === 404) {
+    await requireEffectiveMainRulesets(api, prefix, environment.GITHUB_REPOSITORY, source.default_branch);
+  } else {
+    if (classic?.status !== 200 || !classic.value || typeof classic.value !== 'object' || Array.isArray(classic.value)) {
+      throw new Error('Effective protected-main classic protection facts are unavailable');
+    }
+    const protection = classic.value;
+    const contexts = protection.required_status_checks?.contexts ??
+      protection.required_status_checks?.checks?.map(check => check.context) ?? [];
+    if (protection.required_status_checks?.strict !== true ||
+        !['framework/validation', 'framework/approval', 'framework/coverage'].every(context => contexts.includes(context)) ||
+        !protection.required_pull_request_reviews || protection.required_conversation_resolution?.enabled !== true ||
+        protection.enforce_admins?.enabled !== true || protection.allow_force_pushes?.enabled !== false ||
+        protection.allow_deletions?.enabled !== false) {
+      throw new Error('Effective protected-main merge/review/check/conversation/bypass settings do not match the adopted release policy');
+    }
   }
   const statuses = await requireValue(api, `${prefix}/commits/${sourceCommit}/status`);
   const requiredContexts = ['framework/validation', 'framework/approval', 'framework/coverage'];

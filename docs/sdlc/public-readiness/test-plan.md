@@ -190,7 +190,8 @@ descendant and Windows termination controller or POSIX observation query.
 The existing admission regression uses that real source selection: three slots
 must reject before callback dispatch, while four admit the complete group.
 Retain every strict process-absence, cancellation, sanitization, journal and
-stop-race assertion and the original one-second stop deadline. Correcting this
+stop-race assertion and the platform settlement deadline: five seconds on
+Windows, one second on POSIX. Correcting this
 under-reservation does not establish the cause of an earlier native failure or
 grant a current native correctness or timing pass.
 The PR-only Windows termination-observation regression exercises controlled
@@ -198,7 +199,7 @@ controller/root completion orders and timeout/error paths. Require bounded
 dispatch/event observations and the immutable pre-cleanup snapshot in both the
 final report and durable journal; unobserved events stay null and caller source,
 arguments and secrets stay absent. Preserve real cancellation, strict root
-closure, the one-second stop bound and every original failure outcome. Passing
+closure, the five-second Windows settlement bound and every original failure outcome. Passing
 diagnostics do not attribute the historical C18 timeout or prove native cleanup.
 Run the Windows VM root with POSIX path composition and without error-stack
 labels. Both controlled variants must preserve the exact backend, flags, PID,
@@ -266,7 +267,9 @@ establishes their causes; diagnostic changes do not claim to fix those causes.
 
 The original Windows capture/cancellation root additionally observes the actual
 `taskkill.exe` spawn without changing that invocation, the production backend or
-its one-second stop budget. Before creating the controller or command, an optional
+its immediate stop dispatch. Windows termination settlement allows five seconds;
+POSIX retains one second. This bounded wait still requires affirmative closure
+and never converts a timeout into successful cleanup. Before creating the controller or command, an optional
 owned PowerShell 5.1 observer compiles a small C# bridge inside its new
 repository-local compiler directory. The isolated controller atomically publishes
 only the dispatched PID and original spawn-event UTC bound to the observer's
@@ -278,6 +281,45 @@ creating any controller/command; unknown startup lifetime fails without creating
 additional processes. PowerShell closure alone never proves compiler settlement.
 Complete the original root/controller cleanup before awaiting observer
 finalization, so diagnostics add no delay before existing fixture cleanup.
+
+The same maintainer-owned, five-slot Windows PR root uses
+`test/command-capture-controller.mjs` to retain original process handles through
+cleanup. Controlled cases require controller close before owned-root cleanup,
+one stop when a stop is refused, and refusal of removal on unsettled closure.
+Keep the original failed outcome and diagnostics; cleanup completion is not
+passing cancellation. Preserve immediate stop dispatch, the platform production
+settlement bounds and all original
+native, journal, redaction and closure assertions. No critical promotion or
+new native-positive substitute is introduced.
+
+The existing PR-only T-PRD020/T-PRD022 workflow controls verify the exact
+job-level worker-request expression against the closed source shard identities.
+Historical fixtures retain their literal worker budgets; no matrix/parser
+extension is introduced. The cancellation root must remain in the
+contention-limited shard.
+Windows body-3 requests seven slots to admit its complete source-derived
+selection, including six- and seven-slot roots; other Windows parts retain
+fifteen. The T-PRD020 control checks every selected group's declared demand
+against actual host capacity, reproduces five-slot BUDGET rejection with zero
+dispatch, and admits every group under the configured budget using scheduler
+doubles, not native execution credit. All twenty-five producers, thirty-four
+expanded jobs and thirteen Mac cleanup roles remain required. Preserve original
+main-attempt failures; this contention reduction is not full cancellation
+isolation or a proven hosted cure until fresh
+matching CI completes.
+
+Historical protocol controls reconstruct the original literal Windows budget
+before checking the unchanged archived workflow and admission-helper digests.
+The existing PR-only T-PRD016/T-PRD017 controls retain authentic historical
+primary anchors and SDK limits. Changed current source must instead prove
+unqualified fallback, complete disjoint root closures, actual source-derived
+SDK requirements and no borrowed timing or execution credit. A new root cannot
+inherit the frozen complete ownership vector.
+Compile the captured historical source text and require its original inventory
+digest and planner qualifiers before positive v11 pooling/SDK, v12 complete
+six-component transfer and seven-slot catalog-reservation controls. Keep the
+current-source fallback and mutation-negative controls separate; reconstructed
+fixture success is not current native execution or performance evidence.
 
 The observer pins original owner/target process handles once, then uses only
 handle-based image, creation/CPU/exit-time, wait and exit-code queries. Retain at
@@ -703,17 +745,18 @@ before assertions. The real-kernel root reserves four aggregate slots for its
 test worker, owned root, descendant writer and unrelated sibling; host worker
 limits and the one-second settlement bound remain unchanged.
 The separate TOOL02 controlled Windows settlement root retains all six modes
-under its twenty-second ceiling. Its pre-cancellation root-exit observation
+under its sixty-second test ceiling. Its pre-cancellation root-exit observation
 has a separate five-second window after writer/peer readiness; preparation
 cannot consume that observation window. Preserve native ownership/drain checks,
-the cancellation settlement assertion and the one-second production stop budget.
+the cancellation settlement assertion and the five-second Windows production
+settlement budget.
 Admit at most two independent VM/root/writer
 scopes together and declare five slots for the test process plus their four
 children. Require both first-pair provenance announcements before release;
 serial-execution mutation must fail this bounded overlap check. Drain every
 in-flight scope before surfacing cleanup failure, verify all six modes cleaned,
 and preserve the original cancellation, controller, persistence, owner and
-one-second settlement assertions. This changes no native host capacity.
+platform settlement assertions. This changes no native host capacity.
 For atomic writer publication, advance the test clock while the writer is
 intentionally blocked: the post-release ready deadline must not yet expire.
 Arm the same five-second ready allowance immediately before release, retain
@@ -1170,6 +1213,25 @@ a Test Design/review responsibility.
 
 ### 5.2 Complete PR coverage, trust and provider enforcement
 
+The existing conditional-cache roots in `test/github-transport.unit.test.mjs`
+remain PR-only, Node-only, process-isolated and owned by `github-transport` on all
+four lanes. Reproduce the provider's 200 weak validator followed by a 304 strong
+validator with the same opaque tag, and the reverse transition. Preserve the
+original conditional request tag, cached body and observation version, without
+inventing a new observation time. Missing cache, different opaque tags, changed
+tag case and incompatible authorization/request contexts must still fail closed.
+These injected-response checks require no credentials or network and do not
+grow the critical profile. Actual hosted observer results remain separate.
+
+`T-PRD085 idle observer reconciliation completes without granting validation
+credit` in `test/public-readiness-ci.test.mjs` is maintainer-owned, PR-only,
+Node-only and process-isolated on all four existing native lanes. Its one-slot
+owned status fixture proves zero writes, retained `NotRun` and successful CLI
+completion only for completely acquired empty membership. Incomplete membership,
+diagnostics, failed results, required conversation work and blocked current PRs
+remain non-passing. Existing shared-key, pagination, capacity and publication
+race controls remain required; neither critical cap grows.
+
 `T-PRD018 rejected failure diagnostics retain only closed error and owned phase
 facts` in `test/test-runner.test.mjs` is maintainer-owned, PR-only and Node-only
 on all four native lanes. Its isolated actual formatter VM reserves one slot,
@@ -1183,6 +1245,16 @@ evidence and fatal opaque-event rejection. TOOL02 adds observed mode/phase facts
 to its original error only on failure; all six real modes, assertions, five-slot
 allocation, deadlines and cleanup remain unchanged. No critical promotion,
 historical Intel-cause claim or native pass follows from these diagnostic tests.
+
+The existing PR-only `T-PRD018 Windows termination observations durably
+distinguish dispatch and original handle settlement without exposing caller
+data` VM root keeps all ten scenarios and its ten-second outer watchdog on all
+four lanes. Its controlled clock must model the five-second Windows settlement
+budget, including dispatch that consumes that budget. Drive active settlement
+drain timers while leaving passive progress checkpoints idle, and settle both
+owned handles during failed-assertion teardown. Preserve dispatch, privacy,
+event-ordering and fail-closed assertions; no production deadline, critical
+membership or real-native cleanup credit changes.
 
 The maintainer-owned, PR-only `T-PRD018 native failure annotations escape
 workflow-command injection without changing the underlying failure` root also
@@ -1226,6 +1298,11 @@ Distinguish a stopped fresh connection from actual duplicate allocation without
 changing the BUDGET code or allowing queued work to start.
 The controlled marker/spawn instrumentation remains process-local,
 Node-only and one-slot, with no critical promotion or native execution credit.
+The same controlled readiness root uses barriers to reproduce concurrent
+compiler-settlement refreshes and delayed ENOENT. Verified `notStarted`/settled
+proof cannot be downgraded to `missing`/settled; invalid or missing proof remains
+unsettled, and later valid proof can refine it. Preserve the separate real
+release-before-compiler root and its exact receipt assertion.
 The new maintainer-owned `T-PRD018 Windows observer release before compiler
 dispatch proves no writer and graceful owned cleanup` root is PR-only on
 Windows x64 with two slots and no added dependencies. Use owned observer paths
@@ -1238,11 +1315,22 @@ The existing PR-only `TOOL02 Windows validation settlement bounds exited roots
 and failed or stalled tree termination` root in
 `test/distribution-boundary-lifetime.test.mjs` must await its first durable running
 checkpoint before starting cancellation accounting. Model cold preparation with
-an injected clock advance and retain the real 1500ms watchdog plus a command-clock
-assertion. Keep all six modes, the original one-second production stop deadline,
-five-second preparation bound, twenty-second root timeout, five-slot declaration
-and owned writer/controller/retention cleanup proofs. This fixes a fixture race,
-not a demonstrated sole cause or fresh cure of the hosted cancellation failure.
+an injected clock advance and retain physical and command-clock assertions.
+The bounded outer test watchdog allows ten seconds for cancellation and durable
+journal/report I/O; it is not the five-second Windows production termination
+budget or the separate T-PRD018 1500ms diagnostic capture contract. The owner's
+direction to resolve the reported blocker authorizes the Windows-only production
+settlement change; dispatch remains immediate, POSIX retains one second, and
+missing closure or timeout still fails. Retain the original failed evidence.
+Keep all six modes, five-second preparation bound, sixty-second enclosing test
+timeout, five-slot declaration and owned writer/controller/retention cleanup
+proofs. In the stalled mode, block the final report write, inspect the actual
+durable uncertain checkpoint and `STOP_TIMEOUT`/watchdog facts, prove the command
+has not returned, then release and await retention. Release the barrier in
+`finally`; require the original single stop and all six cleanups. Retain the cold
+preparation clock offset unchanged during cancellation. Preserve the original
+hosted and local failures; observed local flush latency is not proof of the
+sole hosted cause, and a controlled fixture pass is not fresh native CI credit.
 
 `T-PRD018 native timing notices retain only ten source-bound actual group and
 root durations` in `test/public-readiness-native.test.mjs` is maintainer-owned,
@@ -1346,7 +1434,7 @@ failure or grants delivery-limit credit.
 
 | ID | Environment | Level | Checkpoint | Mode | Owner | Location | Requirements | Observe or assert | Implementation | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| T-PRD028 | local | unit | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.1 | F: missing/wrong destination, version/tag/source, toolchain, required setting or trust authority fails preflight with exact reason before any fake irreversible call is made. | test/release-ci.test.mjs#T-PRD028 | NotRun | |
+| T-PRD028 | local | unit | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.1 | F: missing/wrong destination, version/tag/source, toolchain, required setting or trust authority fails preflight with exact reason before any fake irreversible call is made. Preserve classic protection and accept equivalent effective active rulesets; reject missing/unknown enforcement and unsafe bypasses without relaxing successful source validation. These regressions are PR-only, not critical promotion. | test/release-ci.test.mjs#T-PRD028 | NotRun | |
 | T-PRD029 | local | integration | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.2 | F: build independent comparison artifacts, seal only after all exact native gates, and pass the same digest-bound bytes to both publisher fixtures; changed/repacked/swapped data is rejected. | test/release-ci.test.mjs#T-PRD029; four-native-profile, original NDJSON data-only transport and acyclic sealed-handoff assertions all required | NotRun | |
 | T-PRD030 | local | integration | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.3 | F: drive orchestration with fixture provider outcomes; successful publication schedules exact saved-ID acceptance automatically; missing public assets/acceptance handle yields incomplete release, not success or a manual-only hidden step. | test/release-ci.test.mjs#T-PRD030 | NotRun | |
 | T-PRD031 | local | unit | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.4 | F: reject PR events, wrong caller/environment/source, missing OIDC and token fallback; approved token-free exact caller gets only its declared publishing permissions. | test/npm-oidc.test.mjs#T-PRD031 | NotRun | |
@@ -2395,6 +2483,12 @@ PR; it does not exempt CI or conversation resolution. A resolved thread is not
 an approval, and an approval is not evidence that all threads are resolved.
 This defines test expectations, not authority to apply provider settings.
 
+The owner's deliberate PR-only administrator capability is distinct from normal
+merge eligibility. Verify its actual scope without exercising a bypass or
+changing production settings as a test. It is not an author-based exemption,
+does not permit direct/force pushes or deletion, and does not satisfy release
+validation when checks are missing or failing.
+
 Read actual applicable branch/ruleset/review/check settings, including inherited
 rules and bypass actors. Establish repository identity and exact required check
 contexts. Do not apply or probe writes until the user authorizes the proposed
@@ -2566,6 +2660,19 @@ not mean the repository is flawless, attractive to every reader or publicly
 ready; the source-linked published walkthrough remains separate.
 
 ### 10.2 Primary-reference and published-experience assessment
+
+For the current README correction, verify four truthful value bullets, immediate
+placement of the existing explanatory image, release-neutral framework guidance
+linked to repository Releases, and source/doc evidence for each capability row.
+Distinguish framework work-item recovery and evidence from host-agent chat/session
+restoration and external review, monitoring and delivery execution. Required
+runtime constraints and historical release documents are not removed merely to
+make README version-neutral.
+The existing Node-only, PR-only T-PRD049 reader-contract root accepts the
+version-neutral README, requires its repository Releases route and rejects
+even a current package-version pin. Keep stale-version checks for explicit
+supported-release documents, the Node/platform contract and all existing
+claim mutations. No critical expansion or npm capability substitution occurs.
 
 T-PRD089 uses the five immutable reference revisions and adoption matrix in
 Requirements. For each selected practice, inspect its cited primary file and

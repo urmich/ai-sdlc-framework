@@ -466,8 +466,11 @@ test('T-PRD049 public version, platform and latest-readiness examples reject sta
   assertNoDiagnostics(await checkDocumentation({ root }), 'Unmodified public reader fixture');
   const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
   const corruptions = [
-    ['README.md', text => text.replaceAll(`**${pkg.version}**`, '**0.0.1**'), /current version differs/u],
+    ['SECURITY.md', text => text.replaceAll(`**${pkg.version}**`, '**0.0.1**'), /current version differs/u],
     ['README.md', text => `${text}\nai-sdlc-framework@0.0.1\n`, /stale public version pin/u],
+    ['README.md', text => `${text}\nai-sdlc-framework@${pkg.version}\n`, /pinned framework release/u],
+    ['README.md', text => text.replaceAll('https://github.com/urmich/ai-sdlc-framework/releases',
+      'https://github.com/urmich/ai-sdlc-framework/versions'), /missing repository Releases link/u],
     ['docs/installation/README.md', text => text.replace('| Node minimum | >=22 |', '| Node minimum | >=20 |'), /distribution contract Node minimum/u],
     ['docs/installation/README.md', text => text.replace('| Standalone archives | macos, windows-x64 |', '| Standalone archives | macos, windows-x64, linux-x64 |'), /distribution contract Standalone archives/u],
     ['README.md', text => `${text}\nThe macOS package contains two native Mac launchers.\n`, /Mac payload claim/u],

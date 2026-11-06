@@ -218,6 +218,10 @@ merge, even when its author ran nothing locally.
 - AC-203.1: Pushes to a branch with an open PR, new PRs and relevant updates
   automatically run the complete required PR validation for the current
   candidate. A first PR cannot depend on a contributor's local result.
+  A completely acquired empty in-scope PR membership is a successful idle
+  reconciliation operation, not passing validation. Retain `NotRun` and explicit
+  no-work evidence without publishing statuses. Incomplete acquisition, errors
+  and blocked required PRs must not receive that idle-operation success.
 - AC-203.2: Linux, native Windows and native macOS jobs execute their applicable
   substantive tests and utilities, not just command-smoke tests. Windows x64,
   Apple Silicon macOS and Intel macOS native coverage is required. The Test Plan
@@ -302,6 +306,11 @@ Required tests must be real merge prerequisites, not advisory green decorations.
   installing the framework elsewhere must not impose that repository policy.
 - AC-205.2: Direct pushes, force pushes, deletion and administrative bypasses
   follow the explicitly approved policy. Do not silently exempt maintainers.
+  The owner retains a deliberate PR-only administrator override without changing
+  the rules for each merge. Normal required validations apply equally to owner
+  and contributor PRs. Configuring that capability does not authorize an agent
+  to exercise it; a particular PR requires explicit owner direction. An override
+  does not turn missing or failing checks into passing release evidence.
 - AC-205.3: Verify that a failing, missing, stale or skipped required result
   prevents merge. Source configuration alone does not prove provider enforcement.
 - AC-205.4: Document unavailable account-tier controls and owner actions
@@ -429,6 +438,9 @@ maintain the project.
   examples and unqualified readiness claims. Verify navigation separately in
   source, packaged and installed layouts; essential offline guidance must have
   a shipped target or an explicitly identified online reference.
+  README links to the repository's Releases instead of hardcoding a framework
+  release version; required runtime constraints and immutable release history
+  remain accurate in their own documentation.
 - AC-210.2: Provide discoverable contribution, support, security-reporting,
   ownership/review and change/release guidance appropriate to this personal
   third-party OSS project.
@@ -447,6 +459,11 @@ maintain the project.
   paths. Keep transient test counters, internal work-item bookkeeping and
   implementation-recovery problems out of the public landing-page experience;
   retain their truthful evidence in the internal readiness records instead.
+  README presents four compelling, truthful value bullets followed immediately
+  by its explanatory image. Its capability table includes only implemented
+  framework features, supported by source/documentation; host-agent chat/session
+  restoration, review execution and external control infrastructure are not
+  presented as framework-provided capabilities.
 - AC-210.6: A professional/share-ready assessment identifies the exact published
   branch/revision and verifies its documentation links, current required CI,
   effective merge controls, usable private security route and released-channel
