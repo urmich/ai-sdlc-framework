@@ -467,15 +467,7 @@ export function inspectWorkflowTrust(workflows) {
     const expectedParts = protocol ? native.nativePrPartsForProtocol(protocol) : native.nativeLegacyPrParts;
     const keys = protocol ? [...new Set(expectedParts.map(part =>
       resourceJobKey(part, protocol, resourcePolicy)))] : ['native'];
-    const entries = keys.flatMap(key => {
-      const rows = jobs?.[key]?.strategy?.matrix?.include ?? [];
-      if (jobs[key]?.env?.SDLC_TEST_WORKERS !== '${{ matrix.worker_budget }}') return rows;
-      return rows.map(row => {
-        const { worker_budget: workers, ...identity } = row;
-        // A bound worker request is configuration, not an extra producer identity.
-        return Number.isSafeInteger(workers) && workers > 0 && workers <= 32 ? identity : null;
-      });
-    });
+    const entries = keys.flatMap(key => jobs?.[key]?.strategy?.matrix?.include ?? []);
     const runners = JSON.stringify(entries);
     for (const label of Object.values(labels)) if (!runners.includes(`"${label}"`)) {
       result.blockers.push({ file: selected.file, code: 'MISSING_NATIVE_RUNNER', label });

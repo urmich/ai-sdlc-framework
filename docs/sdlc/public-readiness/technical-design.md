@@ -1206,15 +1206,16 @@ directory removal and preserves the primary failed command and diagnostics.
 The separate five-second cleanup bound does not extend the one-second production
 stop deadline or make the original failed cancellation pass.
 
-Windows body-3 requests five shared slots, matching its maximum declared root
-demand and isolating that root from competing groups. Other Windows parts retain
-fifteen. The trusted workflow checker validates a bound `matrix.worker_budget`
-as an integer from 1 through 32 before comparing the unchanged closed producer
-identity; unknown fields and unbound requests remain invalid. Requested workers
-remain in the native configuration digest and actual bootstrap/resource proof.
+Windows body-3 requests seven shared slots, admitting its complete selected
+closure, including six- and seven-slot roots. The five-slot cancellation root
+can still overlap smaller peers; this reduces contention, not full isolation.
+Other Windows parts retain fifteen. A job-level expression selects the request
+from the existing closed shard identity; no matrix metadata or trusted-parser
+extension is introduced. Requested workers remain in the native configuration
+digest and actual bootstrap/resource proof.
 Historical literal-budget definitions and measurements remain unchanged.
 The original hosted failure occupied all fifteen slots on four CPUs, but its
-kernel cause is unproven; isolation is a mitigation requiring fresh hosted CI,
+kernel cause is unproven; reduced concurrency is a mitigation requiring fresh hosted CI,
 not demonstrated cancellation repair.
 
 Installer timing observations are opt-in and use a strict non-secret

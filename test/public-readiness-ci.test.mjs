@@ -52,6 +52,7 @@ import { nativePrParts, nativeLegacyPrParts, nativePartJobKey, nativeFrameworkSh
   nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol,
   nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
 import { compileValidationInventory } from '../scripts/validation-inventory.mjs';
+import { runValidationReadyPool } from '../scripts/test-scheduling.mjs';
 import { expectedBodySdkRequirements } from './native-sdk-expectations.mjs';
 import { digest } from '../src/core.mjs';
 import { evaluateApproval, evaluateConversations, sharedStatusKeys, planStatusUpdate, reconcileStatusKey,
@@ -1389,41 +1390,7 @@ test('T-PRD022 actual workflow graph applies semantic YAML, effective permission
   assert.deepEqual(producer.jobs.find(job => job.id === 'intel-homebrew-admission').effectivePermissions,
     { actions: 'read', contents: 'read' });
   const windows = producer.document.jobs['native-wx'];
-  assert.equal(windows.env.SDLC_TEST_WORKERS, '${{ matrix.worker_budget }}');
-  assert.equal(windows.strategy.matrix.include.find(row => row.shard === 'body-3').worker_budget, 5);
-  assert.ok(windows.strategy.matrix.include.filter(row => row.shard !== 'body-3')
-    .every(row => row.worker_budget === 15));
-  const renderDocument = document => Object.entries(document)
-    .map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`).join('\n') + '\n';
-  for (const workers of [undefined, 0, 5.5, 33]) {
-    const changed = structuredClone(workflows);
-    const selected = changed.find(item => item.file === '.github/workflows/ci.yml');
-    const document = structuredClone(producer.document);
-    const row = document.jobs['native-wx'].strategy.matrix.include.find(row => row.shard === 'body-3');
-    if (workers === undefined) delete row.worker_budget;
-    else row.worker_budget = workers;
-    selected.contents = renderDocument(document);
-    const result = inspectWorkflowTrust(changed);
-    assert.ok(result.blockers.some(item => item.code === 'NATIVE_COMPONENT_MATRIX_DIFFERS'),
-      JSON.stringify({ workers, blockers: result.blockers }));
-  }
-  const legacy = structuredClone(workflows);
-  const legacyDocument = structuredClone(producer.document);
-  legacyDocument.jobs['native-wx'].env.SDLC_TEST_WORKERS = '15';
-  for (const row of legacyDocument.jobs['native-wx'].strategy.matrix.include) delete row.worker_budget;
-  legacy.find(item => item.file === '.github/workflows/ci.yml').contents = renderDocument(legacyDocument);
-  assert.equal(inspectWorkflowTrust(legacy).complete, true);
-  for (const edit of [
-    document => { document.jobs['native-wx'].strategy.matrix.include[0].unknown = true; },
-    document => { document.jobs['native-wx'].env.SDLC_TEST_WORKERS = '15'; },
-  ]) {
-    const changed = structuredClone(workflows);
-    const document = structuredClone(producer.document);
-    edit(document);
-    changed.find(item => item.file === '.github/workflows/ci.yml').contents = renderDocument(document);
-    assert.ok(inspectWorkflowTrust(changed).blockers.some(item =>
-      item.code === 'NATIVE_COMPONENT_MATRIX_DIFFERS'));
-  }
+  assert.equal(windows.env.SDLC_TEST_WORKERS, "${{ matrix.shard == 'body-3' && '7' || '15' }}");
   for (const key of ['intel-retained-admission', 'arm-refresh-admission']) {
     assert.deepEqual(producer.jobs.find(job => job.id === key).effectivePermissions,
       { actions: 'read', contents: 'read' });
@@ -1822,6 +1789,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.deepEqual(ci.jobs['native-homebrew'].needs, ['intent', 'source']);
   assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v11-ready-arm-frontier');
   const historicalV10 = structuredClone(ci);
+  historicalV10.jobs['native-wx'].env.SDLC_TEST_WORKERS = '15';
   historicalV10.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v10-intel-primary-first';
   const primaryStep = historicalV10.jobs['intel-retained-admission'].steps[4];
   primaryStep.name = 'Wait for actual Intel primary body worker allocation';
@@ -2012,6 +1980,32 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   const plan = await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
   const assignments = new Map([...new Set(parts.map(part => part.target))].map(target =>
     [target, nativeFrameworkShardPlan({ inventory, plan, target })]));
+  const windowsBody = assignments.get('windows-x64').parts.find(part => part.shard === 'body-3');
+  const groups = windowsBody.stages.flatMap(stage => stage.groups);
+  assert.equal(ci.jobs['native-wx'].env.SDLC_TEST_WORKERS,
+    "${{ matrix.shard == 'body-3' && '7' || '15' }}");
+  const workerRequest = windowsBody.shard === 'body-3' ? '7' : '15';
+  const capacity = nativeResourceFacts({ availableParallelism: 4, totalMemoryBytes: 17174360064,
+    configuredWorkers: workerRequest }).workerCapacity;
+  const cancellationRoot = inventory.cases.find(test => test.file === 'test/public-readiness-inventory.test.mjs' &&
+    test.name === 'T-PRD018 command capture durably retains dispatched identity and sanitized progress before cancellation or abrupt termination');
+  assert.ok(groups.some(group => group.rootId === cancellationRoot?.id),
+    'The cancellation root must remain in the contention-limited shard');
+  assert.ok(groups.every(group => group.minimumSlots <= capacity),
+    `Windows body-3 capacity ${capacity} must admit every selected group: ${JSON.stringify(
+      groups.filter(group => group.minimumSlots > capacity).map(group =>
+        ({ root: group.name, minimumSlots: group.minimumSlots })))}`);
+  let dispatched = 0;
+  await assert.rejects(runValidationReadyPool(groups, {
+    concurrency: 5, capacity: 5, execute: async () => { dispatched++; return 'Passed'; },
+  }), { code: 'BUDGET' });
+  assert.equal(dispatched, 0, 'An undersized whole-shard budget rejects before any group dispatch');
+  const admitted = await runValidationReadyPool(groups, {
+    concurrency: capacity, capacity, execute: async () => { dispatched++; return 'Passed'; },
+  });
+  assert.equal(dispatched, groups.length, 'The configured budget admits the complete source-derived selection');
+  assert.equal(admitted.completed.size, groups.length);
+  assert.deepEqual(admitted.notRun, []);
   const expectedRoles = { go: [], python: [], schema: [] };
   for (const part of parts) {
     const expected = part.shard?.startsWith('body-') ?
@@ -2062,8 +2056,9 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
         'macos-x64': { availableParallelism: 4, totalMemoryBytes: 15032385536 },
       };
       const host = hosts[part.target];
-      const configuredWorkers = ci.jobs[key].env.SDLC_TEST_WORKERS === '${{ matrix.worker_budget }}' ?
-        String(ci.jobs[key].strategy.matrix.include.find(row => row.role === part.role).worker_budget) :
+      const configuredWorkers = ci.jobs[key].env.SDLC_TEST_WORKERS ===
+        "${{ matrix.shard == 'body-3' && '7' || '15' }}" ?
+        part.shard === 'body-3' ? '7' : '15' :
         ci.jobs[key].env.SDLC_TEST_WORKERS;
       assert.match(configuredWorkers ?? '', /^[1-9]\d*$/u);
       const resources = nativeResourceFacts({ ...host, configuredWorkers });

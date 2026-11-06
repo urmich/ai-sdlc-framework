@@ -288,13 +288,20 @@ passing cancellation. Preserve the one-second production stop and all original
 native, journal, redaction and closure assertions. No critical promotion or
 new native-positive substitute is introduced.
 
-The existing PR-only T-PRD020/T-PRD022 workflow controls verify source-bound
-per-part worker requests, legacy literal-budget compatibility, rejection of
-missing/noninteger/out-of-range requests, unknown fields and unused metadata.
-Windows body-3 requests five slots, its source-derived maximum root demand;
-other Windows parts retain fifteen. All twenty-five producers, thirty-four
+The existing PR-only T-PRD020/T-PRD022 workflow controls verify the exact
+job-level worker-request expression against the closed source shard identities.
+Historical fixtures retain their literal worker budgets; no matrix/parser
+extension is introduced. The cancellation root must remain in the
+contention-limited shard.
+Windows body-3 requests seven slots to admit its complete source-derived
+selection, including six- and seven-slot roots; other Windows parts retain
+fifteen. The T-PRD020 control checks every selected group's declared demand
+against actual host capacity, reproduces five-slot BUDGET rejection with zero
+dispatch, and admits every group under the configured budget using scheduler
+doubles, not native execution credit. All twenty-five producers, thirty-four
 expanded jobs and thirteen Mac cleanup roles remain required. Preserve original
-main-attempt failures; this isolation is not a proven hosted cure until fresh
+main-attempt failures; this contention reduction is not full cancellation
+isolation or a proven hosted cure until fresh
 matching CI completes.
 
 The observer pins original owner/target process handles once, then uses only
