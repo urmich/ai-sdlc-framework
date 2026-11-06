@@ -1,6 +1,6 @@
 import path from 'node:path';
-import { LIMITS, PHASES, digest, id, now, object, recordLimit, requireThat, safeRecord, text } from './core.mjs';
-import { immutableJson, readBytes, readJson, updateJson } from './files.mjs';
+import { LIMITS, PHASES, digest, id, object, recordLimit, requireThat, safeRecord, text } from './core.mjs';
+import { readBytes, readJson, updateJson } from './files.mjs';
 import { currentTestSpecification, loadConfig, snapshots,
   synchronizeTestPlan } from './artifacts.mjs';
 import { applicableOverride, assurancePending, boundToCycle, currentCycle, currentTestEvidence,
@@ -47,6 +47,21 @@ async function validatePublicationDecision(kind, effect, tx) {
       'PR publication consent requires an independent hosted repository observation');
     await requirePublicationSourceObservation(tx.metadata, tx.all(),
       hostedObservation, effect.sourceRepositoryURL);
+    if (effect.descriptionDigest !== undefined) {
+      requireThat((await validateBinding(member)).head === effect.sourceRevision,
+        'STALE', 'Description publication consent must name the current bound commit');
+      if (effect.publicationAction === 'pr-update') requireThat(tx.all().some(record =>
+        record.type === 'pr-observation' && record.state === 'active' &&
+        record.repositoryId === repositoryId &&
+        record.localRepositoryPath === member.root &&
+        record.remoteRepositoryURL === selectedUrl &&
+        (record.sourceRepositoryURL ?? record.remoteRepositoryURL) === effect.sourceRepositoryURL &&
+        record.pullRequestRef === effect.prId &&
+        record.sourceRevision === effect.sourceRevision &&
+        record.sourceBranchRef === effect.sourceRef &&
+        record.targetBranchRef === effect.targetRef), 'EVIDENCE',
+      'Description update consent requires an independently observed matching PR');
+    }
   } else {
     const selected = await selectedPushRemote(member, undefined, effect.target);
     selectedUrl = validateSelectedPushRemote(selected);
@@ -65,29 +80,7 @@ async function validatePublicationDecision(kind, effect, tx) {
   'EVIDENCE', 'Publication consent requires a current observation of its exact hosted URL');
 }
 
-export async function captureReceipt(store, input) {
-  object(input, ['sessionId', 'source', 'input', 'timestamp', 'pendingDecisionId', 'sourceRef'],
-    ['sessionId', 'source', 'input']);
-  requireThat(['userPromptSubmitted', 'ask_user'].includes(input.source), 'PROVENANCE', 'Unsupported input source; documents and agent-authored text cannot authorize work');
-  id(input.sessionId);
-  text(input.input, 'complete user input', LIMITS.input);
-  const sessionFile = store.sessionPath(input.sessionId);
-  let receipt;
-  await updateJson(sessionFile, { schemaVersion: 1, revision: 0, sessionId: input.sessionId, orientationGeneration: 1, acknowledgedToken: null }, async session => {
-    const pendingDecisionId = input.pendingDecisionId ?? session.pendingDecisionId ?? null;
-    requireThat(!input.pendingDecisionId || input.pendingDecisionId === session.pendingDecisionId, 'PROVENANCE', 'Receipt pending decision differs from session');
-    const capturedAt = input.timestamp ?? now(store.clock);
-    requireThat(Number.isFinite(Date.parse(capturedAt)), 'INPUT', 'Invalid input capture timestamp');
-    receipt = { type: 'receipt', schemaVersion: 1, id: `receipt-${digest({ sessionId: input.sessionId, source: input.source, capturedAt, inputDigest: digest(input.input), pendingDecisionId }).slice(0, 40)}`,
-      sessionId: input.sessionId, source: input.source, capturedAt, inputDigest: digest(input.input), pendingDecisionId };
-    if (input.sourceRef) receipt.sourceRef = text(input.sourceRef, 'source reference');
-    safeRecord(receipt);
-    await immutableJson(path.join(store.runtime, 'sessions', input.sessionId, 'receipts', `${receipt.id}.json`), receipt);
-    session.lastReceiptId = receipt.id;
-    return session;
-  });
-  return receipt;
-}
+export { captureReceipt } from './hooks.mjs';
 export async function prepareDecision(store, input) {
   object(input, ['workItemId', 'sessionId', 'kind', 'effect', 'id'], ['workItemId', 'sessionId', 'kind', 'effect']);
   validateEffect(input.kind, input.effect, { strict: true });
@@ -221,6 +214,8 @@ export async function applyDecision(store, input) {
   const receipt = await readJson(path.join(store.runtime, 'sessions', id(input.sessionId), 'receipts', `${id(input.receiptId)}.json`), { limit: LIMITS.record });
   requireThat(receipt.sessionId === input.sessionId && ['userPromptSubmitted', 'ask_user'].includes(receipt.source) &&
     receipt.inputDigest === digest(input.input), 'PROVENANCE', 'Complete input does not match the captured user receipt/session');
+  requireThat(receipt.captureProvenance !== 'direct-uncredited', 'PROVENANCE',
+    'Direct receipt capture is uncredited; use the actual supported user input hook');
   const result = await store.transaction(input.workItemId, async tx => {
     requireThat(!tx.checkpointMissing, 'RECOVERY',
       'The checkpoint is missing; run sdlc resume and restore audited sequence state before applying a decision');
@@ -243,10 +238,13 @@ export async function applyDecision(store, input) {
     const effect = preliminaryEffect ?? existing?.effect;
     validateEffect(kind, effect, { strict: !existing });
     if (!existing) {
+      requireThat(receipt.captureProvenance === 'supported-input-hook', 'PROVENANCE',
+        'Capture provenance is unavailable; historical receipts cannot grant new managed authority');
       await validatePublicationDecision(kind, effect, tx);
     }
     if (existing) {
-      requireThat(existing.sourceReceiptId === receipt.id && digest(existing.effect) === digest(effect) && existing.kind === kind,
+      requireThat(existing.sourceReceiptId === receipt.id && existing.sourceReceiptDigest === digest(receipt) &&
+        digest(existing.effect) === digest(effect) && existing.kind === kind,
         'ID_CONFLICT', 'Effective decision ID reused with different content');
       if (pending) tx.remove(pending.id);
       return { event: existing, idempotent: true };

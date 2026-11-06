@@ -145,27 +145,48 @@ test('T-46 every missing GitHub or referenced-validation module rejects replacem
   for (const directory of ['bin', 'src', 'assets', 'docs']) {
     await fs.cp(path.join(sourceRoot, directory), path.join(source, directory), { recursive: true });
   }
-  await fs.copyFile(path.join(sourceRoot, 'package.json'), path.join(source, 'package.json'));
+  for (const name of ['package.json', 'README.md', 'CONTRIBUTING.md', 'SUPPORT.md',
+    'SECURITY.md', 'CODE_OF_CONDUCT.md', 'OWNERSHIP.md', 'RELEASING.md',
+    'CHANGELOG.md', 'LICENSE']) {
+    await fs.copyFile(path.join(sourceRoot, name), path.join(source, name));
+  }
+  const validReplacement = await distribution(home, source);
+  assert.ok(validReplacement.files.has('sdlc/README.md'));
   const store = new Store(home);
   await install(store);
   const runtime = path.join(home, 'sdlc', 'runtime', 'private-state.json');
   await fs.writeFile(runtime, '{"preserve":"existing-runtime"}\n');
+  const unrelated = path.join(home, 'unowned.json');
+  const outside = path.join(root, 'outside-sentinel.txt');
+  await fs.writeFile(unrelated, '{"preserve":"unowned"}\n');
+  await fs.writeFile(outside, 'outside fixture sentinel\n');
   const { files } = await distribution(home);
+  assert.deepEqual(validReplacement.files, files,
+    'The replacement baseline must be a complete byte-equivalent package before any module is omitted');
   const before = new Map(await Promise.all([...files.keys(),
-    'copilot-instructions.md', 'sdlc/install-manifest.json', 'sdlc/runtime/private-state.json']
+    'copilot-instructions.md', 'sdlc/install-manifest.json',
+    'sdlc/runtime/private-state.json', 'unowned.json']
     .map(async relative => [relative, await fs.readFile(path.join(home, ...relative.split('/')))])));
   const modulePaths = [
     'src/github.mjs', ...retainedModules.map(name => `src/github/${name}.mjs`),
     'src/validation-catalog.mjs', 'src/validation-evidence.mjs',
+    ...['coverage', 'coverage-cli', 'evidence', 'readiness-cli', 'validation-readiness',
+      'validation-report', 'documentation-links', 'pr-description'].map(name => `src/${name}.mjs`),
   ];
   for (const relativeModule of modulePaths) {
     const module = path.join(source, ...relativeModule.split('/'));
     const held = `${module}.held`;
     await fs.rename(module, held);
     try {
-      await assert.rejects(cleanInstall(store, { sourceRoot: source }), error =>
-        error.code === 'INSTALL' && error.message.includes(`sdlc/${relativeModule}`));
-      assert.equal(await fs.readFile(runtime, 'utf8'), '{"preserve":"existing-runtime"}\n');
+      for (const operation of [install, cleanInstall]) {
+        await assert.rejects(operation(store, { sourceRoot: source }), error =>
+          error.code === 'INSTALL' && error.message.includes(`sdlc/${relativeModule}`));
+        assert.equal(await fs.readFile(runtime, 'utf8'), '{"preserve":"existing-runtime"}\n');
+        for (const [relative, content] of before) {
+          assert.deepEqual(await fs.readFile(path.join(home, ...relative.split('/'))), content, relative);
+        }
+        assert.equal(await fs.readFile(outside, 'utf8'), 'outside fixture sentinel\n');
+      }
     } finally {
       await fs.rename(held, module);
     }

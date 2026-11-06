@@ -1,3 +1,7 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "direct", "paths": ["scripts/verify-github-acceptance.mjs"]}]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
@@ -77,7 +81,7 @@ test('T-GHB24 conditional CI and Review cannot inherit local assertion success',
 });
 
 test('T-GHB24 canonical plan binds every condition, Azure baseline and result family without awarding unexecuted credit', async () => {
-  const directory = path.resolve('docs', 'github-integration');
+  const directory = path.resolve('docs', 'sdlc', 'github-integration');
   const [requirements, plan, contents] = await Promise.all([
     fs.readFile(path.join(directory, 'requirements.md'), 'utf8'),
     fs.readFile(path.join(directory, 'test-plan.md'), 'utf8'),

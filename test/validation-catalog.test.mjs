@@ -1,21 +1,56 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "groups": [{
+    "root": "complete synthetic per-case reports obey all 2066 unit prerequisites and full aggregate coverage",
+    "minimumSlots": 7
+  }, {
+    "root": "published references are fresh-checked after cache use and missing/corrupt pages cannot become success",
+    "minimumSlots": 6
+  }],
+  "applicability": [{
+    "names": ["complete synthetic per-case reports obey all 2066 unit prerequisites and full aggregate coverage"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "catalog-resource-contract",
+    "reason": "PR-only complete catalog integration root. Reserve its worker, CLI and five concurrent candidate-snapshot Git readers; direct fixture arithmetic and sequential Git setup require fewer slots. Preserve all original assertions and deadlines; no critical promotion or hosted process-peak/timing claim.",
+    "prerequisites": ["Node, Git and seven aggregate worker slots; owned repository-local repository and Copilot home"]
+  }, {
+    "names": ["published references are fresh-checked after cache use and missing/corrupt pages cannot become success"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "catalog-service-contract",
+    "reason": "PR-only owned producer/admission boundary. Real fixture execution and admission do not depend on an unused caller-authored report; starting the producer needs the bound working directory, not replay of prior outcomes. Immutable-page corruption and loss still fail closed at admission and fresh reload.",
+    "prerequisites": ["Node, Git and six aggregate worker slots; owned repository-local repository and Copilot home"]
+  }],
+  "variants": [
+    {"expression": "`delayed local operation preserves dispatch source A under selection B${interrupted ? ' through terminal recovery' : ''}`", "domains": {"interrupted ? ' through terminal recovery' : ''": ["", " through terminal recovery"]}},
+    {"expression": "`Store STAGING equal-time ${outcomes.join('/')} stays Failed after reload and delayed older events`", "domains": {"outcomes.join('/')": ["Failed/Passed", "Passed/Failed"]}},
+    {"expression": "`${referenced ? 'referenced' : 'inline'} NotRun pending/running evidence keeps immutable dispatch source without completion credit`", "domains": {"referenced ? 'referenced' : 'inline'": ["inline", "referenced"]}},
+    {"expression": "`${referenced ? 'referenced' : 'inline'} late progress cannot replace tied-time terminal Passed Failed or cancelled NotRun`", "domains": {"referenced ? 'referenced' : 'inline'": ["inline", "referenced"]}},
+    {"expression": "`public automated ${count}-case cycle requires retained original proof regardless of inline storage`", "domains": {"count": ["2", "100", "101"]}},
+    {"expression": "`public ${count}-case manual and semi-automated procedures retain their real owner and evidence contract`", "domains": {"count": ["2", "101"]}}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
+import fsPromises from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { artifact, cli, coding, completeReview, fixture, fixtureArtifact, fixtureBuild,
   fixtureDeployment, finishFixtureOperation, grant, observeFixtureRepository, orient,
-  registerFixtureProviderRequest } from './helpers.mjs';
+  executeFixtureReadiness, recordFixtureTest, recordFixtureTests, registerFixtureProviderRequest } from './helpers.mjs';
 import { registerArtifact, parseTestPlan, resolveTestSpecification } from '../src/artifacts.mjs';
-import { startCycle, recordTest, recordTests, stagingHandoff } from '../src/validation.mjs';
-import { currentCycle, currentTestEvidence, hasStagingCompletion, stagePassed } from '../src/authority.mjs';
-import { cycleTests, readValidationObject, validationObjectPath } from '../src/validation-catalog.mjs';
-import { testHistory, cycleResultIds, readTestEvidence, testResetDigest, retainTestEvidence } from '../src/validation-evidence.mjs';
+import { startCycle, recordReadiness, recordTest, recordTests, stagingHandoff } from '../src/validation.mjs';
+import { applicableOverride, currentCycle, currentTestEvidence, hasStagingCompletion, stagePassed } from '../src/authority.mjs';
+import { cycleTests, flushValidationObjects, readValidationObject, stageValidationObject, validationObjectPath } from '../src/validation-catalog.mjs';
+import { appendTestObservation, testHistory, cycleResultIds, readTestEvidence, testResetDigest, retainTestEvidence } from '../src/validation-evidence.mjs';
 import { claimOperationDispatch, prepareOperation, markDispatching, recordOperation, pruneWork } from '../src/operations.mjs';
 import { status, resume } from '../src/recovery.mjs';
 import { byteSize, digest, LIMITS } from '../src/core.mjs';
 import { check } from '../src/checks.mjs';
 import { bridgeFixture } from './fixtures/github-store-bridge.mjs';
+import { Store } from '../src/store.mjs';
+import { formatAudit, recordAudit } from '../src/audit.mjs';
 
 function catalogFixturePlan() {
   return JSON.stringify({ tests: Array.from({ length: 2265 }, (_, index) => ({
@@ -33,6 +68,12 @@ function catalogFixturePlan() {
 
 async function largeFixture(t, contents = catalogFixturePlan()) {
   const f = await coding(await fixture(t));
+  if (contents.trimStart().startsWith('{')) {
+    const plan = JSON.parse(contents);
+    plan.tests = plan.tests.map(test => ({ ...test,
+      requirements: ['FR-001'], conditions: ['AC-001.1'] }));
+    contents = JSON.stringify(plan);
+  }
   const relative = await artifact(f, 'test-plan', contents);
   await registerArtifact(f.store, { workItemId: f.workItemId, role: 'test-plan',
     repositoryId: 'primary', path: relative });
@@ -40,7 +81,7 @@ async function largeFixture(t, contents = catalogFixturePlan()) {
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Isolated catalog fixture');
   const started = await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'fixture-config', cause: 'Full catalog fixture, not real GitHub acceptance' });
+    configDigest: digest('fixture-config'), cause: 'Full catalog fixture, not real GitHub acceptance' });
   return { ...f, cycle: started.cycle };
 }
 async function report(f, cycle, tests, statuses = {}) {
@@ -62,13 +103,7 @@ async function report(f, cycle, tests, statuses = {}) {
   return { file, evidenceRef: pathToFileURL(file).href };
 }
 async function submit(f, cycle, tests, statuses = {}) {
-  const retained = await report(f, cycle, tests, statuses);
-  await recordTests(f.store, { workItemId: f.workItemId, cycleId: cycle.id,
-    results: tests.map(definition => ({ testId: definition.id,
-      status: statuses[definition.id] ?? 'Passed',
-      expectedMet: (statuses[definition.id] ?? 'Passed') === 'Passed',
-      evidenceRef: retained.evidenceRef, owner: definition.owner, host: definition.location })) });
-  return retained;
+  await recordFixtureTests(f.store, cycle, tests, statuses);
 }
 async function localOperation(f, cycle, testId, correlationKey) {
   return (await prepareOperation(f.store, { workItemId: f.workItemId, sessionId: f.sessionId,
@@ -77,10 +112,265 @@ async function localOperation(f, cycle, testId, correlationKey) {
     request: { toolName: 'fixture_test', toolArgs: { testId }, cwd: f.repo },
     correlationKey, intent: 'Execute one isolated local validation case' })).operation;
 }
-async function finishLocal(f, operation) {
-  return recordOperation(f.store, { workItemId: f.workItemId, operationId: operation.id,
+async function finishLocal(f, operation, evaluation) {
+  const result = await recordOperation(f.store, { workItemId: f.workItemId, operationId: operation.id,
     status: 'succeeded', target: operation.target, requestFingerprint: operation.requestFingerprint,
     evidenceRef: `fixture:${operation.id}`, expectedMet: true });
+  if (evaluation) await recordReadiness(f.store, { workItemId: f.workItemId,
+    cycleId: operation.cycleId, evaluation,
+    bindings: [{ testId: operation.action.testId, operationId: operation.id }] });
+  else await recordFixtureTest(f.store, { workItemId: f.workItemId, cycleId: operation.cycleId,
+    testId: operation.action.testId, operationId: operation.id, status: 'Passed',
+    expectedMet: true, owner: 'agent', host: 'local', evidenceRef: `fixture:${operation.id}` });
+  return result;
+}
+
+async function orderingFixture(t, modes) {
+  const tests = modes.map((mode, index) => ({
+    id: `T-order-unit-${index}`, environment: 'local', level: 'unit', checkpoint: 'pre-review',
+    mode, owner: mode === 'automated' ? 'agent' : 'user',
+    location: mode === 'automated' ? 'local' : 'procedure-host',
+    implementation: 'procedure:owned-unit-observation', expected: 'Observed unit outcome matches the procedure',
+    status: 'NotRun',
+  }));
+  tests.push({ id: 'T-order-integration', environment: 'local', level: 'integration',
+    checkpoint: 'pre-review', mode: 'automated', owner: 'agent', location: 'local',
+    implementation: 'node:owned-arithmetic-fixture', expected: 'Controlled arithmetic succeeds', status: 'NotRun' });
+  const f = await largeFixture(t, JSON.stringify({ tests }));
+  f.store.clock = Date;
+  return { ...f, tests: cycleTests(f.cycle), integration: cycleTests(f.cycle).at(-1) };
+}
+
+test('F02 normalized scoped unit-first override preserves proof and current context', async t => {
+  const f = await orderingFixture(t, ['automated']);
+  const action = { class: 'test', repositoryId: 'primary', environment: 'local',
+    testId: f.integration.id, owner: 'agent', host: 'local' };
+  const override = await grant(f, 'override', {
+    rules: ['unit-first'], reason: 'Authorize this independently executed integration before units',
+    scope: { repositoryIds: ['primary'], actions: ['test'], environment: 'local', owner: 'agent', host: 'local' },
+    lifetime: { kind: 'cycle', cycleId: f.cycle.id },
+  });
+  const state = await f.store.load(f.workItemId);
+  assert.equal(applicableOverride(state.records, 'unit-first', action,
+    { cycleId: f.cycle.id, clock: f.store.clock }).id, override.event.id);
+  await assert.rejects(recordTest(f.store, { workItemId: f.workItemId, cycleId: f.cycle.id,
+    testId: f.integration.id, status: 'Passed', expectedMet: true,
+    owner: 'agent', host: 'local', evidenceRef: 'fixture:caller-asserted-pass' }), { code: 'EVIDENCE' });
+  const evaluation = await executeFixtureReadiness(f.store, f.cycle, [f.integration]);
+  assert.equal(evaluation.status, 'Passed');
+  const result = await recordReadiness(f.store, { workItemId: f.workItemId,
+    cycleId: f.cycle.id, evaluation });
+  assert.equal(result.evidence[0].status, 'Passed');
+  assert.deepEqual(result.blocked, []);
+  const loaded = await f.store.load(f.workItemId);
+  const cycle = currentCycle(loaded.records, loaded.checkpoint);
+  assert.equal(currentTestEvidence(cycle, loaded.records, f.integration).status, 'Passed');
+  assert.equal(currentTestEvidence(cycle, loaded.records, f.tests[0]), null);
+  assert.equal(stagePassed(cycle, loaded.records, 'local'), false);
+  await fs.writeFile(path.join(f.repo, 'source.mjs'), 'export const fixture = false;\n');
+  const next = (await startCycle(f.store, { workItemId: f.workItemId,
+    configDigest: cycle.configDigest, cause: 'The old cycle override must not transfer' })).cycle;
+  const currentEvaluation = await executeFixtureReadiness(f.store, next, [f.integration]);
+  assert.equal(currentEvaluation.status, 'Passed');
+  const blocked = await recordReadiness(f.store, { workItemId: f.workItemId,
+    cycleId: next.id, evaluation: currentEvaluation });
+  assert.equal(blocked.evidence[0].status, 'NotRun');
+  assert.deepEqual(blocked.blocked.map(row => row.code), ['UNIT_FIRST']);
+  await grant(f, 'override', { rules: ['unit-first'], reason: 'A different owner has a scoped exception',
+    scope: { actions: ['test'], environment: 'local', owner: 'user' },
+    lifetime: { kind: 'cycle', cycleId: next.id } });
+  const mismatched = await recordReadiness(f.store, { workItemId: f.workItemId,
+    cycleId: next.id, evaluation: currentEvaluation });
+  assert.equal(mismatched.evidence[0].status, 'NotRun');
+  assert.deepEqual(mismatched.blocked.map(row => row.code), ['UNIT_FIRST']);
+});
+
+test('F02 observed manual and semi-automated unit timing orders normalized integration', async t => {
+  const f = await orderingFixture(t, ['manual', 'semi-automated']);
+  const first = await executeFixtureReadiness(f.store, f.cycle, [f.integration]);
+  assert.equal(first.status, 'Passed');
+  const unknown = await recordReadiness(f.store, { workItemId: f.workItemId,
+    cycleId: f.cycle.id, evaluation: first });
+  assert.equal(unknown.evidence[0].status, 'NotRun');
+  assert.deepEqual(unknown.blocked.map(row => row.code), ['UNIT_FIRST']);
+  const observations = [];
+  for (const unit of f.tests.slice(0, -1)) {
+    const input = { workItemId: f.workItemId, cycleId: f.cycle.id, testId: unit.id,
+      status: 'Passed', expectedMet: true, owner: unit.owner, host: unit.location,
+      activity: 'complete', evidenceRef: `procedure:observed-${unit.id}` };
+    await assert.rejects(recordTest(f.store, { ...input, host: 'different-host' }), { code: 'HOST' });
+    observations.push(await recordTest(f.store, input));
+  }
+  assert.ok(observations.every(row => row.sourceCompletedAt === undefined));
+  const late = await recordReadiness(f.store, { workItemId: f.workItemId,
+    cycleId: f.cycle.id, evaluation: first });
+  assert.equal(late.evidence[0].status, 'NotRun');
+  assert.deepEqual(late.blocked.map(row => row.code), ['UNIT_FIRST']);
+  const fresh = await executeFixtureReadiness(f.store, f.cycle, [f.integration]);
+  assert.equal(fresh.status, 'Passed');
+  const result = await recordReadiness(f.store, { workItemId: f.workItemId,
+    cycleId: f.cycle.id, evaluation: fresh });
+  assert.equal(result.evidence[0].status, 'Passed');
+  assert.deepEqual(result.blocked, []);
+  assert.ok(observations.every(row =>
+    Date.parse(row.observedAt) <= Date.parse(result.evidence[0].sourceStartedAt)));
+  const reopened = await new Store(f.home, { clock: Date }).ready();
+  const loaded = await reopened.load(f.workItemId);
+  const cycle = currentCycle(loaded.records, loaded.checkpoint);
+  assert.equal(stagePassed(cycle, loaded.records, 'local'), true);
+  for (const [index, unit] of f.tests.slice(0, -1).entries()) {
+    const current = currentTestEvidence(cycle, loaded.records, unit);
+    assert.equal(current.status, 'Passed');
+    assert.equal(current.observedAt, observations[index].observedAt);
+    assert.equal(current.owner, unit.owner);
+    assert.equal(current.host, unit.location);
+  }
+  await fs.writeFile(path.join(f.repo, 'source.mjs'), 'export const fixture = false;\n');
+  const next = (await startCycle(f.store, { workItemId: f.workItemId,
+    configDigest: cycle.configDigest, cause: 'Prior manual observations stay historical' })).cycle;
+  await assert.rejects(recordReadiness(f.store, { workItemId: f.workItemId,
+    cycleId: next.id, evaluation: fresh }), { code: 'EVIDENCE' });
+  const state = await f.store.load(f.workItemId);
+  assert.ok(f.tests.slice(0, -1).every(unit =>
+    currentTestEvidence(currentCycle(state.records, state.checkpoint), state.records, unit) === null));
+});
+
+test('F02 caller-authored assertions cannot acquire automated credit through recording or retained replay', async t => {
+  const tests = Array.from({ length: 2 }, (_, index) => ({
+    id: `T-authored-${index}`, environment: 'local', level: 'unit', checkpoint: 'pre-review',
+    mode: 'automated', owner: 'agent', location: 'local',
+    implementation: 'test/unexecuted.mjs', expected: `Unexecuted assertion ${index}`, status: 'NotRun',
+  }));
+  const f = await largeFixture(t, JSON.stringify({ tests }));
+  const authored = await report(f, f.cycle, tests);
+  const rows = tests.map(definition => ({ testId: definition.id, status: 'Passed',
+    expectedMet: true, owner: definition.owner, host: definition.location, evidenceRef: authored.evidenceRef }));
+  await assert.rejects(recordTests(f.store, { workItemId: f.workItemId, cycleId: f.cycle.id,
+    results: rows }), { code: 'EVIDENCE' });
+  const retained = await retainTestEvidence(f.store, { workItemId: f.workItemId,
+    evidenceRef: authored.evidenceRef });
+  await assert.rejects(recordTest(f.store, { ...rows[0], workItemId: f.workItemId,
+    cycleId: f.cycle.id, evidenceRef: retained.evidenceRef }), { code: 'EVIDENCE' });
+  await f.store.transaction(f.workItemId, tx => {
+    const selected = currentCycle(tx.all(), tx.checkpoint);
+    for (const [index, definition] of tests.entries()) appendTestObservation(tx, selected, {
+      type: 'test-evidence', id: `evidence-authored-${index}`, workItemId: f.workItemId,
+      sequence: index + 1, cycleId: selected.id, testId: definition.id,
+      candidateDigest: selected.candidateDigest, testSpecDigest: selected.testSpecDigest,
+      configDigest: selected.configDigest, executionSources: selected.sources,
+      executionSourceDigest: digest(selected.sources), retainedPayloadRef: retained.ref,
+      environment: 'local', implementation: definition.implementation, status: 'Passed',
+      expectedMet: true, owner: definition.owner, host: definition.location,
+      evidenceRef: retained.evidenceRef, observedAt: new Date(f.clock.now()).toISOString(),
+    });
+    selected.lastEvidenceSequence = tests.length;
+    tx.put(selected);
+  });
+  const fresh = await new Store(f.home, { clock: f.clock }).ready();
+  const state = await fresh.load(f.workItemId);
+  const selected = currentCycle(state.records, state.checkpoint);
+  assert.equal(stagePassed(selected, state.records, 'local', f.clock), false);
+  for (const definition of tests) {
+    assert.equal(currentTestEvidence(selected, state.records, definition, f.clock), null);
+    const history = await readTestEvidence(fresh, { workItemId: f.workItemId,
+      cycleId: selected.id, testId: definition.id });
+    assert.equal(history.status, 'NotRun');
+    assert.equal(history.observations[0].status, 'Passed');
+  }
+});
+
+for (const count of [2, 100, 101]) {
+  test(`public automated ${count}-case cycle requires retained original proof regardless of inline storage`, async t => {
+    const tests = Array.from({ length: count }, (_, index) => ({
+      id: `T-proof-${index}`, environment: 'local', level: index === 0 ? 'unit' : 'integration',
+      checkpoint: 'pre-review', mode: 'automated', owner: 'agent', location: 'local',
+      implementation: 'test/proof-fixture.mjs', expected: `Original outcome ${index}`, status: 'NotRun',
+    }));
+    const f = await largeFixture(t, JSON.stringify({ tests }));
+    const cycle = f.cycle;
+    assert.equal(cycle.storageVersion, count > 100 ? 2 : undefined);
+    const input = { workItemId: f.workItemId, cycleId: cycle.id, testId: tests[0].id,
+      status: 'Passed', expectedMet: true, owner: 'agent', host: 'local', evidenceRef: 'x' };
+    const opaque = await cli(f, ['evidence', 'test', '--json', '--work-item', f.workItemId],
+      { ...input, workItemId: undefined });
+    assert.notEqual(opaque.code, 0, 'Opaque execution reference must not acquire managed credit');
+    assert.equal(opaque.json.error.code, 'EVIDENCE');
+    await assert.rejects(recordTest(f.store, { ...input, testId: tests[1].id }), { code: 'UNIT_FIRST' });
+    const retained = await report(f, cycle, tests);
+    await assert.rejects(recordTest(f.store, { ...input, evidenceRef: retained.evidenceRef,
+      owner: 'user' }), { code: 'HOST' });
+    const validReport = JSON.parse(await fs.readFile(retained.file, 'utf8'));
+    for (const field of ['candidateDigest', 'testSpecDigest', 'configDigest', 'executionSources']) {
+      await fs.writeFile(retained.file, JSON.stringify({ ...validReport,
+        [field]: field === 'executionSources' ? [{ ...cycle.sources[0], contentDigest: digest('different source') }] :
+          digest(`different ${field}`) }));
+      await assert.rejects(recordTest(f.store, { ...input, evidenceRef: retained.evidenceRef }),
+        { code: 'EVIDENCE' });
+    }
+    await submit(f, cycle, tests);
+    const fresh = await new Store(f.home, { clock: f.clock }).ready();
+    const assertReady = async () => {
+      const state = await fresh.load(f.workItemId);
+      const selected = currentCycle(state.records, state.checkpoint);
+      assert.equal(stagePassed(selected, state.records, 'local', f.clock), true);
+      assert.equal(currentTestEvidence(selected, state.records, tests[0], f.clock).status, 'Passed');
+      return { state, selected };
+    };
+    const { state, selected } = await assertReady();
+    const original = currentTestEvidence(selected, state.records, tests[0], f.clock);
+    const file = validationObjectPath(fresh, f.workItemId, original.retainedPayloadRef);
+    const bytes = await fs.readFile(file);
+    await fs.unlink(retained.file);
+    await assertReady();
+    await fs.writeFile(file, '{"corrupt":true}');
+    await assert.rejects(fresh.load(f.workItemId), { code: 'DIGEST' });
+    await fs.writeFile(file, bytes);
+    await assertReady();
+    await fs.unlink(file);
+    await assert.rejects(fresh.load(f.workItemId), { code: 'ENOENT' });
+    await fs.writeFile(file, bytes);
+    await fresh.transaction(f.workItemId, tx => {
+      const value = JSON.parse(bytes);
+      value.content.testId = 'T-different-case';
+      const ref = stageValidationObject(tx, value);
+      const selectedCycle = currentCycle(tx.all(), tx.checkpoint);
+      const altered = { ...original, id: 'evidence-misbound-proof',
+        sequence: selectedCycle.lastEvidenceSequence + 1, retainedPayloadRef: ref };
+      appendTestObservation(tx, selectedCycle, altered);
+      selectedCycle.lastEvidenceSequence = altered.sequence;
+      tx.put(selectedCycle);
+    });
+    await assert.rejects(fresh.load(f.workItemId), { code: 'EVIDENCE' });
+  });
+}
+
+for (const count of [2, 101]) {
+  test(`public ${count}-case manual and semi-automated procedures retain their real owner and evidence contract`, async t => {
+    const tests = Array.from({ length: count }, (_, index) => ({
+      id: `T-procedure-${index}`, environment: 'local', level: 'unit', checkpoint: 'pre-review',
+      mode: index % 2 ? 'semi-automated' : 'manual', owner: index % 2 ? 'agent' : 'user',
+      location: 'procedure-host', implementation: `Observe declared procedure ${index}`,
+      expected: `Observed procedure outcome ${index}`, status: 'NotRun',
+    }));
+    const f = await largeFixture(t, JSON.stringify({ tests }));
+    await recordTests(f.store, { workItemId: f.workItemId, cycleId: f.cycle.id,
+      results: tests.map(definition => ({ testId: definition.id, status: 'Passed', expectedMet: true,
+        owner: definition.owner, host: definition.location, evidenceRef: `procedure:${definition.id}` })) });
+    const fresh = await new Store(f.home, { clock: f.clock }).ready();
+    const state = await fresh.load(f.workItemId);
+    const selected = currentCycle(state.records, state.checkpoint);
+    assert.equal(stagePassed(selected, state.records, 'local', f.clock), true);
+    for (const definition of tests) {
+      const evidence = currentTestEvidence(selected, state.records, definition, f.clock);
+      assert.equal(evidence.evidenceRef, `procedure:${definition.id}`);
+      assert.equal(evidence.owner, definition.owner);
+      assert.equal(evidence.retainedPayloadRef, undefined);
+      assert.deepEqual(evidence.executionSources, selected.sources);
+    }
+    await assert.rejects(recordTest(f.store, { workItemId: f.workItemId, cycleId: f.cycle.id,
+      testId: tests[0].id, status: 'Passed', expectedMet: true, owner: 'agent',
+      host: 'procedure-host', evidenceRef: 'procedure:wrong-owner' }), { code: 'HOST' });
+  });
 }
 
 test('public CLI and Store retain all 2265 synthetic NotRun slots in 36 thin-cycle pages', async t => {
@@ -102,7 +392,7 @@ test('public CLI and Store retain all 2265 synthetic NotRun slots in 36 thin-cyc
   assert.ok(byteSize(state.records) < LIMITS.workingSet);
   assert.ok(byteSize(state.checkpoint) < LIMITS.checkpoint);
   const started = await cli(f, ['cycle', 'start', '--json', '--work-item', f.workItemId],
-    { configDigest: 'fixture-config', cause: 'CLI complete-catalog reuse' });
+    { configDigest: digest('fixture-config'), cause: 'CLI complete-catalog reuse' });
   assert.equal(started.code, 0, started.stderr);
   assert.equal(started.json.reset, false);
   assert.equal(started.json.cycle.id, cycle.id);
@@ -113,7 +403,7 @@ test('public CLI and Store retain all 2265 synthetic NotRun slots in 36 thin-cyc
 });
 
 test('current canonical 133-case plan retains each core variant and separate execution checkpoint', async t => {
-  const contents = await fs.readFile(path.resolve('docs', 'github-integration', 'test-plan.md'), 'utf8');
+  const contents = await fs.readFile(path.resolve('docs', 'sdlc', 'github-integration', 'test-plan.md'), 'utf8');
   const f = await largeFixture(t, contents);
   const state = await f.store.load(f.workItemId);
   const cycle = currentCycle(state.records, state.checkpoint);
@@ -160,8 +450,9 @@ test('complete synthetic per-case reports obey all 2066 unit prerequisites and f
       evidenceRef: unitReport.evidenceRef, owner: definition.owner, host: definition.location,
     })),
   });
-  assert.equal(admitted.code, 0, admitted.stderr);
-  assert.equal(admitted.json.recorded, 2066);
+  assert.notEqual(admitted.code, 0);
+  assert.equal(admitted.json.error.code, 'EVIDENCE');
+  assert.equal((await recordFixtureTests(f.store, cycle, units)).evidence.length, 2066);
   state = await f.store.load(f.workItemId);
   cycle = currentCycle(state.records, state.checkpoint);
   const first = currentTestEvidence(cycle, state.records, units[0]);
@@ -285,6 +576,145 @@ test('published references are fresh-checked after cache use and missing/corrupt
   await f.store.load(f.workItemId);
   await fs.unlink(file);
   await assert.rejects(f.store.load(f.workItemId), { code: 'ENOENT' });
+  const unit = cycleTests(cycle).find(test => test.level === 'unit');
+  const evaluation = await executeFixtureReadiness(f.store, cycle, [unit]);
+  assert.equal(evaluation.status, 'Passed');
+  await assert.rejects(recordReadiness(f.store, {
+    workItemId: f.workItemId, cycleId: cycle.id, evaluation,
+  }), { code: 'ENOENT' });
+  await fs.writeFile(file, bytes);
+  const admitted = await recordReadiness(f.store, {
+    workItemId: f.workItemId, cycleId: cycle.id, evaluation,
+  });
+  assert.equal(admitted.evidence.length, 1);
+  assert.equal(admitted.evidence[0].status, 'Passed');
+  const reopened = await new Store(f.home, { clock: f.clock }).ready();
+  const current = await reopened.load(f.workItemId);
+  const selected = currentCycle(current.records, current.checkpoint);
+  assert.equal(currentTestEvidence(selected, current.records, unit, f.clock).status, 'Passed');
+  assert.equal(Object.keys(cycleResultIds(selected)).length, 1);
+  assert.equal(stagePassed(selected, current.records, 'local', f.clock), false);
+  const nextUnit = cycleTests(selected).find(test => test.level === 'unit' && test.id !== unit.id);
+  const originalWriteFile = fsPromises.writeFile;
+  const restoreWriteFile = () => {
+    fsPromises.writeFile = originalWriteFile;
+    syncBuiltinESMExports();
+  };
+  t.after(restoreWriteFile);
+  fsPromises.writeFile = async (target, ...args) => {
+    if (typeof target === 'string' && path.dirname(target) === f.root &&
+        /^execution-[a-f0-9]{16}\.json$/u.test(path.basename(target))) {
+      throw Object.assign(new Error('An unused caller-authored report is not an execution prerequisite'),
+        { code: 'UNUSED_FIXTURE_REPORT' });
+    }
+    return originalWriteFile(target, ...args);
+  };
+  syncBuiltinESMExports();
+  try { await submit(f, selected, [nextUnit]); }
+  finally { restoreWriteFile(); }
+  const fresh = await reopened.load(f.workItemId);
+  const recorded = currentCycle(fresh.records, fresh.checkpoint);
+  assert.equal(currentTestEvidence(recorded, fresh.records, nextUnit, f.clock).status, 'Passed');
+  assert.equal(Object.keys(cycleResultIds(recorded)).length, 2);
+  assert.equal(stagePassed(recorded, fresh.records, 'local', f.clock), false);
+});
+
+test('immutable validation publication bounds overlap and drains ordered failures before later batches', async t => {
+  const f = await fixture(t);
+  const originalOpen = fsPromises.open;
+  t.after(() => { fsPromises.open = originalOpen; syncBuiltinESMExports(); });
+  for (const failure of ['none', 'flush', 'readback', 'fault', 'corrupt']) {
+    const directory = path.join(f.root, `publication-${failure}`);
+    const context = { validationObjects: new Map() };
+    const refs = Array.from({ length: 9 }, (_, index) =>
+      stageValidationObject(context, { kind: 'publication-fixture', workItemId: f.workItemId, index }));
+    let active = 0;
+    let maximum = 0;
+    const entered = [];
+    const completed = [];
+    const faults = [];
+    const flushed = [];
+    let directoryFlushes = 0;
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    let ready;
+    const allEntered = new Promise(resolve => { ready = resolve; });
+    const store = { workPath: () => directory, fault: async point => {
+      assert.equal(point, 'validation:object');
+      assert.equal(active, 0, 'Every dispatched publication must settle before ordered fault replay');
+      faults.push(point);
+      if (failure === 'fault') throw new Error('First ordered publication fault');
+    } };
+    if (failure === 'corrupt') {
+      const file = validationObjectPath(store, f.workItemId, refs[0]);
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.writeFile(file, 'corrupt-existing-object');
+    }
+    fsPromises.open = async (file, ...args) => {
+      if (String(file) === path.join(directory, 'validation', 'objects')) directoryFlushes++;
+      const handle = await originalOpen(file, ...args);
+      const index = refs.findIndex(ref => path.basename(String(file)).startsWith(`.${ref.sha256}.json.`));
+      if (index < 0) return handle;
+      const originalSync = handle.sync.bind(handle);
+      const originalClose = handle.close.bind(handle);
+      const originalWrite = handle.writeFile.bind(handle);
+      handle.writeFile = (contents, ...options) => originalWrite(
+        failure === 'readback' && index === 1 ? 'corrupt-new-object' : contents, ...options);
+      handle.sync = async () => {
+        active++;
+        maximum = Math.max(maximum, active);
+        entered.push(index);
+        if (entered.length === (failure === 'corrupt' ? 3 : 4)) ready();
+        await gate;
+        await originalSync();
+        flushed.push(index);
+        if (failure === 'flush' && [1, 2].includes(index)) throw new Error(`Flush failure ${index}`);
+      };
+      handle.close = async () => {
+        try { return await originalClose(); }
+        finally { if (!completed.includes(index)) { completed.push(index); active--; } }
+      };
+      return handle;
+    };
+    syncBuiltinESMExports();
+    const pending = flushValidationObjects(store, f.workItemId, context);
+    pending.catch(() => {});
+    let timer;
+    try {
+      await Promise.race([allEntered, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Independent publications did not overlap')), 5000);
+      })]);
+    } finally {
+      clearTimeout(timer);
+      release();
+      await pending.catch(() => {});
+      fsPromises.open = originalOpen;
+      syncBuiltinESMExports();
+    }
+    assert.equal(maximum, failure === 'corrupt' ? 3 : 4);
+    assert.equal(active, 0);
+    assert.deepEqual(new Set(completed), new Set(entered));
+    assert.deepEqual(new Set(flushed), new Set(entered), 'Every owned file reaches its real durability flush');
+    assert.equal(directoryFlushes, failure === 'flush' ? 2 : entered.length);
+    if (failure === 'none') {
+      await pending;
+      assert.equal(entered.length, 9);
+      assert.equal(faults.length, 9);
+      for (const ref of refs) {
+        assert.deepEqual(await fs.readFile(validationObjectPath(store, f.workItemId, ref)),
+          context.validationObjects.get(ref.sha256));
+      }
+    } else {
+      await assert.rejects(pending, failure === 'flush' ? /Flush failure 1/u :
+        failure === 'fault' ? /First ordered publication fault/u : { code: 'DIGEST' });
+      assert.equal(entered.length, failure === 'corrupt' ? 3 : 4);
+      assert.equal(faults.length, ['flush', 'readback', 'fault'].includes(failure) ? 1 : 0);
+      if (failure === 'corrupt') assert.equal(await fs.readFile(
+        validationObjectPath(store, f.workItemId, refs[0]), 'utf8'), 'corrupt-existing-object');
+    }
+    assert.ok((await fs.readdir(path.join(directory, 'validation', 'objects')))
+      .every(name => /^[a-f0-9]{64}\.json$/u.test(name)), 'All owned atomic-write temporaries are cleaned');
+  }
 });
 
 test('retained execution payload persists no environment-secret or Cookie sentinel bytes', async t => {
@@ -309,6 +739,7 @@ for (const interrupted of [false, true]) {
     const sourceA = structuredClone(cycle.sources);
     const operation = await localOperation(f, cycle, unit.id, 'delayed-test-source-A');
     await markDispatching(f.store, f.workItemId, operation.id);
+    const evaluation = await executeFixtureReadiness(f.store, cycle, [unit], {}, { operation });
     await f.runGit('commit', '--allow-empty', '-qm', 'Select B with unchanged candidate content');
     const selected = await startCycle(f.store, { workItemId: f.workItemId,
       configDigest: cycle.configDigest, cause: 'Reselect B before delayed test completion' });
@@ -318,10 +749,15 @@ for (const interrupted of [false, true]) {
       f.store.fault = async point => {
         if (point === 'record:operation') throw new Error('Interrupted before terminal test projection');
       };
-      await assert.rejects(finishLocal(f, operation), /terminal test projection/u);
+      await assert.rejects(finishLocal(f, operation, evaluation), /terminal test projection/u);
       f.store.fault = async () => {};
       await resume(f.store, { workItemId: f.workItemId, sessionId: f.sessionId, cwd: f.repo });
-    } else await finishLocal(f, operation);
+      const recovered = await f.store.load(f.workItemId);
+      assert.equal(currentTestEvidence(currentCycle(recovered.records, recovered.checkpoint),
+        recovered.records, unit), null);
+      await recordReadiness(f.store, { workItemId: f.workItemId, cycleId: cycle.id,
+        evaluation, bindings: [{ testId: unit.id, operationId: operation.id }] });
+    } else await finishLocal(f, operation, evaluation);
     const reloaded = await f.store.load(f.workItemId);
     const current = currentCycle(reloaded.records, reloaded.checkpoint);
     const result = currentTestEvidence(current, reloaded.records, unit);
@@ -342,14 +778,13 @@ test('object-publication failure cannot commit an orphan pass and checkpoint res
   const cycle = currentCycle(state.records, state.checkpoint);
   const unit = cycleTests(cycle).find(item => item.level === 'unit');
   const priorRoot = cycle.testOutcomeRef.sha256;
-  const payload = await report(f, cycle, [unit]);
+  const evaluation = await executeFixtureReadiness(f.store, cycle, [unit]);
   let injected = false;
   f.store.fault = async point => {
     if (point === 'validation:object' && !injected) { injected = true; throw new Error('Fixture publication interruption'); }
   };
-  await assert.rejects(recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id,
-    testId: unit.id, status: 'Passed', expectedMet: true,
-    owner: unit.owner, host: unit.location, evidenceRef: payload.evidenceRef }), /publication interruption/u);
+  await assert.rejects(recordReadiness(f.store, { workItemId: f.workItemId, cycleId: cycle.id,
+    evaluation }), /publication interruption/u);
   f.store.fault = async () => {};
   state = await f.store.load(f.workItemId);
   assert.equal(currentCycle(state.records, state.checkpoint).testOutcomeRef.sha256, priorRoot);
@@ -368,17 +803,19 @@ async function stagingFixture(t) {
     id: `T-unit-${index}`, environment: 'local', level: 'unit', checkpoint: 'pre-review',
     mode: 'automated', owner: 'agent', location: 'local',
     implementation: 'test/fixture.mjs', expected: `Unit fixture ${index}`, status: 'NotRun',
+    requirements: ['FR-001'], conditions: ['AC-001.1'],
   }));
   tests.push({ id: 'T-staging', environment: 'STAGING', level: 'integration',
     checkpoint: 'STAGING', mode: 'automated', owner: 'user', location: 'authorized-machine',
-    implementation: 'test/staging-fixture.mjs', expected: 'Deployment-bound fixture result', status: 'NotRun' });
+    implementation: 'test/staging-fixture.mjs', expected: 'Deployment-bound fixture result', status: 'NotRun',
+    requirements: ['FR-001'], conditions: ['AC-001.1'] });
   await fs.writeFile(path.join(f.repo, 'docs', 'test-plan.md'), JSON.stringify({ tests }));
   await registerArtifact(f.store, { workItemId: f.workItemId, role: 'test-plan',
     repositoryId: 'primary', path: 'docs/test-plan.md' });
   await fs.writeFile(path.join(f.repo, '.sdlc', 'config.json'), JSON.stringify({
     defaultBranch: 'refs/heads/main', environments: {
-      DEV: { target: 'dev-target', configDigest: 'fixture-config', allowedStages: ['DEV'] },
-      STAGING: { target: 'staging-target', configDigest: 'fixture-config', allowedStages: ['STAGING'],
+      DEV: { target: 'dev-target', configDigest: digest('fixture-config'), allowedStages: ['DEV'] },
+      STAGING: { target: 'staging-target', configDigest: digest('fixture-config'), allowedStages: ['STAGING'],
         execution: { owner: 'user', locations: ['authorized-machine'] } },
     },
   }));
@@ -386,7 +823,7 @@ async function stagingFixture(t) {
   await f.runGit('commit', '-qm', 'Isolated deployment-bound catalog fixture');
   await observeFixtureRepository(f);
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'fixture-config', cause: 'Referenced STAGING fixture' })).cycle;
+    configDigest: digest('fixture-config'), cause: 'Referenced STAGING fixture' })).cycle;
   const state = await f.store.load(f.workItemId);
   await submit(f, cycle, cycleTests(currentCycle(state.records, state.checkpoint))
     .filter(item => item.environment === 'local'));
@@ -412,6 +849,43 @@ async function stagingFixture(t) {
     evidenceRef: 'fixture:actual-captured-staging-results' };
   return { f, cycle, artifact, deployment, result };
 }
+
+test('F02 audited superseded STAGING receipt proof survives pruning and historical reads without current credit', async t => {
+  const { f, cycle, artifact, deployment, result } = await stagingFixture(t);
+  const first = await grant(f, 'staging-result', { ...result, outcome: 'Passed' });
+  await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id, testId: 'T-staging',
+    status: 'Passed', expectedMet: true, owner: 'user', host: 'authorized-machine',
+    deploymentId: deployment.id, artifactId: artifact.artifactId,
+    eventId: first.event.id, evidenceRef: 'fixture:original-staging-receipt' });
+  f.clock.advance(1);
+  const later = await grant(f, 'staging-result', { ...result, outcome: 'Failed' });
+  const audit = await formatAudit(f.store, f.workItemId, [first.event.id, later.event.id]);
+  await f.runGit('add', '.sdlc', 'docs');
+  await f.runGit('commit', '--allow-empty', '-qm',
+    `Audit original receipt observations\n\n${audit.trailers}`);
+  const commit = await f.runGit('rev-parse', 'HEAD');
+  await recordAudit(f.store, { workItemId: f.workItemId, repositoryId: 'primary', commit });
+  const pruned = await pruneWork(f.store, f.workItemId);
+  assert.ok(pruned.archived.includes(first.event.id));
+  const fresh = await new Store(f.home, { clock: f.clock }).ready();
+  const loaded = await fresh.load(f.workItemId);
+  assert.equal(loaded.records.some(record => record.id === first.event.id), false);
+  const retained = await readTestEvidence(fresh, { workItemId: f.workItemId,
+    cycleId: cycle.id, testId: 'T-staging' });
+  assert.equal(retained.observations.some(row => row.eventId === first.event.id && row.status === 'Passed'), true);
+  assert.equal(stagePassed(currentCycle(loaded.records, loaded.checkpoint),
+    loaded.records, 'STAGING', f.clock), false);
+  await fs.writeFile(path.join(f.repo, 'new-candidate.mjs'), 'export const changed = true;\n');
+  const next = await startCycle(fresh, { workItemId: f.workItemId,
+    configDigest: cycle.configDigest, cause: 'Historical receipt proof remains readable' });
+  assert.equal(next.reset, true);
+  await pruneWork(fresh, f.workItemId);
+  const historical = await readTestEvidence(fresh, { workItemId: f.workItemId,
+    cycleId: cycle.id, testId: 'T-staging' });
+  assert.equal(historical.historicalOnly, true);
+  assert.equal(historical.status, 'NotRun');
+  assert.ok(historical.observations.some(row => row.eventId === first.event.id && row.status === 'Passed'));
+});
 
 test('catalog STAGING handoff, captured results and failure history use current deployment proof without completion credit', async t => {
   const { f, cycle, artifact, deployment, result } = await stagingFixture(t);
@@ -532,18 +1006,18 @@ async function atomicEnvironmentFixture(t) {
   const toolArgs = { pipeline: 'fixture-pipeline' };
   const action = { class: 'pipeline', repositoryId: 'primary', environment: 'DEV',
     target: 'dev-target', provider: 'fixture', pipeline: toolArgs.pipeline,
-    configDigest: 'fixture-config', monitorCapability: true };
+    configDigest: digest('fixture-config'), monitorCapability: true };
   await fs.writeFile(path.join(f.repo, '.sdlc', 'config.json'), JSON.stringify({
     defaultBranch: 'refs/heads/main',
-    environments: { DEV: { target: 'dev-target', configDigest: 'fixture-config', allowedStages: ['DEV'] } },
+    environments: { DEV: { target: 'dev-target', configDigest: digest('fixture-config'), allowedStages: ['DEV'] } },
     toolAdapters: [{ toolName: 'fixture_pipeline', match: toolArgs, action }],
   }));
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Post-claim environment synchronization fixture');
   await observeFixtureRepository(f);
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'fixture-config', cause: 'Post-claim synchronization regression' })).cycle;
-  for (const testId of ['T-unit', 'T-integration']) await recordTest(f.store, {
+    configDigest: digest('fixture-config'), cause: 'Post-claim synchronization regression' })).cycle;
+  for (const testId of ['T-unit', 'T-integration']) await recordFixtureTest(f.store, {
     workItemId: f.workItemId, cycleId: cycle.id, testId, status: 'Passed', expectedMet: true,
     owner: 'agent', host: 'local', evidenceRef: `fixture:${testId}`,
   });
@@ -622,6 +1096,7 @@ for (const referenced of [false, true]) {
       id: `T-pending-${index}`, environment: 'local', level: 'unit', checkpoint: 'pre-review',
       mode: 'automated', owner: 'agent', location: 'local',
       implementation: 'test/pending-fixture.mjs', expected: `Pending case ${index}`, status: 'NotRun',
+      requirements: ['FR-001'], conditions: ['AC-001.1'],
     }));
     await fs.writeFile(path.join(f.repo, 'docs', 'test-plan.md'), JSON.stringify({ tests }));
     await registerArtifact(f.store, { workItemId: f.workItemId, role: 'test-plan',
@@ -629,7 +1104,7 @@ for (const referenced of [false, true]) {
     await f.runGit('add', '.');
     await f.runGit('commit', '-qm', 'Nonconclusive operation evidence fixture');
     let cycle = (await startCycle(f.store, { workItemId: f.workItemId,
-      configDigest: 'fixture-config', cause: 'Pending operation evidence regression' })).cycle;
+      configDigest: digest('fixture-config'), cause: 'Pending operation evidence regression' })).cycle;
     const original = structuredClone(cycle.sources);
     const operation = await localOperation(f, cycle, tests[0].id, 'pending-case');
     await markDispatching(f.store, f.workItemId, operation.id);
@@ -667,7 +1142,11 @@ for (const referenced of [false, true]) {
     const terminal = currentTestEvidence(completedCycle, completed.records, tests[0], f.clock);
     assert.equal(terminal.status, 'Passed');
     assert.deepEqual(terminal.executionSources, original);
-    assert.equal(testHistory(completedCycle, completed.records, tests[0].id).length, 3);
+    const history = [...testHistory(completedCycle, completed.records, tests[0].id)]
+      .sort((left, right) => left.sequence - right.sequence);
+    assert.deepEqual(history.map(item => item.status), ['NotRun', 'NotRun', 'Passed', 'Passed']);
+    assert.notEqual(history[2].id, terminal.id);
+    assert.equal(history[3].id, terminal.id);
     await fs.writeFile(path.join(f.repo, 'candidate-drift.mjs'), 'export const changed = true;\n');
     await assert.rejects(recordTest(f.store, input), { code: 'STALE' });
   });
@@ -717,6 +1196,7 @@ for (const referenced of [false, true]) {
       id: `T-terminal-${index}`, environment: 'local', level: 'unit', checkpoint: 'pre-review',
       mode: 'automated', owner: 'agent', location: 'local',
       implementation: 'test/terminal-fixture.mjs', expected: `Terminal case ${index}`, status: 'NotRun',
+      requirements: ['FR-001'], conditions: ['AC-001.1'],
     }));
     await fs.writeFile(path.join(f.repo, 'docs', 'test-plan.md'), JSON.stringify({ tests }));
     await registerArtifact(f.store, { workItemId: f.workItemId, role: 'test-plan',
@@ -724,7 +1204,7 @@ for (const referenced of [false, true]) {
     await f.runGit('add', '.');
     await f.runGit('commit', '-qm', 'Late progress terminal-state fixture');
     const cycle = (await startCycle(f.store, { workItemId: f.workItemId,
-      configDigest: 'fixture-config', cause: 'Late progress cannot displace terminal evidence' })).cycle;
+      configDigest: digest('fixture-config'), cause: 'Late progress cannot displace terminal evidence' })).cycle;
     for (const [index, terminalStatus] of outcomes.entries()) {
       const testId = tests[index].id;
       const operation = await localOperation(f, cycle, testId, `terminal-${terminalStatus}`);
@@ -743,6 +1223,11 @@ for (const referenced of [false, true]) {
       await recordOperation(f.store, completedInput);
       const expected = terminalStatus === 'succeeded' ? 'Passed' :
         terminalStatus === 'failed' ? 'Failed' : 'NotRun';
+      if (terminalStatus !== 'cancelled') await recordFixtureTest(f.store, {
+        workItemId: f.workItemId, cycleId: cycle.id, testId, operationId: operation.id,
+        status: expected, expectedMet: terminalStatus === 'succeeded',
+        owner: 'agent', host: 'local', evidenceRef: `fixture:terminal-${terminalStatus}`,
+      });
       const currentStatus = async () => {
         const state = await f.store.load(f.workItemId);
         return currentTestEvidence(currentCycle(state.records, state.checkpoint),

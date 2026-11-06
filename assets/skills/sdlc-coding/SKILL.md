@@ -21,6 +21,14 @@ Read `{{KNOWLEDGE_INSTRUCTIONS}}`, `{{CODING_INSTRUCTIONS}}`, and
 project-specific rules first. Implement focused increments and planned tests.
 Verify APIs, keep documents aligned, and notify changes.
 
+Follow `sdlc/templates/pr-coverage.md` for coverage authoring. Use
+`coverage prepare/inspect` and the existing Requirements/Test Plan/test sources;
+create no coverage/index/binding/policy sidecar. Report uncovered ACs and
+unimplemented selectors without calling them passes. Regenerate for the actual
+source after authorized commits/pushes and include the owned section only during
+authorized PR creation/update. Framework helpers do not grant those permissions
+or impose this repository's mandatory coverage check on consumer CI.
+
 After every implementation/test/configuration fix, create a current candidate
 validation cycle and reset current test projections to NotRun. Run the full local
 unit suite first, then every other required local check. Preserve prior results as

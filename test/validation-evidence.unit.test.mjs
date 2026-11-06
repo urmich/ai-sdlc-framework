@@ -1,6 +1,490 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "direct", "paths": ["src/validation-evidence.mjs", "src/validation-readiness.mjs", "src/core.mjs", "src/store.mjs"]}],
+  "applicability": [{
+    "names": ["T-PRD037 retained object children are sanitized once without changing legacy redaction or admission guards"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "maintainer",
+    "reason": "PR-only AC-207.5 and AC-213.7 regression: observe actual nested object traversal and exact legacy redaction/digests, fresh mutable-input rejection and independent sanitizer bounds. One independent process-isolated root patches Object.entries with t.mock; no shared resources, network, tools, dependencies or critical promotion.",
+    "prerequisites": ["Node"]
+  }, {
+    "names": ["T-PRD037 fresh readiness validation reuses only its own canonical input and retains every data guard"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "evidence-validation",
+    "reason": "PR-only pure Node regression for invocation-local serialization reuse, fresh mutable-input rejection and unchanged JSON/redaction bounds; no critical promotion or shared process concurrency.",
+    "prerequisites": ["Node"]
+  }, {
+    "names": [
+      "T-PRD037 GitHub token families are redacted in free text and rejected before readiness admission",
+      "T-PRD037 GitHub token families cannot survive retained execution evidence or readable diagnostics",
+      "T-PRD037 GitHub token redaction preserves bounded work and rejects unsafe assertion proof"
+    ],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "evidence-validation",
+    "reason": "PR-only F01 regressions for AC-207.5 and AC-213.7: all GitHub token families, unchanged benign diagnostics and bounded sanitizer behavior, with isolated retained-byte/readable-report proof. Independent process-isolated roots; the retention root owns and cleans its unique repository-local directory. No shared resources, extra tools, network or critical budget change.",
+    "prerequisites": ["Node"]
+  }, {
+    "names": ["T-PRD076 legacy terminal operations recover missing projections without upgrading unsupported history"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "evidence-validation",
+    "reason": "PR-only F02 compatibility regression for AC-213.13: schema-valid 0.4 inline terminal operations retain original bytes across active, archived and pruned projection recovery without current proof or credit. The independent root owns and cleans its repository-local home; causal retention steps stay ordered within the root. No shared resources, critical promotion or network.",
+    "prerequisites": ["Node", "Git"]
+  }, {
+    "names": ["T-PRD076 multi-test captured results retain their event budget across evidence reload"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "evidence-validation",
+    "reason": "PR-only F02 compatibility regression for AC-213.1 and AC-213.13: valid multi-test captured events retain the existing 64 KiB event budget, immutable active/archived bytes and NotRun outcomes. The independent root owns its repository-local home; receipt capture, event retention and fresh-reader checks stay causal. No shared resources, network or critical promotion.",
+    "prerequisites": ["Node", "Git"]
+  }]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reduceTestHistory, sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { LIMITS, createSummarySanitizer, digest, recordLimit, safeRecord, safeSummary,
+  unsafeSummaryContent } from '../src/core.mjs';
+import { captureCycleResultEvents, readTestEvidence, reduceTestHistory, retainExecutionEvidence, sanitizeExecutionPayload,
+  validateRetainedPayload } from '../src/validation-evidence.mjs';
+import { validateReadinessData } from '../src/validation-readiness.mjs';
+import { flushValidationObjects, readValidationObject,
+  validationObjectPath } from '../src/validation-catalog.mjs';
+import { boundedCheck } from '../src/checks.mjs';
+import { humanOutput } from '../src/cli.mjs';
+import { Store } from 'ai-sdlc-framework/store';
+import { currentCycle, currentTestEvidence, stagePassed } from '../src/authority.mjs';
+import { recordTest, startCycle } from '../src/validation.mjs';
+import { registerArtifact } from '../src/artifacts.mjs';
+import { artifact, captureUserInput, coding, fixture, testDefinitions } from './helpers.mjs';
+import { validateRecord } from '../src/schemas.mjs';
+
+test('T-PRD076 legacy terminal operations recover missing projections without upgrading unsupported history', async t => {
+  const f = await coding(await fixture(t));
+  const { cycle } = await startCycle(f.store, {
+    workItemId: f.workItemId, tests: testDefinitions(), configDigest: 'legacy-config',
+    cause: 'Preserve supported 0.4 inline operation history',
+  });
+  const unit = testDefinitions()[0];
+  const operation = {
+    type: 'operation', id: 'op-legacy-unit', workItemId: f.workItemId,
+    sessionId: f.sessionId, repositoryId: 'primary', class: 'test',
+    action: { class: 'test', repositoryId: 'primary', environment: 'local',
+      testId: unit.id, owner: unit.owner, host: unit.location },
+    target: 'local', status: 'succeeded', correlationKey: 'legacy-unit',
+    requestFingerprint: digest('legacy-unit-request'), effectFingerprint: digest('legacy-unit-effect'),
+    intent: 'Original unsupported unit execution', createdAt: cycle.createdAt,
+    dispatchBound: true, cycleId: cycle.id, candidateDigest: cycle.candidateDigest,
+    dispatchStartedAt: cycle.createdAt, updatedAt: cycle.createdAt, terminalSequence: 1,
+    expectedMet: true, evidenceRef: 'legacy:original-result',
+  };
+  validateRecord(operation);
+  const original = Buffer.from(JSON.stringify(operation));
+  const active = f.store.recordPath(f.workItemId, operation.id);
+  await writeFile(active, original, { flag: 'wx' });
+  const reopen = () => new Store(f.home, { clock: f.clock }).ready();
+  const check = async () => {
+    const store = await reopen();
+    const state = await store.load(f.workItemId);
+    const selected = currentCycle(state.records, state.checkpoint);
+    assert.equal(currentTestEvidence(selected, state.records, unit, f.clock), null);
+    assert.equal(stagePassed(selected, state.records, 'local', f.clock), false);
+    const history = await readTestEvidence(store, {
+      workItemId: f.workItemId, cycleId: cycle.id, testId: unit.id,
+    });
+    assert.equal(history.status, 'NotRun');
+    assert.equal(history.observations.length, 1);
+    const recovered = history.observations[0];
+    assert.equal(recovered.operationId, operation.id);
+    assert.equal(recovered.status, 'Passed', 'Preserve the original claimed outcome, not current credit');
+    assert.equal(recovered.evidenceRef, operation.evidenceRef);
+    assert.equal(recovered.observedAt, operation.updatedAt);
+    for (const field of ['executionSources', 'executionSourceDigest', 'retainedPayloadRef',
+      'operationDigest', 'sourceStartedAt', 'sourceCompletedAt']) {
+      assert.equal(recovered[field], undefined, `Do not invent ${field} for unsupported history`);
+    }
+    return { store, recovered };
+  };
+  const initial = await check();
+  await assert.rejects(recordTest(initial.store, {
+    workItemId: f.workItemId, cycleId: cycle.id, testId: unit.id,
+    status: 'Passed', expectedMet: true, owner: unit.owner, host: unit.location,
+    operationId: operation.id, evidenceRef: operation.evidenceRef,
+  }), { code: 'EVIDENCE' }, 'Historical recovery cannot bypass new automated proof admission');
+  assert.deepEqual(await readFile(active), original, 'Read recovery cannot rewrite the original operation');
+  await initial.store.transaction(f.workItemId, () => {}, { skipUnchanged: true });
+  assert.deepEqual(await readFile(active), original);
+  const projection = initial.store.recordPath(f.workItemId, initial.recovered.id);
+  const projectionBytes = await readFile(projection);
+  const archived = path.join(initial.store.workPath(f.workItemId), 'evidence', `${operation.id}.json`);
+  await mkdir(path.dirname(archived), { recursive: true });
+  await writeFile(archived, original, { flag: 'wx' });
+  await rm(active);
+  await check();
+  assert.deepEqual(await readFile(archived), original);
+  assert.deepEqual(await readFile(projection), projectionBytes);
+  await rm(projection);
+  await check();
+  assert.deepEqual(await readFile(archived), original, 'Pruned projections still recover from immutable history');
+  await assert.rejects(stat(projection), { code: 'ENOENT' }, 'Read-only recovery must not persist projections');
+});
+
+test('T-PRD076 multi-test captured results retain their event budget across evidence reload', async t => {
+  const f = await coding(await fixture(t));
+  const staging = Array.from({ length: 99 }, (_, index) => ({
+    ...testDefinitions()[3], id: `T-staging-${index}-${'x'.repeat(75)}`, mode: 'manual',
+  }));
+  const relative = await artifact(f, 'test-plan', JSON.stringify({
+    tests: [...testDefinitions().slice(0, 2), ...staging].map(definition => ({
+      ...definition, requirements: ['FR-001'], conditions: ['AC-001.1'], status: 'NotRun',
+    })),
+  }));
+  await registerArtifact(f.store, {
+    workItemId: f.workItemId, role: 'test-plan', repositoryId: 'primary', path: relative,
+  });
+  const { cycle } = await startCycle(f.store, {
+    workItemId: f.workItemId,
+    configDigest: digest('multi-test receipt'), cause: 'Retain multi-test procedure outcomes',
+  });
+  assert.equal(cycle.storageVersion, 2);
+  for (const testIds of [staging.map(test => test.id), [staging[0].id]]) {
+    const receipt = await captureUserInput(f.store, {
+      sessionId: f.sessionId, input: `STAGING tests were not run: ${testIds.join(', ')}`,
+    });
+    const event = await f.store.transaction(f.workItemId, tx => {
+      const event = {
+        type: 'event', schemaVersion: 1, id: `event-${randomUUID()}`,
+        workItemId: f.workItemId,
+        sequence: Math.max(tx.checkpoint.policyGeneration ?? 0,
+          ...tx.all().filter(record => record.type === 'event').map(record => record.sequence)) + 1,
+        kind: 'staging-result',
+        effect: {
+          cycleId: cycle.id, candidateDigest: cycle.candidateDigest,
+          testSpecDigest: cycle.testSpecDigest, configDigest: cycle.configDigest,
+          target: 'staging-target', deploymentId: 'fixture-deployment',
+          artifactId: 'fixture-artifact', testIds, outcome: 'NotRun',
+          owner: 'user', host: staging[0].location, evidenceRef: 'fixture:not-executed',
+        },
+        sourceReceiptId: receipt.id, sourceReceiptDigest: digest(receipt),
+        inputDigest: receipt.inputDigest, sessionId: f.sessionId,
+        repositoryIds: ['primary'], snapshots: [], occurredAt: receipt.capturedAt,
+      };
+      event.digest = digest(event);
+      tx.put(event);
+      captureCycleResultEvents(tx, tx.get(cycle.id), [event]);
+      return event;
+    });
+    const active = f.store.recordPath(f.workItemId, event.id);
+    const original = await readFile(active);
+    if (testIds.length > 1) assert.ok(original.length > LIMITS.record);
+    const reopen = () => new Store(f.home, { clock: f.clock }).ready();
+    const fresh = await reopen();
+    await fresh.load(f.workItemId);
+    assert.deepEqual(await readFile(active), original);
+    const history = await readTestEvidence(fresh, {
+      workItemId: f.workItemId, cycleId: cycle.id, testId: staging[0].id,
+    });
+    assert.equal(history.status, 'NotRun');
+    const oversized = structuredClone(event);
+    oversized.effect.evidenceRef = 'x'.repeat(LIMITS.decision);
+    delete oversized.digest;
+    oversized.digest = digest(oversized);
+    assert.throws(() => safeRecord(oversized, recordLimit(oversized)),
+      { code: 'CAPACITY' }, 'The existing event budget must still reject oversized capture');
+    assert.deepEqual(await readFile(active), original);
+    const archived = path.join(fresh.workPath(f.workItemId), 'evidence', `${event.id}.json`);
+    await mkdir(path.dirname(archived), { recursive: true });
+    await writeFile(archived, original, { flag: 'wx' });
+    await rm(active);
+    await (await reopen()).load(f.workItemId);
+    assert.deepEqual(await readFile(archived), original);
+    await assert.rejects(stat(active), { code: 'ENOENT' });
+  }
+});
+
+const githubTokenPrefixes = ['ghp_', 'ghs_', 'gho_', 'ghu_', 'ghr_', 'github_pat_'];
+const syntheticGithubToken = prefix => prefix + 'A'.repeat(36);
+
+test('T-PRD037 GitHub token families are redacted in free text and rejected before readiness admission', () => {
+  const missed = githubTokenPrefixes.filter(prefix => {
+    const token = syntheticGithubToken(prefix);
+    const diagnostic = `Producer failed using ${token}; inspect run 42`;
+    const expected = `Producer failed using [redacted:${digest(token)}]; inspect run 42`;
+    const summarized = safeSummary(diagnostic);
+    return summarized !== expected ||
+      sanitizeExecutionPayload(Buffer.from(diagnostic)) !== expected ||
+      !unsafeSummaryContent(diagnostic);
+  });
+  assert.equal(missed.length, 0, `Unredacted families: ${missed.join(', ')}`);
+  for (const prefix of githubTokenPrefixes) {
+    const token = syntheticGithubToken(prefix);
+    const source = { detail: `Producer failed using ${token}`, nested: [token] };
+    assert.throws(() => validateRetainedPayload(source), { code: 'UNSAFE' }, prefix);
+    assert.throws(() => validateReadinessData(source), { code: 'UNSAFE' }, prefix);
+    assert.throws(() => safeRecord(source), { code: 'UNSAFE' }, prefix);
+    for (const url of [
+      `https://example.invalid/runs/${token}?view=public`,
+      `https://example.invalid/runs?trace=${token}&view=public`,
+      `https://example.invalid/runs#${token}`,
+      `https://example.invalid/runs?trace=${token.replaceAll('_', '%5F')}&view=public`,
+    ]) {
+      const safe = safeSummary(url);
+      assert.equal(safe.includes(token), false, prefix);
+      assert.equal(safe.includes(token.replaceAll('_', '%5F')), false, prefix);
+      assert.equal(unsafeSummaryContent(safe), false, prefix);
+      assert.equal(safeSummary(safe), safe, prefix);
+    }
+    const safe = safeSummary(source);
+    assert.equal(safeSummary(safe).detail, safe.detail, prefix);
+    assert.equal(validateReadinessData(safe), safe, prefix);
+    assert.equal(safeRecord(safe), safe, prefix);
+  }
+  const benign = { detail: 'Producer failed with HTTP 403; inspect run 42',
+    nested: ['ghs_ diagnostic label', 'github_pat_ documentation label'],
+    url: 'https://example.invalid/runs/42?view=public' };
+  assert.deepEqual(safeSummary(benign), benign);
+  assert.deepEqual(sanitizeExecutionPayload(Buffer.from(JSON.stringify(benign))), benign);
+  assert.equal(validateReadinessData(benign), benign);
+});
+
+test('T-PRD037 GitHub token families cannot survive retained execution evidence or readable diagnostics', async t => {
+  const root = path.resolve('.test-data', `f01-${randomUUID()}`);
+  await mkdir(root, { recursive: true });
+  t.after(async () => {
+    assert.equal(path.dirname(root), path.resolve('.test-data'));
+    await rm(root, { recursive: true });
+    await assert.rejects(stat(root), { code: 'ENOENT' });
+  });
+  const source = { detail: githubTokenPrefixes.map(prefix =>
+    `Producer failed using ${syntheticGithubToken(prefix)}`).join('; '),
+  cases: [{ testId: 'T-owned-fixture', status: 'Failed',
+    assertions: [{ name: 'Expected producer failure remains observable', passed: false }] }] };
+  const bytes = Buffer.from(JSON.stringify(source));
+  const file = path.join(root, 'producer.json');
+  await writeFile(file, bytes);
+  const store = { workPath: () => root, fault: async () => {} };
+  const tx = { validationObjects: new Map() };
+  const retained = await retainExecutionEvidence(store, tx, {
+    workItemId: 'f01-owned-fixture', evidenceRef: pathToFileURL(file).href,
+  });
+  await flushValidationObjects(store, 'f01-owned-fixture', tx);
+  const fresh = await readValidationObject(store, 'f01-owned-fixture', retained.ref);
+  const persistedBytes = await readFile(validationObjectPath(store, 'f01-owned-fixture', retained.ref));
+  assert.equal(digest(persistedBytes), retained.ref.sha256);
+  assert.equal(fresh.provenance.sourceDigest, digest(bytes));
+  assert.notEqual(retained.ref.sha256, digest(bytes));
+  assert.deepEqual(fresh.content.cases, source.cases);
+  const finding = [{ rule: 'producer', verdict: 'violation', reason: fresh.content.detail }];
+  const reports = [humanOutput(boundedCheck(finding, 'all', 'f01-owned-fixture')),
+    humanOutput(boundedCheck(finding, 'all', 'f01-owned-fixture', { finding: 0 }))];
+  const missed = githubTokenPrefixes.filter(prefix => {
+    const token = syntheticGithubToken(prefix);
+    return persistedBytes.includes(token) || reports.some(report => report.includes(token));
+  });
+  assert.equal(missed.length, 0, `Unredacted retained families: ${missed.join(', ')}`);
+  assert.equal(fresh.content.detail.includes('[redacted:'), true);
+  assert.equal(reports.every(report => report.includes('Producer failed using')), true);
+});
+
+test('T-PRD037 GitHub token redaction preserves bounded work and rejects unsafe assertion proof', () => {
+  for (const prefix of githubTokenPrefixes) {
+    const token = syntheticGithubToken(prefix);
+    const source = { cases: [{ testId: 'T-owned-fixture', status: 'Passed',
+      assertions: [{ name: `Verify ${token}`, passed: true }] }] };
+    assert.throws(() => sanitizeExecutionPayload(Buffer.from(JSON.stringify(source))),
+      { code: 'UNSAFE' }, prefix);
+    assert.equal(source.cases[0].status, 'Passed');
+    assert.equal(source.cases[0].assertions[0].name === `Verify ${token}`, true);
+    const shorter = prefix + 'A'.repeat(19);
+    assert.equal(safeSummary(shorter) === shorter, true, 'Preserve the existing token-body threshold');
+  }
+  const token = syntheticGithubToken('ghs_');
+  const nearLimit = ' '.repeat(LIMITS.artifact - 128) + token;
+  const sanitized = sanitizeExecutionPayload(Buffer.from(nearLimit));
+  assert.equal(sanitized.includes(token), false);
+  assert.equal(Buffer.byteLength(sanitized) <= LIMITS.artifact, true);
+  assert.throws(() => sanitizeExecutionPayload(Buffer.alloc(LIMITS.artifact + 1, 0x61)),
+    { code: 'CAPACITY' });
+  assert.throws(() => validateRetainedPayload(Array(65537).fill('visible')), { code: 'CAPACITY' });
+  let deep = 'visible';
+  for (let index = 0; index < 34; index++) deep = { detail: deep };
+  assert.throws(() => validateReadinessData(deep), { code: 'CAPACITY' });
+});
+
+test('T-PRD037 fresh readiness validation reuses only its own canonical input and retains every data guard', t => {
+  const initial = 'owned-canonical-input-fixture';
+  const changed = `${initial}-changed`;
+  const stringify = JSON.stringify;
+  let encodings = 0;
+  t.mock.method(JSON, 'stringify', function (value, ...args) {
+    if (value === initial || value === changed) encodings++;
+    return Reflect.apply(stringify, this, [value, ...args]);
+  });
+  const source = { detail: initial, complete: true };
+  assert.equal(validateReadinessData(source), source);
+  assert.equal(encodings, 2, 'Encode the input and sanitized result once each, not the original twice');
+  source.detail = changed;
+  encodings = 0;
+  assert.equal(validateReadinessData(source), source);
+  assert.equal(encodings, 2, 'A later call must encode the changed input afresh');
+  source.detail = 'Authorization: owned-private-fixture';
+  assert.throws(() => validateReadinessData(source), { code: 'UNSAFE' });
+  source.detail = initial;
+  encodings = 0;
+  assert.equal(validateReadinessData(source), source);
+  assert.equal(encodings, 2, 'Neither passing nor rejected inputs confer cached validation');
+
+  const unicode = { detail: 'é' };
+  const bytes = Buffer.byteLength(stringify(unicode));
+  assert.equal(validateReadinessData(unicode, bytes), unicode);
+  assert.throws(() => validateReadinessData(unicode, bytes - 1), { code: 'CAPACITY' });
+  let getterReads = 0;
+  const accessor = { get detail() { getterReads++; return initial; } };
+  for (const value of [accessor, { [Symbol('hidden')]: initial },
+    Object.create({ inherited: initial }), new Date(), { detail: undefined },
+    { detail: Infinity }, { detail: () => initial }]) {
+    assert.throws(() => validateReadinessData(value), { code: 'INPUT' });
+  }
+  assert.equal(getterReads, 0, 'Plain-data admission must reject accessors without invoking them');
+  for (const wrap of [value => value, value => ({ nested: [value] })]) {
+    let reads = 0;
+    const changing = new Proxy({ detail: initial }, {
+      get(target, key, receiver) {
+        if (key === 'detail') return ++reads < 3 ? initial : 'Authorization: owned-private-fixture';
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    assert.throws(() => validateReadinessData(wrap(changing)), { code: 'UNSAFE' },
+      'A proxy may change during validation and must retain the original fresh equality read');
+    assert.equal(reads, 3);
+  }
+  for (const value of [{ detail: '\u0001' }, { password: 'owned-private-fixture' },
+    { detail: 'output {"token":"owned-private-fixture"}' }]) {
+    assert.throws(() => validateReadinessData(value), { code: 'UNSAFE' });
+  }
+  let deep = initial;
+  for (let index = 0; index < 34; index++) deep = { detail: deep };
+  assert.throws(() => validateReadinessData(deep), { code: 'CAPACITY' });
+});
+
+test('T-PRD037 retained object children are sanitized once without changing legacy redaction or admission guards', t => {
+  const mixed = `[ReDaCtEd:${'AB'.repeat(32)}]`;
+  const source = {
+    nested: [{
+      prompt: { visible: 'fixture-private-value', Cookie: 'fixture-private-value' },
+      rawPrompt: 'fixture-private-value',
+      providerPayload: ['fixture-private-value', { password: 'fixture-private-value' }],
+      headers: { Cookie: 'fixture-private-value', public: 'visible' },
+      env: { SERVICE_AUTH_TOKEN: 'fixture-private-value', count: 2 },
+      marked: { prompt: mixed, rawPrompt: '[redacted]', SERVICE_AUTH_TOKEN: mixed },
+      log: `capture ${JSON.stringify({
+        prompt: 'fixture-private-value', AWS_SECRET_ACCESS_KEY: 'fixture-private-value',
+        visible: [mixed, { detail: 'ordinary diagnostic' }],
+      })} end`,
+    }],
+    visible: [['ordinary diagnostic', { count: 1 }]],
+  };
+  const expected = {
+    nested: [{
+      prompt: '[redacted:044e4e42416028bedafab9f86967b19b877ee1ff4a0463ff3b614d8964a5bc15]',
+      rawPrompt: '[redacted:7d247bee84ae89e2adfc245dd4e22ddbd3965b2cf78fc6eb823114a7c8895154]',
+      providerPayload: '[redacted:e806696ab2acf0d77af3794457e7122ee788be25fe5a654dc3099d20e69c519b]',
+      headers: '[redacted:cd3dbd326c73d49003cce077c87679a426b9892811214ac3f60331f780470bbe]',
+      env: {
+        SERVICE_AUTH_TOKEN: '[redacted:7d247bee84ae89e2adfc245dd4e22ddbd3965b2cf78fc6eb823114a7c8895154]',
+        count: 2,
+      },
+      marked: {
+        prompt: mixed, rawPrompt: '[redacted]',
+        SERVICE_AUTH_TOKEN: '[redacted:e10a5d64a47d873df1c2eb8bfe095473d68bdcdb9f3ad15f8f0d34725f4beae7]',
+      },
+      log: 'capture {"prompt":"[redacted:7d247bee84ae89e2adfc245dd4e22ddbd3965b2cf78fc6eb823114a7c8895154]",' +
+        '"AWS_SECRET_ACCESS_KEY":"[redacted:7d247bee84ae89e2adfc245dd4e22ddbd3965b2cf78fc6eb823114a7c8895154]",' +
+        `"visible":["${mixed}",{"detail":"ordinary diagnostic"}]} end`,
+    }],
+    visible: [['ordinary diagnostic', { count: 1 }]],
+  };
+  const original = JSON.stringify(source);
+  assert.deepEqual(sanitizeExecutionPayload(Buffer.from(original)), expected);
+  assert.equal(JSON.stringify(source), original, 'Sanitization must not mutate the caller');
+  assert.equal(validateReadinessData(expected), expected);
+  assert.throws(() => validateReadinessData(source), { code: 'UNSAFE' });
+  assert.throws(() => validateRetainedPayload(source), { code: 'UNSAFE' });
+  assert.throws(() => sanitizeExecutionPayload(Buffer.from(JSON.stringify({
+    cases: [{ testId: 'T-owned-fixture', status: 'Passed',
+      assertions: [{ name: 'capture {"prompt":"fixture-private-value"} end', passed: true }] }],
+  }))), { code: 'UNSAFE' }, 'Sensitive assertion proof must reject, not become passing evidence');
+  const summarize = createSummarySanitizer();
+  for (const summary of [safeSummary, summarize]) {
+    assert.deepEqual(summary({ visible: [{ prompt: 'fixture-private-value' }] }), {
+      visible: [{ prompt: '[redacted:7d247bee84ae89e2adfc245dd4e22ddbd3965b2cf78fc6eb823114a7c8895154]' }],
+    }, 'Ordinary summary callers must retain deep traversal');
+  }
+
+  const leaf = { traversalSentinel: 'leaf', detail: 'ordinary diagnostic' };
+  const branch = { traversalSentinel: 'branch', leaf,
+    arrays: [{ traversalSentinel: 'arrayLeaf', detail: 'ordinary diagnostic' },
+      [{ traversalSentinel: 'deepArrayLeaf', detail: 'ordinary diagnostic' }]] };
+  const tree = { traversalSentinel: 'root', branch };
+  const expectedTree = structuredClone(tree);
+  const entries = Object.entries;
+  const visits = { root: 0, branch: 0, leaf: 0, arrayLeaf: 0, deepArrayLeaf: 0 };
+  const observer = t.mock.method(Object, 'entries', function (value) {
+    const result = Reflect.apply(entries, this, [value]);
+    const sentinel = result.find(([key]) => key === 'traversalSentinel')?.[1];
+    if (Object.hasOwn(visits, sentinel)) visits[sentinel]++;
+    return result;
+  });
+  try {
+    assert.deepEqual(sanitizeExecutionPayload(Buffer.from(JSON.stringify(tree))), expectedTree);
+  } finally {
+    observer.mock.restore();
+  }
+  assert.deepEqual(tree, expectedTree);
+  assert.deepEqual(visits, { root: 4, branch: 4, leaf: 4, arrayLeaf: 4, deepArrayLeaf: 4 },
+    'Both sanitization and retained validation visit each object and key summary once, never again per ancestor');
+
+  leaf.detail = 'Cookie: fixture-private-value';
+  assert.throws(() => validateReadinessData(tree), { code: 'UNSAFE' },
+    'A previously safe subtree must be checked afresh after mutation');
+  leaf.detail = 'ordinary diagnostic';
+  assert.equal(validateReadinessData(tree), tree);
+  assert.doesNotThrow(() => validateRetainedPayload(Array(65535).fill(0)));
+  assert.throws(() => validateRetainedPayload(Array(65536).fill(0)), {
+    code: 'CAPACITY', message: 'Retained payload exceeds bounded sanitizer structure or decode depth',
+  });
+  let deep = 'ordinary diagnostic';
+  for (let index = 0; index < 33; index++) deep = { detail: deep };
+  assert.throws(() => validateRetainedPayload(deep), {
+    code: 'CAPACITY', message: 'Retained payload exceeds bounded sanitizer structure or decode depth',
+  });
+  const unicode = { detail: 'é' };
+  const bytes = Buffer.byteLength(JSON.stringify(unicode));
+  assert.equal(validateReadinessData(unicode, bytes), unicode);
+  assert.throws(() => validateReadinessData(unicode, bytes - 1), { code: 'CAPACITY' });
+  assert.throws(() => sanitizeExecutionPayload(Buffer.alloc(LIMITS.artifact + 1, 0x61)),
+    { code: 'CAPACITY' });
+});
+
+test('T-PRD037 markerless payload text retains core redaction without impossible structured scans', t => {
+  const value = 'owned-markerless-path/0123456789abcdef';
+  const replace = String.prototype.replace;
+  let headerScans = 0;
+  t.mock.method(String.prototype, 'replace', function (pattern, ...args) {
+    if (String(this) === value && pattern?.source.includes('Proxy-Authorization')) headerScans++;
+    return Reflect.apply(replace, this, [pattern, ...args]);
+  });
+  validateRetainedPayload(value);
+  assert.equal(headerScans, 0);
+  const jwt = `${Buffer.from('{"alg":"HS256"}').toString('base64url')}.opaque.payload`;
+  assert.throws(() => validateRetainedPayload(jwt), { code: 'UNSAFE' },
+    'Markerless text must still use the existing core redactor');
+  for (const unsafe of [
+    'Authorization: owned-fixture-value',
+    'ACCESS_TOKEN=owned-fixture-value',
+    'result {"password":"owned-fixture-value"}',
+  ]) assert.throws(() => validateRetainedPayload(unsafe), { code: 'UNSAFE' });
+});
 
 function permutations(items) {
   return items.length ? items.flatMap((item, index) =>
@@ -55,6 +539,245 @@ test('retained payload bytes, not just locators, are sanitized', () => {
   assert.doesNotMatch(JSON.stringify(retained), /fixture-private-value/u);
   assert.match(JSON.stringify(retained), /redacted/u);
   assert.throws(() => sanitizeExecutionPayload(Buffer.from([0xff, 0xfe])), { code: 'UNSAFE' });
+});
+
+test('T-PRD037 repeated summary text is sanitized once per traversal without reusing another call', () => {
+  const text = 'Read https://example.invalid/run?token=fixture-value&view=summary';
+  const matchAll = String.prototype.matchAll;
+  let scans = 0;
+  String.prototype.matchAll = function (...args) {
+    if (String(this) === text) scans++;
+    return Reflect.apply(matchAll, this, args);
+  };
+  try {
+    const expected = safeSummary(text);
+    const once = scans;
+    assert.ok(once > 0, 'The observer must see the actual text sanitizer');
+    assert.doesNotMatch(expected, /fixture-value/u);
+    assert.match(expected, /view=summary/u);
+    scans = 0;
+    assert.deepEqual(safeSummary({ first: text, nested: { second: text }, list: [text] }),
+      { first: expected, nested: { second: expected }, list: [expected] });
+    assert.equal(scans, once, 'Identical text must not repeat pure parsing in one traversal');
+    scans = 0;
+    assert.deepEqual(safeSummary({ first: text, second: text }),
+      { first: expected, second: expected });
+    assert.equal(scans, once, 'A separate call must sanitize its inputs again');
+    assert.match(safeSummary({ password: text, visible: text }).password,
+      /^\[redacted:[a-f0-9]{64}\]$/u);
+  } finally {
+    String.prototype.matchAll = matchAll;
+  }
+  const texts = Array.from({ length: 512 }, (_, index) =>
+    `https://example.invalid/run/${index}?token=fixture-value&view=summary`);
+  const large = `${'ordinary diagnostic '.repeat(5000)}${text}`;
+  assert.deepEqual(safeSummary({ texts, large, tail: [text, text] }), {
+    texts: texts.map(safeSummary),
+    large: safeSummary(large),
+    tail: [safeSummary(text), safeSummary(text)],
+  });
+});
+
+test('T-PRD037 retained text summaries reuse only identical strings inside one bounded sanitization', () => {
+  const text = 'https://example.invalid/retained-summary/fixture?view=summary';
+  const matchAll = String.prototype.matchAll;
+  let scans = 0;
+  String.prototype.matchAll = function (...args) {
+    if (String(this) === text) scans++;
+    return Reflect.apply(matchAll, this, args);
+  };
+  try {
+    assert.equal(safeSummary(text), text);
+    const once = scans;
+    assert.ok(once > 0);
+    for (let call = 0; call < 2; call++) {
+      scans = 0;
+      assert.doesNotThrow(() => validateRetainedPayload([text, text, text]));
+      assert.equal(scans, once, 'Only pure summary scans are shared, never another invocation');
+    }
+    scans = 0;
+    assert.doesNotThrow(() => validateRetainedPayload({ first: text, nested: { second: text } }));
+    assert.equal(scans, once, 'Ancestor summaries reuse the same invocation-owned text work');
+    const changed = [text, `${text}&token=fixture-private-value`];
+    assert.throws(() => validateRetainedPayload(changed), { code: 'UNSAFE' });
+    assert.throws(() => validateRetainedPayload(Array(65537).fill(text)), { code: 'CAPACITY' });
+    const summarize = createSummarySanitizer();
+    let reads = 0;
+    const source = { get detail() { return ++reads === 1 ? text : `${text}&token=fixture-private-value`; } };
+    const first = summarize(source);
+    assert.equal(reads, 1);
+    first.detail = 'caller mutation';
+    assert.deepEqual(summarize({ detail: text }), { detail: text });
+    const second = summarize(source);
+    assert.equal(reads, 2);
+    assert.doesNotMatch(second.detail, /fixture-private-value/u);
+    assert.match(summarize({ password: text }).password, /^\[redacted:[a-f0-9]{64}\]$/u);
+  } finally {
+    String.prototype.matchAll = matchAll;
+  }
+});
+
+test('T-PRD037 plain summary literals avoid rich-text scans without bypassing sensitive keys or limits', () => {
+  const literals = ['', 'Passed', 'NotRun', 'provider', 'linux', 'x64',
+    'Original behavior remains observable', 'a'.repeat(64)];
+  const selected = new Set(literals);
+  const matchAll = String.prototype.matchAll;
+  let scans = 0;
+  String.prototype.matchAll = function (...args) {
+    if (selected.has(String(this))) scans++;
+    return Reflect.apply(matchAll, this, args);
+  };
+  try {
+    for (const text of literals) assert.equal(safeSummary(text), text);
+    assert.deepEqual(safeSummary({ values: literals }), { values: literals });
+    assert.equal(scans, 0, 'Policy-inert literals must not enter rich-text scanners');
+    const protectedKeys = safeSummary({ password: 'Passed', token: literals.at(-1) });
+    for (const value of Object.values(protectedKeys)) {
+      assert.match(value, /^\[redacted:[a-f0-9]{64}\]$/u);
+    }
+  } finally {
+    String.prototype.matchAll = matchAll;
+  }
+  for (const text of [
+    'rawPrompt: fixture-private-value; visible tail',
+    'https://example.invalid/run?token=fixture-private-value&view=public',
+    '{"password":"fixture-private-value","safe":"visible"}',
+    'ghp_' + 'a'.repeat(32),
+    '-----BEGIN PRIVATE KEY-----\nfixture-private-value\n-----END PRIVATE KEY-----',
+  ]) {
+    assert.notEqual(safeSummary(text), text);
+    assert.doesNotMatch(safeSummary(text), /fixture-private-value/u);
+  }
+  assert.throws(() => sanitizeExecutionPayload(Buffer.alloc(LIMITS.artifact + 1, 0x61)),
+    { code: 'CAPACITY' });
+});
+
+test('T-PRD037 decoded JWT non-object headers avoid JSON parsing without changing redaction policy', () => {
+  const token = header => `${Buffer.from(header).toString('base64url')}.opaque.payload`;
+  const ordinary = Array.from({ length: 64 }, (_, index) => token(`ordinary-not-json-${index}`));
+  const parse = JSON.parse;
+  let scans = 0;
+  JSON.parse = function (value, ...args) {
+    if (typeof value === 'string' && value.startsWith('ordinary-not-json-')) scans++;
+    return Reflect.apply(parse, this, [value, ...args]);
+  };
+  try {
+    assert.deepEqual(safeSummary(ordinary), ordinary);
+    assert.equal(scans, 0, 'Decoded non-object headers must not incur failed JSON parses');
+  } finally {
+    JSON.parse = parse;
+  }
+  for (const header of [
+    '{"alg":"HS256"}',
+    ' \r\n\t{"extra":true,"alg":" none "}',
+    '{"alg":"\\u0048S256"}',
+  ]) {
+    const jwt = token(header);
+    assert.equal(safeSummary(jwt), `[redacted:${digest(jwt)}]`);
+  }
+  for (const header of [
+    '{}', '{"alg":""}', '{"alg":" "}', '{"alg":false}', '{"alg":5}',
+    '[{"alg":"HS256"}]', 'null', '"HS256"', '{"alg":',
+    '\ufeff{"alg":"HS256"}', '\u00a0{"alg":"HS256"}',
+  ]) {
+    const text = token(header);
+    assert.equal(safeSummary(text), text);
+  }
+  const oversized = `${'a'.repeat(4097)}.opaque.payload`;
+  assert.equal(safeSummary(oversized), `[redacted:${digest(oversized)}]`);
+});
+
+test('T-PRD037 punctuation-only diagnostics skip fragment discovery but retain scalar redaction', () => {
+  const jwt = `${Buffer.from('{"alg":"HS256"}').toString('base64url')}.opaque.payload`;
+  const examples = [
+    ['test/public-readiness-observer.test.mjs:810 (linux-x64)', null],
+    ['worker\'s "visible" diagnostic — complete', null],
+    ['password=fixture-private-value; visible tail',
+      `password=[redacted:${digest('fixture-private-value')}]; visible tail`],
+    [`worker returned ${jwt}`, `worker returned [redacted:${digest(jwt)}]`],
+    ['ghp_' + 'a'.repeat(32), `[redacted:${digest('ghp_' + 'a'.repeat(32))}]`],
+    ['https://example.invalid/run?token=fixture-private-value&view=public',
+      'https://example.invalid/run?token=[redacted]&view=public'],
+  ];
+  const matchAll = String.prototype.matchAll;
+  for (const [source, expected] of examples) {
+    let assignmentScans = 0;
+    String.prototype.matchAll = function (expression) {
+      if (String(this) === source && expression.source.includes('rawPrompt')) assignmentScans++;
+      return Reflect.apply(matchAll, this, [expression]);
+    };
+    try {
+      assert.equal(safeSummary(source), expected ?? source);
+      assert.equal(assignmentScans, 1, 'No duplicate assignment scan for fragment discovery');
+    } finally {
+      String.prototype.matchAll = matchAll;
+    }
+  }
+  const encoded = 'capture {"password":"fixture-private-value"} end';
+  assert.doesNotMatch(safeSummary(encoded), /fixture-private-value/u);
+  assert.doesNotMatch(safeSummary('capture {"\\u0070assword":"fixture-private-value"} end'),
+    /fixture-private-value/u);
+  for (const fragment of [
+    "log{'AWS_SECRET_ACCESS_KEY':'fixture-private-value'}end",
+    'log{"AWS_SECRET_ACCESS_KEY":\'fixture-private-value\'}end',
+    'capture {"AWS_SECRET_ACCESS_KEY":"unterminated',
+  ]) {
+    assert.throws(() => sanitizeExecutionPayload(Buffer.from(JSON.stringify({ log: fragment }))),
+      { code: 'UNSAFE' });
+  }
+  assert.throws(() => sanitizeExecutionPayload(Buffer.from([0xff, 0xfe])), { code: 'UNSAFE' });
+});
+
+test('T-PRD037 JWT diagnostics and signed query links are sanitized without changing case outcomes', () => {
+  const jwt = [
+    JSON.stringify({ alg: 'HS256', typ: 'JWT' }),
+    JSON.stringify({ sub: 'synthetic-fixture', purpose: 'not-a-real-credential' }),
+    'synthetic-signature',
+  ].map(value => Buffer.from(value).toString('base64url')).join('.');
+  const unsigned = jwt.slice(0, jwt.lastIndexOf('.') + 1);
+  const cases = [{ testId: 'T-one', status: 'Passed',
+    assertions: [{ name: 'Original behavior remains observable', passed: true }] }];
+  const source = {
+    detail: `Worker returned ${jwt}`,
+    nested: [JSON.stringify({ detail: jwt })],
+    links: [
+      `https://example.invalid/run?jwt=${jwt}&view=summary`,
+      `https://example.invalid/run?%6a%77%74=${jwt.replaceAll('.', '%2E')}`,
+      `https://example.invalid/run?trace=${jwt}`,
+      `https://example.invalid/run?trace=${unsigned}`,
+    ],
+    jwt: 'synthetic-opaque-token',
+    safe: 'release 1.2.3 and package/service.mjs',
+    cases,
+  };
+  assert.throws(() => validateRetainedPayload(source), { code: 'UNSAFE' });
+  for (const retained of [
+    safeSummary(source),
+    sanitizeExecutionPayload(Buffer.from(JSON.stringify(source))),
+  ]) {
+    assert.equal(JSON.stringify(retained).includes(jwt), false);
+    assert.equal(JSON.stringify(retained).includes(unsigned), false);
+    assert.equal(JSON.stringify(retained).includes('synthetic-opaque-token'), false);
+    assert.equal(JSON.stringify(retained).includes(jwt.replaceAll('.', '%2E')), false);
+    assert.match(JSON.stringify(retained), /redacted/u);
+    assert.deepEqual(retained.cases, cases);
+    assert.equal(retained.safe, source.safe);
+    assert.doesNotThrow(() => validateRetainedPayload(retained));
+  }
+});
+
+test('T-PRD037 JWT-bearing assertion identity is rejected rather than rewritten as passing proof', () => {
+  const jwt = [
+    JSON.stringify({ alg: 'none', typ: 'JWT' }),
+    JSON.stringify({ sub: 'synthetic-identity-fixture' }),
+    '',
+  ].map(value => Buffer.from(value).toString('base64url')).join('.');
+  const source = { cases: [{ testId: 'T-one', status: 'Passed',
+    assertions: [{ name: `Verify ${jwt}`, passed: true }] }] };
+  assert.throws(() => sanitizeExecutionPayload(Buffer.from(JSON.stringify(source))),
+    { code: 'UNSAFE' });
+  assert.equal(source.cases[0].status, 'Passed');
+  assert.equal(source.cases[0].assertions[0].name, `Verify ${jwt}`);
 });
 
 test('declared sanitizer covers environment secrets and HTTP session headers without changing assertions', () => {

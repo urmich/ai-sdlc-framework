@@ -32,6 +32,14 @@ Every test visibly has exactly NotRun, Passed or Failed. Keep implementation
 references, activity, blockers, result provenance and readiness separate.
 Add necessary new scenarios whenever discovered, without writing their code yet.
 
+Read `sdlc/templates/pr-coverage.md`. Once the canonical Requirements and Test
+Plan exist, invoke the installed CLI's `coverage prepare` using the selected
+work item/member, or explicit canonical references on stdin. Inspect uncovered
+ACs and planned bindings; metadata is declared traceability, never test success.
+Keep it in memory for an authorized PR description, not a new repository file.
+Consumer CI adoption is optional; this framework never installs a required gate
+into unrelated projects.
+
 Plan/register each exact Test Plan locator before creating a new file, finalize
 registration after content exists, check the aggregate plan, review coverage and request completion/advancement
 approval naturally: explain once that Technical Design will agree on the

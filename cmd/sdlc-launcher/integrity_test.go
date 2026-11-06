@@ -13,6 +13,39 @@ import (
 	"testing"
 )
 
+const validationIntegrityInventory = `{
+  "schemaVersion": 1,
+  "tests": {
+    "TestNativePayloadIntegrity": [],
+    "TestNativePayloadRejectsTampering": [
+      "missing payload manifest", "missing platform metadata", "malformed manifest",
+      "noncanonical manifest", "duplicate metadata keys", "unknown metadata field",
+      "wrong metadata version", "wrong platform", "wrong architecture",
+      "wrong checksum reference", "missing launcher digest", "launcher changed",
+      "missing embedded archive", "archive digest mismatch", "inventory digest mismatch",
+      "duplicate inventory path", "case alias inventory path", "unsafe inventory path",
+      "wrong inventory type", "wrong inventory mode", "wrong inventory size",
+      "missing extracted file", "extra extracted file", "extra empty directory",
+      "file changed to directory", "extracted size changed",
+      "extracted same-size content changed", "tampered inventory cannot launder changed JS",
+      "duplicate tar entry", "extra tar entry", "unsafe tar entry", "symlink tar entry",
+      "hardlink tar entry", "directory tar entry", "wrong tar mode",
+      "truncated archive even with updated checksum",
+      "trailing archive bytes even with updated checksum", "extracted mode changed"
+    ],
+    "TestInventoryRejectsWindowsAliasesAndInvalidModes": [
+      "#00", "/absolute", "../parent", "a/../b", "a//b", "a\\b",
+      "CON", "con.txt", "AUX.txt", "a/NUL.txt", "COM1.js", "lpt9",
+      "trailing.", "alternate:stream", "non-ascii-\u03bb"
+    ],
+    "TestNativePayloadRejectsFilesystemLinks": [
+      "payload-manifest.json", "platform.json", "ai-sdlc-framework-0.3.0.tgz",
+      "package/bin/sdlc.mjs", "package/src"
+    ],
+    "TestSharedCanonicalArchiveContract": []
+  }
+}`
+
 type fixtureFile struct {
 	name string
 	data []byte

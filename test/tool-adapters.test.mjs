@@ -1,3 +1,7 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "direct", "paths": ["src/tool-arguments.mjs"]}]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { classifyToolArguments } from '../src/tool-arguments.mjs';

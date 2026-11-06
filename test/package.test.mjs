@@ -1,11 +1,91 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "plannedCases": [{"id": "T-PRD046", "selectors": [{"name": "T-36 package is reproducible, integrity-bound and installable in isolation", "parents": []}]}],
+  "surfaces": [{"coverage": "direct", "paths": ["scripts/package.mjs", "scripts/verify-package.mjs"]}],
+  "applicability": [{
+    "names": ["T-36 GitHub import smoke permits no-follow reads but rejects write-capable opens"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "maintainer-package-reproducibility",
+    "reason": "PR-only subprocess guard regression; no npm execution, registry access or critical-budget growth.",
+    "prerequisites": ["Node >=22; owned repository-local child preload and facade fixtures"]
+  }],
+  "groups": [
+    {"root": "T-36 package is reproducible, integrity-bound and installable in isolation", "minimumSlots": 1, "dependsOn": [], "exclusiveResources": []},
+    {"root": "T-36 GitHub import smoke permits no-follow reads but rejects write-capable opens", "minimumSlots": 1, "dependsOn": [], "exclusiveResources": []}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import { buildPackage, npmInvocation } from '../scripts/package.mjs';
-import { packageInstallArguments, verifyPackage } from '../scripts/verify-package.mjs';
+import { packageInstallArguments, smokeGitHubImports, verifyPackage } from '../scripts/verify-package.mjs';
 import { isolatedNpmEnvironment } from './npm-environment.mjs';
+import { parseWorkflow, validateWorkflowPolicy, workflowActionPins } from '../scripts/workflow-policy.mjs';
+import { nativeWorkflowContract, nativeFrameworkShardProtocol,
+  nativePrPartsForProtocol } from '../scripts/native-validation.mjs';
+
+test('T-36 GitHub import smoke permits no-follow reads but rejects write-capable opens', async t => {
+  const root = path.resolve('.test-data', `package-open-guard-${randomUUID()}`);
+  await fs.mkdir(root, { recursive: true });
+  t.after(async () => {
+    await fs.rm(root, { recursive: true });
+    await assert.rejects(fs.stat(root), { code: 'ENOENT' });
+  });
+  const preload = path.join(root, 'posix-read-flags.mjs');
+  await fs.writeFile(preload, `
+    import filesystem from 'node:fs';
+    import promises from 'node:fs/promises';
+    import { syncBuiltinESMExports } from 'node:module';
+    if (process.platform === 'win32') {
+      // Exercise the real POSIX reader/guard boundary without claiming native execution.
+      const noFollow = 0x20000;
+      filesystem.constants.O_NOFOLLOW = noFollow;
+      Object.defineProperty(process, 'platform', { value: 'linux' });
+      for (const [target, names] of [[filesystem, ['open', 'openSync']], [promises, ['open']]]) {
+        for (const name of names) {
+          const open = target[name];
+          target[name] = function(file, flags, ...args) {
+            return open.call(this, file, typeof flags === 'number' ? flags & ~noFollow : flags, ...args);
+          };
+        }
+      }
+      syncBuiltinESMExports();
+    }
+  `);
+  const environment = { ...process.env,
+    NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${pathToFileURL(preload).href}`.trim(),
+  };
+  const modules = path.resolve('src', 'github');
+  const home = path.join(root, 'uncreated home');
+  const actual = await smokeGitHubImports(modules, { home }, { env: environment });
+  assert.deepEqual(actual, { modules: 7, publicExports: 28, constructors: 6 });
+  await assert.rejects(fs.stat(home), { code: 'ENOENT' });
+  const sentinel = path.join(root, 'sentinel.txt');
+  await fs.writeFile(sentinel, 'Unchanged owned sentinel.\n');
+  for (const [name, operation] of [
+    ['async-write', `await promises.open(file, 'w')`],
+    ['callback-write', `filesystem.open(file, filesystem.constants.O_WRONLY, () => {})`],
+    ['sync-truncate', `filesystem.openSync(file, filesystem.constants.O_RDONLY | filesystem.constants.O_NOFOLLOW | filesystem.constants.O_TRUNC)`],
+    ['sync-create', `filesystem.openSync(file, filesystem.constants.O_RDONLY | filesystem.constants.O_NOFOLLOW | filesystem.constants.O_CREAT)`],
+  ]) {
+    const facade = path.join(root, `${name}.mjs`);
+    await fs.writeFile(facade, `
+      import filesystem from 'node:fs';
+      import promises from 'node:fs/promises';
+      const file = ${JSON.stringify(sentinel)};
+      ${operation};
+    `);
+    await assert.rejects(smokeGitHubImports(modules, {
+      home, facade: pathToFileURL(facade).href,
+    }, { env: environment }), {
+      stderr: /^Error: GitHub import smoke forbids host effects\r?$/mu,
+    });
+    assert.equal(await fs.readFile(sentinel, 'utf8'), 'Unchanged owned sentinel.\n');
+  }
+});
 
 test('T-36 package is reproducible, integrity-bound and installable in isolation', async t => {
   const root = path.resolve('.test-data', randomUUID());
@@ -21,27 +101,79 @@ test('T-36 package is reproducible, integrity-bound and installable in isolation
   assert.match(built.sha256, /^[a-f0-9]{64}$/u);
   assert.ok(built.files.some(file => file.path === 'bin/sdlc.mjs'));
   assert.ok(built.files.some(file =>
-    file.path === 'docs/provider-adapters.md'));
+    file.path === 'docs/integrations/provider-adapters.md'));
   assert.ok(!built.files.some(file => file.path.startsWith('test/') ||
     file.path.startsWith('runtime/') || file.path.startsWith('.git/')));
   assert.deepEqual(await fs.readdir(path.dirname(built.artifact)), [built.filename]);
-  const workflow = await fs.readFile('.github/workflows/ci.yml', 'utf8');
-  for (const contract of ['npm run check', 'npm test', 'npm run package:artifact',
-    'npm run verify:package']) {
-    assert.ok(workflow.includes(contract));
+  const sources = await Promise.all(['ci', 'release', 'npm-publish', 'release-acceptance'].map(async name => ({
+    file: `.github/workflows/${name}.yml`,
+    contents: await fs.readFile(`.github/workflows/${name}.yml`, 'utf8'),
+  })));
+  assert.equal(validateWorkflowPolicy(sources).complete, true);
+  const documents = new Map(sources.map(input => [input.file, parseWorkflow(input)]));
+  const ci = documents.get(nativeWorkflowContract.path);
+  const steps = Object.values(ci.jobs).flatMap(job => job.steps ?? []);
+  const native = steps.find(step => step.name === nativeWorkflowContract.steps.execution);
+  assert.ok(native?.run.includes('scripts/native-validation.mjs'),
+    'CI must delegate to the substantive native driver, not omit validation behind missing npm literals');
+  const [sourceId, sourceJob] = Object.entries(ci.jobs).find(([, job]) =>
+    job.name === nativeWorkflowContract.sourceJob) ?? [];
+  const [intentId, intentJob] = Object.entries(ci.jobs).find(([, job]) =>
+    job.name === nativeWorkflowContract.intentJob) ?? [];
+  assert.ok(sourceId && intentId);
+  assert.ok(sourceJob.steps.some(step => step.run?.includes('scripts/native-validation.mjs') &&
+    /--phase\s+candidate/u.test(step.run)), 'One source job must freeze the common candidate');
+  assert.ok(intentJob.steps.every(step => !step.uses?.startsWith('actions/checkout@')));
+  const nativeJobs = Object.values(ci.jobs).filter(job =>
+    job.steps?.some(step => step.name === nativeWorkflowContract.steps.execution));
+  const parts = nativeJobs.flatMap(job => {
+    assert.ok(Array.isArray(job.strategy?.matrix?.include),
+      'Native PR jobs must declare their complete producer parts');
+    return job.strategy.matrix.include.map(({ target, component, shard = null, role }) =>
+      ({ target, component, shard, role }));
+  });
+  const expectedParts = nativePrPartsForProtocol(nativeFrameworkShardProtocol)
+    .map(part => ({ ...part, shard: part.shard ?? null }));
+  assert.equal(parts.length, expectedParts.length, 'Every required native PR part must be present');
+  assert.equal(new Set(parts.map(part => part.role)).size, parts.length,
+    'Native PR producer roles must be unique');
+  const byRole = (left, right) => left.role.localeCompare(right.role);
+  assert.deepEqual(parts.toSorted(byRole), expectedParts.toSorted(byRole),
+    'Native PR target, component, shard and role bindings must match the complete required inventory');
+  assert.deepEqual([...new Set(parts.map(part => part.target))].sort(),
+    Object.keys(nativeWorkflowContract.jobs).sort(), 'All four native platforms remain required');
+  for (const target of Object.keys(nativeWorkflowContract.jobs)) {
+    assert.deepEqual(parts.filter(part => part.target === target)
+      .map(part => `${part.component}:${part.shard}`).sort(),
+    expectedParts.filter(part => part.target === target)
+      .map(part => `${part.component}:${part.shard}`).sort(),
+    'Each native platform must include every required component and shard');
   }
-  const releaseWorkflow = await fs.readFile('.github/workflows/release.yml', 'utf8');
-  for (const contract of ['actions/upload-artifact@v4', 'artifact-ids:',
-    'id-token: write', 'scripts/npm-handoff.mjs', 'uses: ./.github/workflows/npm-publish.yml',
-    'SOURCE_REPOSITORY: ${{ github.repository }}']) {
-    assert.ok(releaseWorkflow.includes(contract));
+  for (const job of nativeJobs) {
+    const needs = Array.isArray(job.needs) ? job.needs : [job.needs];
+    assert.ok(needs.includes(sourceId) && needs.includes(intentId));
   }
+  const nativeSource = await fs.readFile('scripts/native-validation.mjs', 'utf8');
+  assert.match(nativeSource, /name: 'static'[\s\S]*?args: \['scripts\/check\.mjs'\]/u);
+  assert.match(nativeSource, /staticReport\.complete && staticReport\.exitCode === 0/u);
+  const candidateSource = await fs.readFile('scripts/release-bundle.mjs', 'utf8');
+  assert.match(candidateSource, /await buildPackage\(/u);
+  assert.match(candidateSource, /await verifyRelease\(/u);
+  const release = documents.get('.github/workflows/release.yml');
+  assert.equal(release.jobs['npm-handoff'].uses, './.github/workflows/npm-publish.yml');
+  assert.equal(release.jobs.acceptance.uses, './.github/workflows/release-acceptance.yml');
+  assert.equal(release.jobs['npm-handoff'].permissions['id-token'], 'write');
+  assert.ok(Object.values(release.jobs).flatMap(job => job.steps ?? [])
+    .some(step => step.uses === `actions/upload-artifact@${workflowActionPins['actions/upload-artifact']}`));
   const publication = await fs.readFile('scripts/npm-handoff.mjs', 'utf8');
   assert.ok(publication.includes('pkg.repository?.url !== `https://github.com/${sourceRepository}.git`'));
-  const protectedWorkflow = await fs.readFile('.github/workflows/npm-publish.yml', 'utf8');
-  assert.ok(protectedWorkflow.includes('environment: npm'));
-  assert.ok(protectedWorkflow.includes('node-version: \'24\''));
-  assert.ok(!protectedWorkflow.includes('--provenance'));
+  const protectedWorkflow = documents.get('.github/workflows/npm-publish.yml');
+  assert.equal(protectedWorkflow.jobs.publish.environment, 'npm');
+  assert.equal(protectedWorkflow.jobs.publish.env.NPM_TOOL_VERSION, '11.16.0');
+  assert.ok(protectedWorkflow.jobs.publish.steps.some(step =>
+    step.uses?.startsWith('actions/setup-node@') && step.with?.['node-version'] === '24.22.0'));
+  assert.ok(protectedWorkflow.jobs.publish.steps.every(step => !step.uses?.startsWith('actions/checkout@')));
+  assert.ok(protectedWorkflow.jobs.publish.steps.every(step => !/--provenance|npm (?:ci|run)|node scripts\//u.test(step.run ?? '')));
   const sourceBefore = await fs.readFile('src/core.mjs');
   await assert.rejects(buildPackage({ outputDir: 'src' }),
     /empty or contain only owned distribution files/u);
@@ -56,6 +188,8 @@ test('T-36 package is reproducible, integrity-bound and installable in isolation
   const verified = await verifyPackage({ artifact: built.artifact, environment });
   assert.equal(verified.verified, true);
   assert.equal(verified.sha256, built.sha256);
+  assert.equal(verified.evidence.coverage, 'Passed');
+  assert.ok(verified.evidence.publicExports > 0);
   const previousUmask = process.umask(0o077);
   try {
     assert.equal((await verifyPackage({ artifact: built.artifact, environment })).verified, true);

@@ -1,3 +1,10 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "process", "paths": ["src/hooks.mjs"]}],
+  "applicability": [
+    {"options": "{skip:process.platform!=='win32'}", "platforms": ["windows-x64"], "owner": "maintainer", "reason": "All eight hook handlers require native Windows Node/PE and actual isolated installation.", "prerequisites": ["Native Windows x64 Node", "Isolated Copilot home"]}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';

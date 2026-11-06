@@ -10,6 +10,25 @@ import (
 	"testing"
 )
 
+const validationMainInventory = `{
+  "schemaVersion": 1,
+  "tests": {
+    "TestFindNodeValidatesTheSelectedExecutable": [
+      "valid", "old", "wrong-arch", "shadowed", "crash", "malformed",
+      "relative PATH is rejected even when Go ErrDot is disabled",
+      "absolute override is used instead of PATH",
+      "invalid override does not fall back to PATH"
+    ],
+    "TestRuntimeValidation": [
+      "minimum", "newer", "old", "prerelease", "malformed", "leading-zero",
+      "wrong-platform", "wrong-architecture", "missing-platform",
+      "relative-executable", "shadowed-executable"
+    ],
+    "TestPreloadEnvironmentIsRemoved": [],
+    "TestEntrypointIsRelativeToArchiveNotWorkingDirectory": []
+  }
+}`
+
 func TestMain(m *testing.M) {
 	if mode := os.Getenv("SDLC_TEST_NODE_PROBE"); mode != "" && len(os.Args) > 1 && os.Args[1] == "--eval" {
 		if mode == "crash" {

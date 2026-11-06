@@ -15,14 +15,14 @@ import {
 test('pr evaluate CLI requires the selected artifact, exact destination, current assurance, and Git HEAD', async t => {
   const f = await coding(await fixture(t));
   await writeJson(path.join(f.repo, '.sdlc/config.json'), {
-    environments: { DEV: { target: 'dev-target', configDigest: 'v1' } },
+    environments: { DEV: { target: 'dev-target', configDigest: digest('v1') } },
   });
   await f.runGit('add', '.sdlc');
   await f.runGit('commit', '-qm', 'Fixture artifact candidate');
   await observeFixtureRepository(f);
   const { cycle } = await startCycle(f.store, {
     workItemId: f.workItemId, tests: testDefinitions(),
-    configDigest: 'v1', cause: 'artifact readiness from CLI',
+    configDigest: digest('v1'), cause: 'artifact readiness from CLI',
   });
   for (const testId of ['T-unit', 'T-integration']) {
     await recordTest(f.store, {

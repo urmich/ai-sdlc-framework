@@ -1,3 +1,9 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "variants": [
+    {"expression": "name", "names": ["wrong ref", "wrong revision", "force", "delete", "auto-merge", "policy-bypass"]}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
@@ -8,7 +14,8 @@ import { registerArtifact, snapshots } from '../src/artifacts.mjs';
 import { check } from '../src/checks.mjs';
 import { captureReceipt, prepareDecision, applyDecision } from '../src/decisions.mjs';
 import { resume, acknowledgeContext } from '../src/recovery.mjs';
-import { candidateSnapshot, candidateContentDigest, recordTest, startCycle } from '../src/validation.mjs';
+import { candidateSnapshot, candidateContentDigest, startCycle } from '../src/validation.mjs';
+import { recordFixtureTest as recordTest } from './helpers.mjs';
 import { digest } from '../src/core.mjs';
 import { evaluateReadiness } from '../src/pr.mjs';
 import { evaluatePolicy } from '../src/policy.mjs';
@@ -136,7 +143,7 @@ test('T-GHB06/T-GHB08 ordinary publication authority cannot authorize another re
   await f.runGit('commit', '-qm', 'Exact publication authority fixture');
   const repositoryObservation = await observeFixtureRepository(f);
   const { cycle } = await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'config-v1', cause: 'Exact publication grant fixture' });
+    configDigest: digest('config-v1'), cause: 'Exact publication grant fixture' });
   for (const testId of ['T-unit', 'T-integration']) {
     await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id,
       testId, status: 'Passed', expectedMet: true,

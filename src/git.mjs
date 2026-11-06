@@ -20,14 +20,37 @@ export async function git(cwd, args, { optional = false, maxBuffer = LIMITS.arti
     throw new SdlcError('GIT', `Git ${args[0]} failed`, { cause: error.stderr?.trim() || error.message });
   }
 }
-export async function identity(cwd, repositoryId) {
+async function repositoryPaths(cwd) {
+  const paths = (await git(cwd, ['rev-parse', '--path-format=absolute',
+    '--show-toplevel', '--git-common-dir', '--absolute-git-dir'])).split(/\r?\n/u);
+  // Individual outputs preserve paths whose line breaks make the combined framing ambiguous.
+  const root = await canonicalPath(paths.length === 3 ? paths[0].trimEnd() :
+    await git(cwd, ['rev-parse', '--show-toplevel']));
+  const commonDir = await canonicalPath(paths.length === 3 ? paths[1].trimEnd() :
+    await git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir']));
+  const gitDir = await canonicalPath(paths.length === 3 ? paths[2].trimEnd() :
+    await git(root, ['rev-parse', '--absolute-git-dir']));
+  return { root, commonDir, gitDir };
+}
+export async function identity(cwd, repositoryId, branchHint) {
   id(repositoryId, 'repository ID');
-  const root = await canonicalPath(await git(cwd, ['rev-parse', '--show-toplevel']));
-  const commonDir = await canonicalPath(await git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir']));
-  const gitDir = await canonicalPath(await git(root, ['rev-parse', '--absolute-git-dir']));
-  const branch = await git(root, ['symbolic-ref', '-q', 'HEAD'], { optional: true });
+  const { root, commonDir, gitDir } = await repositoryPaths(cwd);
+  let branch;
+  let head;
+  // A stored branch is only a lookup hint, never evidence of the current checkout.
+  if (typeof branchHint === 'string' && branchHint.length <= 4096 &&
+      /^refs\/heads\/[A-Za-z0-9._/-]+$/u.test(branchHint)) {
+    const current = (await git(root, ['for-each-ref', '--count=1',
+      '--format=%(HEAD)%00%(refname)%00%(objectname)', '--', branchHint])).split('\0');
+    if (current.length === 3 && current[0] === '*' && current[1] === branchHint &&
+        /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(current[2])) {
+      branch = current[1];
+      head = current[2];
+    }
+  }
+  branch ??= await git(root, ['symbolic-ref', '-q', 'HEAD'], { optional: true });
   requireThat(branch?.startsWith('refs/heads/'), 'BINDING', 'Detached HEAD requires an explicitly selected branch/worktree');
-  const head = await git(root, ['rev-parse', '--verify', '-q', 'HEAD'], { optional: true });
+  head ??= await git(root, ['rev-parse', '--verify', '-q', 'HEAD'], { optional: true });
   return { repositoryId, root, commonDir, branch, head, linkedWorktree: !sameNativePath(gitDir, commonDir),
     defaultBranch: null };
 }
@@ -39,28 +62,37 @@ export function validateRemoteName(name) {
   return name;
 }
 async function selectedRemoteName(member, configuredName, requestedName, direction) {
-  await validateBinding(member);
+  await validateWorktreeBinding(member);
   if (configuredName !== undefined) validateRemoteName(configuredName);
   if (requestedName !== undefined) validateRemoteName(requestedName);
   requireThat(!configuredName || !requestedName || configuredName === requestedName,
     'CONFIG', 'Selected Git remote conflicts with repository configuration');
+  const readURLs = name => git(member.root, ['remote', 'get-url',
+    ...(direction === 'push' ? ['--push'] : []), '--all', name]);
+  const selected = configuredName ?? requestedName;
+  if (selected) {
+    try {
+      return { name: selected, urls: await readURLs(selected) };
+    } catch (error) {
+      if (error.code !== 'GIT' ||
+          error.details?.cause !== `error: No such remote '${selected}'`) throw error;
+    }
+  }
   const names = (await git(member.root, ['remote'])).split(/\r?\n/u).filter(Boolean);
-  const name = configuredName ?? requestedName ?? (names.length === 1 ? names[0] : undefined);
+  const name = selected ?? (names.length === 1 ? names[0] : undefined);
   requireThat(name, 'EVIDENCE',
     `Select a Git remote: no unique current ${direction} destination is available`);
   requireThat(names.includes(name), 'EVIDENCE', 'Selected Git remote does not exist');
-  return name;
+  return { name, urls: await readURLs(name) };
 }
 export async function selectedFetchRemote(member, configuredName, requestedName) {
-  const name = await selectedRemoteName(member, configuredName, requestedName, 'fetch');
-  const fetchURLs = (await git(member.root, ['remote', 'get-url', '--all', name]))
-    .split(/\r?\n/u).filter(Boolean);
+  const { name, urls } = await selectedRemoteName(member, configuredName, requestedName, 'fetch');
+  const fetchURLs = urls.split(/\r?\n/u).filter(Boolean);
   return { selectedRemoteName: name, fetchURLs };
 }
 export async function selectedPushRemote(member, configuredName, requestedName) {
-  const name = await selectedRemoteName(member, configuredName, requestedName, 'push');
-  const pushURLs = (await git(member.root, ['remote', 'get-url', '--push', '--all', name]))
-    .split(/\r?\n/u).filter(Boolean);
+  const { name, urls } = await selectedRemoteName(member, configuredName, requestedName, 'push');
+  const pushURLs = urls.split(/\r?\n/u).filter(Boolean);
   return { selectedRemoteName: name, pushURLs };
 }
 export function bindingKey(member) { return digest({ root: member.root, commonDir: member.commonDir, branch: member.branch }); }
@@ -71,9 +103,18 @@ export function sameBinding(left, right) {
     left.branch === right.branch;
 }
 export async function validateBinding(member) {
-  const current = await identity(member.root, member.repositoryId);
+  const current = await identity(member.root, member.repositoryId, member.branch);
   requireThat(sameBinding(member, current), 'BINDING', 'Repository/worktree/branch changed; explicitly bind and resume before mutation');
   return current;
+}
+export async function validateWorktreeBinding(member) {
+  id(member.repositoryId, 'repository ID');
+  const { root, commonDir } = await repositoryPaths(member.root);
+  const branch = await git(root, ['symbolic-ref', '-q', 'HEAD'], { optional: true });
+  requireThat(branch?.startsWith('refs/heads/'), 'BINDING',
+    'Detached HEAD requires an explicitly selected branch/worktree');
+  requireThat(sameBinding(member, { repositoryId: member.repositoryId, root, commonDir, branch }),
+    'BINDING', 'Repository/worktree/branch changed; explicitly bind and resume before mutation');
 }
 export async function publicationPaths(member, sourceRevision, targetRevision) {
   for (const [label, revision] of [['source', sourceRevision], ['target', targetRevision]]) {
@@ -142,8 +183,8 @@ export async function contentSnapshot(member, relative) {
   return { repositoryId: member.repositoryId, path: relative, digest: digest(bytes), bytes };
 }
 export async function history(member, boundary = null) {
-  await validateBinding(member);
-  if (!member.head && !(await identity(member.root, member.repositoryId)).head) return [];
+  const current = await validateBinding(member);
+  if (!member.head && !current.head) return [];
   if (boundary) text(boundary, 'history boundary', 128);
   const range = boundary ? `${boundary}..HEAD` : 'HEAD';
   requireThat(!range.startsWith('-'), 'INPUT', 'Invalid revision');

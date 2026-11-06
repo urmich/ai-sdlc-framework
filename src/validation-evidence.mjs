@@ -1,28 +1,39 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LIMITS, canonical, choice, digest, id, object, recordLimit, requireThat,
+import { types } from 'node:util';
+import { LIMITS, canonical, choice, createSummarySanitizer, digest, id, object, recordLimit, requireThat,
   safeRecord, safeSummary } from './core.mjs';
-import { listJson, readBytes, readJson, safePath } from './files.mjs';
+import { readBytes, readJson, readJsonEntries, safePath } from './files.mjs';
 import { validateRecord } from './schemas.mjs';
 import { bindCycleCatalog, buildTestCatalog, cycleTests, OUTCOME_PAGE_SIZE,
-  readValidationObject, stageValidationObject, validateObjectReference } from './validation-catalog.mjs';
+  prepareValidationObjectRead, readValidationObject, stageValidationObject,
+  validateObjectReference } from './validation-catalog.mjs';
+import { MAX_BUNDLE_BYTES, MAX_OBJECTS, validateRetainedEvidenceBundle } from './validation-readiness.mjs';
 
 const views = new WeakMap();
 const operationHistories = new WeakMap();
 const recordHistories = new WeakMap();
+const executionProofs = new WeakMap();
 const terminal = new Set(['succeeded', 'failed', 'cancelled', 'not-started']);
 const rank = { Passed: 0, NotRun: 1, Failed: 2 };
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 const redactedPayloadValue = /^\[redacted(?::[a-f0-9]{64})?\]$/u;
 const sensitiveHeader = /^(?:authorization|proxy[-_]authorization|cookie|set[-_]cookie|x[-_]api[-_]key|x[-_]auth[-_]token|x[-_]amz[-_]security[-_]token)$/iu;
-const environmentSecret = /(?:^|_)(?:secret|password|passwd|token|credential|credentials|private_key|access_key|api_key|client_secret)(?:_|$)/iu;
+const environmentSecret = /(?:^|_)(?:secret|password|passwd|token|jwt|credential|credentials|private_key|access_key|api_key|client_secret)(?:_|$)/iu;
+const payloadTextMarkers = /["\[{:=]/u;
 
-function sensitivePayloadKey(key) {
+function sensitivePayloadKey(key, state) {
+  const cached = state?.keyClassifications.get(key);
+  if (cached !== undefined) return cached;
   const normalized = key.replace(/([a-z0-9])([A-Z])/gu, '$1_$2')
     .replace(/[.-]/gu, '_');
-  return sensitiveHeader.test(key) ||
+  const sensitive = sensitiveHeader.test(key) ||
     sensitiveHeader.test(normalized) ||
     /^[A-Za-z_][A-Za-z0-9_]*$/u.test(normalized) && environmentSecret.test(normalized);
+  if (state && state.keyClassifications.size < 256 && key.length <= 128) {
+    state.keyClassifications.set(key, sensitive);
+  }
+  return sensitive;
 }
 function unsupportedPayloadFragment(value) {
   if (/["'\\]/u.test(value)) return true;
@@ -34,7 +45,8 @@ function redactPayloadValue(value) {
     value : `[redacted:${digest(value)}]`;
 }
 function payloadSanitizerState() {
-  return { nodes: 0, parsedBytes: 0, scannedCharacters: 0 };
+  return { nodes: 0, parsedBytes: 0, scannedCharacters: 0,
+    keyClassifications: new Map(), summarize: createSummarySanitizer({ shallowObjects: true }) };
 }
 function checkPayloadWork(state, depth) {
   requireThat(depth <= 32 && ++state.nodes <= 65536, 'CAPACITY',
@@ -71,10 +83,12 @@ function sanitizePayloadText(value, state = payloadSanitizerState(), depth = 0) 
   requireThat(Buffer.byteLength(value) <= LIMITS.artifact, 'CAPACITY',
     'Retained text exceeds the immutable-object byte budget');
   if (redactedPayloadValue.test(value)) return value;
+  if (!payloadTextMarkers.test(value)) return state.summarize(value);
   let text = '';
   let start = 0;
   for (let index = 0; index < value.length; index++) {
-    if (!['{', '[', '"'].includes(value[index])) continue;
+    const character = value[index];
+    if (character !== '{' && character !== '[' && character !== '"') continue;
     const marker = value.startsWith('[redacted', index) ?
       /^\[redacted(?::[a-f0-9]{64})?\]/u.exec(value.slice(index, index + 80)) : null;
     if (marker) { index += marker[0].length - 1; continue; }
@@ -109,22 +123,69 @@ function sanitizePayloadText(value, state = payloadSanitizerState(), depth = 0) 
     (_, start, name, content) => `${start}${name}${redactPayloadValue(content.trim())}`);
   const assignments = headers.replace(
     /(?<![A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)([ \t]*=[ \t]*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s;&]+)/gu,
-    (assignment, name, separator, content) => sensitivePayloadKey(name) ?
+    (assignment, name, separator, content) => sensitivePayloadKey(name, state) ?
       `${name}${separator}${redactPayloadValue(content)}` : assignment);
-  return safeSummary(assignments);
+  return state.summarize(assignments);
 }
 function sanitizeRetainedValue(value, state = payloadSanitizerState(), depth = 0) {
   checkPayloadWork(state, depth);
   if (typeof value === 'string') return sanitizePayloadText(value, state, depth);
   if (Array.isArray(value)) return value.map(item => sanitizeRetainedValue(item, state, depth + 1));
   if (!value || typeof value !== 'object') return value;
-  return safeSummary(Object.fromEntries(Object.entries(value).map(([key, item]) =>
-    [key, sensitivePayloadKey(key) ? redactPayloadValue(item) :
+  return state.summarize(Object.fromEntries(Object.entries(value).map(([key, item]) =>
+    [key, sensitivePayloadKey(key, state) ? redactPayloadValue(item) :
       sanitizeRetainedValue(item, state, depth + 1)])));
 }
-export function validateRetainedPayload(value) {
-  requireThat(canonical(sanitizeRetainedValue(value)) === canonical(value),
+function requireRetainedPayloadText(sanitized, original) {
+  requireThat(sanitized === original,
     'UNSAFE', 'Retained payload or provenance contains unsupported sensitive content');
+}
+export function validateRetainedPayload(value) {
+  requireRetainedPayloadText(canonical(sanitizeRetainedValue(value)), canonical(value));
+}
+function validationJson(value, limit) {
+  let nodes = 0;
+  let canReuseInput = true;
+  const maxNodes = Math.max(200000, Math.floor(limit / 16));
+  function visit(item, depth) {
+    requireThat(depth <= 32 && ++nodes <= maxNodes, 'CAPACITY',
+      'Validation data exceeds the bounded JSON structure budget');
+    if (item === null || typeof item === 'boolean') return;
+    if (typeof item === 'string') {
+      requireThat(!/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(item),
+        'UNSAFE', 'Validation data contains unsupported control characters');
+      return;
+    }
+    if (typeof item === 'number') {
+      requireThat(Number.isFinite(item), 'INPUT', 'Validation data contains a non-finite number');
+      return;
+    }
+    requireThat(item && typeof item === 'object' &&
+      (Array.isArray(item) ? Object.getPrototypeOf(item) === Array.prototype :
+        Object.getPrototypeOf(item) === Object.prototype) &&
+      Object.getOwnPropertySymbols(item).length === 0,
+    'INPUT', 'Validation data must be plain JSON without executable values');
+    if (types.isProxy(item)) canReuseInput = false;
+    const fields = Object.getOwnPropertyDescriptors(item);
+    requireThat(Object.values(fields).every(field => Object.hasOwn(field, 'value')),
+      'INPUT', 'Validation data cannot contain accessors');
+    for (const key of Object.keys(item)) visit(fields[key].value, depth + 1);
+  }
+  visit(value, 0);
+  const encoded = canonical(value);
+  requireThat(Buffer.byteLength(encoded) <= limit, 'CAPACITY',
+    'Validation data exceeds its byte budget');
+  return { encoded, canReuseInput };
+}
+export function validationJsonText(value, limit = LIMITS.artifact) {
+  return validationJson(value, limit).encoded;
+}
+export function validateReadinessData(value, limit = LIMITS.artifact) {
+  const { encoded, canReuseInput } = validationJson(value, limit);
+  // Proxies retain the original second input read after sanitization.
+  if (canReuseInput) requireRetainedPayloadText(canonical(sanitizeRetainedValue(value)), encoded);
+  else validateRetainedPayload(value);
+  return value;
 }
 
 export function reduceTestHistory(history, { sourceTime = evidence => evidence.observedAt,
@@ -148,15 +209,17 @@ export function reduceTestHistory(history, { sourceTime = evidence => evidence.o
   const producers = new Map();
   for (const evidence of group) {
     const direct = !evidence.operationId && !evidence.eventId;
-    const producer = evidence.operationId ? `operation:${evidence.operationId}` :
+    const producer = evidence.executionProducerKey ? `execution:${evidence.executionProducerKey}` :
+      evidence.operationId ? `operation:${evidence.operationId}` :
       evidence.eventId ? `event:${evidence.eventId}` :
         `direct:${digest([evidence.owner ?? null, evidence.host ?? null,
           evidence.executionSourceDigest ?? null])}`;
     const previous = producers.get(producer);
     const tie = item => canonical([producer, item.id, digest(item)]);
+    const sequence = item => item.sourceSequence ?? item.sequence ?? 0;
     if (!previous || (direct ?
-      (evidence.sequence ?? 0) > (previous.sequence ?? 0) ||
-        (evidence.sequence ?? 0) === (previous.sequence ?? 0) &&
+      sequence(evidence) > sequence(previous) ||
+        sequence(evidence) === sequence(previous) &&
           compare(tie(evidence), tie(previous)) > 0 :
       rank[evidence.status] > rank[previous.status] ||
         rank[evidence.status] === rank[previous.status] &&
@@ -197,8 +260,7 @@ export async function prepareValidationHistory(store, workItemId, active) {
   const evidence = new Map();
   const events = new Map();
   const directory = path.join(store.workPath(workItemId), 'evidence');
-  for (const name of await listJson(directory)) {
-    const record = await readJson(await safePath(directory, name), { limit: LIMITS.workingSet + 1 });
+  for await (const { name, record } of readJsonEntries(directory, { limit: LIMITS.workingSet + 1 })) {
     if (['test-evidence', 'event'].includes(record.type)) {
       requireThat(record.workItemId === workItemId && record.id === name.slice(0, -5),
         'BINDING', 'Archived evidence or event identity differs from its locator');
@@ -297,6 +359,9 @@ export function observationAfterReset(cycle, records, evidence) {
   const barrier = cycle.storageVersion === 2 ?
     viewFor(cycle).slots.get(evidence.testId)?.barrier : cycle.resultBarriers?.[evidence.testId];
   if (!barrier) return true;
+  if (evidence.sourceObservedAt !== undefined &&
+      (!Number.isFinite(Date.parse(evidence.sourceObservedAt)) ||
+        Date.parse(evidence.sourceObservedAt) <= Date.parse(barrier.at))) return false;
   if (evidence.eventId) {
     const event = records.find(record => record.id === evidence.eventId);
     return evidence.eventId === barrier.eventId || Boolean(event && event.sequence > barrier.eventSequence);
@@ -306,19 +371,55 @@ export function observationAfterReset(cycle, records, evidence) {
     const operation = lookupOperation(records, evidence.operationId);
     return Boolean(operation && Date.parse(operation.dispatchStartedAt ?? operation.createdAt) > Date.parse(barrier.at));
   }
-  return (evidence.sequence ?? 0) > barrier.sequence;
+  return (evidence.sequence ?? evidence.sourceSequence ?? 0) > barrier.sequence;
 }
-export function executionSourceEligible(cycle, evidence) {
-  if (!evidence.executionSources) return cycle.storageVersion !== 2;
-  return evidence.configDigest === cycle.configDigest &&
+export function sameExecutionSources(left, right, { requireRevision = true } = {}) {
+  return Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
+    new Set(left.map(source => source.repositoryId)).size === left.length &&
+    new Set(right.map(source => source.repositoryId)).size === right.length &&
+    left.every(source => right.some(selected =>
+      selected.repositoryId === source.repositoryId &&
+      selected.contentDigest === source.contentDigest &&
+      (!requireRevision || selected.revision === source.revision)));
+}
+export function executionSourceEligible(cycle, evidence,
+  { requireRevision = evidence.environment !== 'local' } = {}) {
+  return sourceIdentityEligible(cycle, evidence, { requireRevision });
+}
+export function retainedExecutionProofEligible(evidence) {
+  return executionProofs.get(evidence) === digest(evidence);
+}
+export function verifiedOperationCompletedAt(evidence, records) {
+  if (!evidence?.operationId || !retainedExecutionProofEligible(evidence)) return undefined;
+  const operation = lookupOperation(records, evidence.operationId);
+  return operation && evidence.operationDigest === digest(operation) &&
+    independentOperationResult(operation) && operation.status === 'succeeded' &&
+    operation.expectedMet === true ? operation.updatedAt : undefined;
+}
+function sourceIdentityEligible(cycle, evidence, { requireRevision = evidence.environment !== 'local' } = {}) {
+  return Boolean(evidence.executionSources) && evidence.configDigest === cycle.configDigest &&
     evidence.candidateDigest === cycle.candidateDigest &&
     evidence.testSpecDigest === cycle.testSpecDigest &&
     evidence.executionSourceDigest === digest(evidence.executionSources) &&
-    evidence.executionSources.length === cycle.sources.length &&
-    evidence.executionSources.every(source => cycle.sources.some(selected =>
-      selected.repositoryId === source.repositoryId &&
-      selected.contentDigest === source.contentDigest &&
-      (evidence.environment === 'local' || selected.revision === source.revision)));
+    sameExecutionSources(evidence.executionSources, cycle.sources, { requireRevision });
+}
+function validateCaseExecutionReport(cycle, test, evidence, report, { currentReset = false } = {}) {
+  const cases = new Map(Array.isArray(report?.cases) ?
+    report.cases.map(item => [item.testId, item]) : []);
+  const result = cases.get(test.id);
+  requireThat(report && report.cycleId === cycle.id &&
+    report.candidateDigest === evidence.candidateDigest &&
+    report.testSpecDigest === evidence.testSpecDigest && report.configDigest === evidence.configDigest &&
+    sameExecutionSources(report.executionSources, evidence.executionSources) &&
+    cases.size === report.cases?.length && result &&
+    result.status === evidence.status && result.expectedMet === evidence.expectedMet &&
+    /^[a-f0-9]{64}$/u.test(result.resetDigest ?? '') &&
+    (!currentReset || result.resetDigest === testResetDigest(cycle, test.id)) &&
+    result.expectedDigest === digest(test.expected) && Array.isArray(result.assertions) &&
+    result.assertions.length > 0 && result.assertions.every(assertion =>
+      typeof assertion.name === 'string' && assertion.name.trim() && typeof assertion.passed === 'boolean') &&
+    result.assertions.every(assertion => assertion.passed) === (evidence.status === 'Passed'),
+  'EVIDENCE', 'Execution report must contain this exact case, assertion outcomes and source/spec/config identity');
 }
 export function validateExecutionSource(source, operation) {
   object(source, ['schemaVersion', 'kind', 'workItemId', 'operationId', 'cycleId',
@@ -399,8 +500,213 @@ export function initializeReferencedCycle(tx, cycle, specification) {
   cycle.testOutcomeRef = stageValidationObject(tx, root);
   attachView(cycle, pages, refs, root);
 }
+async function prepareRetainedReadinessEvidence(store, cycle, evidence, payload, context, assertion) {
+  const admission = payload.content;
+  if (admission?.kind !== 'normalized-case-admission') return;
+  object(admission, ['kind', 'cycleId', 'testId', 'status', 'importRef', 'assertionPageRefs', 'blockers'],
+    ['kind', 'cycleId', 'testId', 'status', 'importRef', 'assertionPageRefs', 'blockers']);
+  requireThat(admission.cycleId === cycle.id && admission.testId === evidence.testId &&
+    admission.status === evidence.status && Array.isArray(admission.assertionPageRefs),
+  'EVIDENCE', 'Retained normalized admission differs from its immutable case result');
+  let readPreparedAssertion;
+  const readContent = async ref => {
+    const consume = readPreparedAssertion;
+    readPreparedAssertion = undefined;
+    const retained = consume ? await consume(ref, context) :
+      await readValidationObject(store, cycle.workItemId, ref, context);
+    requireThat(retained.kind === 'execution-payload' &&
+      retained.provenance?.sanitizer === 'sdlc-normalized-v1' &&
+      retained.provenance.sourceDigest === digest(retained.content),
+    'EVIDENCE', 'Normalized evidence dependency is not its original retained content');
+    return retained.content;
+  };
+  validateObjectReference(admission.importRef);
+  const imports = context.normalizedReadinessImports ??= new Map();
+  let imported = imports.get(admission.importRef.sha256);
+  if (imported) requireThat(imported.bytes === admission.importRef.bytes, 'DIGEST',
+    'Normalized import reference length differs from its retained bytes');
+  else {
+    const retained = await readContent(admission.importRef);
+    object(retained, ['kind', 'manifest', 'manifestRef', 'objectMapRefs'],
+      ['kind', 'manifest', 'manifestRef', 'objectMapRefs']);
+    requireThat(retained.kind === 'normalized-readiness-import' &&
+      Array.isArray(retained.manifest?.objectRefs) &&
+      retained.manifest.objectRefs.length > 0 &&
+      retained.manifest.objectRefs.length <= MAX_OBJECTS &&
+      Array.isArray(retained.objectMapRefs) &&
+      retained.objectMapRefs.length === Math.ceil(retained.manifest.objectRefs.length / OUTCOME_PAGE_SIZE),
+    'EVIDENCE', 'Normalized import has no complete bounded object mapping');
+    const objects = [];
+    let bytes = 0;
+    for (const [index, ref] of retained.objectMapRefs.entries()) {
+      const page = await readContent(ref);
+      object(page, ['kind', 'index', 'objects'], ['kind', 'index', 'objects']);
+      const count = Math.min(OUTCOME_PAGE_SIZE,
+        retained.manifest.objectRefs.length - objects.length);
+      requireThat(page.kind === 'normalized-object-map' && page.index === index &&
+        Array.isArray(page.objects) && page.objects.length === count,
+      'EVIDENCE', 'Normalized object-map page is unavailable or incomplete');
+      const batchSize = 4;
+      for (let offset = 0; offset < page.objects.length; offset += batchSize) {
+        const batch = await Promise.allSettled(page.objects.slice(offset, offset + batchSize)
+          .map(async entry => {
+            // Guard and budget accounting stays in input order before the first await.
+            object(entry, ['originalRef', 'retainedRef'], ['originalRef', 'retainedRef']);
+            validateObjectReference(entry.originalRef);
+            bytes += entry.originalRef.bytes;
+            requireThat(bytes <= MAX_BUNDLE_BYTES, 'CAPACITY',
+              'Normalized import exceeds the retained bundle byte budget');
+            return { ref: entry.originalRef, value: await readContent(entry.retainedRef) };
+          }));
+        for (const result of batch) {
+          if (result.status === 'rejected') throw result.reason;
+          objects.push(result.value);
+        }
+      }
+    }
+    imported = { bytes: admission.importRef.bytes,
+      ...validateRetainedEvidenceBundle({
+        manifest: retained.manifest, manifestRef: retained.manifestRef, objects,
+      }) };
+    imports.set(admission.importRef.sha256, imported);
+  }
+  const definition = imported.specification.cases.find(test => test.id === evidence.testId);
+  const test = cycleTests(cycle).find(test => test.id === evidence.testId);
+  const execution = imported.context.executions.find(item => item.id === definition?.executionId)?.context;
+  requireThat(definition && test && definition.expectedDigest === digest(test.expected) &&
+    execution && execution.candidateDigest === evidence.candidateDigest &&
+    execution.testSpecDigest === evidence.testSpecDigest &&
+    execution.configDigest === evidence.configDigest &&
+    sameExecutionSources(execution.sources, evidence.executionSources) &&
+    admission.assertionPageRefs.length <= Math.ceil(definition.assertions.length / OUTCOME_PAGE_SIZE),
+  'EVIDENCE', 'Retained normalized input is not bound to its original managed case');
+  const assertions = new Set();
+  for (const [index, ref] of admission.assertionPageRefs.entries()) {
+    if (index === 0 && assertion && ref?.sha256 === assertion.ref.sha256 &&
+        ref?.bytes === assertion.ref.bytes) readPreparedAssertion = assertion.read;
+    const page = await readContent(ref);
+    object(page, ['kind', 'testId', 'index', 'observations'],
+      ['kind', 'testId', 'index', 'observations']);
+    requireThat(page.kind === 'normalized-case-observations' &&
+      page.testId === test.id && page.index === index &&
+      Array.isArray(page.observations) && page.observations.length > 0 &&
+      page.observations.length <= OUTCOME_PAGE_SIZE,
+    'EVIDENCE', 'Normalized admission assertion page is unavailable or misbound');
+    for (const selected of page.observations) {
+      const report = imported.reports.find(item => item.id === selected.reportId);
+      const observation = report?.observations.find(item => item.id === selected.observationId);
+      requireThat(observation && observation.testId === test.id &&
+        definition.assertions.some(item => item.id === observation.assertionId) &&
+        !assertions.has(observation.assertionId) &&
+        digest(selected) === digest({
+          reportId: report.id, observationId: observation.id,
+          observedAt: observation.observedAt, sourceSequence: observation.sourceSequence,
+          startedAt: report.startedAt, completedAt: report.finishedAt,
+        }),
+      'EVIDENCE', 'Normalized admission relabeled or duplicated an original assertion');
+      assertions.add(observation.assertionId);
+    }
+  }
+  requireThat(admission.status !== 'Passed' || assertions.size === definition.assertions.length,
+    'EVIDENCE', 'Passing normalized admission is missing original assertion proof');
+}
+async function originalResultEvent(store, cycle, evidence, context, retainedEvents) {
+  let event = context.get?.(evidence.eventId) ??
+    context.all().find(record => record.id === evidence.eventId) ??
+    retainedEvents?.get(evidence.eventId);
+  if (!event) {
+    id(evidence.eventId);
+    event = await readJson(path.join(store.workPath(cycle.workItemId), 'evidence',
+      `${evidence.eventId}.json`), { limit: LIMITS.decision, optional: true });
+  }
+  if (event) {
+    validateRecord(event); safeRecord(event, recordLimit(event));
+    requireThat(event.type === 'event' && event.id === evidence.eventId &&
+      event.workItemId === cycle.workItemId, 'EVIDENCE',
+    'Original captured result identity differs from its retained locator');
+    const retained = retainedEvents?.get(event.id);
+    requireThat(!retained || digest(retained) === digest(event), 'EVIDENCE',
+      'Active and retained captured result identities conflict');
+  }
+  return event;
+}
+function independentOperationResult(operation) {
+  const proof = operation?.resultProof;
+  return Boolean(proof && proof.status === operation.status &&
+    proof.dispatchId === operation.id && proof.intendedOutcomeDigest === operation.intendedOutcome?.digest &&
+    /^[a-f0-9]{64}$/u.test(proof.resultDigest ?? '') &&
+    typeof proof.causalKey === 'string' && proof.causalKey &&
+    typeof proof.providerResultId === 'string' && proof.providerResultId);
+}
+async function readExecutionPayload(store, cycle, evidence, context) {
+  const payload = await readValidationObject(store, cycle.workItemId, evidence.retainedPayloadRef, context);
+  return payload;
+}
+async function prepareExecutionEvidence(store, cycle, evidence, context, retainedEvents, readPayload, assertion) {
+  if (!evidence.retainedPayloadRef) return;
+  const test = cycleTests(cycle).find(test => test.id === evidence.testId);
+  const payload = readPayload ? await readPayload(evidence.retainedPayloadRef, context) :
+    await readExecutionPayload(store, cycle, evidence, context);
+  requireThat(payload.kind === 'execution-payload' && test &&
+    evidence.workItemId === cycle.workItemId && evidence.cycleId === cycle.id &&
+    evidence.candidateDigest === cycle.candidateDigest && evidence.testSpecDigest === cycle.testSpecDigest &&
+    evidence.configDigest === cycle.configDigest &&
+    evidence.executionSourceDigest === digest(evidence.executionSources),
+  'EVIDENCE', 'Retained execution proof differs from its original cycle and case identity');
+  if (payload.content?.kind === 'normalized-case-admission') {
+    requireThat(payload.provenance?.sanitizer === 'sdlc-normalized-v1' &&
+      payload.provenance.sourceDigest === digest(payload.content), 'EVIDENCE',
+    'Normalized admission requires its originally verified managed import');
+    await prepareRetainedReadinessEvidence(store, cycle, evidence, payload, context, assertion);
+  } else if (evidence.operationId) {
+    const operation = lookupOperation(context.all(), evidence.operationId);
+    requireThat(operation?.executionSourceRef && operation.class === 'test' &&
+      operation.action.testId === test.id && operation.action.environment === test.environment &&
+      operation.action.owner === evidence.owner && operation.action.host === evidence.host &&
+      ['succeeded', 'failed'].includes(operation.status) &&
+      (evidence.status !== 'Passed' || operation.status === 'succeeded' && operation.expectedMet === true) &&
+      evidence.operationDigest === digest(operation) &&
+      payload.content?.operationId === operation.id &&
+      payload.content.operationDigest === evidence.operationDigest &&
+      digest(payload.content.resultProof) === digest(operation.resultProof ?? null),
+    'EVIDENCE', 'Retained operation result has no matching original terminal execution');
+    const source = validateExecutionSource(await readValidationObject(store, cycle.workItemId,
+      operation.executionSourceRef, context), operation);
+    requireThat(evidence.executionSourceDigest === source.sourceDigest &&
+      sameExecutionSources(evidence.executionSources, source.sources) &&
+      evidence.testSpecDigest === source.testSpecDigest && evidence.configDigest === source.configDigest,
+    'EVIDENCE', 'Retained observation relabeled its producer execution source');
+    if (!independentOperationResult(operation)) return;
+  } else if (evidence.eventId) {
+    const event = await originalResultEvent(store, cycle, evidence, context, retainedEvents);
+    requireThat(event?.kind === 'staging-result' && test.environment === 'STAGING' &&
+      event.effect.cycleId === cycle.id && event.effect.testIds?.includes(test.id) &&
+      event.effect.candidateDigest === evidence.candidateDigest &&
+      event.effect.testSpecDigest === evidence.testSpecDigest &&
+      event.effect.configDigest === evidence.configDigest &&
+      event.effect.outcome === evidence.status && event.effect.owner === evidence.owner &&
+      event.effect.host === evidence.host && event.effect.deploymentId === evidence.deploymentId &&
+      event.effect.artifactId === evidence.artifactId &&
+      payload.content?.eventId === event.id && payload.content.eventDigest === event.digest &&
+      payload.provenance?.reference === `receipt:${event.sourceReceiptId}`,
+    'EVIDENCE', 'Retained result has no matching captured procedure outcome');
+  } else {
+    validateCaseExecutionReport(cycle, test, evidence, payload.content);
+    requireThat(evidence.owner === test.owner && evidence.host === test.location,
+      'EVIDENCE', 'Retained execution owner/location differs from the Test Plan');
+    return;
+  }
+  executionProofs.set(evidence, digest(evidence));
+}
 export async function prepareCycleEvidence(store, cycle, context) {
-  if (cycle.storageVersion !== 2) return;
+  if (cycle.storageVersion !== 2) {
+    for (const test of cycleTests(cycle)) {
+      for (const evidence of testHistory(cycle, context.all(), test.id)) {
+        await prepareExecutionEvidence(store, cycle, evidence, context);
+      }
+    }
+    return;
+  }
   const catalog = await readValidationObject(store, cycle.workItemId, cycle.testCatalogRef, context);
   bindCycleCatalog(cycle, catalog);
   for (const binding of catalog.bindings) if (binding.snapshotRef) {
@@ -426,7 +732,6 @@ export async function prepareCycleEvidence(store, cycle, context) {
   const prefixes = new Map();
   const ids = new Set();
   const observationIds = new Set();
-  const payloads = new Map();
   for (let index = 0; index < root.pageRefs.length; index++) {
     const page = await readValidationObject(store, cycle.workItemId, root.pageRefs[index], context);
     object(page, ['schemaVersion', 'kind', 'workItemId', 'cycleId', 'index', 'slots'],
@@ -436,7 +741,44 @@ export async function prepareCycleEvidence(store, cycle, context) {
       page.cycleId === cycle.id && page.index === index &&
       Array.isArray(page.slots) && page.slots.length === tests.length,
     'EVIDENCE', 'Outcome page does not cover its exact catalog slots');
+    let items;
+    let prepared;
+    let assertions;
     for (let offset = 0; offset < tests.length; offset++) {
+      const position = offset % 4;
+      if (position === 0) {
+        items = page.slots.slice(offset, offset + 4)
+          .map(slot => Array.isArray(slot?.history) ? slot.history[0] : undefined);
+        // Finish and close every prepared read before ordered replay can start an import.
+        prepared = await Promise.allSettled(items.map(item => item?.retainedPayloadRef ?
+          prepareValidationObjectRead(store, cycle.workItemId, item.retainedPayloadRef, context) :
+          undefined));
+        const projections = prepared.map(result => {
+          if (result.status !== 'fulfilled' || !result.value) return;
+          return result.value.projectAssertionPage(context);
+        });
+        let reserved = projections.reduce((bytes, projection) => bytes + (projection?.bytes ?? 0), 0);
+        const parents = new Set(items.map(item => item?.retainedPayloadRef?.sha256));
+        const children = new Set();
+        const selected = projections.map(projection => {
+          if (!projection?.ref) return;
+          const { ref, importRef } = projection;
+          const alias = parents.has(ref.sha256) || children.has(ref.sha256);
+          children.add(ref.sha256);
+          if (alias || context.normalizedReadinessImports?.get(importRef.sha256)?.bytes !== importRef.bytes ||
+              context.validationReadObjects?.has(ref.sha256) ||
+              context.validationObjects?.has(ref.sha256) ||
+              reserved + LIMITS.artifact > 4 * LIMITS.artifact) return;
+          // A malformed file can exceed its claimed length before the digest check.
+          reserved += LIMITS.artifact;
+          return ref;
+        });
+        const reads = await Promise.allSettled(selected.map(ref => ref ?
+          prepareValidationObjectRead(store, cycle.workItemId, ref, context) : undefined));
+        assertions = selected.map((ref, position) => ref ? { ref,
+          read: reads[position].status === 'rejected' ?
+            () => Promise.reject(reads[position].reason) : reads[position].value } : undefined);
+      }
       const slot = page.slots[offset];
       object(slot, ['testId', 'history', 'historyRef', 'events', 'selected', 'barrier'],
         ['testId', 'history', 'historyRef', 'events', 'selected', 'barrier']);
@@ -444,6 +786,18 @@ export async function prepareCycleEvidence(store, cycle, context) {
         Array.isArray(slot.history) && Array.isArray(slot.events), 'EVIDENCE', 'Outcome slots are not a catalog bijection');
       ids.add(slot.testId);
       if (slot.barrier !== null) validateResetBarrier(slot.barrier);
+      const retainedEvents = new Map();
+      for (const eventRef of slot.events) {
+        const retained = await readValidationObject(store, cycle.workItemId, eventRef, context);
+        requireThat(retained.kind === 'result-event' && retained.event?.kind === 'staging-result' &&
+          retained.event.effect.testIds?.includes(slot.testId) &&
+          retained.event.effect.cycleId === cycle.id, 'EVIDENCE', 'Retained result event differs from its case');
+        validateRecord(retained.event); safeRecord(retained.event, recordLimit(retained.event));
+        const prior = retainedEvents.get(retained.event.id);
+        requireThat(!prior || digest(prior) === digest(retained.event), 'EVIDENCE',
+          'Retained captured result identities conflict');
+        retainedEvents.set(retained.event.id, retained.event);
+      }
       if (slot.historyRef) {
         const chunks = [];
         let ref = slot.historyRef;
@@ -491,20 +845,14 @@ export async function prepareCycleEvidence(store, cycle, context) {
             item.testSpecDigest === source.testSpecDigest && item.configDigest === source.configDigest,
           'EVIDENCE', 'Retained observation relabeled its producer execution source');
         }
-        if (item.retainedPayloadRef && !payloads.has(item.retainedPayloadRef.sha256)) {
-          payloads.set(item.retainedPayloadRef.sha256,
-            await readValidationObject(store, cycle.workItemId, item.retainedPayloadRef, context));
-        }
+        const preparation = items[position] === item ? prepared[position] : undefined;
+        const readPayload = preparation?.status === 'rejected' ?
+          () => Promise.reject(preparation.reason) : preparation?.value;
+        await prepareExecutionEvidence(store, cycle, item, context, retainedEvents, readPayload,
+          items[position] === item ? assertions[position] : undefined);
       }
       requireThat(slot.selected === null || slot.history.some(item => item.id === slot.selected),
         'EVIDENCE', 'Selected observation is missing from complete history');
-      for (const eventRef of slot.events) {
-        const retained = await readValidationObject(store, cycle.workItemId, eventRef, context);
-        requireThat(retained.kind === 'result-event' && retained.event?.kind === 'staging-result' &&
-          retained.event.effect.testIds?.includes(slot.testId) &&
-          retained.event.effect.cycleId === cycle.id, 'EVIDENCE', 'Retained result event differs from its case');
-        validateRecord(retained.event);
-      }
     }
     pages.push(page);
   }
@@ -645,7 +993,8 @@ export async function retainExecutionEvidence(store, tx, input) {
   cache.set(input.evidenceRef, result);
   return result;
 }
-export async function bindExecutionEvidence(store, tx, cycle, test, evidence) {
+export async function bindExecutionEvidence(store, tx, cycle, test, evidence,
+  { requireIndependentProof = false, historicalRecovery = false } = {}) {
   let operation;
   if (evidence.operationId) {
     operation = lookupOperation(tx.all(), evidence.operationId);
@@ -659,19 +1008,34 @@ export async function bindExecutionEvidence(store, tx, cycle, test, evidence) {
     'EVIDENCE', evidence.status === 'NotRun' ?
       'Nonconclusive evidence requires the exact dispatched test operation' :
       'Terminal operation proof is unavailable');
+    // Published 0.4 inline terminal records may predate dispatch-source retention.
+    // Recover their claimed history only; no new source, proof or current credit.
+    if (historicalRecovery && !requireIndependentProof &&
+        cycle.storageVersion !== 2 && !operation.executionSourceRef &&
+        terminal.has(operation.status)) return;
     if (evidence.status === 'NotRun') evidence.operationState = operation.status;
     if (operation.executionSourceRef) {
       const source = validateExecutionSource(await readValidationObject(store, cycle.workItemId,
         operation.executionSourceRef, tx), operation);
+      if (tx.normalizedImports?.has(test.id)) requireThat(
+        evidence.configDigest === source.configDigest &&
+          sameExecutionSources(evidence.executionSources, source.sources),
+        'EVIDENCE', 'Normalized report differs from the original dispatched execution source');
       evidence.configDigest = source.configDigest;
       evidence.executionSources = structuredClone(source.sources);
       evidence.executionSourceDigest = source.sourceDigest;
-      requireThat(executionSourceEligible(cycle, evidence), 'STALE',
+      requireThat(sourceIdentityEligible(cycle, evidence), 'STALE',
         'Producer execution source is not eligible for the current candidate/spec/config');
-    } else requireThat(cycle.storageVersion !== 2 && terminal.has(operation.status), 'EVIDENCE',
+    } else requireThat(false, 'EVIDENCE',
       'Dispatched test evidence requires the original immutable execution source');
   }
-  if (cycle.storageVersion !== 2) return;
+  if (tx.normalizedImports?.has(test.id)) {
+    requireThat(sourceIdentityEligible(cycle, evidence, { requireRevision: test.environment !== 'local' }),
+      'STALE', 'Normalized execution does not match the current managed source/specification/configuration');
+    if (operation) evidence.operationDigest = digest(operation);
+    await prepareExecutionEvidence(store, cycle, evidence, tx);
+    return;
+  }
   if (!operation) {
     evidence.configDigest = cycle.configDigest;
     evidence.executionSources = structuredClone(cycle.sources);
@@ -694,27 +1058,23 @@ export async function bindExecutionEvidence(store, tx, cycle, test, evidence) {
       content: { eventId: event.id, eventDigest: event.digest },
       provenance: { reference: `receipt:${event.sourceReceiptId}`, sanitizer: 'sdlc-proof-v1' },
     });
-  } else {
+  } else if (test.mode === 'automated') {
     const retained = await retainExecutionEvidence(store, tx, evidence);
-    const report = retained.payload.content;
-    const result = retained.cases.get(test.id);
-    requireThat(report && report.cycleId === cycle.id &&
-      report.candidateDigest === cycle.candidateDigest &&
-      report.testSpecDigest === cycle.testSpecDigest && report.configDigest === cycle.configDigest &&
-      digest(report.executionSources) === digest(cycle.sources) && result &&
-      result.status === evidence.status && result.expectedMet === evidence.expectedMet &&
-      result.resetDigest === testResetDigest(cycle, test.id) &&
-      result.expectedDigest === digest(test.expected) && Array.isArray(result.assertions) &&
-      result.assertions.length > 0 && result.assertions.every(assertion =>
-        typeof assertion.name === 'string' && assertion.name.trim() && typeof assertion.passed === 'boolean') &&
-      result.assertions.every(assertion => assertion.passed) === (evidence.status === 'Passed'),
-    'EVIDENCE', 'Execution report must contain this exact case, assertion outcomes and source/spec/config identity');
-    evidence.retainedPayloadRef = retained.ref;
-    evidence.evidenceRef = retainedPayloadReference(retained.ref);
-    evidence.id = `evidence-${digest({ cycleId: cycle.id, testId: test.id,
-      payload: retained.ref.sha256 }).slice(0, 40)}`;
+    const original = testHistory(cycle, tx.all(), test.id).find(item =>
+      item.retainedPayloadRef?.sha256 === retained.ref.sha256 &&
+      item.retainedPayloadRef.bytes === retained.ref.bytes && retainedExecutionProofEligible(item));
+    requireThat(original && retained.payload.content?.kind === 'normalized-case-admission' &&
+      original.status === evidence.status && original.expectedMet === evidence.expectedMet &&
+      original.owner === evidence.owner && original.host === evidence.host &&
+      observationAfterReset(cycle, tx.all(), original), 'EVIDENCE',
+    'Automated credit requires an independently verified producer import or execution result, not caller-authored assertions');
+    Object.assign(evidence, original);
   }
   safeRecord(evidence, LIMITS.record);
+  await prepareExecutionEvidence(store, cycle, evidence, tx);
+  requireThat(!requireIndependentProof || test.mode !== 'automated' || evidence.status === 'NotRun' ||
+    retainedExecutionProofEligible(evidence), 'EVIDENCE',
+  'Automated credit requires the original independently verified execution outcome');
 }
 export async function retainTestEvidence(store, input) {
   object(input, ['workItemId', 'evidenceRef'], ['workItemId', 'evidenceRef']);

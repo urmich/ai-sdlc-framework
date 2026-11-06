@@ -1,3 +1,12 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "applicability": [
+    {"options": "{skip:!enabled}", "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "All native validation jobs provision the pinned real Go compiler; missing SDLC_GO is not an allowed required-job skip.", "prerequisites": ["Go 1.27.1", "SDLC_GO selects the native compiler", "GOTOOLCHAIN=local", "Owned Go caches"]}
+  ],
+  "surfaces": [
+    {"coverage": "process", "paths": ["packaging/winget/build-launcher.mjs", "cmd/sdlc-launcher/main.go", "cmd/sdlc-launcher/integrity.go"]}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
@@ -5,12 +14,46 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { finished } from 'node:stream/promises';
 import { buildLauncher, launcherBuildEnvironment, TOOLCHAIN } from '../packaging/winget/build-launcher.mjs';
 import { writePayloadFixture } from './winget-payload-fixture.mjs';
 
 const execute = promisify(execFile);
 const goCommand = process.env.SDLC_GO || 'go';
 const enabled = !!process.env.SDLC_GO || process.platform === 'win32';
+
+async function runFixtureCommand(command, args, options, input) {
+  let child;
+  const completed = new Promise(resolve => {
+    child = execFile(command, args, options, (error, stdout, stderr) =>
+      resolve({ error, stdout, stderr }));
+  });
+  const written = finished(child.stdin, { readable: false, cleanup: true });
+  child.stdin.end(input);
+  const [result, stream] = await Promise.allSettled([completed, written]);
+  if (result.status === 'rejected') throw result.reason;
+  const inputError = stream.status === 'rejected' ? stream.reason : null;
+  if (inputError && !result.value.error) throw inputError;
+  return { ...result.value, inputError };
+}
+
+test('T-PRD018 launcher fixture input failures preserve the actual child exit without unhandled stream errors', async () => {
+  const input = Buffer.alloc(1024 * 1024, 'x');
+  const closeInput = code => ['--input-type=module', '--eval',
+    `import {closeSync} from 'node:fs';closeSync(0);process.stderr.write('owned early rejection\\n');process.exitCode=${code};`];
+  const failed = await runFixtureCommand(process.execPath, closeInput(37), {}, input);
+  assert.equal(failed.error.code, 37);
+  assert.equal(failed.stderr, 'owned early rejection\n');
+  assert.ok(['EPIPE', 'EOF'].includes(failed.inputError?.code));
+  await assert.rejects(runFixtureCommand(process.execPath, closeInput(0), {}, input),
+    error => ['EPIPE', 'EOF'].includes(error.code));
+  const passed = await runFixtureCommand(process.execPath, ['--eval',
+    "let bytes=0;process.stdin.on('data',chunk=>{bytes+=chunk.length;});process.stdin.on('end',()=>process.stdout.write(String(bytes)));"],
+  {}, input);
+  assert.ifError(passed.error);
+  assert.equal(passed.stdout, String(input.length));
+  assert.equal(passed.inputError, null);
+});
 
 test('T-51 native Go launcher preserves paths, streams, arguments, working directory and child exit code', { skip: !enabled }, async t => {
   const root = path.resolve('.test-data', `winget native with spaces ${randomUUID()}`);
@@ -47,11 +90,7 @@ process.exit(Number(process.env.SDLC_TEST_EXIT ?? 0));
     COPILOT_HOME: home, NODE_OPTIONS: '--import=missing-preload.mjs', NODE_PATH: 'untrusted-preload' };
   delete runtimeEnv.SDLC_NODE;
   const args = ['install', '--home', 'path with spaces', '& echo SHOULD_NOT_RUN', '"quoted"', '', 'unicode-λ', '--purge-existing'];
-  const run = command => new Promise(resolve => {
-    const child = execFile(command, args, { cwd, env: runtimeEnv }, (error, stdout, stderr) =>
-      resolve({ error, stdout, stderr }));
-    child.stdin.end('forwarded stdin');
-  });
+  const run = command => runFixtureCommand(command, args, { cwd, env: runtimeEnv }, 'forwarded stdin');
   const result = await run(launcher);
   assert.ifError(result.error);
   const output = JSON.parse(result.stdout);

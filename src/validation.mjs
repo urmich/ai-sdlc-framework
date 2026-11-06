@@ -4,9 +4,14 @@ import { git, validateBinding } from './git.mjs';
 import { currentTestSpecification, loadConfig, resolveTestSpecification,
   synchronizeTestPlan } from './artifacts.mjs';
 import { applicableOverride, assurancePending, boundToCycle, currentCycle, currentTestEvidence, hasEnvironmentGrant, latestStagingResultEvent, stagePassed, testCheckpoint } from './authority.mjs';
-import { cycleTests, requireCatalogSpecification, validateTestDefinitions } from './validation-catalog.mjs';
+import { cycleTests, OUTCOME_PAGE_SIZE, requireCatalogSpecification, stageValidationObject,
+  validateTestDefinitions } from './validation-catalog.mjs';
 import { appendTestObservation, bindExecutionEvidence, initializeReferencedCycle,
-  lookupOperation, lookupTestEvidence, observationAfterReset, resetCycleResults, selectTestObservation } from './validation-evidence.mjs';
+  lookupOperation, lookupTestEvidence, observationAfterReset, resetCycleResults, retainedPayloadReference,
+  sameExecutionSources, selectTestObservation, testResetBarrier,
+  verifiedOperationCompletedAt } from './validation-evidence.mjs';
+import { createEvidenceBundle, readinessCaseProofs, refreshReadinessEvaluation,
+  requireReadinessEvaluation } from './validation-readiness.mjs';
 import { effectiveStagingExecution, stagingExecutionGuidance,
   stagingExecutionMatches } from './staging.mjs';
 import { createHash } from 'node:crypto';
@@ -22,13 +27,25 @@ function gitBlobId(bytes, algorithm) {
   return createHash(algorithm).update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 }
 
+function completedGitRead(result) {
+  if (result.status === 'rejected') throw result.reason;
+  return result.value;
+}
+
 export async function candidateSnapshot(metadata, manifest) {
   const sources = [];
   for (const member of metadata.members) {
     const actual = await validateBinding(member);
+    const [indexRead, changedRead, untrackedRead, formatRead, fileModeRead] = await Promise.allSettled([
+      git(member.root, ['ls-files', '--stage', '-z']),
+      git(member.root, ['diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z']),
+      git(member.root, ['ls-files', '--others', '--exclude-standard', '-z']),
+      git(member.root, ['rev-parse', '--show-object-format']),
+      git(member.root, ['config', '--bool', 'core.filemode'], { optional: true }),
+    ]);
     const documents = new Set(manifest.artifacts.filter(a => a.kind === 'git' && a.repositoryId === member.repositoryId).map(a => a.path));
     const included = name => !documents.has(name) && (!name.startsWith('.sdlc/') || name === '.sdlc/config.json');
-    const indexEntries = (await git(member.root, ['ls-files', '--stage', '-z'])).split('\0').filter(Boolean)
+    const indexEntries = completedGitRead(indexRead).split('\0').filter(Boolean)
       .filter(entry => included(entry.slice(entry.indexOf('\t') + 1)));
     requireThat(indexEntries.length <= 20000, 'CAPACITY', 'Candidate index exceeds 20,000 files; use a scoped member checkout');
     const effective = new Map();
@@ -40,12 +57,12 @@ export async function candidateSnapshot(metadata, manifest) {
       values.push([mode, objectId, stage]);
       effective.set(name, values);
     }
-    const changed = await git(member.root, ['diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z']);
-    const untracked = await git(member.root, ['ls-files', '--others', '--exclude-standard', '-z']);
+    const changed = completedGitRead(changedRead);
+    const untracked = completedGitRead(untrackedRead);
     const names = [...new Set([...changed.split('\0'), ...untracked.split('\0')].filter(name => name && included(name)))].sort();
     requireThat(names.length <= 20000, 'CAPACITY', 'Candidate working changes exceed 20,000 files; use a scoped member checkout');
-    const objectFormat = await git(member.root, ['rev-parse', '--show-object-format']);
-    const coreFileMode = (await git(member.root, ['config', '--bool', 'core.filemode'], { optional: true })) !== 'false';
+    const objectFormat = completedGitRead(formatRead);
+    const coreFileMode = completedGitRead(fileModeRead) !== 'false';
     for (const name of names) {
       try {
         await safePath(member.root, name);
@@ -106,9 +123,14 @@ export async function candidateStamp(metadata, manifest) {
   const members = [];
   for (const member of metadata.members) {
     const actual = await validateBinding(member);
-    const index = await git(member.root, ['ls-files', '--stage', '-z']);
-    const changed = await git(member.root, ['diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z']);
-    const untracked = await git(member.root, ['ls-files', '--others', '--exclude-standard', '-z']);
+    const [indexRead, changedRead, untrackedRead] = await Promise.allSettled([
+      git(member.root, ['ls-files', '--stage', '-z']),
+      git(member.root, ['diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z']),
+      git(member.root, ['ls-files', '--others', '--exclude-standard', '-z']),
+    ]);
+    const index = completedGitRead(indexRead);
+    const changed = completedGitRead(changedRead);
+    const untracked = completedGitRead(untrackedRead);
     const documents = new Set(manifest.artifacts.filter(a => a.kind === 'git' && a.repositoryId === member.repositoryId).map(a => a.path));
     const included = name => !documents.has(name) && (!name.startsWith('.sdlc/') || name === '.sdlc/config.json');
     const indexed = index.split('\0').filter(Boolean).filter(entry => included(entry.slice(entry.indexOf('\t') + 1)));
@@ -269,13 +291,38 @@ export async function invalidateEnvironmentAssurance(store, workItemId, environm
     return { invalidated: true, environments: affected };
   }, { allowRecoveryRequired: true });
 }
-export function checkTestStart(cycle, records, test, { unitFirstOverride = false } = {}) {
+export function checkTestStart(cycle, records, test, { unitFirstOverride = false, clock = Date } = {}) {
   requireThat(cycle, 'EVIDENCE', 'Start a validation cycle first');
   if (testCheckpoint(test) === 'pre-review' && test.level !== 'unit' && !unitFirstOverride) {
     const units = cycleTests(cycle).filter(t => testCheckpoint(t) === 'pre-review' && t.level === 'unit');
-    requireThat(units.every(t => currentTestEvidence(cycle, records, t)?.status === 'Passed'),
+    requireThat(units.every(t => currentTestEvidence(cycle, records, t, clock)?.status === 'Passed'),
       'UNIT_FIRST', 'Run the full required local unit suite before other local tests');
   }
+}
+function testEvidenceAction(metadata, test, input, operation) {
+  return operation ? { ...operation.action, operationId: operation.id } : {
+    class: 'test', repositoryId: metadata.coordinatorId, environment: test.environment,
+    testId: test.id, owner: input.owner ?? test.owner, host: input.host ?? test.location,
+  };
+}
+function unitCompletedBefore(cycle, records, unit, startedAt, clock) {
+  const current = currentTestEvidence(cycle, records, unit, clock);
+  if (current?.status !== 'Passed' || current.expectedMet !== true ||
+      current.owner !== unit.owner || current.host !== unit.location ||
+      !current.evidenceRef || current.activity !== undefined && current.activity !== 'complete') return false;
+  let completedAt = current.sourceCompletedAt;
+  if (unit.mode === 'automated' && completedAt === undefined) {
+    completedAt = verifiedOperationCompletedAt(current, records);
+  }
+  if (unit.mode !== 'automated' && completedAt === undefined) {
+    completedAt = current.sourceObservedAt !== undefined ? current.sourceObservedAt :
+      current.operationId ? lookupOperation(records, current.operationId)?.updatedAt :
+        current.eventId ? records.find(record => record.id === current.eventId)?.occurredAt :
+          current.observedAt;
+  }
+  const completed = Date.parse(completedAt ?? '');
+  const started = Date.parse(startedAt ?? '');
+  return Number.isFinite(completed) && Number.isFinite(started) && completed <= started;
 }
 async function recordTestInTransaction(store, input, tx) {
   object(input, ['workItemId', 'cycleId', 'testId', 'status', 'evidenceRef', 'runId', 'artifactId', 'deploymentId', 'operationId', 'expectedMet', 'owner', 'host', 'activity', 'eventId'],
@@ -373,16 +420,22 @@ async function recordTestInTransaction(store, input, tx) {
           'EVIDENCE', 'A failed test operation cannot produce a passing test result');
         if (operation.expectedMet !== undefined) requireThat(operation.expectedMet === input.expectedMet,
           'EVIDENCE', 'Test evidence expected-result evaluation differs from its operation');
+        const normalized = tx.normalizedImports?.get(test.id);
+        if (normalized) requireThat(
+          operation.action.environment === 'local' && !operation.resultProof ?
+            normalized.context.producer.executionRef === operation.id &&
+              normalized.context.jobRef === operation.requestFingerprint :
+            digest(operation.resultProof?.executionIdentity ?? null) === digest(normalized.context.producer) &&
+              operation.resultProof?.attemptCapability === normalized.context.attemptCapability,
+          'PROVENANCE', 'Normalized report belongs to a different managed execution or attempt');
       }
     }
-    const testAction = operation ? { ...operation.action, operationId: operation.id } : {
-      class: 'test', repositoryId: tx.metadata.coordinatorId, environment: test.environment,
-      testId: test.id, owner: input.owner ?? test.owner,
-      host: input.host ?? test.location,
-    };
+    const testAction = testEvidenceAction(tx.metadata, test, input, operation);
     const unitFirstOverride = applicableOverride(tx.all(), 'unit-first', testAction,
       { cycleId: cycle.id, clock: store.clock });
-    checkTestStart(cycle, tx.all(), test, { unitFirstOverride: Boolean(unitFirstOverride) });
+    if (!(tx.normalizedImports?.has(test.id) && input.status === 'NotRun')) {
+      checkTestStart(cycle, tx.all(), test, { unitFirstOverride: Boolean(unitFirstOverride), clock: store.clock });
+    }
     if (test.environment === 'STAGING') {
       const deployment = tx.get(cycle.deployments.STAGING);
       testAction.repositoryId = deployment?.repositoryId ??
@@ -450,6 +503,13 @@ async function recordTestInTransaction(store, input, tx) {
         input.owner === test.owner && input.host === test.location,
       'HOST',
       'Execution owner/location does not match the effective Test Plan contract');
+      if (tx.normalizedImports?.has(test.id) && test.environment !== 'local') {
+        const artifact = tx.get(cycle.artifacts[test.environment]);
+        requireThat(artifact?.type === 'artifact' && artifact.artifactId === input.artifactId &&
+          tx.normalizedImports.get(test.id).context.artifacts.some(item =>
+          item.sha256 === artifact.artifactSha256), 'EVIDENCE',
+        'Normalized environment evidence did not test the current deployed artifact');
+      }
     }
     const evidence = { type: 'test-evidence', id: newId('evidence'), workItemId: input.workItemId,
       sequence: Math.max(cycle.lastEvidenceSequence ?? 0,
@@ -463,9 +523,16 @@ async function recordTestInTransaction(store, input, tx) {
       evidence.host ??= operation.action.host;
       if (operation.status === 'cancelled') evidence.activity = 'cancelled';
     }
+    const imported = tx.normalizedImports?.get(test.id);
+    if (imported) Object.assign(evidence, imported.source, {
+      configDigest: imported.context.configDigest,
+      executionSources: structuredClone(imported.context.sources),
+      executionSourceDigest: digest(imported.context.sources),
+      retainedPayloadRef: imported.ref,
+    });
     requireThat(observationAfterReset(cycle, tx.all(), evidence), 'STALE',
       'Result belongs to an execution before the current reset barrier');
-    await bindExecutionEvidence(store, tx, cycle, test, evidence);
+    await bindExecutionEvidence(store, tx, cycle, test, evidence, { requireIndependentProof: true });
     const committed = lookupTestEvidence(cycle, tx.all(), evidence.id);
     if (committed) {
       const content = ({ sequence, observedAt, ...record }) => record;
@@ -478,8 +545,8 @@ async function recordTestInTransaction(store, input, tx) {
     appendTestObservation(tx, cycle, evidence);
     selectTestObservation(cycle, test.id, currentTestEvidence(cycle, tx.all(), test, store.clock));
     cycle.lastEvidenceSequence = evidence.sequence;
-    cycle.step = stagePassed(cycle, tx.all(), 'DEV') ? 'awaiting-dev-completion' :
-      stagePassed(cycle, tx.all(), 'local') ? 'awaiting-local-completion' : 'local-testing';
+    cycle.step = stagePassed(cycle, tx.all(), 'DEV', store.clock) ? 'awaiting-dev-completion' :
+      stagePassed(cycle, tx.all(), 'local', store.clock) ? 'awaiting-local-completion' : 'local-testing';
     tx.put(cycle);
     cycle.pendingPlanSync = true;
     return evidence;
@@ -506,6 +573,135 @@ export async function recordTests(store, input) {
         tx.testAdmissionSnapshot.specification.digest,
     'STALE', 'Candidate or specification changed during evidence admission');
     return evidence;
+  });
+  await synchronizeTestPlan(store, input.workItemId);
+  return result;
+}
+function retainReadinessObject(tx, workItemId, content) {
+  return stageValidationObject(tx, {
+    schemaVersion: 1, kind: 'execution-payload', workItemId, content,
+    provenance: { sourceDigest: digest(content), sanitizer: 'sdlc-normalized-v1' },
+  });
+}
+function retainReadinessBundle(tx, workItemId, bundle) {
+  const mappings = bundle.objects.map(entry => ({
+    originalRef: entry.ref, retainedRef: retainReadinessObject(tx, workItemId, entry.value),
+  }));
+  const objectMapRefs = [];
+  for (let index = 0; index < mappings.length; index += OUTCOME_PAGE_SIZE) {
+    objectMapRefs.push(retainReadinessObject(tx, workItemId, {
+      kind: 'normalized-object-map', index: objectMapRefs.length,
+      objects: mappings.slice(index, index + OUTCOME_PAGE_SIZE),
+    }));
+  }
+  return retainReadinessObject(tx, workItemId, {
+    kind: 'normalized-readiness-import', manifest: bundle.manifest,
+    manifestRef: bundle.manifestRef, objectMapRefs,
+  });
+}
+export async function recordReadiness(store, input) {
+  object(input, ['workItemId', 'cycleId', 'evaluation', 'bindings'],
+    ['workItemId', 'cycleId', 'evaluation']);
+  id(input.workItemId); id(input.cycleId);
+  requireReadinessEvaluation(input.evaluation);
+  const bindings = input.bindings ?? [];
+  requireThat(Array.isArray(bindings) && new Set(bindings.map(binding => binding.testId)).size ===
+    bindings.length, 'INPUT', 'Supply unique managed case bindings');
+  for (const binding of bindings) {
+    object(binding, ['testId', 'operationId', 'eventId', 'artifactId', 'deploymentId'], ['testId']);
+    Object.values(binding).forEach(value => id(value));
+  }
+  const result = await store.transaction(input.workItemId, async tx => {
+    const cycle = currentCycle(tx.all(), tx.checkpoint);
+    requireThat(cycle?.id === input.cycleId && tx.checkpoint.phase === 'coding' &&
+      !assurancePending(cycle, tx.all()), 'STALE',
+    'Normalized admission requires the legitimate current Coding validation cycle');
+    const sources = await candidateSnapshot(tx.metadata, tx.manifest);
+    const specification = await resolveTestSpecification(store, input.workItemId, cycleTests(cycle));
+    requireThat(candidateContentDigest(sources) === cycle.candidateDigest &&
+      digest(sources) === digest(cycle.sources) && specification.digest === cycle.testSpecDigest,
+    'STALE', 'Candidate or Test Plan changed before normalized admission');
+    requireCatalogSpecification(cycle, specification);
+    tx.testAdmissionSnapshot = { sources, specification };
+    const original = requireReadinessEvaluation(input.evaluation);
+    const tests = cycleTests(cycle);
+    requireThat(original.spec.cases.every(test => tests.some(planned => planned.id === test.id)) &&
+      bindings.every(binding => original.spec.cases.some(test => test.id === binding.testId)),
+    'EVIDENCE', 'Normalized cases or bindings are not part of the current managed Test Plan');
+    const barriers = original.spec.cases.flatMap(test => {
+      const barrier = testResetBarrier(cycle, test.id);
+      return barrier ? [{ testId: test.id, notBefore: barrier.at }] : [];
+    });
+    const evaluation = refreshReadinessEvaluation(input.evaluation, {
+      now: now(store.clock), barriers,
+    });
+    const proofs = readinessCaseProofs(evaluation);
+    for (const proof of proofs) {
+      const test = tests.find(test => test.id === proof.definition.id);
+      const trace = specification.traceability?.find(row => row.testId === test.id);
+      requireThat(proof.context.candidateDigest === cycle.candidateDigest &&
+        proof.context.testSpecDigest === cycle.testSpecDigest &&
+        proof.context.configDigest === cycle.configDigest &&
+        sameExecutionSources(proof.context.sources, cycle.sources, { requireRevision: test.environment !== 'local' }) &&
+        proof.context.environment === test.environment &&
+        proof.definition.mode === test.mode && proof.definition.owner === test.owner &&
+        proof.definition.location === test.location &&
+        proof.definition.checkpoint === testCheckpoint(test) &&
+        proof.definition.expectedDigest === digest(test.expected) &&
+        (!trace || digest([...proof.definition.conditions].sort()) ===
+          digest([...trace.conditions].sort())),
+      'EVIDENCE', 'Normalized execution does not match the authoritative managed case definition');
+    }
+    const importRef = retainReadinessBundle(tx, input.workItemId, createEvidenceBundle(evaluation));
+    const evidence = [];
+    const blocked = [];
+    tx.normalizedImports = new Map();
+    proofs.sort((left, right) => Number(tests.find(test => test.id === right.definition.id).level === 'unit') -
+      Number(tests.find(test => test.id === left.definition.id).level === 'unit') ||
+      (left.source?.sourceObservedAt ?? '').localeCompare(right.source?.sourceObservedAt ?? ''));
+    for (const proof of proofs) {
+      const test = tests.find(test => test.id === proof.definition.id);
+      const binding = bindings.find(binding => binding.testId === test.id) ?? {};
+      const operation = binding.operationId ? lookupOperation(tx.all(), binding.operationId) : null;
+      const unitFirstOverride = applicableOverride(tx.all(), 'unit-first',
+        testEvidenceAction(tx.metadata, test, {}, operation), { cycleId: cycle.id, clock: store.clock });
+      const units = tests.filter(test => testCheckpoint(test) === 'pre-review' && test.level === 'unit');
+      if (testCheckpoint(test) === 'pre-review' && test.level !== 'unit' &&
+          !unitFirstOverride && !units.every(unit => unitCompletedBefore(cycle, tx.all(), unit,
+            proof.source?.sourceStartedAt, store.clock))) {
+        const problem = { testId: test.id, code: 'UNIT_FIRST',
+          message: 'Every required local unit execution must complete successfully before this execution starts' };
+        blocked.push(problem);
+        proof.status = 'NotRun';
+        proof.blockers = [...proof.blockers, problem];
+        proof.source = null;
+      }
+      const barrier = testResetBarrier(cycle, test.id);
+      if (proof.status === 'NotRun' && barrier && proof.source &&
+          Date.parse(proof.source.sourceObservedAt) <= Date.parse(barrier.at)) proof.source = null;
+      const assertionPageRefs = [];
+      for (let index = 0; index < proof.selected.length; index += OUTCOME_PAGE_SIZE) {
+        assertionPageRefs.push(retainReadinessObject(tx, input.workItemId, {
+          kind: 'normalized-case-observations', testId: test.id, index: assertionPageRefs.length,
+          observations: proof.selected.slice(index, index + OUTCOME_PAGE_SIZE),
+        }));
+      }
+      const ref = retainReadinessObject(tx, input.workItemId, {
+        kind: 'normalized-case-admission', cycleId: cycle.id, testId: test.id,
+        status: proof.status, importRef, assertionPageRefs, blockers: proof.blockers,
+      });
+      tx.normalizedImports.set(test.id, { ...proof, ref });
+      evidence.push(await recordTestInTransaction(store, {
+        ...binding, workItemId: input.workItemId, cycleId: cycle.id, testId: test.id,
+        status: proof.status, expectedMet: proof.status === 'Passed',
+        owner: test.owner, host: test.location, evidenceRef: retainedPayloadReference(ref),
+        activity: proof.status === 'NotRun' ? 'blocked' : 'complete',
+      }, tx));
+    }
+    requireThat(digest(await candidateSnapshot(tx.metadata, tx.manifest)) === digest(sources) &&
+      (await resolveTestSpecification(store, input.workItemId)).digest === specification.digest,
+    'STALE', 'Candidate or Test Plan changed during normalized admission');
+    return { evaluation, evidence, blocked, importRef };
   });
   await synchronizeTestPlan(store, input.workItemId);
   return result;

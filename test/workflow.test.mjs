@@ -1,9 +1,14 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "direct", "paths": ["src/decisions.mjs", "src/policy.mjs", "src/recovery.mjs", "src/staging.mjs", "src/artifacts.mjs"]}]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { artifact, fixture, coding, completeReview, finishFixtureOperation, fixtureArtifact, fixtureBuild, fixtureDeployment, grant, grantPush, observeFixtureRepository, orient, pushAction, pushPermission, registerFixtureProviderRequest, registerFixtureProviderResult, syntheticPushAction, testDefinitions } from './helpers.mjs';
-import { startCycle, recordTest, recordArtifact, stagingHandoff } from '../src/validation.mjs';
+import { startCycle, recordArtifact, recordTest as recordProductionTest, stagingHandoff } from '../src/validation.mjs';
+import { recordFixtureTest as recordTest } from './helpers.mjs';
 import { currentCycle } from '../src/authority.mjs';
 import { evaluatePolicy } from '../src/policy.mjs';
 import { prepareOperation, markDispatching, recordOperation, pruneWork, addConflict, resolveConflict } from '../src/operations.mjs';
@@ -12,9 +17,11 @@ import { evaluateGate as gate } from '../src/gate.mjs';
 import { nextAction, resume, acknowledgeContext } from '../src/recovery.mjs';
 import { registerArtifact } from '../src/artifacts.mjs';
 import { formatAudit, recordAudit } from '../src/audit.mjs';
+import { digest } from '../src/core.mjs';
+import { lookupOperation } from '../src/validation-evidence.mjs';
 
 async function localPass(f) {
-  const { cycle } = await startCycle(f.store, { workItemId: f.workItemId, tests: testDefinitions(), configDigest: 'config-v1', cause: 'initial validation' });
+  const { cycle } = await startCycle(f.store, { workItemId: f.workItemId, tests: testDefinitions(), configDigest: digest('config-v1'), cause: 'initial validation' });
   for (const testId of ['T-unit', 'T-integration']) await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id,
     testId, status: 'Passed', expectedMet: true, evidenceRef: `fixture:${testId}`, owner: 'agent', host: 'local' });
   return (await f.store.load(f.workItemId)).records.find(r => r.id === cycle.id);
@@ -22,8 +29,8 @@ async function localPass(f) {
 function binding(cycle, extra = {}) { return { cycleId: cycle.id, candidateDigest: cycle.candidateDigest, testSpecDigest: cycle.testSpecDigest, configDigest: cycle.configDigest, ...extra }; }
 async function configuration(f) {
   const config = { defaultBranch: 'refs/heads/main', environments: {
-    DEV: { target: 'dev-resource', configDigest: 'config-v1', allowedStages: ['DEV'] },
-    STAGING: { target: 'staging-resource', configDigest: 'config-v1',
+    DEV: { target: 'dev-resource', configDigest: digest('config-v1'), allowedStages: ['DEV'] },
+    STAGING: { target: 'staging-resource', configDigest: digest('config-v1'),
       allowedStages: ['STAGING'],
       execution: { owner: 'user', locations: ['authorized-machine'] } },
   } };
@@ -68,10 +75,10 @@ test('T-20/T-22 cumulative gates preserve per-session compaction, push and phase
 test('T-24/T-26/T-29 local unit-first reset never authorizes DEV or STAGING automatically', async t => {
   const f = await coding(await fixture(t));
   const config = await configuration(f);
-  let cycle = (await startCycle(f.store, { workItemId: f.workItemId, tests: testDefinitions(), configDigest: 'config-v1', cause: 'first' })).cycle;
-  await assert.rejects(recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id, testId: 'T-integration', status: 'Passed', expectedMet: true, evidenceRef: 'fixture:integration', owner: 'agent', host: 'local' }), { code: 'UNIT_FIRST' });
+  let cycle = (await startCycle(f.store, { workItemId: f.workItemId, tests: testDefinitions(), configDigest: digest('config-v1'), cause: 'first' })).cycle;
+  await assert.rejects(recordProductionTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id, testId: 'T-integration', status: 'Passed', expectedMet: true, evidenceRef: 'fixture:integration', owner: 'agent', host: 'local' }), { code: 'UNIT_FIRST' });
   cycle = await localPass(f);
-  const action = { class: 'build', repositoryId: 'primary', environment: 'DEV', target: 'dev-resource', configDigest: 'config-v1', stages: ['DEV'], monitorCapability: true };
+  const action = { class: 'build', repositoryId: 'primary', environment: 'DEV', target: 'dev-resource', configDigest: digest('config-v1'), stages: ['DEV'], monitorCapability: true };
   let state = await f.store.load(f.workItemId);
   assert.equal(evaluatePolicy(state, action, { configuration: config }).allowed, false);
   await completeReview(f, cycle);
@@ -80,7 +87,7 @@ test('T-24/T-26/T-29 local unit-first reset never authorizes DEV or STAGING auto
   assert.equal(evaluatePolicy(state, action, { configuration: config, clock: f.clock }).allowed, true);
   await assert.rejects(grant(f, 'staging-promotion', binding(cycle, { target: 'staging-resource', completedStage: 'DEV' })), { code: 'EVIDENCE' });
   await fs.writeFile(path.join(f.repo, 'fix.mjs'), 'export const fixed = true;');
-  const reset = await startCycle(f.store, { workItemId: f.workItemId, tests: testDefinitions(), configDigest: 'config-v1', cause: 'fix after tests' });
+  const reset = await startCycle(f.store, { workItemId: f.workItemId, tests: testDefinitions(), configDigest: digest('config-v1'), cause: 'fix after tests' });
   assert.equal(reset.reset, true);
   assert.equal(reset.cycle.step, 'local-testing');
   assert.deepEqual(reset.cycle.results, {});
@@ -351,7 +358,7 @@ test('T-31 once-only out-of-scope documentation and execution authority remain d
 test('T-12/T-20 scoped unit-first override permits truthful integration evidence', async t => {
   const f = await coding(await fixture(t));
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'unit-first deviation' })).cycle;
+    configDigest: digest('v1'), cause: 'unit-first deviation' })).cycle;
   await grant(f, 'override', { rules: ['unit-first'], reason: 'User accepts running this integration check before units',
     scope: { actions: ['test'], environment: 'local' } });
   const evidence = await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id,
@@ -364,7 +371,7 @@ test('T-12/T-20 scoped unit-first override permits truthful integration evidence
 test('T-12/T-20 once-only unit-first override remains usable at evidence recording', async t => {
   const f = await coding(await fixture(t));
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'once-only unit-first deviation' })).cycle;
+    configDigest: digest('v1'), cause: 'once-only unit-first deviation' })).cycle;
   await grant(f, 'override', { rules: ['unit-first'],
     reason: 'User authorizes one integration execution before units',
     scope: { actions: ['test'], environment: 'local' }, lifetime: { kind: 'once' } });
@@ -380,8 +387,10 @@ test('T-12/T-20 once-only unit-first override remains usable at evidence recordi
     requestFingerprint: prepared.operation.requestFingerprint,
     evidenceRef: 'fixture:failed-test-operation', providerStatus: 'failed', expectedMet: false });
   await pruneWork(f.store, f.workItemId);
-  assert.ok((await f.store.records(f.workItemId)).some(record =>
-    record.id === prepared.operation.id));
+  const pruned = await f.store.load(f.workItemId);
+  const retained = lookupOperation(pruned.records, prepared.operation.id);
+  assert.equal(retained.status, 'failed');
+  assert.equal(retained.requestFingerprint, prepared.operation.requestFingerprint);
   const evidence = await recordTest(f.store, { workItemId: f.workItemId,
     cycleId: cycle.id, testId: 'T-integration', operationId: prepared.operation.id,
     status: 'Failed', expectedMet: false, evidenceRef: 'fixture:once-integration',
@@ -400,7 +409,7 @@ test('T-12/T-20 once-only unit-first override remains usable at evidence recordi
   await fs.unlink(path.join(f.store.workPath(f.workItemId), 'evidence', 'fabricated-operation.json'));
   await fs.writeFile(path.join(f.repo, 'new-cycle.mjs'), 'export const next = true;\n');
   const next = await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'new cycle after once-only execution' });
+    configDigest: digest('v1'), cause: 'new cycle after once-only execution' });
   await assert.rejects(recordTest(f.store, { workItemId: f.workItemId,
     cycleId: next.cycle.id, testId: 'T-integration', operationId: prepared.operation.id,
     status: 'Failed', expectedMet: false, evidenceRef: 'fixture:historical-operation',
@@ -412,7 +421,7 @@ test('T-12/T-20 test evidence preserves a secondary repository override scope', 
   await f.store.bindMember({ workItemId: f.workItemId, repositoryId: 'secondary',
     cwd: secondary.repo, sessionId: 'secondary-session' });
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'secondary repository test' })).cycle;
+    configDigest: digest('v1'), cause: 'secondary repository test' })).cycle;
   await grant(f, 'override', { rules: ['unit-first'],
     reason: 'User authorizes one secondary integration execution before units',
     scope: { repositoryIds: ['secondary'], actions: ['test'], environment: 'local' },
@@ -437,7 +446,7 @@ test('T-12/T-20 test evidence preserves a secondary repository override scope', 
 test('T-18 superseded current-cycle evidence is pruned from the active working set', async t => {
   const f = await coding(await fixture(t));
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'evidence retention' })).cycle;
+    configDigest: digest('v1'), cause: 'evidence retention' })).cycle;
   for (let index = 0; index < 30; index++) {
     await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id,
       testId: 'T-unit', status: 'Passed', expectedMet: true,
@@ -470,7 +479,7 @@ test('T-08/T-13 next action supports local-only, paused and completed work', asy
     '| T-unit | FR-001 | AC-001.1 | local | unit | pre-review | automated | agent | local | Unit passes | test/unit.mjs | NotRun |\n' +
     '| T-followup | FR-001 | AC-001.1 | local | workflow | post-review | automated | agent | local | Follow-up passes | test/followup.mjs | NotRun |\n');
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'local-only work' })).cycle;
+    configDigest: digest('v1'), cause: 'local-only work' })).cycle;
   await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id, testId: 'T-unit',
     status: 'Passed', expectedMet: true, evidenceRef: 'fixture:unit', owner: 'agent', host: 'local' });
   await completeReview(f, cycle);
@@ -495,7 +504,7 @@ test('T-13 STAGING-only Test Plan is not misreported as local-only completion', 
     '| T-unit | FR-001 | AC-001.1 | local | unit | pre-review | automated | agent | local | Unit passes | test/unit.mjs | NotRun |\n' +
     '| T-staging | FR-001 | AC-001.1 | STAGING | integration | STAGING | automated | user | authorized-machine | STAGING passes | test/staging.mjs | NotRun |\n');
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'invalid STAGING-only plan' })).cycle;
+    configDigest: digest('v1'), cause: 'invalid STAGING-only plan' })).cycle;
   await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id, testId: 'T-unit',
     status: 'Passed', expectedMet: true, evidenceRef: 'fixture:unit', owner: 'agent', host: 'local' });
   await completeReview(f, cycle);
@@ -509,9 +518,9 @@ test('T-06/T-13 STAGING-only guidance combines wildcard targets with secondary r
     cwd: secondary.repo, sessionId: 'secondary-session' });
   await writeJson(path.join(f.repo, '.sdlc/config.json'), { defaultBranch: 'refs/heads/main',
     environments: {
-      DEV: { target: 'dev-target', configDigest: 'v1', allowedStages: ['DEV'] },
+      DEV: { target: 'dev-target', configDigest: digest('v1'), allowedStages: ['DEV'] },
       STAGING: { target: 'staging-target',
-        configDigest: 'v1', allowedStages: ['STAGING'],
+        configDigest: digest('v1'), allowedStages: ['STAGING'],
         execution: { owner: 'user', locations: ['authorized-machine'] } },
     } });
   await observeCommittedFixture(f);
@@ -521,7 +530,7 @@ test('T-06/T-13 STAGING-only guidance combines wildcard targets with secondary r
     '| T-unit | FR-001 | AC-001.1 | local | unit | pre-review | automated | agent | local | Unit passes | test/unit.mjs | NotRun |\n' +
     '| T-staging | FR-001 | AC-001.1 | STAGING | integration | STAGING | automated | user | authorized-machine | STAGING passes | test/staging.mjs | NotRun |\n');
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'cross-scoped STAGING-only plan' })).cycle;
+    configDigest: digest('v1'), cause: 'cross-scoped STAGING-only plan' })).cycle;
   await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id, testId: 'T-unit',
     status: 'Passed', expectedMet: true, evidenceRef: 'fixture:unit', owner: 'agent', host: 'local' });
   await completeReview(f, cycle);
@@ -551,12 +560,12 @@ test('T-06/T-13 STAGING-only guidance combines wildcard targets with secondary r
     scope: { actions: ['build'], environment: 'STAGING' } });
   assert.match(nextAction(await f.store.load(f.workItemId), f.clock),
     /Prepare the concrete STAGING build\/deployment/u);
-  const pipelineState = structuredClone(await f.store.load(f.workItemId));
+  const pipelineState = await f.store.load(f.workItemId);
   pipelineState.records.push({ type: 'operation', id: 'op-implicit-staging', cycleId: cycle.id,
     class: 'pipeline', status: 'running', action: { class: 'pipeline', stages: ['STAGING'] } });
   assert.match(nextAction(pipelineState, f.clock),
     /Monitor or reconcile the current STAGING operation/u);
-  const revokedPipelineState = structuredClone(pipelineState);
+  const revokedPipelineState = { ...pipelineState, records: [...pipelineState.records] };
   revokedPipelineState.records.push({ type: 'event', id: 'event-revoke-pipeline-promotion',
     kind: 'revocation', effect: { revokes: [promotion.event.id] } });
   assert.match(nextAction(revokedPipelineState, f.clock),
@@ -569,9 +578,9 @@ test('T-06/T-13 explicit DEV prerequisite overrides allow STAGING-only progressi
   const f = await coding(await fixture(t));
   await writeJson(path.join(f.repo, '.sdlc/config.json'), { defaultBranch: 'refs/heads/main',
     environments: {
-      DEV: { target: 'dev-target', configDigest: 'v1', allowedStages: ['DEV'] },
+      DEV: { target: 'dev-target', configDigest: digest('v1'), allowedStages: ['DEV'] },
       STAGING: { target: 'staging-target',
-        configDigest: 'v1', allowedStages: ['STAGING'],
+        configDigest: digest('v1'), allowedStages: ['STAGING'],
         execution: { owner: 'user', locations: ['authorized-machine'] } },
     } });
   await observeCommittedFixture(f);
@@ -582,7 +591,7 @@ test('T-06/T-13 explicit DEV prerequisite overrides allow STAGING-only progressi
     '| T-unit | FR-001 | AC-001.1 | local | unit | pre-review | automated | agent | local | Unit passes | test/unit.mjs | NotRun |\n' +
     '| T-staging | FR-001 | AC-001.1 | STAGING | integration | STAGING | automated | user | authorized-machine | STAGING passes | test/staging.mjs | NotRun |\n');
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'overridden STAGING-only plan' })).cycle;
+    configDigest: digest('v1'), cause: 'overridden STAGING-only plan' })).cycle;
   await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id, testId: 'T-unit',
     status: 'Passed', expectedMet: true, evidenceRef: 'fixture:unit', owner: 'agent', host: 'local' });
   await completeReview(f, cycle);
@@ -627,7 +636,7 @@ test('T-06/T-13 explicit DEV prerequisite overrides allow STAGING-only progressi
   assert.match(nextAction(await f.store.load(f.workItemId), f.clock),
     /Prepare the concrete STAGING build\/deployment/u);
   const action = { class: 'deploy', repositoryId: 'primary', environment: 'STAGING',
-    target: 'staging-target', configDigest: 'v1', stages: ['STAGING'],
+    target: 'staging-target', configDigest: digest('v1'), stages: ['STAGING'],
     artifactId: stagingArtifact.artifactId, artifactRef: stagingArtifact.artifactRef,
     artifactSha256: stagingArtifact.artifactSha256,
     sourceRevision: stagingArtifact.sourceRevision, monitorCapability: true };
@@ -668,7 +677,7 @@ test('T-06/T-13 explicit DEV prerequisite overrides allow STAGING-only progressi
   await grant(f, 'revocation', { revokes: [promotion.event.id] });
   assert.match(nextAction(await f.store.load(f.workItemId), f.clock),
     /Run handoff staging to resolve/u);
-  const replacementState = structuredClone(await f.store.load(f.workItemId));
+  const replacementState = await f.store.load(f.workItemId);
   replacementState.records.push({ type: 'operation', id: 'op-staging-replacement',
     cycleId: cycle.id, class: 'pipeline', status: 'running',
     action: { class: 'pipeline', implicitEnvironments: ['STAGING'] } });
@@ -693,7 +702,7 @@ test('T-06/T-13 explicit DEV prerequisite overrides allow STAGING-only progressi
     target: 'staging-target' });
   assert.match(nextAction(await f.store.load(f.workItemId), f.clock),
     /Evaluate current PROD PR readiness/u);
-  const failedState = structuredClone(await f.store.load(f.workItemId));
+  const failedState = await f.store.load(f.workItemId);
   failedState.records.find(record => record.id ===
     currentCycle(failedState.records, failedState.checkpoint).deployments.STAGING).status = 'failed';
   assert.match(nextAction(failedState, f.clock), /STAGING deployment is failed/u);
@@ -702,7 +711,7 @@ test('T-13 legacy cycles without checkpoint fields retain DEV/STAGING progressio
   const f = await coding(await fixture(t));
   const cycle = await localPass(f);
   await completeReview(f, cycle);
-  const state = structuredClone(await f.store.load(f.workItemId));
+  const state = await f.store.load(f.workItemId);
   const current = currentCycle(state.records, state.checkpoint);
   for (const test of current.tests) delete test.checkpoint;
   assert.match(nextAction(state, f.clock), /Await DEV authorization/u);
@@ -718,7 +727,7 @@ test('T-13 recovery guidance bounds large later-checkpoint lists', async t => {
     '| T-unit | FR-001 | AC-001.1 | local | unit | pre-review | automated | agent | local | Unit passes | test/unit.mjs | NotRun |\n' +
     `${rows}\n`);
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'large later-checkpoint list' })).cycle;
+    configDigest: digest('v1'), cause: 'large later-checkpoint list' })).cycle;
   await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id,
     testId: 'T-unit', status: 'Passed', expectedMet: true,
     evidenceRef: 'fixture:unit', owner: 'agent', host: 'local' });
@@ -730,7 +739,7 @@ test('T-13 recovery guidance bounds large later-checkpoint lists', async t => {
 test('T-17 once-only PROD authority is reserved for implicit pipeline stages', async t => {
   const f = await coding(await fixture(t));
   await writeJson(path.join(f.repo, '.sdlc/config.json'), { defaultBranch: 'refs/heads/main',
-    environments: { PROD: { target: 'prod-target', configDigest: 'config-v1', allowedStages: ['PROD'] } } });
+    environments: { PROD: { target: 'prod-target', configDigest: digest('config-v1'), allowedStages: ['PROD'] } } });
   const repositoryObservation = await observeCommittedFixture(f);
   const cycle = await localPass(f);
   await completeReview(f, cycle);
@@ -747,7 +756,7 @@ test('T-17 once-only PROD authority is reserved for implicit pipeline stages', a
   const authority = await grant(f, 'permission', { grant: 'prod-execution',
     target: 'prod-target', lifetime: { kind: 'once' } });
   const action = { class: 'pipeline', repositoryId: 'primary', target: 'prod-target',
-    configDigest: 'config-v1', stages: ['PROD'],
+    configDigest: digest('config-v1'), stages: ['PROD'],
     provider: 'fixture', pipeline: 'fixture-prod-pipeline',
     localRepositoryPath: repositoryObservation.localRepositoryPath,
     remoteRepositoryURL: repositoryObservation.remoteRepositoryURL,
@@ -773,8 +782,8 @@ test('T-17 once-only DEV/STAGING authority is reserved for implicit pipeline sta
   const f = await coding(await fixture(t));
   await writeJson(path.join(f.repo, '.sdlc/config.json'), { defaultBranch: 'refs/heads/main',
     environments: {
-      DEV: { target: 'dev-target', configDigest: 'config-v1', allowedStages: ['DEV'] },
-      STAGING: { target: 'staging-target', configDigest: 'config-v1',
+      DEV: { target: 'dev-target', configDigest: digest('config-v1'), allowedStages: ['DEV'] },
+      STAGING: { target: 'staging-target', configDigest: digest('config-v1'),
         allowedStages: ['STAGING'],
         execution: { owner: 'user', locations: ['authorized-machine'] } },
     } });
@@ -786,7 +795,7 @@ test('T-17 once-only DEV/STAGING authority is reserved for implicit pipeline sta
   const dev = await grant(f, 'dev-authorization', { ...cycleBinding, target: 'dev-target',
     completedStage: 'review', lifetime: { kind: 'once' } });
   const devAction = { class: 'pipeline', repositoryId: 'primary', target: 'dev-target',
-    configDigest: 'config-v1', stages: ['DEV'],
+    configDigest: digest('config-v1'), stages: ['DEV'],
     provider: 'fixture', pipeline: 'fixture-dev-pipeline',
     localRepositoryPath: repositoryObservation.localRepositoryPath,
     remoteRepositoryURL: repositoryObservation.remoteRepositoryURL,
@@ -829,7 +838,7 @@ test('T-17 once-only DEV/STAGING authority is reserved for implicit pipeline sta
     completedStage: 'DEV', deploymentId: devDeployment.id,
     lifetime: { kind: 'once' } });
   const stagingAction = { class: 'pipeline', repositoryId: 'primary', target: 'staging-target',
-    configDigest: 'config-v1', stages: ['STAGING'],
+    configDigest: digest('config-v1'), stages: ['STAGING'],
     provider: 'fixture', pipeline: 'fixture-staging-pipeline',
     localRepositoryPath: repositoryObservation.localRepositoryPath,
     remoteRepositoryURL: repositoryObservation.remoteRepositoryURL,
@@ -855,7 +864,7 @@ test('T-17 once-only DEV/STAGING authority is reserved for implicit pipeline sta
     commit: await f.runGit('rev-parse', 'HEAD') });
   await fs.writeFile(path.join(f.repo, 'next-candidate.mjs'), 'export const next = true;\n');
   await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'config-v1', cause: 'retire once-only environment authority' });
+    configDigest: digest('config-v1'), cause: 'retire once-only environment authority' });
   await pruneWork(f.store, f.workItemId);
   const records = await f.store.records(f.workItemId);
   assert.ok(!records.some(record => record.type === 'reservation' &&
@@ -870,12 +879,12 @@ test('T-47 deployment operations require one explicitly resolved environment', a
     environments: {
       DEV: {
         target: 'dev-target',
-        configDigest: 'config-v1',
+        configDigest: digest('config-v1'),
         allowedStages: ['pre-production', 'deploy-app'],
       },
       STAGING: {
         target: 'staging-target',
-        configDigest: 'config-v1',
+        configDigest: digest('config-v1'),
         allowedStages: ['staging-deploy'],
         execution: { owner: 'user', locations: ['authorized-machine'] },
       },
@@ -886,7 +895,7 @@ test('T-47 deployment operations require one explicitly resolved environment', a
       label: 'pre-production',
       environment: 'DEV',
       target: 'dev-target',
-      configDigest: 'config-v1',
+      configDigest: digest('config-v1'),
     }],
     toolAdapters: [{
       toolName: 'fixture_pipeline',
@@ -896,7 +905,7 @@ test('T-47 deployment operations require one explicitly resolved environment', a
         provider: 'ci-provider',
         pipeline: 'application-delivery',
         target: 'dev-target',
-        configDigest: 'config-v1',
+        configDigest: digest('config-v1'),
         stages: ['pre-production'],
         implicitEnvironments: ['pre-production'],
         monitorCapability: true,
@@ -920,7 +929,7 @@ test('T-47 deployment operations require one explicitly resolved environment', a
     provider: 'ci-provider',
     pipeline: 'application-delivery',
     target: 'dev-target',
-    configDigest: 'config-v1',
+    configDigest: digest('config-v1'),
     stages: ['pre-production'],
     implicitEnvironments: ['pre-production'],
     monitorCapability: true,
@@ -1029,7 +1038,7 @@ test('T-47 deployment operations require one explicitly resolved environment', a
     label: 'staging-deploy',
     environment: 'STAGING',
     target: 'dev-target',
-    configDigest: 'config-v1',
+    configDigest: digest('config-v1'),
   });
   const ambiguous = evaluatePolicy(state, {
     ...mapped,
@@ -1051,7 +1060,7 @@ test('T-47 deployment operations require one explicitly resolved environment', a
     repositoryId: 'primary',
     environment: 'PROD',
     target: 'prod-target',
-    configDigest: 'config-v1',
+    configDigest: digest('config-v1'),
     stages: ['unapproved-production-stage'],
     monitorCapability: true,
   }, {
@@ -1059,7 +1068,7 @@ test('T-47 deployment operations require one explicitly resolved environment', a
       environments: {
         PROD: {
           target: 'prod-target',
-          configDigest: 'config-v1',
+          configDigest: digest('config-v1'),
           allowedStages: ['approved-production-stage'],
         },
       },

@@ -4,6 +4,10 @@ import { validateBinding } from './git.mjs';
 import { loadConfig } from './artifacts.mjs';
 import { currentArtifact, publicationDestination } from './current-evidence.mjs';
 import { archiveSupersededObservations, withObservationRetention } from './observation-retention.mjs';
+import { PR_DESCRIPTION_FIELDS, preparePrDescription,
+  prDescriptionWriteConflicts, validatePrDescriptionBinding } from './pr-description.mjs';
+export { preparePrDescription, publishPrDescription,
+  reconcilePrDescription } from './pr-description.mjs';
 export { readArchivedPrFacts } from './observation-retention.mjs';
 import { monitorAssociationKey, readActiveMonitor, readMonitorAssociation,
   runKey as monitorRunKey, withMonitorLocks } from './monitors.mjs';
@@ -222,6 +226,9 @@ export function publicationAuthority(records, pr, clock = Date, { cycleId, allow
   for (const field of ['operationId', 'paths', 'itemId', 'outOfScope', 'environment', 'target']) {
     if (pr[field] !== undefined) action[field] = pr[field];
   }
+  for (const field of ['sourceRevision', 'prId', ...PR_DESCRIPTION_FIELDS]) {
+    if (pr[field] !== undefined) action[field] = pr[field];
+  }
   return activeEvents(records, { clock, cycleId }).find(event => {
     if (event.kind !== 'pr-publication' || event.effect.repositoryId !== pr.repositoryId ||
       event.effect.sourceRef !== pr.sourceRef || event.effect.targetRef !== pr.targetRef ||
@@ -229,6 +236,12 @@ export function publicationAuthority(records, pr, clock = Date, { cycleId, allow
       !['localRepositoryPath', 'remoteRepositoryURL', 'sourceRepositoryURL',
         'target'].every(field => event.effect[field] !== undefined &&
           event.effect[field] === action[field])) return false;
+    if (PR_DESCRIPTION_FIELDS.some(field =>
+      pr[field] !== undefined || event.effect[field] !== undefined)) {
+      if (event.effect.publicationAction !== action.class ||
+          ['sourceRevision', 'prId', ...PR_DESCRIPTION_FIELDS]
+            .some(field => event.effect[field] !== action[field])) return false;
+    }
     if (event.effect.lifetime?.kind === 'once' && !action.operationId) {
       if (!allowUnreservedOnce || records.some(record => record.type === 'reservation' && record.eventId === event.id)) return false;
       action.operationId = `unreserved-${event.id}`;
@@ -239,9 +252,27 @@ export function publicationAuthority(records, pr, clock = Date, { cycleId, allow
 export async function preparePr(store, input) {
   object(input, ['workItemId', 'provider', 'connection', 'repositoryId', 'sourceRef', 'targetRef', 'sourceRevision',
     'targetRevision', 'remoteSourceRevision', 'draft', 'scope', 'matches',
-    'localRepositoryPath', 'remoteRepositoryURL', 'sourceRepositoryURL', 'target'],
+    'localRepositoryPath', 'remoteRepositoryURL', 'sourceRepositoryURL', 'target',
+    'class', 'prId', 'description'],
   ['workItemId', 'remoteSourceRevision', 'matches']);
   requireThat(Array.isArray(input.matches), 'INPUT', 'Supply the provider search result, including an empty list when no PR exists');
+  let description;
+  if (input.description !== undefined) {
+    object(input.description, ['body', 'descriptionVersion'], ['body']);
+    choice(input.class ?? 'pr-create', ['pr-create', 'pr-update'], 'PR publication action');
+    requireThat(input.class === 'pr-update' ? typeof input.prId === 'string' &&
+      input.prId.length > 0 : input.prId === undefined, 'INPUT',
+    'Only PR updates identify the existing provider PR');
+    description = await preparePrDescription(store, {
+      workItemId: input.workItemId, repositoryId: input.repositoryId,
+      sourceRevision: input.sourceRevision, class: input.class ?? 'pr-create',
+      ...input.description,
+    });
+  } else requireThat(input.class === undefined && input.prId === undefined, 'INPUT',
+    'Explicit PR create/update actions require description data');
+  const publication = description ? {
+    ...input, class: input.class ?? 'pr-create', ...description.binding,
+  } : input;
   return store.transaction(input.workItemId, async tx => {
     const member = tx.metadata.members.find(m => m.repositoryId === input.repositoryId);
     requireThat(member?.branch === input.sourceRef, 'BINDING', 'PR source differs from the bound member');
@@ -267,16 +298,26 @@ export async function preparePr(store, input) {
     };
     validatePrIdentity(input, verifiedRepositories);
     requireThat(input.remoteSourceRevision === input.sourceRevision, 'EVIDENCE', 'Commit/push the authorized candidate before publishing a PR');
-    requireThat(publicationAuthority(tx.all(), input, store.clock, {
+    requireThat(publicationAuthority(tx.all(), publication, store.clock, {
       cycleId: currentCycle(tx.all(), tx.checkpoint)?.id, allowUnreservedOnce: true,
     }), 'AUTHORITY', 'PR prerequisite is not publication consent; request the missing authority once');
     const existing = tx.all().find(r => r.type === 'pr-intent' &&
-      prMatches(r, input) &&
+      prMatches(r, publication) &&
       ['localRepositoryPath', 'remoteRepositoryURL', 'sourceRepositoryURL',
-        'target', 'targetRevision', 'draft'].every(field => r[field] === input[field]));
-    if (existing) return { intent: existing, action: existing.status === 'recorded' ? 'reuse' : 'reconcile-before-create' };
+        'target', 'targetRevision', 'draft', 'class', 'prId',
+        ...PR_DESCRIPTION_FIELDS].every(field => r[field] === publication[field]));
+    if (existing) return { intent: existing, ...(description ? { description } : {}),
+      action: existing.status === 'recorded' ? 'reuse' : 'reconcile-before-create' };
+    if (description) requireThat(!tx.all().some(record =>
+      prDescriptionWriteConflicts({ class: publication.class, action: publication }, record)),
+    'UNCERTAIN', 'Reconcile the existing PR write before preparing a changed description');
     const matches = input.matches.filter(pr => prMatches(pr, input) && pr.state === 'active');
     requireThat(matches.length <= 1, 'CONFLICT', 'Multiple appropriate PRs; resolve ambiguity instead of creating another');
+    if (description && publication.class === 'pr-update') {
+      requireThat(matches.length === 1 && matches[0].prId === input.prId &&
+        matches[0].draft === input.draft, 'EVIDENCE',
+      'Description update requires the exact existing PR source/target and draft intent');
+    }
     if (matches.length === 1) {
       requireThat(tx.all().some(record => record.type === 'pr-observation' &&
         currentObservation(tx.all(), record) &&
@@ -293,15 +334,22 @@ export async function preparePr(store, input) {
         record.targetRevision === input.targetRevision &&
         record.state === 'active'), 'EVIDENCE',
       'An existing PR needs a current trusted observation of the exact hosted and source repositories');
-      const pr = normalizedPr(input.workItemId, matches[0], verifiedRepositories);
-      requireThat(pr.draft === input.draft, 'CONFLICT', 'Existing PR draft/ready state differs from requested intent');
-      tx.put(pr);
-      return { pr, action: 'reuse' };
+      if (!description || publication.class === 'pr-create') {
+        const pr = normalizedPr(input.workItemId, matches[0], verifiedRepositories);
+        requireThat(pr.draft === input.draft, 'CONFLICT', 'Existing PR draft/ready state differs from requested intent');
+        tx.put(pr);
+        return { pr, action: 'reuse' };
+      }
     }
-    const { matches: ignored, remoteSourceRevision, ...identity } = input;
+    const { matches: ignored, remoteSourceRevision, description: ignoredDescription,
+      ...identity } = publication;
+    if (description) validatePrDescriptionBinding(description.binding, identity.class);
     const intent = { ...identity, id: `pr-intent-${digest(identity).slice(0, 40)}`, type: 'pr-intent', status: 'prepared', createdAt: now(store.clock) };
     tx.put(intent);
-    return { intent, action: 'prepare-operation', nextAction: 'Prepare and bind a pr-create operation before invoking the provider. Do not retry an uncertain create.' };
+    return { intent, ...(description ? { description } : {}), action: 'prepare-operation',
+      nextAction: description ?
+        `Prepare and bind a ${identity.class} operation before invoking the provider. Do not retry an uncertain write.` :
+        'Prepare and bind a pr-create operation before invoking the provider. Do not retry an uncertain create.' };
   });
 }
 function normalizedPr(workItemId, input, verifiedRepositories) {
@@ -352,8 +400,11 @@ export async function adoptPr(store, input) {
         operation.handle === input.pr.prId,
       'EVIDENCE', 'PR creation requires a causally proven matching provider result');
       requireThat(operation.repositoryId === intent.repositoryId &&
-        ['sourceRef', 'targetRef', 'sourceRevision', 'targetRevision', 'draft']
+        ['sourceRef', 'targetRef', 'sourceRevision', 'targetRevision', 'draft',
+          ...PR_DESCRIPTION_FIELDS]
           .every(field => operation.action[field] === intent[field]) &&
+        (intent.class === undefined || intent.class === operation.class) &&
+        (intent.operationId === undefined || intent.operationId === operation.id) &&
         operation.action.localRepositoryPath === intent.localRepositoryPath &&
         operation.action.remoteRepositoryURL === intent.remoteRepositoryURL &&
         operation.action.sourceRepositoryURL === intent.sourceRepositoryURL &&
@@ -396,7 +447,9 @@ export async function adoptPr(store, input) {
       tx.remove(`facts-${pr.id}`);
     }
     if (intent) {
-      requireThat(intent.status !== 'recorded' || intent.prRecordId === pr.id,
+      requireThat(intent.status !== 'recorded' || intent.prRecordId === pr.id ||
+        intent.descriptionDigest !== undefined && intent.prRecordId === undefined &&
+          intent.operationId === input.operationId,
         'ID_CONFLICT', 'Recorded PR intent cannot be reassigned to another PR');
       intent.status = 'recorded'; intent.prRecordId = pr.id; tx.put(intent);
     }
@@ -429,9 +482,32 @@ export async function updatePrFacts(store, input) {
   if (input.mergeContext) object(input.mergeContext, ['sourceRevision', 'targetRevision', 'mergeRevision', 'evidenceRef'],
     ['sourceRevision', 'targetRevision', 'mergeRevision', 'evidenceRef']);
   if (input.runMonitorRefs) strings(input.runMonitorRefs, 'run monitor references', 30);
+  const persistFacts = verifiedMonitorRefs => store.transaction(input.workItemId, tx => {
+    const pr = tx.get(input.prRecordId);
+    requireThat(['pr', 'pr-observation'].includes(pr?.type), 'INPUT',
+      'PR record is unavailable');
+    requireThat(pr.type !== 'pr-observation' ||
+      currentObservation(tx.all(), pr), 'STALE',
+    'PR facts cannot be updated for an older observation');
+    requireThat(pr.sourceRevision === input.sourceRevision &&
+      pr.targetRevision === input.targetRevision,
+    'STALE',
+    'Provider facts do not match the current PR source/target observation');
+    const facts = {
+      ...input,
+      runMonitorRefs: verifiedMonitorRefs,
+      id: `facts-${input.prRecordId}`,
+      type: 'pr-facts',
+      observedAt: now(store.clock),
+    };
+    tx.put(facts);
+    return facts;
+  });
   return withMonitorLocks(store,
     input.checks.flatMap(check => check.runKey ? [check.runKey] : []),
     async () => {
+      // Without monitor claims, only the authoritative transaction needs to scan history.
+      if (!input.checks.length && !input.runMonitorRefs?.length) return persistFacts([]);
       const state = await store.load(input.workItemId);
       const observedPr = state.records.find(record =>
         record.id === input.prRecordId && ['pr', 'pr-observation'].includes(record.type));
@@ -501,27 +577,7 @@ export async function updatePrFacts(store, input) {
         verifiedMonitorRefs.includes(reference)),
       'EVIDENCE',
       'Supplied PR monitor references must resolve to matching verified monitor records');
-      return store.transaction(input.workItemId, tx => {
-        const pr = tx.get(input.prRecordId);
-        requireThat(['pr', 'pr-observation'].includes(pr?.type), 'INPUT',
-          'PR record is unavailable');
-        requireThat(pr.type !== 'pr-observation' ||
-          currentObservation(tx.all(), pr), 'STALE',
-        'PR facts cannot be updated for an older observation');
-        requireThat(pr.sourceRevision === input.sourceRevision &&
-          pr.targetRevision === input.targetRevision,
-        'STALE',
-        'Provider facts do not match the current PR source/target observation');
-        const facts = {
-          ...input,
-          runMonitorRefs: verifiedMonitorRefs,
-          id: `facts-${input.prRecordId}`,
-          type: 'pr-facts',
-          observedAt: now(store.clock),
-        };
-        tx.put(facts);
-        return facts;
-      });
+      return persistFacts(verifiedMonitorRefs);
     });
 }
 export function evaluateReadiness(records, input, { clock = Date, maxAgeMs = 60000, cycle } = {}) {

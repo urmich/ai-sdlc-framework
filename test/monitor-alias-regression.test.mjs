@@ -1,3 +1,14 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "variants": [
+    {"expression": "`FR-059 ${order} non-Azure aliases have exactly one public poll owner`", "domains": {"order": ["historical-first", "current-first"]}},
+    {"expression": "`FR-059 ${order} non-Azure no-attempt aliases use trusted adapter proof`", "domains": {"order": ["historical-first", "current-first"]}},
+    {"expression": "`FR-059/063 ${order} archived alias attaches retain bytes and cannot restart polling`", "domains": {"order": ["historical-first", "current-first"]}},
+    {"expression": "`FR-063 ${order} alias attach racing archive leaves one immutable history record`", "domains": {"order": ["historical-first", "current-first"]}},
+    {"expression": "`FR-059 different ${field} is not conflated with a known historical attempt`", "domains": {"field": ["provider", "connection", "scope", "definition", "missing definition", "run", "attempt", "unknown attempt", "historical unknown attempt"]}},
+    {"expression": "`FR-059 ${name} does not prove historical/current equivalence`", "domains": {"name": ["missing adapter", "link-only adapter", "unknown adapter capability", "incompatible adapter capability", "unknown distinct attempt", "unknown provider attempt"]}}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
@@ -116,9 +127,16 @@ for (const order of ['historical-first', 'current-first']) {
 
 test('FR-059 concurrent non-Azure alias attaches and competing claims admit one poll owner', async t => {
   const store = await fixture(t);
-  const [historical, current] = await Promise.all([
+  const attached = await Promise.allSettled([
     attach(store, identity()), attach(store, currentIdentity()),
   ]);
+  assert.ok(attached.some(result => result.status === 'fulfilled'));
+  for (const result of attached.filter(result => result.status === 'rejected')) {
+    assert.equal(result.reason.code, 'LOCK_BUSY');
+  }
+  const identities = [identity(), currentIdentity()];
+  const [historical, current] = await Promise.all(attached.map((result, index) =>
+    result.status === 'fulfilled' ? result.value : attach(store, identities[index])));
   assert.equal(historical.key, current.key);
   const claims = await Promise.allSettled([
     claimMonitor(store, { runKey: historical.key, workerId: 'historical-worker' }),
@@ -132,7 +150,11 @@ test('FR-059 concurrent non-Azure alias attaches and competing claims admit one 
     beginPoll(store, worker(claimed[0].value)),
   ]);
   assert.equal(polls.filter(result => result.status === 'fulfilled').length, 1);
-  assert.equal(polls.find(result => result.status === 'rejected').reason.code, 'MONITOR');
+  const duplicate = polls.find(result => result.status === 'rejected');
+  assert.ok(['MONITOR', 'LOCK_BUSY'].includes(duplicate.reason.code));
+  if (duplicate.reason.code === 'LOCK_BUSY') {
+    await assert.rejects(beginPoll(store, worker(claimed[0].value)), { code: 'MONITOR' });
+  }
   assert.deepEqual((await dueMonitors(store)).map(record => ({
     key: record.runKey, workerId: record.workerId, inFlight: record.inFlight,
   })), [{ key: historical.key, workerId: claimed[0].value.workerId, inFlight: true }]);
@@ -183,12 +205,35 @@ for (const order of ['historical-first', 'current-first']) {
     const first = await attach(store, identities[0]);
     await complete(store, first);
     const before = await fs.readFile(activePath(store, first.key));
-    const [pruned, attached] = await Promise.all([
-      pruneMonitor(store, { runKey: first.key }), attach(store, identities[1]),
-    ]);
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const withWorkItemLocks = store.withWorkItemLocks;
+    store.withWorkItemLocks = async (...args) => {
+      entered.resolve();
+      await release.promise;
+      return withWorkItemLocks.apply(store, args);
+    };
+    const pruning = pruneMonitor(store, { runKey: first.key });
+    let pruned;
+    try {
+      // Pruning owns the live monitor lock until dependency inspection completes.
+      await Promise.race([entered.promise, pruning]);
+      const lock = `${activePath(store, first.key)}.lock`;
+      const owner = await fs.readFile(lock);
+      await assert.rejects(attach(store, identities[1]), { code: 'LOCK_BUSY' });
+      assert.deepEqual(await fs.readFile(lock), owner);
+      assert.deepEqual(await fs.readFile(activePath(store, first.key)), before);
+    } finally {
+      release.resolve();
+      store.withWorkItemLocks = withWorkItemLocks;
+      pruned = await pruning;
+    }
+    const attached = await attach(store, identities[1]);
     assert.equal(pruned.archived, true);
     assert.equal(attached.key, first.key);
     assert.deepEqual(await fs.readFile(archivePath(store, first.key)), before);
+    assert.deepEqual(await fs.readdir(path.dirname(archivePath(store, first.key))),
+      [`${first.key}.json`]);
     assert.equal(await readActiveMonitor(store, first.key), null);
     assert.equal(await readMonitor(store, runKey(identities[1])), null);
     assert.deepEqual(await dueMonitors(store), []);

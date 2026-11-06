@@ -1,3 +1,15 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "direct", "paths": ["src/pr.mjs", "src/store.mjs", "src/validation-evidence.mjs"]}],
+  "plannedCases": [
+    {"id": "T-PRD010", "selectors": [
+      {"name": "T-PRD010 empty PR checks persist exact facts with one authoritative history load", "parents": []}
+    ]},
+    {"id": "T-PRD013", "selectors": [
+      {"name": "T-PRD013 empty PR checks reject stale identities revisions and corrupt history without writing facts", "parents": []}
+    ]}
+  ]
+};
 import {
   test, assert, fs, path, cli,
   coding, completeReview, fixture, fixtureArtifact, fixtureBuild,
@@ -11,6 +23,98 @@ import {
   linkObservation, prIdentity, publicationFixture, observePushRepository, observeHostedBase,
   prCreateAction, successfulCheckMonitor, reviewedCoding,
 } from './pr-support.mjs';
+import { retentionFixture, refreshPr, factsInput } from './observation-retention-fixture.mjs';
+
+test('T-PRD010 empty PR checks persist exact facts with one authoritative history load', async t => {
+  const f = await retentionFixture(t);
+  const repository = await observeFixtureRepository(f);
+  const pr = await refreshPr(f, repository);
+  const operation = {
+    type: 'operation', id: 'op-empty-facts-history', workItemId: f.workItemId,
+    repositoryId: 'primary', class: 'build', action: { class: 'build' },
+    target: 'owned-fixture-build', status: 'succeeded', dispatchBound: true,
+    correlationKey: 'empty-facts-history', requestFingerprint: digest('fixture request'),
+  };
+  const archive = path.join(f.store.workPath(f.workItemId), 'evidence', `${operation.id}.json`);
+  await writeJson(archive, operation);
+  const archiveBefore = await fs.readFile(archive);
+  const checkpointFile = path.join(f.store.workPath(f.workItemId), 'checkpoint.json');
+  const lock = path.join(f.store.workPath(f.workItemId), '.lock');
+  const load = f.store.load.bind(f.store);
+  const mocked = t.mock.method(f.store, 'load', async (...args) => {
+    assert.equal((await fs.stat(lock)).isFile(), true,
+      'The only load must execute under the authoritative work-item lock');
+    const state = await load(...args);
+    assert.deepEqual(state.operationHistory.get(operation.id), operation);
+    return state;
+  });
+  try {
+    for (const explicitEmptyRefs of [false, true]) {
+      mocked.mock.resetCalls();
+      const checkpointBefore = JSON.parse(await fs.readFile(checkpointFile, 'utf8'));
+      const input = { ...factsInput(f, pr), ...(explicitEmptyRefs ? { runMonitorRefs: [] } : {}) };
+      const facts = await updatePrFacts(f.store, input);
+      assert.equal(mocked.mock.callCount(), 1);
+      assert.deepEqual(facts, {
+        ...input, runMonitorRefs: [], id: `facts-${pr.id}`, type: 'pr-facts',
+        observedAt: new Date(f.clock.now()).toISOString(),
+      });
+      assert.deepEqual((await f.store.records(f.workItemId))
+        .find(record => record.id === facts.id), facts);
+      assert.equal(JSON.parse(await fs.readFile(checkpointFile, 'utf8')).revision,
+        checkpointBefore.revision + 1);
+      assert.deepEqual(await fs.readFile(archive), archiveBefore);
+      await assert.rejects(fs.stat(lock), { code: 'ENOENT' });
+      f.clock.advance(1);
+    }
+  } finally {
+    mocked.mock.restore();
+  }
+});
+
+test('T-PRD013 empty PR checks reject stale identities revisions and corrupt history without writing facts', async t => {
+  const f = await retentionFixture(t);
+  const repository = await observeFixtureRepository(f);
+  const previous = await refreshPr(f, repository);
+  const pr = await refreshPr(f, repository, previous);
+  await writeJson(f.store.recordPath(f.workItemId, previous.id), previous);
+  const input = factsInput(f, pr);
+  const directory = path.join(f.store.workPath(f.workItemId), 'records');
+  const names = (await fs.readdir(directory)).sort();
+  const recordBytes = await Promise.all(names.map(name => fs.readFile(path.join(directory, name))));
+  const checkpointFile = path.join(f.store.workPath(f.workItemId), 'checkpoint.json');
+  const checkpointBefore = await fs.readFile(checkpointFile);
+  const unchanged = async () => {
+    assert.deepEqual((await fs.readdir(directory)).sort(), names);
+    assert.deepEqual(await Promise.all(names.map(name =>
+      fs.readFile(path.join(directory, name)))), recordBytes);
+    assert.deepEqual(await fs.readFile(checkpointFile), checkpointBefore);
+  };
+  for (const [invalid, code] of [
+    [factsInput(f, previous), 'STALE'],
+    [{ ...input, prRecordId: repository.id }, 'INPUT'],
+    [{ ...input, sourceRevision: 'c'.repeat(40) }, 'STALE'],
+    [{ ...input, targetRevision: 'd'.repeat(40) }, 'STALE'],
+    [{ ...input, runMonitorRefs: ['unverified-monitor-reference'] }, 'EVIDENCE'],
+  ]) {
+    await assert.rejects(updatePrFacts(f.store, invalid), { code });
+    await unchanged();
+  }
+  const archive = path.join(f.store.workPath(f.workItemId), 'evidence',
+    'repository-observation-invalid-archive.json');
+  await fs.mkdir(path.dirname(archive), { recursive: true });
+  await fs.writeFile(archive, '{');
+  await assert.rejects(updatePrFacts(f.store, input), { code: 'JSON' });
+  await unchanged();
+  await writeJson(archive, {
+    type: 'operation', id: 'repository-observation-invalid-archive',
+    workItemId: 'wi-other', status: 'succeeded',
+  });
+  await assert.rejects(updatePrFacts(f.store, input), { code: 'BINDING' });
+  await unchanged();
+  await fs.unlink(archive);
+  assert.equal((await f.store.records(f.workItemId)).some(record => record.type === 'pr-facts'), false);
+});
 
 test('T-33/T-34 legacy PR policy and monitor history cannot grant new readiness or deployment permission', async t => {
   const f = await fixture(t);

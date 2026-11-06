@@ -1,3 +1,9 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "variants": [
+    {"expression": "`FR-059 ${environment} ${kind} cannot conclude from a bare run and attempt`", "domains": {"environment": ["DEV", "STAGING"], "kind": ["build", "pipeline", "pr-validation", "test"]}}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -8,7 +14,8 @@ import { validateCurrentExecutionIdentity, validateExecutionIdentity } from '../
 import { validateRecord } from '../src/schemas.mjs';
 import { digest } from '../src/core.mjs';
 import { writeJson } from '../src/files.mjs';
-import { startCycle, recordTest } from '../src/validation.mjs';
+import { startCycle } from '../src/validation.mjs';
+import { recordFixtureTest as recordTest } from './helpers.mjs';
 import {
   coding, completeReview, fixture, fixtureArtifact, fixtureBuild,
   fixtureDeployment, grant, observeFixtureRepository,
@@ -20,7 +27,7 @@ async function candidate(t) {
   await writeJson(path.join(f.repo, '.sdlc', 'config.json'), {
     defaultBranch: 'refs/heads/main',
     environments: { DEV: {
-      target: 'dev-target', configDigest: 'config-1', allowedStages: ['DEV'],
+      target: 'dev-target', configDigest: digest('config-1'), allowedStages: ['DEV'],
     } },
   });
   await f.runGit('add', '.');
@@ -28,7 +35,7 @@ async function candidate(t) {
   const repository = await observeFixtureRepository(f);
   const { cycle } = await startCycle(f.store, {
     workItemId: f.workItemId, tests: testDefinitions(),
-    configDigest: 'config-1', cause: 'FR-059/060/064 required execution identity',
+    configDigest: digest('config-1'), cause: 'FR-059/060/064 required execution identity',
   });
   for (const testId of ['T-unit', 'T-integration']) {
     await recordTest(f.store, {
@@ -133,7 +140,7 @@ function hostedResult(kind = 'build', environment = 'DEV', capability = 'distinc
     class: kind, repositoryId: 'primary',
     remoteRepositoryURL: 'https://example.invalid/repository.git',
     environment, target: `${environment.toLowerCase()}-target`,
-    sourceRevision: 'a'.repeat(40), configDigest: 'config-1',
+    sourceRevision: 'a'.repeat(40), configDigest: digest('config-1'),
     provider: 'fixture', pipeline: 'fixture-build',
     ...(kind === 'test' ? {
       testId: 'T-hosted', artifactId: 'package', deploymentId: 'deployment',

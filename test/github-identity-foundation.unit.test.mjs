@@ -1,3 +1,16 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "direct", "paths": ["src/github/execution-adapter.mjs", "src/github/repository.mjs", "src/github/schemas.mjs"]}],
+  "variants": [
+    {"expression": "`FR-140/141 rejects ${name} as a provider ID`", "domains": {"name": ["absent", "null", "zero", "negative", "fraction", "unsafe JSON number", "NaN", "infinity", "boolean", "object", "empty", "leading zero", "zero string", "whitespace", "trailing whitespace", "exponent", "signed", "decimal"]}},
+    {"expression": "`FR-141 rejects malformed node ID ${JSON.stringify(value)}`", "domains": {"JSON.stringify(value)": ["undefined", "17", "\"\"", "\" R_fixture17\"", "\"R_fixture17\\n\"", "\"node id\""]}},
+    {"expression": "`AC-140.2 ${source} ${name} cannot verify the observed attempt`", "domains": {"source": ["metadata", "final"], "name": ["API URL", "API-shaped web path", "login", "SSO login", "wrong repository", "wrong owner", "wrong run", "wrong attempt", "job path", "trailing slash", "untrusted host"]}},
+    {"expression": "`FR-140 rejects ${name} instead of inventing execution proof`", "domains": {"name": ["missing attempt", "zero attempt", "unknown attempt", "missing workflow", "missing repository", "unsafe repository ID", "missing node ID", "undefined access", "nonboolean access", "unsupported kind", "expected identity injection", "repository alias"]}},
+    {"expression": "`AC-140.2 rejects ${source} ${name} without retaining unsafe URL text`", "domains": {"source": ["metadata", "final"], "name": ["credentials", "userinfo", "token query", "encoded token query", "fragment", "HTTP", "dot normalization", "backslash normalization"]}},
+    {"expression": "`expected ${field} never becomes its own provider proof`", "domains": {"field": ["connection", "scopeRef", "definitionRef", "executionRef", "attemptRef", "attemptKind"]}},
+    {"expression": "`FR-141 rejects ${name} without satisfying repository/branch proof`", "domains": {"name": ["different numeric repository", "different node repository", "wrong captured repository URL", "repository prefix endpoint", "matching-ref prefix endpoint", "branch read in another repository", "branch response prefix", "wrong requested branch", "missing selected branch capture", "short SHA", "uppercase SHA", "unsupported SHA format", "missing commit", "missing trusted repository ID", "missing trusted node ID", "missing trusted context", "unnormalized connection", "unselected URL", "multiple selected URLs", "fetch URLs as push proof", "relative checkout", "noncanonical checkout", "unverified HTTPS alias", "unverified SSH alias", "inconsistent provider clone URL", "inconsistent provider SSH URL", "unsafe captured request", "credentialed repository page", "missing provider default", "invalid observation time", "missing evidence reference", "provider self-attestation", "invalid full ref", "invalid ref component", "stale default name", "contradictory duplicate default capture", "fork numeric ID as base repository", "fork node ID as base repository"]}}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';

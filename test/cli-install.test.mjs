@@ -1,17 +1,57 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "applicability": [
+    {"names": ["T-42 uninstall preflight preserves missing modified and redirected owned entries"], "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Native redirected-content preservation requires owned file symlinks; unavailable Windows symlink privilege remains explicit NotRun, not success.", "prerequisites": ["Node and Git", "Native file-symlink creation"]}
+  ],
+  "surfaces": [{"coverage": "process", "paths": ["bin/sdlc.mjs", "src/cli.mjs", "src/install.mjs", "src/hooks.mjs", "src/checks.mjs"]}],
+  "plannedCases": [
+    {"id": "T-23", "selectors": [
+      {"name": "T-23 controlled obsolete symlink update preserves the literal entry and unowned target before any writes", "parents": []},
+      {"name": "T-23 native obsolete symlink update preserves the literal entry and unowned target before any writes", "parents": []},
+      {"name": "T-23 ordinary uninstall rejects unsupported ownership schemas without partial removal", "parents": []},
+      {"name": "T-23 ordinary uninstall rejects malformed ownership records before removing any content", "parents": []},
+      {"name": "T-23 update rejects malformed ownership records before replacement writes", "parents": []},
+      {"name": "T-23 canonical ownership file keys reject aliases before update or uninstall mutations", "parents": []},
+      {"name": "T-23 uninstall rejects a last serialized root alias before any owned file removal", "parents": []},
+      {"name": "T-23 uninstall preflights non-file and unreadable entries before deleting owned assets", "parents": []}
+    ]},
+    {"id": "T-42", "selectors": [
+      {"name": "T-42 ordinary uninstall accepts schema-one ownership with compatible version labels", "parents": []},
+      {"name": "T-42 partial uninstall preserves valid empty inventories and accepts omitted legacy optional fields", "parents": []},
+      {"name": "T-42 uninstall preflight preserves missing modified and redirected owned entries", "parents": []}
+    ]}
+  ],
+  "groups": [
+    {"root": "T-23 controlled obsolete symlink update preserves the literal entry and unowned target before any writes", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-23 native obsolete symlink update preserves the literal entry and unowned target before any writes", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-23 ordinary uninstall rejects unsupported ownership schemas without partial removal", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-42 ordinary uninstall accepts schema-one ownership with compatible version labels", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-23 ordinary uninstall rejects malformed ownership records before removing any content", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-23 update rejects malformed ownership records before replacement writes", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-42 partial uninstall preserves valid empty inventories and accepts omitted legacy optional fields", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-23 canonical ownership file keys reject aliases before update or uninstall mutations", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-23 uninstall rejects a last serialized root alias before any owned file removal", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-23 uninstall preflights non-file and unreadable entries before deleting owned assets", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-42 uninstall preflight preserves missing modified and redirected owned entries", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import * as fs from 'node:fs/promises';
+import fsPromises from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { randomUUID } from 'node:crypto';
 import { fixture, artifact, coding, cli, grant, orient } from './helpers.mjs';
-import { cleanInstall, install, uninstall, doctor, BLOCK_START, canonicalInstalledText } from '../src/install.mjs';
+import { cleanInstall, install, uninstall, doctor, distribution, BLOCK_START, canonicalInstalledText } from '../src/install.mjs';
 import { registerArtifact } from '../src/artifacts.mjs';
 import { aggregate, check } from '../src/checks.mjs';
 import { readJson, writeJson } from '../src/files.mjs';
-import { safeRecord } from '../src/core.mjs';
+import { digest, LIMITS, safeRecord } from '../src/core.mjs';
 import { evaluateGate as gate } from '../src/gate.mjs';
 const execute = promisify(execFile);
 const packageVersion = JSON.parse(await fs.readFile(
@@ -21,6 +61,84 @@ test('T-38 installed framework text uses canonical LF without changing source', 
   const source = Buffer.from('first\r\nsecond\rthird\n');
   assert.equal(canonicalInstalledText(source).toString('utf8'), 'first\nsecond\nthird\n');
   assert.equal(source.toString('utf8'), 'first\r\nsecond\rthird\n');
+});
+
+test('T-23 installation read batches drain failures before writes and stop further dispatch', async t => {
+  for (const phase of ['source', 'destination']) {
+    const f = await fixture(t);
+    const prepared = await distribution(f.home);
+    const targets = new Set([...prepared.files.keys()].map(relative =>
+      path.join(f.home, relative)));
+    const source = path.resolve('src') + path.sep;
+    const method = phase === 'source' ? 'open' : 'lstat';
+    const original = fsPromises[method];
+    const started = [];
+    const seen = new Set();
+    const releases = [];
+    const batchStarted = Promise.withResolvers();
+    const firstFailed = Promise.withResolvers();
+    const releaseAll = Promise.withResolvers();
+    const failure = new Error(`Controlled ${phase} read failure`);
+    let active = 0;
+    let peak = 0;
+    let settled = false;
+    let mutations = 0;
+    const mocked = t.mock.method(fsPromises, method, async (file, ...options) => {
+      const selected = typeof file === 'string' && (phase === 'source' ?
+        file.startsWith(source) : targets.has(file));
+      if (!selected || seen.has(file)) return original(file, ...options);
+      seen.add(file);
+      const index = started.length;
+      const release = Promise.withResolvers();
+      releases.push(release);
+      started.push(file);
+      active++;
+      peak = Math.max(peak, active);
+      if (started.length === 16) batchStarted.resolve();
+      try {
+        await Promise.race([release.promise, releaseAll.promise]);
+        if (index === 0) {
+          firstFailed.resolve();
+          throw failure;
+        }
+        return await original(file, ...options);
+      } finally {
+        active--;
+      }
+    });
+    syncBuiltinESMExports();
+    const work = install(f.store, { fault: async () => { mutations++; } })
+      .then(value => { settled = true; return { value }; },
+        error => { settled = true; return { error }; });
+    let timer;
+    try {
+      await Promise.race([batchStarted.promise, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`The ${phase} read batch did not fill`)), 10000);
+      })]);
+      clearTimeout(timer);
+      assert.equal(active, 16);
+      releases[0].resolve();
+      await firstFailed.promise;
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(settled, false, 'The remaining dispatched reads must drain');
+      assert.equal(mutations, 0);
+      for (const release of releases.slice(1)) release.resolve();
+      const result = await work;
+      assert.equal(result.error, failure);
+      assert.equal(active, 0);
+      assert.equal(peak, 16);
+      assert.equal(started.length, 16, 'No later batch may start after a read failure');
+      assert.equal(mutations, 0);
+    } finally {
+      clearTimeout(timer);
+      releaseAll.resolve();
+      await work;
+      mocked.mock.restore();
+      syncBuiltinESMExports();
+    }
+    await assert.rejects(fs.lstat(path.join(f.home, 'sdlc/bin/sdlc.mjs')), { code: 'ENOENT' });
+    await assert.rejects(fs.lstat(path.join(f.home, 'sdlc/install-manifest.json')), { code: 'ENOENT' });
+  }
 });
 
 test('T-23 install/update/uninstall preserve user files, paths with spaces, modified assets and runtime', async t => {
@@ -115,6 +233,483 @@ test('T-23 partial installation rolls back only its own unchanged writes', async
   assert.equal(await fs.readFile(instructions, 'utf8'), 'Keep user instructions');
   assert.match(await fs.readFile(path.join(f.home, 'sdlc/bin/sdlc.mjs'), 'utf8'), /concurrent user edit/u);
 });
+
+async function obsoleteSymlinkUpdate(t, controlled) {
+  const f = await fixture(t, { initialize: false });
+  const instructions = path.join(f.home, 'copilot-instructions.md');
+  await fs.writeFile(instructions, 'Keep personal instructions.\n');
+  await install(f.store);
+  const manifestFile = path.join(f.home, 'sdlc/install-manifest.json');
+  const manifest = await readJson(manifestFile);
+  const obsolete = path.join(f.home, 'sdlc/obsolete-owned.txt');
+  const unowned = path.join(f.home, 'unowned-target.txt');
+  const bytes = Buffer.from('Former owned content, now unowned.\n');
+  await fs.writeFile(unowned, bytes);
+  const restores = [];
+  try {
+    if (controlled) {
+      // Exercise the real updater with controlled filesystem link observations,
+      // independently of the host's privilege to create native file symlinks.
+      await fs.writeFile(obsolete, bytes);
+      const originalLstat = fsPromises.lstat;
+      const originalRealpath = fsPromises.realpath;
+      const originalReadlink = fsPromises.readlink;
+      restores.push(t.mock.method(fsPromises, 'lstat', async (file, ...options) => {
+        const stat = await originalLstat(file, ...options);
+        if (file === obsolete) {
+          stat.isSymbolicLink = () => true;
+          stat.isFile = () => false;
+        }
+        return stat;
+      }));
+      restores.push(t.mock.method(fsPromises, 'realpath', (file, ...options) =>
+        originalRealpath(file === obsolete ? unowned : file, ...options)));
+      restores.push(t.mock.method(fsPromises, 'readlink', (file, ...options) =>
+        file === obsolete ? Promise.resolve(unowned) : originalReadlink(file, ...options)));
+      syncBuiltinESMExports();
+    } else {
+      try { await fs.symlink(unowned, obsolete, 'file'); }
+      catch (error) {
+        if (process.platform !== 'win32' ||
+            !['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) throw error;
+        t.skip(`Native file-symlink capability unavailable (${error.code}); regression NotRun on this host`);
+        return;
+      }
+    }
+    assert.equal((await fs.lstat(obsolete)).isSymbolicLink(), true);
+    assert.equal(await fs.readlink(obsolete), unowned);
+    const pending = path.join(f.home, 'sdlc/README.md');
+    await fs.appendFile(pending, '\nPrevious owned revision.\n');
+    manifest.files['sdlc/README.md'] = digest(await fs.readFile(pending));
+    manifest.files['sdlc/obsolete-owned.txt'] = digest(bytes);
+    const ordinaryObsolete = path.join(f.home, 'sdlc/ordinary-obsolete.txt');
+    await fs.writeFile(ordinaryObsolete, 'Unchanged obsolete owned content.\n');
+    manifest.files['sdlc/ordinary-obsolete.txt'] = digest(await fs.readFile(ordinaryObsolete));
+    await writeJson(manifestFile, manifest);
+    const snapshot = new Map(await Promise.all([
+      ...Object.keys(manifest.files).filter(relative => relative !== 'sdlc/obsolete-owned.txt'),
+      'sdlc/install-manifest.json', 'copilot-instructions.md', 'unowned-target.txt',
+    ].map(async relative => [relative, await fs.readFile(path.join(f.home, relative))])));
+    let mutations = 0;
+    await assert.rejects(install(f.store, { fault: async () => { mutations++; } }),
+      { code: 'INSTALL_CONFLICT' });
+    assert.equal(mutations, 0, 'All obsolete ownership checks must finish before replacement writes');
+    for (const [relative, content] of snapshot) {
+      assert.deepEqual(await fs.readFile(path.join(f.home, relative)), content, relative);
+    }
+    assert.equal((await fs.lstat(obsolete)).isSymbolicLink(), true);
+    assert.equal(await fs.readlink(obsolete), unowned);
+  } finally {
+    for (const mocked of restores.reverse()) mocked.mock.restore();
+    syncBuiltinESMExports();
+  }
+}
+
+test('T-23 controlled obsolete symlink update preserves the literal entry and unowned target before any writes', async t => {
+  await obsoleteSymlinkUpdate(t, true);
+});
+
+test('T-23 native obsolete symlink update preserves the literal entry and unowned target before any writes', async t => {
+  await obsoleteSymlinkUpdate(t, false);
+});
+
+test('T-23 ordinary uninstall rejects unsupported ownership schemas without partial removal', async t => {
+  const f = await fixture(t, { initialize: false });
+  const instructions = path.join(f.home, 'copilot-instructions.md');
+  await fs.writeFile(instructions, 'Keep personal instructions.\n');
+  await install(f.store);
+  const manifestFile = path.join(f.home, 'sdlc/install-manifest.json');
+  const manifest = await readJson(manifestFile);
+  const unowned = path.join(f.home, 'user-settings.json');
+  const runtime = path.join(f.home, 'sdlc/runtime/user-sentinel.json');
+  await fs.writeFile(unowned, '{"user":"preserved"}\n');
+  await fs.writeFile(runtime, '{"runtime":"preserved"}\n');
+  const snapshot = new Map(await Promise.all([
+    ...Object.keys(manifest.files), 'copilot-instructions.md',
+    'user-settings.json', 'sdlc/runtime/user-sentinel.json',
+  ].map(async relative => [relative, await fs.readFile(path.join(f.home, relative))])));
+  for (const schemaVersion of [2, '1', null, undefined]) {
+    const unsupported = { ...manifest, schemaVersion };
+    if (schemaVersion === undefined) delete unsupported.schemaVersion;
+    await writeJson(manifestFile, unsupported);
+    const manifestBytes = await fs.readFile(manifestFile);
+    await assert.rejects(uninstall(f.store), {
+      code: 'INSTALL_CONFLICT', message: 'Unknown ownership manifest',
+    });
+    assert.deepEqual(await fs.readFile(manifestFile), manifestBytes);
+    for (const [relative, content] of snapshot) {
+      assert.deepEqual(await fs.readFile(path.join(f.home, relative)), content, relative);
+    }
+  }
+});
+
+test('T-42 ordinary uninstall accepts schema-one ownership with compatible version labels', async t => {
+  for (const version of ['0.0.1', '0.1.0-private.7', 'legacy internal build']) {
+    const f = await fixture(t, { initialize: false });
+    const instructions = path.join(f.home, 'copilot-instructions.md');
+    await fs.writeFile(instructions, 'Keep personal instructions.\n');
+    await install(f.store);
+    const manifestFile = path.join(f.home, 'sdlc/install-manifest.json');
+    const manifest = await readJson(manifestFile);
+    await writeJson(manifestFile, { ...manifest, version });
+    const unowned = path.join(f.home, 'user-settings.json');
+    const runtime = path.join(f.home, 'sdlc/runtime/user-sentinel.json');
+    await fs.writeFile(unowned, '{"user":"preserved"}\n');
+    await fs.writeFile(runtime, '{"runtime":"preserved"}\n');
+    const result = await uninstall(f.store);
+    assert.equal(result.uninstalled, true, version);
+    assert.deepEqual(result.preserved, []);
+    assert.ok(result.removed.includes('copilot-instructions.md:owned-block'));
+    for (const relative of [...Object.keys(manifest.files), 'sdlc/install-manifest.json']) {
+      await assert.rejects(fs.lstat(path.join(f.home, relative)), { code: 'ENOENT' });
+    }
+    assert.equal((await fs.readFile(instructions, 'utf8')).trim(), 'Keep personal instructions.');
+    assert.equal(await fs.readFile(unowned, 'utf8'), '{"user":"preserved"}\n');
+    assert.equal(await fs.readFile(runtime, 'utf8'), '{"runtime":"preserved"}\n');
+  }
+});
+
+async function malformedOwnershipPreservesContent(t, update) {
+  const f = await fixture(t, { initialize: false });
+  const instructions = path.join(f.home, 'copilot-instructions.md');
+  await fs.writeFile(instructions, 'Keep personal instructions.\n');
+  await install(f.store);
+  const manifestFile = path.join(f.home, 'sdlc/install-manifest.json');
+  const manifest = await readJson(manifestFile);
+  const pending = path.join(f.home, 'sdlc/README.md');
+  await fs.appendFile(pending, '\nPrevious owned revision.\n');
+  manifest.files['sdlc/README.md'] = digest(await fs.readFile(pending));
+  const obsolete = path.join(f.home, 'sdlc/ordinary-obsolete.txt');
+  await fs.writeFile(obsolete, 'Unchanged obsolete owned content.\n');
+  manifest.files['sdlc/ordinary-obsolete.txt'] = digest(await fs.readFile(obsolete));
+  await fs.writeFile(path.join(f.home, 'user-settings.json'), '{"user":"preserved"}\n');
+  await fs.writeFile(path.join(f.home, 'sdlc/runtime/user-sentinel.json'), '{"runtime":"preserved"}\n');
+  const snapshot = new Map(await Promise.all([
+    ...Object.keys(manifest.files), 'copilot-instructions.md',
+    'user-settings.json', 'sdlc/runtime/user-sentinel.json',
+  ].map(async relative => [relative, await fs.readFile(path.join(f.home, relative))])));
+  const missingInventory = { ...manifest };
+  delete missingInventory.files;
+  const missingBlock = { ...manifest };
+  delete missingBlock.instructionsBlock;
+  const malformed = [
+    ['null inventory', { ...manifest, files: null }],
+    ['missing inventory', missingInventory],
+    ['array inventory', { ...manifest, files: [] }],
+    ['string inventory', { ...manifest, files: 'not an inventory' }],
+    ['boolean inventory', { ...manifest, files: false }],
+    ['number inventory', { ...manifest, files: 7 }],
+    ...[null, {}, [], 7, '0'.repeat(63), 'g'.repeat(64)].map(hash => [
+      `invalid hash ${JSON.stringify(hash)}`,
+      { ...manifest, files: { ...manifest.files, 'sdlc/missing-obsolete.txt': hash } },
+    ]),
+    ['empty inventory path', { ...manifest, files: { ...manifest.files, '': digest('') } }],
+    ['missing instruction block', missingBlock],
+    ...[null, 7, '', 'not an owned block', `prefix${manifest.instructionsBlock}`,
+      `${manifest.instructionsBlock}\n${manifest.instructionsBlock}`].map(instructionsBlock => [
+      `invalid instruction block ${JSON.stringify(instructionsBlock).slice(0, 80)}`,
+      { ...manifest, instructionsBlock },
+    ]),
+    ['invalid instruction provenance', { ...manifest, instructionsOriginallyExisted: 'false' }],
+    ['invalid version field', { ...manifest, version: null }],
+    ['null record', null],
+    ['boolean record', false],
+    ['array record', []],
+  ];
+  for (const [label, candidate] of malformed) {
+    await writeJson(manifestFile, candidate);
+    const manifestBytes = await fs.readFile(manifestFile);
+    let writes = 0;
+    await assert.rejects(update ?
+      install(f.store, { fault: async () => { writes++; } }) : uninstall(f.store),
+    { code: 'INSTALL_CONFLICT' }, label);
+    assert.equal(writes, 0, label);
+    assert.deepEqual(await fs.readFile(manifestFile), manifestBytes, label);
+    for (const [relative, content] of snapshot) {
+      assert.deepEqual(await fs.readFile(path.join(f.home, relative)), content, `${label}: ${relative}`);
+    }
+  }
+}
+
+test('T-23 ordinary uninstall rejects malformed ownership records before removing any content', async t => {
+  await malformedOwnershipPreservesContent(t, false);
+});
+
+test('T-23 update rejects malformed ownership records before replacement writes', async t => {
+  await malformedOwnershipPreservesContent(t, true);
+});
+
+test('T-42 partial uninstall preserves valid empty inventories and accepts omitted legacy optional fields', async t => {
+  const f = await fixture(t, { initialize: false });
+  const instructions = path.join(f.home, 'copilot-instructions.md');
+  await fs.writeFile(instructions, 'Keep personal instructions.\n');
+  await install(f.store);
+  const installedInstructions = await fs.readFile(instructions);
+  const manifestFile = path.join(f.home, 'sdlc/install-manifest.json');
+  const installedManifest = await readJson(manifestFile);
+  const unowned = path.join(f.home, 'user-settings.json');
+  const runtime = path.join(f.home, 'sdlc/runtime/user-sentinel.json');
+  await fs.writeFile(unowned, '{"user":"preserved"}\n');
+  await fs.writeFile(runtime, '{"runtime":"preserved"}\n');
+  const modifiedInstructions = Buffer.from(installedInstructions.toString('utf8')
+    .replace(BLOCK_START, `${BLOCK_START}\nUser customization inside the block.`));
+  await fs.writeFile(instructions, modifiedInstructions);
+  const first = await uninstall(f.store);
+  assert.equal(first.uninstalled, false);
+  assert.deepEqual(first.preserved, ['copilot-instructions.md:modified-owned-block']);
+  for (const relative of Object.keys(installedManifest.files)) {
+    await assert.rejects(fs.lstat(path.join(f.home, relative)), { code: 'ENOENT' });
+  }
+  const partial = await readJson(manifestFile);
+  assert.deepEqual(partial.files, {});
+  delete partial.version;
+  delete partial.instructionsOriginallyExisted;
+  await writeJson(manifestFile, partial);
+  const partialBytes = await fs.readFile(manifestFile);
+  const repeated = await uninstall(f.store);
+  assert.equal(repeated.uninstalled, false);
+  assert.deepEqual(repeated.removed, []);
+  assert.deepEqual(repeated.preserved, first.preserved);
+  assert.deepEqual(await fs.readFile(instructions), modifiedInstructions);
+  assert.deepEqual(await fs.readFile(manifestFile), partialBytes);
+  await fs.writeFile(instructions, installedInstructions);
+  assert.equal((await install(f.store)).installed, true);
+  const restored = await readJson(manifestFile);
+  assert.deepEqual(restored.files, installedManifest.files);
+  for (const [relative, hash] of Object.entries(restored.files)) {
+    assert.equal(digest(await fs.readFile(path.join(f.home, relative))), hash, relative);
+  }
+  assert.equal((await uninstall(f.store)).uninstalled, true);
+  await assert.rejects(fs.lstat(manifestFile), { code: 'ENOENT' });
+  assert.equal((await fs.readFile(instructions, 'utf8')).trim(), 'Keep personal instructions.');
+  assert.equal(await fs.readFile(unowned, 'utf8'), '{"user":"preserved"}\n');
+  assert.equal(await fs.readFile(runtime, 'utf8'), '{"runtime":"preserved"}\n');
+});
+
+async function ownershipPreflightFixture(t) {
+  const f = await fixture(t, { initialize: false });
+  const instructions = path.join(f.home, 'copilot-instructions.md');
+  await fs.writeFile(instructions, 'Keep personal instructions.\n');
+  await install(f.store);
+  const manifestFile = path.join(f.home, 'sdlc/install-manifest.json');
+  const manifest = await readJson(manifestFile);
+  await fs.mkdir(path.join(f.home, 'zz-user'));
+  await fs.writeFile(path.join(f.home, 'zz-user/note.txt'), 'Keep unowned content.\n');
+  await fs.writeFile(path.join(f.home, 'sdlc/runtime/user-sentinel.json'), '{"runtime":"preserved"}\n');
+  const ownedPaths = Object.keys(manifest.files);
+  const snapshot = async ({ omit = [], include = [] } = {}) => new Map(await Promise.all([
+    ...ownedPaths, 'copilot-instructions.md', 'sdlc/install-manifest.json',
+    'zz-user/note.txt', 'sdlc/runtime/user-sentinel.json', ...include,
+  ].filter(relative => !omit.includes(relative)).map(async relative =>
+    [relative, await fs.readFile(path.join(f.home, relative))])));
+  return { ...f, instructions, manifestFile, manifest, snapshot };
+}
+
+async function assertOwnershipSnapshot(home, snapshot, label) {
+  for (const [relative, content] of snapshot) {
+    assert.deepEqual(await fs.readFile(path.join(home, relative)), content, `${label}: ${relative}`);
+  }
+}
+
+test('T-23 canonical ownership file keys reject aliases before update or uninstall mutations', async t => {
+  const f = await ownershipPreflightFixture(t);
+  const keys = [
+    'zz-user/.', 'zz-user/', 'zz-user//note.txt', './zz-user/note.txt',
+    'zz-user/../zz-user/note.txt', 'zz-user\\note.txt', '',
+    '.', '..', '/zz-user/note.txt', 'C:zz-user/note.txt', 'C:/zz-user/note.txt',
+    '\\\\server\\share\\note.txt', 'zz-user/note.txt:stream', 'zz-user/\0',
+    path.join(f.home, 'zz-user', 'note.txt'),
+  ];
+  for (const relative of keys) {
+    for (const update of [false, true]) {
+      const label = `${update ? 'update' : 'uninstall'} ${JSON.stringify(relative)}`;
+      await writeJson(f.manifestFile, {
+        ...f.manifest, files: { ...f.manifest.files, [relative]: digest('Keep unowned content.\n') },
+      });
+      const snapshot = await f.snapshot();
+      const outcome = await (update ? install(f.store) : uninstall(f.store))
+        .then(value => ({ value }), error => ({ error }));
+      await assertOwnershipSnapshot(f.home, snapshot, label);
+      assert.deepEqual(await fs.readdir(path.join(f.home, 'zz-user')), ['note.txt'], label);
+      assert.equal(outcome.error?.code, 'INSTALL_CONFLICT', label);
+    }
+  }
+});
+
+test('T-23 uninstall rejects a last serialized root alias before any owned file removal', async t => {
+  const f = await ownershipPreflightFixture(t);
+  // Keep the root alias after valid entries; canonical serialization would sort it first.
+  await fs.writeFile(f.manifestFile, `${JSON.stringify({
+    ...f.manifest, files: { ...f.manifest.files, '.': digest('valid recorded bytes') },
+  })}\n`);
+  const snapshot = await f.snapshot();
+  const outcome = await uninstall(f.store).then(value => ({ value }), error => ({ error }));
+  await assertOwnershipSnapshot(f.home, snapshot, 'last serialized root alias');
+  assert.equal(outcome.error?.code, 'INSTALL_CONFLICT');
+});
+
+test('T-23 uninstall preflights non-file and unreadable entries before deleting owned assets', async t => {
+  for (const scenario of [
+    'inventory-directory', 'inventory-oversized', 'instructions-directory', 'instructions-oversized',
+  ]) {
+    const f = await ownershipPreflightFixture(t);
+    const inventory = scenario.startsWith('inventory-');
+    const directory = scenario.endsWith('-directory');
+    const relative = inventory ? (directory ? 'zz-user' : 'zz-oversized-owned.txt') :
+      'copilot-instructions.md';
+    const target = path.join(f.home, relative);
+    if (inventory) {
+      await writeJson(f.manifestFile, {
+        ...f.manifest, files: { ...f.manifest.files, [relative]: digest('valid recorded bytes') },
+      });
+    } else {
+      await fs.unlink(target);
+    }
+    if (directory) {
+      if (!inventory) {
+        await fs.mkdir(target);
+        await fs.writeFile(path.join(target, 'note.txt'), 'Keep unrelated instruction-directory content.\n');
+      }
+    } else {
+      await fs.writeFile(target, Buffer.alloc((inventory ? LIMITS.artifact : LIMITS.input) + 1, 0x61));
+    }
+    const snapshot = await f.snapshot({
+      omit: directory ? [relative] : [],
+      include: directory ? (inventory ? [] : [`${relative}/note.txt`]) : (inventory ? [relative] : []),
+    });
+    const outcome = await uninstall(f.store).then(value => ({ value }), error => ({ error }));
+    await assertOwnershipSnapshot(f.home, snapshot, scenario);
+    if (directory) {
+      assert.equal((await fs.lstat(target)).isDirectory(), true, scenario);
+      assert.deepEqual(await fs.readdir(target), ['note.txt'], scenario);
+    }
+    assert.equal(outcome.error?.code,
+      directory ? (inventory ? 'INSTALL_CONFLICT' : 'PATH') : 'CAPACITY', scenario);
+  }
+});
+
+test('T-42 uninstall preflight preserves missing modified and redirected owned entries', async t => {
+  const f = await ownershipPreflightFixture(t);
+  const modified = 'sdlc/README.md';
+  const redirected = 'skills/sdlc/SKILL.md';
+  const missing = 'sdlc/bin/sdlc.mjs';
+  const originalModified = await fs.readFile(path.join(f.home, modified));
+  const originalRedirected = await fs.readFile(path.join(f.home, redirected));
+  const originalInstructions = await fs.readFile(f.instructions);
+  const redirectTarget = path.join(f.home, 'zz-user/redirect-target.txt');
+  const instructionsTarget = path.join(f.home, 'zz-user/instructions-target.txt');
+  await fs.writeFile(redirectTarget, originalRedirected);
+  await fs.writeFile(instructionsTarget, originalInstructions);
+  await fs.unlink(path.join(f.home, redirected));
+  await fs.unlink(f.instructions);
+  try {
+    await fs.symlink(redirectTarget, path.join(f.home, redirected), 'file');
+    await fs.symlink(instructionsTarget, f.instructions, 'file');
+  } catch (error) {
+    if (process.platform !== 'win32' ||
+        !['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) throw error;
+    t.skip(`Native file-symlink capability unavailable (${error.code}); compatibility regression NotRun`);
+    return;
+  }
+  await fs.appendFile(path.join(f.home, modified), '\nUser customization.\n');
+  const modifiedBytes = await fs.readFile(path.join(f.home, modified));
+  await fs.unlink(path.join(f.home, missing));
+  const obsolete = 'sdlc/obsolete..owned.txt';
+  await fs.writeFile(path.join(f.home, obsolete), 'Unchanged obsolete owned content.\n');
+  await writeJson(f.manifestFile, {
+    ...f.manifest, files: { ...f.manifest.files,
+      [obsolete]: digest('Unchanged obsolete owned content.\n'),
+      'zz-already-removed.txt': digest('Already removed.\n') },
+  });
+  const first = await uninstall(f.store);
+  assert.equal(first.uninstalled, false);
+  assert.deepEqual(new Set(first.preserved), new Set([
+    modified, `${redirected}:symlink`, 'copilot-instructions.md:symlink',
+  ]));
+  assert.deepEqual(await fs.readFile(path.join(f.home, modified)), modifiedBytes);
+  assert.equal(await fs.readlink(path.join(f.home, redirected)), redirectTarget);
+  assert.equal(await fs.readlink(f.instructions), instructionsTarget);
+  assert.deepEqual((await readJson(f.manifestFile)).files, {
+    [modified]: f.manifest.files[modified], [redirected]: f.manifest.files[redirected],
+  });
+  for (const relative of [...Object.keys(f.manifest.files).filter(file =>
+    ![modified, redirected].includes(file)), obsolete, 'zz-already-removed.txt']) {
+    await assert.rejects(fs.lstat(path.join(f.home, relative)), { code: 'ENOENT' });
+  }
+  await fs.writeFile(path.join(f.home, modified), originalModified);
+  await fs.unlink(path.join(f.home, redirected));
+  await fs.writeFile(path.join(f.home, redirected), originalRedirected);
+  await fs.unlink(f.instructions);
+  await fs.writeFile(f.instructions, originalInstructions);
+  assert.equal((await uninstall(f.store)).uninstalled, true);
+  await assert.rejects(fs.lstat(f.manifestFile), { code: 'ENOENT' });
+  assert.equal((await fs.readFile(f.instructions, 'utf8')).trim(), 'Keep personal instructions.');
+  assert.deepEqual(await fs.readFile(redirectTarget), originalRedirected);
+  assert.deepEqual(await fs.readFile(instructionsTarget), originalInstructions);
+  assert.equal(await fs.readFile(path.join(f.home, 'zz-user/note.txt'), 'utf8'), 'Keep unowned content.\n');
+  assert.equal(await fs.readFile(path.join(f.home, 'sdlc/runtime/user-sentinel.json'), 'utf8'),
+    '{"runtime":"preserved"}\n');
+});
+
+test('T-PRD023 competing installs and interrupted rollback preserve unowned content, runtime and the other fixture', async t => {
+  const first = await fixture(t);
+  const second = await fixture(t);
+  const outside = path.join(os.tmpdir(), `sdlc-unowned-${randomUUID()}.json`);
+  await fs.writeFile(outside, '{"outside":"preserved"}\n', { flag: 'wx' });
+  t.after(() => fs.unlink(outside));
+  const settings = await Promise.all([first, second].map(async f => {
+    const file = path.join(f.home, 'user-settings.json');
+    await fs.writeFile(file, '{"user":"preserved"}\n', { flag: 'wx' });
+    const runtime = path.join(f.home, 'sdlc', 'runtime', 'user-sentinel.json');
+    await fs.writeFile(runtime, '{"runtime":"preserved"}\n', { flag: 'wx' });
+    return { file, runtime };
+  }));
+  const entered = [Promise.withResolvers(), Promise.withResolvers()];
+  const secondCompleted = Promise.withResolvers();
+  const wait = async promise => {
+    const timeout = new AbortController();
+    try {
+      return await Promise.race([promise, delay(20000, null, { signal: timeout.signal, ref: false })
+        .then(() => { throw new Error('Independent installer did not reach its owned-resource barrier'); })]);
+    } finally { timeout.abort(); }
+  };
+  let injected = false;
+  const failed = install(first.store, { fault: async relative => {
+    if (relative !== 'sdlc/bin/sdlc.mjs') return;
+    entered[0].resolve();
+    await wait(entered[1].promise);
+    await wait(secondCompleted.promise);
+    await fs.appendFile(path.join(first.home, relative), '\n// preserved concurrent user modification\n');
+    injected = true;
+    throw new Error('Interrupted owned installation');
+  } });
+  const failedOutcome = failed.then(() => null, error => error);
+  try {
+    const success = await install(second.store, { fault: async relative => {
+      if (relative !== 'sdlc/bin/sdlc.mjs') return;
+      entered[1].resolve();
+      await wait(entered[0].promise);
+    } });
+    assert.equal(success.installed, true);
+  } finally {
+    entered[0].resolve();
+    entered[1].resolve();
+    secondCompleted.resolve();
+    await failedOutcome;
+  }
+  const failure = await failedOutcome;
+  assert.equal(failure?.code, 'INSTALL_FAILED');
+  assert.equal(injected, true);
+  assert.match(await fs.readFile(path.join(first.home, 'sdlc/bin/sdlc.mjs'), 'utf8'),
+    /preserved concurrent user modification/u);
+  await uninstall(second.store);
+  for (const { file, runtime } of settings) {
+    assert.equal(await fs.readFile(file, 'utf8'), '{"user":"preserved"}\n');
+    assert.equal(await fs.readFile(runtime, 'utf8'), '{"runtime":"preserved"}\n');
+  }
+  assert.equal(await fs.readFile(outside, 'utf8'), '{"outside":"preserved"}\n');
+});
+
 test('T-46 explicit purge removes all framework traces but preserves unrelated Copilot content', async t => {
   const f = await fixture(t, { initialize: false });
   const instructions = path.join(f.home, 'copilot-instructions.md');
@@ -184,7 +779,8 @@ test('T-46 clean install purges the previous framework and installs the new pack
   assert.equal(await fs.readFile(oldRuntime, 'utf8'), '{"old":true}\n');
   const incompleteSource = path.join(f.root, 'incomplete-package');
   for (const directory of ['bin', 'src', 'assets/skills',
-    'assets/templates', 'assets/instructions', 'assets/hooks', 'docs']) {
+    'assets/templates', 'assets/instructions', 'assets/hooks',
+    'docs/reference', 'docs/integrations']) {
     await fs.mkdir(path.join(incompleteSource, directory), { recursive: true });
   }
   await fs.writeFile(path.join(incompleteSource, 'assets/hooks/sdlc.json'),
@@ -192,9 +788,13 @@ test('T-46 clean install purges the previous framework and installs the new pack
   await fs.writeFile(path.join(incompleteSource, 'assets/instructions.md'), '');
   await fs.writeFile(path.join(incompleteSource,
     'assets/lifecycle-intent.md'), '');
-  await fs.writeFile(path.join(incompleteSource, 'docs/cli.md'), '');
+  for (const name of ['README.md', 'CONTRIBUTING.md', 'SUPPORT.md', 'SECURITY.md',
+    'CODE_OF_CONDUCT.md', 'OWNERSHIP.md', 'RELEASING.md', 'CHANGELOG.md', 'LICENSE']) {
+    await fs.writeFile(path.join(incompleteSource, name), '');
+  }
+  await fs.writeFile(path.join(incompleteSource, 'docs/reference/cli.md'), '');
   await fs.writeFile(path.join(incompleteSource,
-    'docs/provider-adapters.md'), '');
+    'docs/integrations/provider-adapters.md'), '');
   await fs.writeFile(path.join(incompleteSource, 'package.json'), JSON.stringify({
     name: 'ai-sdlc-framework',
     version: '9.9.9',
@@ -202,7 +802,7 @@ test('T-46 clean install purges the previous framework and installs the new pack
   }));
   await assert.rejects(cleanInstall(f.store, {
     sourceRoot: incompleteSource,
-  }), { code: 'INSTALL' });
+  }), { code: 'INSTALL', message: /missing docs\/integrations\/github-adapters\.md/u });
   assert.equal(await fs.readFile(oldRuntime, 'utf8'), '{"old":true}\n');
   await assert.rejects(execute(process.execPath, [
     path.join(f.home, 'sdlc/bin/sdlc.mjs'),
@@ -307,18 +907,45 @@ test('T-46 purge recovers invalid locks and unlinks runtime redirects without fo
 test('T-46 purge does not steal a newly populated live lock', async t => {
   const f = await fixture(t, { initialize: false });
   const lock = path.join(f.home, '.ai-sdlc-framework.install.lock');
-  await fs.writeFile(lock, '');
-  const writer = delay(20).then(() => fs.writeFile(lock, JSON.stringify({
+  const content = path.join(f.store.runtime, 'live-owner.json');
+  const owner = JSON.stringify({
     host: os.hostname(),
     pid: process.pid,
     token: 'live-owner',
-  })));
-  await assert.rejects(uninstall(f.store, { purge: true }),
-    { code: 'LOCK_BUSY' });
-  await writer;
-  assert.equal(JSON.parse(await fs.readFile(lock, 'utf8')).token,
-    'live-owner');
-  await fs.unlink(lock);
+  });
+  await fs.writeFile(content, '{"preserve":true}\n');
+  await fs.writeFile(lock, '');
+  const open = fsPromises.open;
+  let populated = false;
+  const mocked = t.mock.method(fsPromises, 'open', async (file, ...options) => {
+    const handle = await open(file, ...options);
+    if (file === lock && !populated) {
+      const read = handle.read.bind(handle);
+      t.mock.method(handle, 'read', async (...readOptions) => {
+        if (!populated) {
+          populated = true;
+          await fs.writeFile(lock, owner);
+        }
+        return read(...readOptions);
+      });
+    }
+    return handle;
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(uninstall(f.store, { purge: true }),
+      { code: 'LOCK_BUSY' });
+    assert.equal(populated, true);
+    assert.equal(await fs.readFile(lock, 'utf8'), owner);
+    await assert.rejects(uninstall(f.store, { purge: true }),
+      { code: 'LOCK_BUSY' });
+    assert.equal(await fs.readFile(lock, 'utf8'), owner);
+    assert.equal(await fs.readFile(content, 'utf8'), '{"preserve":true}\n');
+  } finally {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+    await fs.unlink(lock);
+  }
 });
 test('T-46 purge validates every parent before removing any owned content', async t => {
   const f = await fixture(t, { initialize: false });

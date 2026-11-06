@@ -5,7 +5,8 @@ import * as fs from 'node:fs/promises';
 import { fixture, coding, completeReview, finishFixtureOperation, fixtureArtifact,
   fixtureBuild, fixtureDeployment, grant, observeFixtureRepository, prepareFixtureDeployment,
   registerFixtureProviderRequest, testDefinitions, orient } from './helpers.mjs';
-import { startCycle, recordArtifact, recordTest, stagingHandoff } from '../src/validation.mjs';
+import { startCycle, recordArtifact, stagingHandoff } from '../src/validation.mjs';
+import { recordFixtureTest as recordTest } from './helpers.mjs';
 import { readJson, writeJson } from '../src/files.mjs';
 import { prepareOperation, markDispatching, pruneWork, recordOperation } from '../src/operations.mjs';
 import { evaluatePolicy } from '../src/policy.mjs';

@@ -143,6 +143,8 @@ export async function smokeGitHubImports(moduleDirectory, options = {}, commandO
     }
     const filesystem = await import('node:fs');
     const promises = await import('node:fs/promises');
+    const readOnlyOpenFlags = new Set(['r', filesystem.default.constants.O_RDONLY,
+      filesystem.default.constants.O_RDONLY | (filesystem.default.constants.O_NOFOLLOW ?? 0)]);
     for (const name of ['appendFile', 'chmod', 'chown', 'copyFile', 'cp', 'link', 'lchmod',
       'lchown', 'lutimes', 'mkdir', 'mkdtemp', 'rename', 'rm', 'rmdir', 'symlink',
       'truncate', 'unlink', 'utimes', 'writeFile']) {
@@ -154,13 +156,13 @@ export async function smokeGitHubImports(moduleDirectory, options = {}, commandO
     for (const target of [filesystem.default, promises.default]) {
       const open = target.open;
       target.open = function(file, flags, ...args) {
-        if (flags !== 'r' && flags !== 0) deny();
+        if (!readOnlyOpenFlags.has(flags)) deny();
         return open.call(this, file, flags, ...args);
       };
     }
     const openSync = filesystem.default.openSync;
     filesystem.default.openSync = function(file, flags, ...args) {
-      if (flags !== 'r' && flags !== 0) deny();
+      if (!readOnlyOpenFlags.has(flags)) deny();
       return openSync.call(this, file, flags, ...args);
     };
     (await import('node:module')).syncBuiltinESMExports();
@@ -252,8 +254,8 @@ export async function verifyPackage({ artifact, environment = process.env } = {}
     }
     for (const required of ['package.json', 'bin/sdlc.mjs', 'src/install.mjs',
       'src/provider-adapters.mjs', 'assets/instructions.md',
-      'assets/lifecycle-intent.md', 'assets/hooks/sdlc.json', 'docs/cli.md',
-      'docs/provider-adapters.md', 'docs/github-adapters.md',
+      'assets/lifecycle-intent.md', 'assets/hooks/sdlc.json', 'docs/reference/cli.md',
+      'docs/integrations/provider-adapters.md', 'docs/integrations/github-adapters.md',
       'src/github.mjs', 'src/validation-catalog.mjs', 'src/validation-evidence.mjs',
       ...githubModuleNames.map(name => `src/github/${name}.mjs`)]) {
       if (!actualFiles.some(file => file.path === required)) {
@@ -266,16 +268,38 @@ export async function verifyPackage({ artifact, environment = process.env } = {}
       const stores = await import('ai-sdlc-framework/store');
       const github = await import('ai-sdlc-framework/github');
       const operations = await import('ai-sdlc-framework/operations');
+      const evidence = await import('ai-sdlc-framework/evidence');
       for (const entry of [
         adapters.registerProviderAdapter, monitors.attachMonitor, stores.Store,
         operations.claimOperationDispatch,
         github.createGitHubExecutionAdapter, github.createGitHubConnection,
         github.createGitHubTransport, github.createGitHubStoreBridge,
         github.createGitHubHost, github.createGitHubStore,
+        evidence.prepareCoverage, evidence.inspectCoverage, evidence.renderCoverageSection,
+        evidence.normalizeExecutionReport, evidence.evaluateReadiness,
+        evidence.createEvidenceBundle, evidence.readEvidenceBundle,
+        evidence.retainTestEvidence, evidence.readTestEvidence,
       ]) if (typeof entry !== 'function') throw new Error('Provider extension API is unavailable');
       if (adapters.providerAdapterIds().includes('github')) throw new Error('Import registered GitHub implicitly');
+      const definitions = {
+        repositoryId: 'package-consumer', sourceRevision: 'a'.repeat(40),
+        requirements: [{ artifactId: 'sample', path: 'docs/sdlc/sample/requirements.md',
+          contents: '# Consumer requirements\\n\\n### FR-801: Preserve the balance\\n\\n**Definition of Done**\\n\\n- AC-801.1: Reject an overdraft.\\n' }],
+        testPlans: [{ artifactId: 'sample', path: 'docs/sdlc/sample/test-plan.md',
+          contents: '# Consumer Test Plan\\n\\n| ID | Requirements | Environment | Level | Checkpoint | Mode | Owner | Location | Expected outcome | Implementation | Status |\\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\\n| T-BALANCE | FR-801; AC-801.1 | local | unit | pre-review | automated | agent | local | Reject an overdraft | node test-balance.mjs | NotRun |\\n' }],
+      };
+      const coverage = evidence.prepareCoverage(definitions);
+      const body = evidence.renderCoverageSection(coverage);
+      const inspected = evidence.inspectCoverage({ ...definitions, body });
+      if (!inspected.complete || inspected.uncovered.length) {
+        throw new Error('Installed public evidence facade cannot prepare complete consumer coverage');
+      }
+      if (evidence.inspectCoverage({ ...definitions, body: 'Missing coverage' }).complete) {
+        throw new Error('Installed public evidence facade admitted missing coverage');
+      }
+      console.log(JSON.stringify({ evidence: { coverage: 'Passed', publicExports: Object.keys(evidence).length } }));
     `;
-    await command(process.execPath, ['--input-type=module', '-e', providerSmoke],
+    const publicSmoke = await jsonCommand(process.execPath, ['--input-type=module', '-e', providerSmoke],
       { cwd: packageInstall, env: environment });
     const publicGitHub = await smokeGitHubImports(path.join(packageRoot, 'src', 'github'), {
       facade: 'ai-sdlc-framework/github', home: copilotHome,
@@ -291,6 +315,11 @@ export async function verifyPackage({ artifact, environment = process.env } = {}
       [installedEntry, 'doctor', '--home', copilotHome], { cwd: packageRoot, env: environment });
     if (!doctor.installed || doctor.frameworkVersion !== pkg.version || doctor.findings.length) {
       throw new Error('Installed package failed doctor verification');
+    }
+    const help = await command(process.execPath, [installedEntry, 'help'],
+      { cwd: packageRoot, env: environment });
+    if (help.stdout.split('\n')[0] !== `AI SDLC Framework ${pkg.version}`) {
+      throw new Error('Installed CLI help identity differs from the package version');
     }
     const installedGitHub = await smokeGitHubImports(path.join(copilotHome, 'sdlc', 'src', 'github'),
       { home: copilotHome }, { cwd: packageRoot, env: environment });
@@ -322,7 +351,8 @@ export async function verifyPackage({ artifact, environment = process.env } = {}
       throw new Error('Package uninstall changed isolated runtime state');
     }
     return { verified: true, filename, sha256: digest,
-      packageFiles: expected.files.length, isolatedHome: true, github: publicGitHub };
+      packageFiles: expected.files.length, isolatedHome: true, github: publicGitHub,
+      evidence: publicSmoke.evidence };
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

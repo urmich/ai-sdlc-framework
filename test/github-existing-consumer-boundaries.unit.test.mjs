@@ -1,15 +1,166 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "assertionNamespace": "test/github-existing-consumer-boundaries.unit.test.mjs",
+  "variants": [
+    {
+      "expression": "`T-GH-37-${family}-wrong-${axis}`",
+      "names": [
+        "T-GH-37-execution-wrong-repository",
+        "T-GH-37-execution-wrong-producer",
+        "T-GH-37-execution-wrong-attempt",
+        "T-GH-37-execution-wrong-version",
+        "T-GH-37-test-wrong-repository",
+        "T-GH-37-test-wrong-producer",
+        "T-GH-37-test-wrong-attempt",
+        "T-GH-37-test-wrong-version",
+        "T-GH-37-artifact-wrong-repository",
+        "T-GH-37-artifact-wrong-revision",
+        "T-GH-37-artifact-wrong-producer",
+        "T-GH-37-artifact-wrong-attempt",
+        "T-GH-37-artifact-wrong-version",
+        "T-GH-37-deployment-wrong-repository",
+        "T-GH-37-deployment-wrong-revision",
+        "T-GH-37-deployment-wrong-version",
+        "T-GH-37-pull-request-wrong-repository",
+        "T-GH-37-pull-request-wrong-ref",
+        "T-GH-37-pull-request-wrong-revision",
+        "T-GH-37-git-ref-wrong-repository",
+        "T-GH-37-git-ref-wrong-item",
+        "T-GH-37-git-ref-wrong-ref",
+        "T-GH-37-merge-wrong-repository",
+        "T-GH-37-merge-wrong-revision",
+        "T-GH-37-merge-wrong-item",
+        "T-GH-37-merge-wrong-version",
+        "T-GH-37-policy-wrong-repository",
+        "T-GH-37-policy-wrong-item",
+        "T-GH-37-notification-wrong-repository"
+      ]
+    },
+    {
+      "expression": "`T-GH-37-${family}-wrong-cause`",
+      "domains": {
+        "family": [
+          "execution",
+          "artifact",
+          "deployment",
+          "test",
+          "pull-request",
+          "git-ref",
+          "merge",
+          "policy",
+          "notification"
+        ]
+      }
+    },
+    {
+      "expression": "'T-GH-36-ADO19-artifact'",
+      "names": [
+        "T-GH-36-ADO19-artifact"
+      ]
+    },
+    {
+      "expression": "'T-GH-36-ADO20-state'",
+      "names": [
+        "T-GH-36-ADO20-state"
+      ]
+    },
+    {
+      "expression": "id",
+      "names": [
+        "T-GH-36-ADO18-attempt",
+        "T-GH-36-ADO18-bytes"
+      ]
+    }
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as fs from 'node:fs/promises';
+import fsPromises from 'node:fs/promises';
 import path from 'node:path';
-import { digest } from '../src/core.mjs';
+import { createHash } from 'node:crypto';
+import { syncBuiltinESMExports } from 'node:module';
 import { recordArtifact } from '../src/validation.mjs';
-import { adoptPr } from '../src/pr.mjs';
-import { attachMonitor, verifyMonitorLink, readMonitor } from '../src/monitors.mjs';
-import { registerGitHubAdapter } from '../src/github/execution-adapter.mjs';
-import { verifyProviderLink } from '../src/provider-adapters.mjs';
-import { grant, orient } from './helpers.mjs';
-import { bridgeFixture, durableBytes, remote, repositoryRef } from './fixtures/github-store-bridge.mjs';
+import { bridgeFixture, durableBytes } from './fixtures/github-store-bridge.mjs';
+import { fixture } from './helpers.mjs';
+
+test('fixture byte snapshots bound fresh reads and drain failures without caching or losing lock exclusions', async t => {
+  const f = await fixture(t);
+  const directory = path.join(f.store.runtime, 'snapshot-batch');
+  await fsPromises.mkdir(directory);
+  const names = Array.from({ length: 32 }, (_, index) =>
+    path.join(directory, `file-${String(index).padStart(2, '0')}.txt`));
+  for (const file of names) await fsPromises.writeFile(file, path.basename(file));
+  const selected = new Set(names);
+  const readFile = fsPromises.readFile;
+  const batchStarted = Promise.withResolvers();
+  const firstFailed = Promise.withResolvers();
+  const releaseAll = Promise.withResolvers();
+  const releases = [];
+  const failure = new Error('Controlled snapshot read failure');
+  let active = 0;
+  let peak = 0;
+  let settled = false;
+  const mocked = t.mock.method(fsPromises, 'readFile', async (file, ...options) => {
+    if (!selected.has(file)) return readFile(file, ...options);
+    const index = releases.length;
+    const release = Promise.withResolvers();
+    releases.push(release);
+    active++;
+    peak = Math.max(peak, active);
+    if (releases.length === 16) batchStarted.resolve();
+    try {
+      await Promise.race([release.promise, releaseAll.promise]);
+      if (index === 0) {
+        firstFailed.resolve();
+        throw failure;
+      }
+      return await readFile(file, ...options);
+    } finally {
+      active--;
+    }
+  });
+  syncBuiltinESMExports();
+  const work = durableBytes(f).then(value => { settled = true; return { value }; },
+    error => { settled = true; return { error }; });
+  let timer;
+  try {
+    await Promise.race([batchStarted.promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('The snapshot read batch did not fill')), 10000);
+    })]);
+    clearTimeout(timer);
+    assert.equal(active, 16);
+    releases[0].resolve();
+    await firstFailed.promise;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(settled, false);
+    for (const release of releases.slice(1)) release.resolve();
+    const result = await work;
+    assert.equal(result.error, failure);
+    assert.equal(active, 0);
+    assert.equal(peak, 16);
+    assert.equal(releases.length, 16);
+  } finally {
+    clearTimeout(timer);
+    releaseAll.resolve();
+    await work;
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+  }
+  await fsPromises.writeFile(path.join(directory, 'ignored.lock'), 'Not snapshot content');
+  const nested = path.join(directory, 'nested.lock');
+  await fsPromises.mkdir(nested);
+  await fsPromises.writeFile(path.join(nested, 'kept.txt'), 'Keep directory content');
+  const before = await durableBytes(f);
+  const changed = path.relative(f.root, names[0]);
+  await fsPromises.writeFile(names[0], 'Fresh replacement bytes');
+  const after = await durableBytes(f);
+  assert.equal(after.some(([file]) => file === path.relative(f.root, path.join(directory, 'ignored.lock'))), false);
+  assert.ok(after.some(([file]) => file === path.relative(f.root, path.join(nested, 'kept.txt'))));
+  assert.deepEqual(after.find(([file]) => file === changed), [changed,
+    createHash('sha256').update('Fresh replacement bytes').digest('hex')]);
+  assert.deepEqual(after.filter(([file]) => file !== changed), before.filter(([file]) => file !== changed));
+  assert.deepEqual(after, [...after].sort(([left], [right]) => left.localeCompare(right)));
+});
 
 const base = '/repos/bridge-owner/bridge-repo';
 const revision = 'f'.repeat(40);
@@ -26,10 +177,10 @@ export const existingAssertionCandidates = Object.freeze([
     selector: 'T-GH-37-policy-N', assertion: 'result.policyVersion differs independently; EVIDENCE; immutable durable state', consumer },
   { id: 'T-GH-37-git-ref-wrong-revision', file: 'test/github-operation-results.unit.test.mjs',
     selector: 'T-GH-37-git-ref-N', assertion: 'result.revision differs independently; EVIDENCE; immutable durable state', consumer },
-  { id: 'T-GH-37-notification-wrong-producer', file: 'test/github-operation-results.unit.test.mjs',
+  { id: 'T-GH-37-notification-wrong-producer', file: 'test/github-operation-publication.unit.test.mjs',
     selector: 'independently acquired different publication producer',
     assertion: 'actual comment read returns user.id=999; private producer reference rejected by recordResult/reconcile', consumer },
-  { id: 'T-GH-37-local-build', file: 'test/github-operation-results.unit.test.mjs',
+  { id: 'T-GH-37-local-build', file: 'test/github-operation-dispatch.unit.test.mjs',
     selector: 'local build remains a real local operation without GitHub execution or result proof',
     assertion: 'real local operation has no intendedOutcome or hosted resultProof', consumer },
   { id: 'T-GH-36-ADO03-attempt', file: 'test/github-provider-consumers.test.mjs', selector: 'T-GH-36-ADO14-N',
@@ -51,10 +202,10 @@ export const existingAssertionCandidates = Object.freeze([
     selector: 'T-GH-37-deployment-wrong-version', assertion: 'Only result.configDigest changes; actual deployed artifact unchanged', consumer },
   { id: 'T-GH-36-ADO21-destination', file: 'test/github-existing-consumer-boundaries.unit.test.mjs',
     selector: 'T-GH-37-git-ref-wrong-item', assertion: 'Only destination changes; full ref/revision unchanged', consumer },
-  { id: 'T-GH-36-ADO10-default', file: 'test/github-existing-consumer-boundaries.unit.test.mjs',
+  { id: 'T-GH-36-ADO10-default', file: 'test/github-consumer-refresh.unit.test.mjs',
     selector: 'T-GH-36-ADO10-stale-default', assertion: 'Current native default admitted, stale cached branch independently rejected',
     consumer: 'Store.observeRepository' },
-  { id: 'T-GH-36-ADO10-selected', file: 'test/github-existing-consumer-boundaries.unit.test.mjs',
+  { id: 'T-GH-36-ADO10-selected', file: 'test/github-consumer-refresh.unit.test.mjs',
     selector: 'T-GH-36-ADO10-prefix-search', assertion: 'Current full ref/SHA verified, different prefix ref independently rejected',
     consumer: 'Store.observeRepository' },
 ]);
@@ -234,263 +385,6 @@ test('GH37 independently named existing-consumer boundary axes retain exact clai
         const input = f.artifactVariant(artifact, mutate);
         await assert.rejects(recordArtifact(f.store, input), { code: 'EVIDENCE' });
         assert.deepEqual(await durableBytes(f), before);
-      });
-    }
-  }
-});
-
-test('GH36/GH37 PR refresh and exact repository boundary gaps use their actual consumers', async t => {
-  const f = await bridgeFixture(t);
-  const repositoryInput = { ...f.repositoryInput, observedAt: new Date(f.clock.now()).toISOString() };
-  await f.store.observeRepository(repositoryInput);
-  const reject = async (callback, code = 'EVIDENCE') => {
-    const before = await durableBytes(f);
-    await assert.rejects(callback, { code });
-    assert.deepEqual(await durableBytes(f), before);
-  };
-  await t.test('T-GH-36-ADO08-remote-handle', async () => {
-    await f.runGit('remote', 'rename', 'origin', 'selected-upstream');
-    try {
-      const current = await f.store.currentRepositoryObservation(f.workItemId, 'primary', 'selected-upstream');
-      assert.equal(current.selectedFetchRemote.selectedRemoteName, 'selected-upstream');
-      assert.equal(current.observation.repositoryRef, repositoryRef);
-      assert.equal(current.observation.remoteRepositoryURL, remote);
-    } finally { await f.runGit('remote', 'rename', 'selected-upstream', 'origin'); }
-  });
-  await t.test('T-GH-36-ADO10-stale-default', async () => {
-    assert.equal((await f.store.currentRepositoryObservation(f.workItemId, 'primary', 'origin')).observation.defaultBranchRef,
-      'refs/heads/main');
-    await reject(() => f.store.observeRepository({ ...repositoryInput, defaultBranchRef: 'refs/heads/obsolete-default' }));
-  });
-  await t.test('T-GH-36-ADO10-prefix-search', async () => {
-    assert.deepEqual((await f.store.currentRepositoryObservation(f.workItemId, 'primary', 'origin')).observation.verifiedBranch,
-      { branchRef: 'refs/heads/feature/fixture', revision: f.revision });
-    await reject(() => f.store.observeRepository({ ...repositoryInput,
-      verifiedBranch: { branchRef: 'refs/heads/feature/fixture-copy', revision: f.revision } }));
-  });
-  await t.test('T-GH-36-ADO05-login', async () => {
-    registerGitHubAdapter();
-    const identity = { provider: 'github', connection: 'bridge-fixture', scopeRef: repositoryRef,
-      definitionRef: '301', executionRef: '401', attemptKind: 'known', attemptRef: '2' };
-    const native = await f.acquire('GET', `${base}/actions/runs/401/attempts/2`, {
-      id: 401, workflow_id: 301, run_attempt: 2, repository: Object.fromEntries(
-        Object.entries(f.repositoryBody).filter(([name]) => name !== 'url')),
-      html_url: 'https://github.com/bridge-owner/bridge-repo/actions/runs/401',
-    });
-    const observation = { connection: 'bridge-fixture', run: native.body,
-      access: { accessible: true, finalUrl: 'https://github.com/bridge-owner/bridge-repo/actions/runs/401/attempts/2' } };
-    const attached = await attachMonitor(f.store, { identity, origin: 'framework',
-      workItemId: f.workItemId, schedulerAvailable: true, readAvailable: true });
-    assert.equal((await verifyMonitorLink(f.store, { runKey: attached.key, adapterId: 'github',
-      observation, evidenceRef: 'fixture:original-accessible-page' })).link.status, 'verified');
-    const before = await durableBytes(f);
-    const rejected = await verifyProviderLink('github', identity, { ...observation,
-      access: { accessible: true, finalUrl: 'https://github.com/login' } });
-    assert.equal(rejected.verified, false);
-    assert.match(rejected.reason, /final page does not identify/u);
-    assert.deepEqual(await durableBytes(f), before);
-    assert.equal((await readMonitor(f.store, attached.key)).link.status, 'verified');
-  });
-  const pr = await f.acquirePr();
-  const adopted = (await adoptPr(f.store, { workItemId: f.workItemId, ...pr })).observation;
-  f.clock.advance(1);
-  const refresh = await f.acquirePr({ sequence: 2, previousObservationKey: adopted.id });
-  await t.test('T-GH-37-pull-request-wrong-sequence', async () => {
-    const wrong = f.originalPrVariant(refresh, { sequence: 999 });
-    await reject(() => adoptPr(f.store, { workItemId: f.workItemId, ...wrong,
-      previousObservationKey: adopted.id }));
-  });
-  await t.test('T-GH-37-pull-request-wrong-version', async () => {
-    const wrong = f.originalPrVariant(refresh, { version: 'foreign-original-provider-version' });
-    await reject(() => adoptPr(f.store, { workItemId: f.workItemId, ...wrong,
-      previousObservationKey: adopted.id }), 'STALE');
-  });
-  const actual = (await adoptPr(f.store, { workItemId: f.workItemId, ...refresh,
-    previousObservationKey: adopted.id })).observation;
-  assert.equal(actual.sequence, 2);
-  await t.test('T-GH-retained-history exact current PR and rejected delayed acquisition preserve predecessor', async () => {
-    assert.equal(actual.previousObservationKey, adopted.id);
-    const state = await f.store.load(f.workItemId);
-    assert.equal(state.records.find(value => value.id === actual.id).sequence, 2);
-    const archived = JSON.parse(await fs.readFile(path.join(
-      f.store.workPath(f.workItemId), 'evidence', `${adopted.id}.json`), 'utf8'));
-    assert.deepEqual(archived, adopted);
-    await reject(() => adoptPr(f.store, { workItemId: f.workItemId, ...pr }), 'STALE');
-    assert.deepEqual(JSON.parse(await fs.readFile(path.join(
-      f.store.workPath(f.workItemId), 'evidence', `${adopted.id}.json`), 'utf8')), adopted);
-    assert.deepEqual((await f.store.load(f.workItemId)).records.find(value => value.id === actual.id), actual);
-  });
-  await t.test('T-GH-36-ADO22-policy-denied', async () => {
-    const merge = await f.prepare('merge');
-    assert.equal((await f.record(merge, await f.result(merge))).status, 'succeeded');
-    const prepared = await f.prepare('policy', '-revoked-policy', { claim: false });
-    const event = (await f.store.records(f.workItemId)).find(value =>
-      value.type === 'event' && value.kind === 'permission' && value.effect.grant === 'auto-merge');
-    assert.ok(event);
-    await grant(f, 'revocation', { revokes: [event.id] });
-    await orient(f);
-    const calls = f.calls.length;
-    await reject(() => f.bridge.legacyOperations.claimDispatch(prepared.preparation, f.store), 'GATE');
-    assert.equal(f.calls.length, calls);
-  });
-});
-
-test('GH37 original authenticated checkout and prepared source configuration axes', async t => {
-  const f = await bridgeFixture(t);
-  const build = await f.prepare('execution');
-  const nativeBuild = await f.authenticatedExecutionResult(build);
-  assert.equal(nativeBuild.apiHead, f.revision);
-  assert.equal(nativeBuild.verify(nativeBuild.good).observation.status, 'succeeded');
-  await t.test('authenticated execution bytes cannot be replaced by an altered report with unchanged API head', async () => {
-    const before = await durableBytes(f);
-    await assert.rejects(f.record(build, nativeBuild.tamperedBytes()), error => {
-      assert.equal(error.code, 'EVIDENCE');
-      assert.match(error.message, /Original runner result signature changed/u);
-      return true;
-    });
-    assert.equal(nativeBuild.apiHead, f.revision);
-    assert.deepEqual(await durableBytes(f), before);
-  });
-  await t.test('T-GH-37-execution-wrong-revision', async () => {
-    const wrong = await nativeBuild.wrongCheckout(revision);
-    const before = await durableBytes(f);
-    await assert.rejects(f.record(build, wrong), error => {
-      assert.equal(error.code, 'EVIDENCE');
-      assert.match(error.message, /Authenticated executed source differs from original acquired revision/u);
-      return true;
-    });
-    assert.equal(nativeBuild.apiHead, f.revision, 'API head SHA remains unchanged');
-    assert.deepEqual(await durableBytes(f), before);
-  });
-  const producer = await f.record(build, nativeBuild.good);
-  await f.selectArtifact(producer);
-  const originalArtifact = await f.artifact(producer);
-  for (const [id, mutate] of [
-    ['T-GH-37-deployment-wrong-producer', value => { value.producingExecution.definitionRef = '999'; }],
-    ['T-GH-37-deployment-wrong-attempt', value => {
-      value.attemptRef = '1';
-      value.producingExecution.attemptRef = '1';
-    }],
-  ]) await t.test(id, async () => {
-    const before = await durableBytes(f);
-    const badProducer = f.artifactVariant(originalArtifact, mutate);
-    await assert.rejects(recordArtifact(f.store, badProducer), error => {
-      assert.equal(error.code, 'EVIDENCE');
-      assert.match(error.message, /exact proven producer/u);
-      return true;
-    });
-    assert.deepEqual(await durableBytes(f), before);
-    const current = await f.store.load(f.workItemId);
-    const artifact = current.records.find(value => value.type === 'artifact' && value.artifactId === '901');
-    assert.deepEqual(artifact.producingExecution, producer.resultProof.executionIdentity,
-      'Rejected source producer must not replace the deployable artifact selection');
-  });
-  const deploy = await f.prepare('deployment');
-  f.deployment = await f.record(deploy, await f.result(deploy));
-  const selected = await f.prepare('test');
-  const nativeTest = await f.authenticatedExecutionResult(selected);
-  assert.equal(nativeTest.verify(nativeTest.good).observation.result.expectedMet, true);
-  await t.test('authenticated aggregate success without the selected test outcome cannot pass the existing test consumer', async () => {
-    const before = await durableBytes(f);
-    await assert.rejects(f.record(selected, nativeTest.missingSelection()), error => {
-      assert.equal(error.code, 'EVIDENCE');
-      assert.match(error.message, /actual selected test outcome/u);
-      return true;
-    });
-    assert.deepEqual(await durableBytes(f), before);
-  });
-  await t.test('T-GH-37-test-wrong-revision', async () => {
-    const wrong = await nativeTest.wrongCheckout(revision);
-    const before = await durableBytes(f);
-    await assert.rejects(f.record(selected, wrong), error => {
-      assert.equal(error.code, 'EVIDENCE');
-      assert.match(error.message, /Authenticated executed source differs from original acquired revision/u);
-      return true;
-    });
-    assert.equal(nativeTest.apiHead, f.revision, 'Check/run API head is not changed to simulate executed checkout');
-    assert.deepEqual(await durableBytes(f), before);
-  });
-  assert.equal((await f.record(selected, nativeTest.good)).status, 'succeeded');
-  await t.test('T-GH-37-git-ref-wrong-version', async () => {
-    const prepared = await f.prepare('git-ref', '-original-config', { claim: false });
-    const file = path.join(f.repo, '.sdlc', 'config.json');
-    const bytes = await fs.readFile(file);
-    const configuration = JSON.parse(bytes);
-    configuration.environments.DEV.configDigest = 'foreign-original-source-config';
-    await fs.writeFile(file, JSON.stringify(configuration));
-    try {
-      const before = await durableBytes(f);
-      const calls = f.calls.length;
-      await assert.rejects(f.bridge.legacyOperations.claimDispatch(prepared.preparation, f.store), { code: 'STALE' });
-      const operation = (await f.store.records(f.workItemId)).find(value => value.id === prepared.preparation.operation.id);
-      assert.equal(operation.status, 'prepared');
-      assert.equal(operation.dispatchBound, false);
-      assert.deepEqual(await durableBytes(f), before);
-      assert.equal(f.calls.length, calls);
-    } finally { await fs.writeFile(file, bytes); }
-  });
-});
-
-test('GH37 policy and notification use original prepared action-source guards', async t => {
-  const f = await bridgeFixture(t);
-  const merge = await f.prepare('merge');
-  assert.equal((await f.record(merge, await f.result(merge))).status, 'succeeded');
-  const configFile = path.join(f.repo, '.sdlc', 'config.json');
-  const configBytes = await fs.readFile(configFile);
-  const originalRef = await f.runGit('symbolic-ref', 'HEAD');
-  const foreignRef = 'refs/heads/original-source-axis';
-  await f.runGit('update-ref', foreignRef, f.revision);
-  const tree = await f.runGit('rev-parse', 'HEAD^{tree}');
-  const foreignRevision = await f.runGit('commit-tree', tree, '-p', f.revision,
-    '-m', 'Isolated original source revision axis');
-  assert.notEqual(foreignRevision, f.revision);
-
-  for (const family of ['policy', 'notification']) {
-    const positive = await f.prepare(family, '-source-positive');
-    assert.equal(positive.claim.operation.dispatchBound, true);
-    assert.equal((await f.record(positive, await f.result(positive))).status, 'succeeded');
-    for (const axis of family === 'policy' ? ['ref', 'revision'] : ['ref', 'revision', 'version']) {
-      await t.test(`T-GH-37-${family}-wrong-${axis}`, async () => {
-        const prepared = await f.prepare(family, `-source-${axis}`, { claim: false });
-        const change = async () => {
-          if (axis === 'ref') await f.runGit('symbolic-ref', 'HEAD', foreignRef);
-          else if (axis === 'revision') await f.runGit('update-ref', 'HEAD', foreignRevision, f.revision);
-          else {
-            const config = JSON.parse(configBytes);
-            config.environments.DEV.configDigest = 'foreign-original-notification-config';
-            await fs.writeFile(configFile, JSON.stringify(config));
-          }
-        };
-        const restore = async () => {
-          if (axis === 'ref') await f.runGit('symbolic-ref', 'HEAD', originalRef);
-          else if (axis === 'revision') await f.runGit('update-ref', 'HEAD', f.revision, foreignRevision);
-          else await fs.writeFile(configFile, configBytes);
-        };
-        await change();
-        try {
-          assert.equal(await f.runGit('rev-parse', 'HEAD'), axis === 'revision' ? foreignRevision : f.revision);
-          assert.equal(await f.runGit('symbolic-ref', 'HEAD'), axis === 'ref' ? foreignRef : originalRef);
-          if (axis !== 'version') assert.deepEqual(await fs.readFile(configFile), configBytes);
-          const before = await durableBytes(f);
-          const calls = f.calls.length;
-          await assert.rejects(f.bridge.legacyOperations.claimDispatch(prepared.preparation, f.store), error => {
-            assert.equal(error.code, axis === 'ref' ? 'BINDING' : 'STALE');
-            assert.match(error.message, axis === 'ref' ?
-              /Repository\/worktree\/branch changed/u : /Candidate changed after operation preparation/u);
-            return true;
-          });
-          assert.deepEqual(await durableBytes(f), before);
-          assert.equal(f.calls.length, calls);
-          const operation = (await f.store.records(f.workItemId)).find(value =>
-            value.id === prepared.preparation.operation.id);
-          assert.equal(operation.status, 'prepared');
-          assert.equal(operation.dispatchBound, false);
-        } finally { await restore(); }
-        prepared.claim = await f.bridge.legacyOperations.claimDispatch(prepared.preparation, f.store);
-        assert.equal(prepared.claim.operation.dispatchBound, true);
-        const failure = await f.record(prepared, await f.failedResult(prepared), { status: 'failed' });
-        assert.equal(failure.status, 'failed');
-        assert.equal(failure.dispatchBound, true, 'An actual later provider rejection is not preclaim non-dispatch');
       });
     }
   }

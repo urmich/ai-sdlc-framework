@@ -1,171 +1,90 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "direct", "paths": ["src/observation-retention.mjs", "src/repository-observations.mjs", "src/pr.mjs", "src/git.mjs"]}],
+  "variants": [
+    {"expression": "`FR-063 sole ${status} action retains its source observation until released`", "domains": {"status": ["prepared", "uncertain"]}},
+    {"expression": "`FR-063 sole ${consumer} retains superseded PR observations and facts`", "domains": {"consumer": ["facts-reference", "audit-reference", "recovery"]}},
+    {"expression": "`FR-063 sole ${consumer} association retains its PR and facts`", "domains": {"consumer": ["current-check", "terminal-notice", "running-check", "uncertain-action-reference"]}},
+    {"expression": "`FR-064 archival retries after ${interruption} without changing historical bytes`", "domains": {"interruption": ["archive:repository-observation", "record:repository-observation", "checkpoint", "remove:repository-observation:"]}}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import * as fs from 'node:fs/promises';
-import childProcess from 'node:child_process';
-import { syncBuiltinESMExports } from 'node:module';
-import { promisify } from 'node:util';
+import { subscribe, unsubscribe } from 'node:diagnostics_channel';
 import { LIMITS, canonical, digest } from '../src/core.mjs';
-
-// Cache only immutable fixture Git reads; all transactions, archival and
-// filesystem I/O are real. Mutating Git commands invalidate the cached reads.
-const execute = childProcess.execFile;
-const gitReads = new Map();
-childProcess.execFile = (file, args, options, callback) => {
-  const command = args.filter(argument => !['--no-pager',
-    '--no-optional-locks'].includes(argument))[0];
-  const cacheable = file === 'git' && (['rev-parse', 'symbolic-ref'].includes(command) ||
-    command === 'remote' && (!args.includes('add') && !args.includes('set-url')));
-  if (file === 'git' && !cacheable) gitReads.clear();
-  const key = canonical([options.cwd, args]);
-  if (cacheable && gitReads.has(key)) {
-    const { stdout, stderr } = gitReads.get(key);
-    queueMicrotask(() => callback(null, stdout, stderr));
-    return undefined;
-  }
-  return execute(file, args, options, (error, stdout, stderr) => {
-    if (!error && cacheable) gitReads.set(key, { stdout, stderr });
-    callback(error, stdout, stderr);
-  });
-};
-const cachedGit = childProcess.execFile;
-cachedGit[promisify.custom] = (file, args, options) => new Promise((resolve, reject) => {
-  cachedGit(file, args, options, (error, stdout, stderr) => {
-    if (error) reject(error);
-    else resolve({ stdout, stderr });
-  });
-});
-syncBuiltinESMExports();
-const { fixture, observeFixtureRepository } = await import('./helpers.mjs');
-const { pruneWork } = await import('../src/operations.mjs');
-const { adoptPr, evaluateReadiness, updatePrFacts } = await import('../src/pr.mjs');
-const { archiveSupersededObservations, withObservationRetention } =
-  await import('../src/observation-retention.mjs');
-const { currentArtifact, currentDeployment } = await import('../src/current-evidence.mjs');
-const { deriveIntendedOutcome } = await import('../src/external-results.mjs');
-const { attachMonitor, monitorAssociationKey, withMonitorLocks } =
-  await import('../src/monitors.mjs');
-const { immutableJson, readJson, withLock, writeJson } = await import('../src/files.mjs');
-childProcess.execFile = execute;
-syncBuiltinESMExports();
-
-async function retentionFixture(t) {
-  const f = await fixture(t);
-  await f.runGit('commit', '--allow-empty', '-qm', 'Retention fixture baseline');
-  f.store.verifyPullRequest = ({ adapterObservation: observation }) => ({
-    canonicalLocalRepositoryPath: observation.localRepositoryPath,
-    verifiedRemoteRepositoryURL: observation.remoteRepositoryURL,
-    verifiedProvider: observation.provider,
-    verifiedConnection: observation.connection,
-    verifiedRepositoryRef: observation.repositoryRef,
-    verifiedPullRequestRef: observation.pullRequestRef,
-    verifiedSourceBranchRef: observation.sourceBranchRef,
-    verifiedTargetBranchRef: observation.targetBranchRef,
-    verifiedSourceRevision: observation.sourceRevision,
-    verifiedTargetRevision: observation.targetRevision,
-    verifiedState: observation.state,
-    verifiedObservedAt: observation.observedAt,
-    verifiedEvidenceRef: observation.evidenceRef,
-  });
-  return f;
-}
-
-async function refreshPr(f, repository, predecessor, overrides = {}) {
-  f.clock.advance(1);
-  const observation = {
-    repositoryId: repository.repositoryId,
-    localRepositoryPath: repository.localRepositoryPath,
-    remoteRepositoryURL: repository.remoteRepositoryURL,
-    provider: repository.provider, connection: repository.connection,
-    repositoryRef: repository.repositoryRef, pullRequestRef: 'retention-pr',
-    sourceBranchRef: 'refs/heads/feature/fixture',
-    targetBranchRef: 'refs/heads/main',
-    sourceRevision: repository.revision, targetRevision: 'b'.repeat(40),
-    state: 'active', observedAt: new Date(f.clock.now()).toISOString(),
-    evidenceRef: `fixture:pr:${f.clock.now()}`, ...overrides,
-  };
-  return (await adoptPr(f.store, {
-    workItemId: f.workItemId, observation, adapterObservation: observation,
-    ...(predecessor ? { previousObservationKey: predecessor.id } : {}),
-  })).observation;
-}
-
-const factsInput = (f, pr) => ({
-  workItemId: f.workItemId, prRecordId: pr.id, policyVersion: 'policy-1',
-  sourceRevision: pr.sourceRevision, targetRevision: pr.targetRevision,
-  requiredChecks: [], checks: [], reviewsSatisfied: true,
-  providerEvidenceRef: 'fixture:policy',
-});
-
-async function archivedBytes(f, recordId) {
-  return fs.readFile(path.join(f.store.workPath(f.workItemId),
-    'evidence', `${recordId}.json`));
-}
-
-test('FR-063/064 real refresh and prune archive superseded observations/facts before exhaustion', async t => {
-  const f = await retentionFixture(t);
-  const first = await observeFixtureRepository(f);
-  const firstBytes = await fs.readFile(f.store.recordPath(f.workItemId, first.id));
-  let pr = await refreshPr(f, first);
-  const firstPr = pr;
-  const prBytes = await fs.readFile(f.store.recordPath(f.workItemId, pr.id));
-  const firstFacts = await updatePrFacts(f.store, factsInput(f, pr));
-  const factsBytes = await fs.readFile(f.store.recordPath(f.workItemId, firstFacts.id));
-  f.clock.advance(1);
-  let repository = await observeFixtureRepository(f);
-  pr = await refreshPr(f, repository, pr);
-  await pruneWork(f.store, f.workItemId);
-  const active = await f.store.records(f.workItemId);
-  assert.equal(active.some(record => record.id === first.id), false,
-    'superseded repository observation must leave the active working set after refresh/prune');
-  assert.equal(active.some(record => record.id === firstPr.id), false,
-    'superseded PR observation must leave the active working set');
-  assert.equal(active.some(record => record.id === firstFacts.id), false,
-    'superseded PR facts must leave the active working set');
-  assert.deepEqual(await archivedBytes(f, first.id), firstBytes);
-  assert.deepEqual(await archivedBytes(f, firstPr.id), prBytes);
-  assert.deepEqual(await archivedBytes(f, firstFacts.id), factsBytes);
-
-  for (let index = 0; index < 550; index++) {
-    f.clock.advance(1);
-    repository = await observeFixtureRepository(f);
-    if (index % 2 === 0) {
-      pr = await refreshPr(f, repository, pr);
-      await updatePrFacts(f.store, factsInput(f, pr));
-    }
-    if (index % 50 === 0) await pruneWork(f.store, f.workItemId);
-    const records = await f.store.records(f.workItemId);
-    assert.ok(Buffer.byteLength(canonical(records)) < LIMITS.workingSet,
-      `refresh ${index} must be admitted below the unchanged working-set budget`);
-    assert.ok(records.filter(record => ['repository-observation',
-      'pr-observation', 'pr-facts'].includes(record.type)).length <= 6,
-    `refresh ${index} must keep superseded history bounded, not wait for capacity failure`);
-  }
-  const records = await f.store.records(f.workItemId);
-  const history = await fs.readdir(path.join(f.store.workPath(f.workItemId), 'evidence'));
-  assert.ok(history.filter(name => name.startsWith('repository-observation-')).length >= 550);
-  assert.ok(history.filter(name => name.startsWith('pr-observation-')).length >= 275);
-  assert.ok(records.some(record => record.id === repository.id));
-  assert.ok(records.some(record => record.id === pr.id));
-  assert.equal((await f.store.currentRepositoryObservation(f.workItemId,
-    'primary')).observation.id, repository.id);
-  const oldReadiness = evaluateReadiness(records, {
-    environment: 'PROD', prRecordId: firstPr.id,
-    localRepositoryPath: first.localRepositoryPath,
-    remoteRepositoryURL: first.remoteRepositoryURL,
-    prId: firstPr.pullRequestRef, sourceRevision: firstPr.sourceRevision,
-    targetRevision: firstPr.targetRevision, policyVersion: 'policy-1',
-  }, { clock: f.clock });
-  assert.equal(oldReadiness.ready, false);
-  assert.ok(oldReadiness.gaps.includes('qualifying-pr-missing'));
-  await assert.rejects(updatePrFacts(f.store, factsInput(f, firstPr)),
-    { code: 'INPUT' });
-});
+import { fixture, observeFixtureRepository, pruneWork, adoptPr, evaluateReadiness, updatePrFacts,
+  archiveSupersededObservations, withObservationRetention, currentArtifact, currentDeployment,
+  deriveIntendedOutcome, attachMonitor, monitorAssociationKey, withMonitorLocks,
+  immutableJson, readJson, withLock, writeJson, retentionFixture, refreshPr,
+  factsInput, archivedBytes } from './observation-retention-fixture.mjs';
 
 const pruneObservations = f => withObservationRetention(f.store, f.workItemId,
   (tx, monitorDependencies) =>
     archiveSupersededObservations(f.store, tx, { monitorDependencies }),
   { allowRecoveryRequired: true });
+
+test('FR-063 immutable fixture Git reads are reused without masking subsequent writes', async t => {
+  const f = await retentionFixture(t);
+  const first = await observeFixtureRepository(f);
+  const commands = [];
+  const observe = ({ process: child }) => {
+    child.once('spawn', () => {
+      if (child.spawnargs[0] !== 'git') return;
+      commands.push(child.spawnargs.slice(1).filter(argument =>
+        !['--no-pager', '--no-optional-locks'].includes(argument)));
+    });
+  };
+  subscribe('child_process', observe);
+  t.after(() => unsubscribe('child_process', observe));
+
+  f.clock.advance(1);
+  const repeated = await observeFixtureRepository(f);
+  assert.equal(repeated.revision, first.revision);
+  assert.equal(commands.length, 0,
+    `Immutable fixture reads must not launch Git again: ${JSON.stringify(commands)}`);
+
+  await f.runGit('commit', '--allow-empty', '-qm', 'Advance retention fixture');
+  const revision = await f.runGit('rev-parse', 'HEAD');
+  assert.notEqual(revision, first.revision);
+  commands.length = 0;
+  f.clock.advance(1);
+  assert.equal((await observeFixtureRepository(f)).revision, revision);
+  assert.ok(commands.some(args => args[0] === 'for-each-ref'),
+    'A real commit must invalidate the cached current-ref query');
+
+  const remoteRepositoryURL = 'https://example.invalid/changed-retention.git';
+  await f.runGit('remote', 'set-url', 'origin', remoteRepositoryURL);
+  commands.length = 0;
+  f.clock.advance(1);
+  assert.equal((await observeFixtureRepository(f)).remoteRepositoryURL, remoteRepositoryURL);
+  assert.ok(commands.some(args => args[0] === 'remote' && args.includes('get-url')),
+    'A real remote change must invalidate cached destination reads');
+
+  const remoteName = 'renamed-retention';
+  await f.runGit('remote', 'rename', 'origin', remoteName);
+  commands.length = 0;
+  f.clock.advance(1);
+  await assert.rejects(observeFixtureRepository(f, { remoteName: 'origin' }),
+    error => error.code === 2 && error.message.includes("error: No such remote 'origin'"),
+    'A remote rename must reject the cached old destination');
+  assert.ok(commands.some(args => args[0] === 'remote' &&
+    args.includes('get-url') && args.includes('origin')),
+  'A remote rename must query the old destination instead of reusing cached URLs');
+  commands.length = 0;
+  f.clock.advance(1);
+  assert.equal((await observeFixtureRepository(f, { remoteName })).remoteRepositoryURL,
+    remoteRepositoryURL);
+  assert.ok(commands.some(args => args[0] === 'remote' &&
+    args.includes('get-url') && args.includes(remoteName)),
+  'A remote rename must query the renamed destination without cached old URLs');
+
+  await f.runGit('checkout', '-qb', 'feature/changed-retention');
+  assert.equal(await f.runGit('rev-parse', 'HEAD'), revision);
+  await assert.rejects(observeFixtureRepository(f, { remoteName }), { code: 'BINDING' },
+    'A same-commit branch switch must not reuse the old checked-out-ref marker');
+});
 
 test('FR-063/064 pruneWork alone archives released historical observations and facts without another refresh', async t => {
   const f = await retentionFixture(t);
@@ -497,6 +416,7 @@ for (const interruption of ['archive:repository-observation', 'record:repository
 test('FR-063 deterministic prune/refresh race rechecks dependencies under the work-item lock', async t => {
   const f = await retentionFixture(t);
   const first = await observeFixtureRepository(f);
+  const bytes = await fs.readFile(f.store.recordPath(f.workItemId, first.id));
   await f.store.transaction(f.workItemId, tx => tx.put({
     type: 'conflict', id: 'race-consumer', workItemId: f.workItemId,
     reason: 'Hold the sole recovery reference until pruning', status: 'open',
@@ -519,14 +439,24 @@ test('FR-063 deterministic prune/refresh race rechecks dependencies under the wo
   let waiting;
   const waitingForWorkLock = new Promise(resolve => { waiting = resolve; });
   const transaction = f.store.transaction.bind(f.store);
-  t.mock.method(f.store, 'transaction', (...args) => {
+  t.mock.method(f.store, 'transaction', async (...args) => {
     waiting();
+    // Queue at the Store boundary, not inside its bounded lock acquisition.
+    await pruning;
     return transaction(...args);
   });
-  f.clock.advance(1);
-  const refreshing = observeFixtureRepository(f);
-  await waitingForWorkLock;
-  release();
+  let refreshing;
+  try {
+    const lock = path.join(f.store.workPath(f.workItemId), '.lock');
+    const owner = await fs.readFile(lock);
+    f.clock.advance(1);
+    refreshing = observeFixtureRepository(f);
+    await waitingForWorkLock;
+    assert.deepEqual(await fs.readFile(lock), owner);
+  } finally {
+    release();
+    await Promise.allSettled([pruning, refreshing]);
+  }
   const [archived, latest] = await Promise.all([pruning, refreshing]);
   assert.ok(archived.includes(first.id));
   const active = await f.store.records(f.workItemId);
@@ -534,7 +464,7 @@ test('FR-063 deterministic prune/refresh race rechecks dependencies under the wo
   assert.ok(active.some(record => record.id === latest.id));
   assert.equal((await f.store.currentRepositoryObservation(f.workItemId,
     'primary')).observation.id, latest.id);
-  assert.equal(JSON.parse(await archivedBytes(f, first.id)).id, first.id);
+  assert.deepEqual(await archivedBytes(f, first.id), bytes);
 });
 
 test('FR-063 newly associated monitor is reported STALE instead of reversing lock order', async t => {
@@ -553,16 +483,24 @@ test('FR-063 newly associated monitor is reported STALE instead of reversing loc
   let waiting;
   const waitingForWorkLock = new Promise(resolve => { waiting = resolve; });
   const transaction = f.store.transaction.bind(f.store);
-  t.mock.method(f.store, 'transaction', (...args) => {
+  t.mock.method(f.store, 'transaction', async (...args) => {
     waiting();
+    await held;
     return transaction(...args);
   });
-  const pruning = pruneObservations(f);
-  const rejection = assert.rejects(pruning, { code: 'STALE' });
-  await waitingForWorkLock;
-  await associationFixture(f, pr);
-  release();
-  await Promise.all([held, rejection]);
+  try {
+    await Promise.all([
+      assert.rejects(pruneObservations(f), { code: 'STALE' }),
+      (async () => {
+        await waitingForWorkLock;
+        try { await associationFixture(f, pr); }
+        finally { release(); }
+      })(),
+    ]);
+  } finally {
+    release();
+    await held;
+  }
   await pruneObservations(f);
   assert.ok((await f.store.records(f.workItemId)).some(record => record.id === pr.id));
 });

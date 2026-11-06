@@ -1,28 +1,11 @@
 name: Release acceptance
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      source_run_id:
-        description: Release candidate run ID from the saved handoff
+      acceptance_handoff:
         type: string
         required: true
-      bundle_artifact_id:
-        description: Exact immutable release-bundle artifact ID (not a name or wildcard)
-        type: string
-        required: true
-      bundle_sha256:
-        description: Saved prepublication bundle manifest SHA-256
-        type: string
-        required: true
-      source_commit:
-        description: Full source commit from the saved handoff
-        type: string
-        required: true
-      check_npm:
-        description: Require anonymous npm payload and isolated npm lifecycle acceptance
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -31,59 +14,94 @@ permissions:
 defaults:
   run:
     working-directory: source
+    shell: bash
 
 jobs:
   anonymous-acceptance:
-    runs-on: macos-15
-    timeout-minutes: 30
-    environment: release-acceptance
+    name: consumer-${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            runner: windows-2022
+            architecture: x64
+          - target: macos-arm64
+            runner: macos-15
+            architecture: arm64
+          - target: macos-x64
+            runner: macos-15-intel
+            architecture: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
     env:
-      EXPECTED_BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
-      EXPECTED_SOURCE_COMMIT: ${{ inputs.source_commit }}
-      ACCEPTANCE_VERIFIER_COMMIT: ${{ github.sha }}
+      EXPECTED_BUNDLE_SHA256: ${{ fromJSON(inputs.acceptance_handoff).bundle.sha256 }}
+      EXPECTED_SOURCE_COMMIT: ${{ fromJSON(inputs.acceptance_handoff).identity.sourceCommit }}
+      RELEASE_INTENT_ID: ${{ fromJSON(inputs.acceptance_handoff).releaseIntentId }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Reject a misbound acceptance source before checkout
+        working-directory: .
+        run: test "$GITHUB_EVENT_NAME" = workflow_dispatch && test "$EXPECTED_SOURCE_COMMIT" = "$GITHUB_SHA"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ fromJSON(inputs.acceptance_handoff).identity.sourceCommit }}
           path: source
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '22'
-      - uses: actions/download-artifact@v4
+          node-version: '24.20.0'
+          architecture: ${{ matrix.architecture }}
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
-          artifact-ids: ${{ inputs.bundle_artifact_id }}
-          run-id: ${{ inputs.source_run_id }}
+          go-version: '1.27.1'
+          cache: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12.10'
+          architecture: ${{ matrix.architecture }}
+      - name: Provision exact native tools and owned Homebrew prefix without global linking
+        id: bootstrap
+        env:
+          NATIVE_TARGET: ${{ matrix.target }}
+        run: node scripts/native-toolchain.mjs --target "$NATIVE_TARGET" --output-dir .test-data/consumer-tools
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ fromJSON(inputs.acceptance_handoff).bundle.artifactId }}
+          run-id: ${{ fromJSON(inputs.acceptance_handoff).bundle.sourceRunId }}
           github-token: ${{ github.token }}
           path: source/.test-data/release-bundle
           merge-multiple: true
-      - name: Provision pinned workspace-local Homebrew for public acceptance
+      - name: Anonymous exact public downloads, real prior-version upgrades and cryptographic provenance
         env:
-          HOMEBREW_BREW_COMMIT: 99fd9a8eed4ff942c448da0c1f11156302441e4a
+          NATIVE_TARGET: ${{ matrix.target }}
+          ACCEPTANCE_HANDOFF: ${{ inputs.acceptance_handoff }}
         run: |
-          set -euo pipefail
-          root="$GITHUB_WORKSPACE/source/.test-data/homebrew-acceptance"
-          test ! -e "$root"
-          git init -q "$root"
-          git -C "$root" remote add origin https://github.com/Homebrew/brew.git
-          git -C "$root" fetch --quiet --depth=1 origin "$HOMEBREW_BREW_COMMIT"
-          git -C "$root" checkout --quiet --detach FETCH_HEAD
-          test "$(git -C "$root" rev-parse HEAD)" = "$HOMEBREW_BREW_COMMIT"
-          brew="$root/bin/brew"
-          test -x "$brew"
-          echo "SDLC_PUBLIC_HOMEBREW_BREW=$brew" >> "$GITHUB_ENV"
-      - name: Verify saved evidence, anonymously download, then execute native Apple Silicon lifecycle
-        env:
-          CHECK_NPM: ${{ inputs.check_npm }}
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/.test-data/acceptance-scratch"
-          export TMPDIR="$GITHUB_WORKSPACE/.test-data/acceptance-scratch"
-          node scripts/accept-release.mjs --directory .test-data/release-bundle \
-            --output-file .test-data/acceptance-result.json --npm "$CHECK_NPM"
-      - name: Retain postpublication results separately from prepublication evidence
+          node scripts/release-orchestration.mjs consume --directory .test-data/release-bundle \
+            --handoff "$ACCEPTANCE_HANDOFF" --target "$NATIVE_TARGET" \
+            --output-file ".test-data/consumer-results/$NATIVE_TARGET.json"
+      - name: Retain every original native-consumer result, failure and explicit limitation
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: release-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
-          path: source/.test-data/acceptance-result.json
+          name: release-acceptance-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/.test-data/consumer-results/
           if-no-files-found: error
+          retention-days: 90
+      - name: Remove owned short Homebrew prefix
+        if: ${{ always() && runner.os == 'macOS' && steps.bootstrap.outcome != 'skipped' }}
+        env:
+          NATIVE_TARGET: ${{ matrix.target }}
+        run: >-
+          node scripts/native-toolchain.mjs --cleanup
+          --target "$NATIVE_TARGET" --output-dir .test-data/consumer-tools
+      - name: Retain native toolchain originals
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: consumer-toolchain-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            source/.test-data/consumer-tools/*.json
+            source/.test-data/consumer-tools/*.ndjson
+          if-no-files-found: warn
           retention-days: 90

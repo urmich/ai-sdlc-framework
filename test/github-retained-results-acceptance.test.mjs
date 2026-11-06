@@ -1,3 +1,10 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "variants": [
+    {"expression": "name", "names": ["T-GHB17 changed retrieval bytes fail integrity", "T-GHB17 independently acquired digest contradiction fails integrity", "T-GHC10-N another producer cannot reuse immutable bytes", "T-GHC10-G nullable metadata without independent producer stays unverified", "T-GHB18 hashing bytes without independent original byte proof cannot admit", "T-GHB19 expired artifact cannot replace current selection or establish historical absence", "T-GHC21-N mutable tag cannot prove selected delivered revision", "T-GHC21-N another full candidate revision cannot borrow release lineage", "T-GHC21-N unrelated asset release cannot borrow candidate lineage", "T-GHC21-G missing destination cannot establish delivered release"]},
+    {"expression": "`T-GHC14 exact ${mergeMethod} method rejects another acquired merge method`", "domains": {"mergeMethod": ["merge", "squash", "rebase"]}}
+  ]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';

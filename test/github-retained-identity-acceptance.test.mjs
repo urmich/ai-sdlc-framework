@@ -1,3 +1,11 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "deferred": {"declaration": "test", "dispatch": "parent", "parent": "retained identity acceptance through existing public consumers"},
+  "groups": [{
+    "root": "retained identity acceptance through existing public consumers",
+    "minimumSlots": 4
+  }]
+};
 import nodeTest from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
@@ -35,7 +43,13 @@ const verifiersOf = f => Object.fromEntries(Object.entries(f.bridge.storeOptions
   .filter(([, value]) => typeof value === 'function'));
 
 async function bridgeFixture(t) {
+  const started = process.hrtime.bigint();
   const f = await acquiredBridgeFixture(t);
+  t.diagnostic(JSON.stringify({
+    kind: 'retained-bridge-setup',
+    phase: 'fixture-and-bridge-setup',
+    elapsedMs: Number(process.hrtime.bigint() - started) / 1e6,
+  }));
   f.repositoryInput = { ...f.repositoryInput, observedAt: new Date(f.clock.now()).toISOString() };
   return f;
 }

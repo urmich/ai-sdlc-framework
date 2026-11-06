@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ai-sdlc:pr-coverage:1",
+  "title": "PR-description requirements coverage, version 1",
+  "description": "Declared traceability, not test execution or approval. The runtime also checks references, uniqueness by identity, gap consistency and UTF-8 byte budgets.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "repositoryId", "sourceRevision",
+    "requirements", "testPlans", "coverage", "uncovered"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "repositoryId": { "$ref": "#/$defs/artifactId" },
+    "sourceRevision": { "type": "string", "pattern": "^([a-f0-9]{40}|[a-f0-9]{64})$" },
+    "requirements": {
+      "type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": true,
+      "items": { "$ref": "#/$defs/requirementsReference" }
+    },
+    "testPlans": {
+      "type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": true,
+      "items": { "$ref": "#/$defs/planReference" }
+    },
+    "coverage": {
+      "type": "array", "maxItems": 10000, "uniqueItems": true,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["requirement", "condition", "tests"],
+        "properties": {
+          "requirement": { "type": "string", "pattern": "^FR-[0-9]+$" },
+          "condition": { "$ref": "#/$defs/conditionId" },
+          "tests": {
+            "type": "array", "maxItems": 10000, "uniqueItems": true,
+            "items": { "type": "string", "maxLength": 100, "pattern": "^T-[A-Za-z0-9._-]+$" }
+          }
+        }
+      }
+    },
+    "uncovered": {
+      "type": "array", "maxItems": 10000, "uniqueItems": true,
+      "items": { "$ref": "#/$defs/conditionId" }
+    }
+  },
+  "$defs": {
+    "artifactId": { "type": "string", "maxLength": 100, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "conditionId": { "type": "string", "maxLength": 100, "pattern": "^AC-[0-9]+\\.[0-9]+$" },
+    "path": {
+      "type": "string", "minLength": 1, "maxLength": 512,
+      "description": "Repository-relative canonical path; the runtime rejects absolute, protected, ambiguous and escaping paths."
+    },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "requirementsReference": {
+      "type": "object", "additionalProperties": false,
+      "required": ["artifactId", "path", "sha256"],
+      "properties": {
+        "artifactId": { "$ref": "#/$defs/artifactId" },
+        "path": { "$ref": "#/$defs/path" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "planReference": {
+      "type": "object", "additionalProperties": false,
+      "required": ["artifactId", "path", "definitionDigest"],
+      "properties": {
+        "artifactId": { "$ref": "#/$defs/artifactId" },
+        "path": { "$ref": "#/$defs/path" },
+        "definitionDigest": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}

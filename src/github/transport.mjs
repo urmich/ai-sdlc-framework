@@ -421,20 +421,42 @@ export function createGitHubTransport(options) {
     });
     const interrupted = () => transportError(timedOut ? 'TIMEOUT' : 'CANCELLED',
       timedOut ? 'GitHub request timed out' : 'GitHub request was cancelled', context());
-    async function bounded(operation) {
-      if (signal.aborted) throw interrupted();
+    async function bounded(operation, startWhenAborted = false) {
+      if (signal.aborted && !startWhenAborted) throw interrupted();
       let listener;
       const cancelled = new Promise((_, reject) => {
         listener = () => reject(interrupted());
         signal.addEventListener('abort', listener, { once: true });
+        if (signal.aborted) listener();
       });
       try {
         return await Promise.race([Promise.resolve().then(() => {
-          if (signal.aborted) throw interrupted();
+          if (signal.aborted && !startWhenAborted) throw interrupted();
           return operation();
         }), cancelled]);
       } finally {
         signal.removeEventListener('abort', listener);
+      }
+    }
+    const cancellations = new WeakMap();
+    function cancelResource(resource, operation) {
+      let pending = cancellations.get(resource);
+      if (pending === undefined) {
+        pending = Promise.resolve().then(operation);
+        cancellations.set(resource, pending);
+      }
+      // Attempt cancellation after abort, but never extend the request deadline.
+      return bounded(() => pending, true);
+    }
+    async function cancelBody(response) {
+      if (response.body !== null && response.body !== undefined) {
+        requireThat(typeof response.body.cancel === 'function', 'CONTRACT',
+          'GitHub response body cannot be safely released');
+        try { await cancelResource(response.body, () => response.body.cancel()); }
+        catch (error) {
+          if (transportErrors.has(error)) throw error;
+          requireThat(false, 'CLEANUP', 'GitHub response body cleanup failed');
+        }
       }
     }
     let reader;
@@ -679,32 +701,26 @@ export function createGitHubTransport(options) {
       primaryError = transportError('TRANSPORT', 'GitHub injected request or response stream failed', context());
       throw primaryError;
     } finally {
-      clearTimeout(timer);
-      runtime.signal?.removeEventListener('abort', abort);
       let cleanupFailed = false;
+      let cleanupTimedOut = false;
       try {
-        if (reader !== undefined) await reader.cancel();
+        if (reader !== undefined) await cancelResource(reader, () => reader.cancel());
         else if (activeResponse !== undefined) await cancelBody(activeResponse);
-      } catch {
+      } catch (error) {
         cleanupFailed = true;
+        cleanupTimedOut = transportErrors.has(error) && error.code === 'TIMEOUT';
       } finally {
         try { reader?.releaseLock(); }
         catch { cleanupFailed = true; }
+        clearTimeout(timer);
+        runtime.signal?.removeEventListener('abort', abort);
       }
       if (cleanupFailed) {
         throw transportError(primaryError?.code ?? 'CLEANUP',
           primaryError?.message ?? 'GitHub response stream cleanup failed',
-          { ...primaryError?.details, ...context(), cleanupFailed: true });
+          { ...primaryError?.details, ...context(), cleanupFailed: true,
+            ...(cleanupTimedOut ? { cleanupTimedOut: true } : {}) });
       }
-    }
-  }
-
-  async function cancelBody(response) {
-    if (response.body !== null && response.body !== undefined) {
-      requireThat(typeof response.body.cancel === 'function', 'CONTRACT',
-        'GitHub response body cannot be safely released');
-      try { await response.body.cancel(); }
-      catch { requireThat(false, 'CLEANUP', 'GitHub response body cleanup failed'); }
     }
   }
 

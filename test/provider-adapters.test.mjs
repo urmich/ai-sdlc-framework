@@ -1,3 +1,7 @@
+export const validationDeclarations = {
+  "schemaVersion": 1,
+  "surfaces": [{"coverage": "direct", "paths": ["src/provider-adapters.mjs"]}]
+};
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {

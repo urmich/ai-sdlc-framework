@@ -5,7 +5,8 @@ import path from 'node:path';
 import { coding, completeReview, fixture, grant, grantPush, observeFixtureRepository, orient, pushAction, testDefinitions } from './helpers.mjs';
 import { evaluatePolicy } from '../src/policy.mjs';
 import { nextAction, resume } from '../src/recovery.mjs';
-import { candidateStamp, recordTest, startCycle } from '../src/validation.mjs';
+import { candidateStamp, startCycle } from '../src/validation.mjs';
+import { recordFixtureTest as recordTest } from './helpers.mjs';
 import { writeJson } from '../src/files.mjs';
 import { markDispatching, prepareOperation } from '../src/operations.mjs';
 import { evaluateGate as gate } from '../src/gate.mjs';
@@ -24,7 +25,7 @@ async function passLocal(f, cycle) {
 
 test('T-35 build artifact labels require a provider and workflow before normalization', () => {
   const build = { class: 'build', repositoryId: 'primary', environment: 'DEV',
-    target: 'dev-target', configDigest: 'config-v1', stages: ['DEV'],
+    target: 'dev-target', configDigest: digest('config-v1'), stages: ['DEV'],
     monitorCapability: true, sourceRevision: 'a'.repeat(40),
     remoteRepositoryURL: 'https://example.invalid/repository.git' };
   for (const artifactId of ['artifact-a', 'artifact-b']) {
@@ -54,12 +55,12 @@ test('T-35 canonical tests and candidate-bound /review gate publication and DEV'
     verifiedBranch: { branchRef: 'refs/heads/trunk', revision: targetRevision },
   });
   const configuration = { defaultBranch: 'refs/heads/main', environments: {
-    DEV: { target: 'dev-target', configDigest: 'config-v1', allowedStages: ['DEV'] },
+    DEV: { target: 'dev-target', configDigest: digest('config-v1'), allowedStages: ['DEV'] },
   } };
   await writeJson(path.join(f.repo, '.sdlc/config.json'), configuration);
   await assert.rejects(startCycle(f.store, { workItemId: f.workItemId,
-    tests: [testDefinitions()[0]], configDigest: 'config-v1', cause: 'incomplete selection' }), { code: 'ARTIFACT' });
-  let cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'config-v1', cause: 'canonical plan' })).cycle;
+    tests: [testDefinitions()[0]], configDigest: digest('config-v1'), cause: 'incomplete selection' }), { code: 'ARTIFACT' });
+  let cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: digest('config-v1'), cause: 'canonical plan' })).cycle;
   assert.equal(cycle.tests.length, testDefinitions().length);
   const publication = { repositoryId: 'primary', sourceRef: 'refs/heads/feature/fixture',
     targetRef: 'refs/heads/trunk', draft: true, target: 'origin',
@@ -104,7 +105,7 @@ test('T-35 canonical tests and candidate-bound /review gate publication and DEV'
     status: 'Passed', evidenceRef: 'copilot-cli:/review:second',
     summary: 'No blocking findings', blockingFindings: [], completedStage: 'review' }), { code: 'EVIDENCE' });
   await fs.writeFile(path.join(f.repo, 'changed-after-review.mjs'), 'export const changed = true;\n');
-  cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'config-v1', cause: 'post-review fix' })).cycle;
+  cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: digest('config-v1'), cause: 'post-review fix' })).cycle;
   assert.equal(cycle.reviewRef, null);
   assert.equal(evaluatePolicy(await f.store.load(f.workItemId), push, { configuration, clock: f.clock }).allowed, false);
   await passLocal(f, cycle);
@@ -114,7 +115,7 @@ test('T-35 canonical tests and candidate-bound /review gate publication and DEV'
     testSpecDigest: cycle.testSpecDigest, configDigest: cycle.configDigest,
     target: 'dev-target', completedStage: 'review' });
   const build = { class: 'build', repositoryId: 'primary', environment: 'DEV',
-    target: 'dev-target', configDigest: 'config-v1', stages: ['DEV'], monitorCapability: true,
+    target: 'dev-target', configDigest: digest('config-v1'), stages: ['DEV'], monitorCapability: true,
     provider: repositoryObservation.provider, pipeline: 'fixture-build-a',
     sourceRevision: cycle.sources.find(source => source.repositoryId === 'primary').revision };
   assert.equal(evaluatePolicy(await f.store.load(f.workItemId), build, { configuration, clock: f.clock }).allowed, true);
@@ -137,7 +138,7 @@ test('T-35 canonical tests and candidate-bound /review gate publication and DEV'
       remoteRepositoryURL: repositoryObservation.remoteRepositoryURL,
       environment: 'DEV', target: 'dev-target',
       provider: build.provider, pipeline: build.pipeline },
-    requested: { configDigest: 'config-v1', stages: ['DEV'],
+    requested: { configDigest: digest('config-v1'), stages: ['DEV'],
       sourceRevision: build.sourceRevision,
       candidateDigest: cycle.candidateDigest, testSpecDigest: cycle.testSpecDigest } };
   const secondOutcome = { ...firstOutcome,
@@ -169,7 +170,7 @@ test('T-35 Review remains current only while local prerequisites and authority r
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Commit reviewed fixture candidate');
   const repositoryObservation = await observeFixtureRepository(f);
-  const cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'v1', cause: 'review eligibility' })).cycle;
+  const cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: digest('v1'), cause: 'review eligibility' })).cycle;
   await passLocal(f, cycle);
   const review = await completeReview(f, cycle);
   const { action: push } = await grantPush(f, undefined, { repositoryObservation });
@@ -192,7 +193,7 @@ test('T-35 Review waits only for pre-Review checkpoints, not for its own observa
     '| T-unit | FR-001 | AC-001.1 | local | unit | pre-review | automated | agent | local | Unit passes | test/unit.mjs | NotRun |\n' +
     '| T-review | FR-001 | AC-001.1 | local | review | review | automated | user | development-machine | Review is completed | GitHub Copilot CLI /review | NotRun |\n' +
     '| T-review-extra | FR-001 | AC-001.1 | local | review | review | automated | agent | local | Extra Review check passes | test/review-extra.mjs | NotRun |\n');
-  const cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'v1', cause: 'checkpoint ordering' })).cycle;
+  const cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: digest('v1'), cause: 'checkpoint ordering' })).cycle;
   await recordTest(f.store, { workItemId: f.workItemId, cycleId: cycle.id, testId: 'T-unit',
     status: 'Passed', expectedMet: true, evidenceRef: 'fixture:unit', owner: 'agent', host: 'local' });
   const state = await f.store.load(f.workItemId);
@@ -215,7 +216,7 @@ test('T-20/T-32 push authorization binds actual remote, refs and destructive opt
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Commit candidate before push binding tests');
   await observeFixtureRepository(f, { remoteName: 'approved-origin' });
-  const cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'v1', cause: 'push binding' })).cycle;
+  const cycle = (await startCycle(f.store, { workItemId: f.workItemId, configDigest: digest('v1'), cause: 'push binding' })).cycle;
   await passLocal(f, cycle);
   await completeReview(f, cycle);
   const approvedCommand = 'git push --no-follow-tags --no-recurse-submodules approved-origin refs/heads/feature/fixture:refs/heads/feature/fixture';
@@ -258,9 +259,9 @@ test('T-28/T-29 candidate and Test Plan identities ignore staging and execution-
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Add a large clean tracked fixture');
   await fs.writeFile(path.join(f.repo, 'candidate.mjs'), 'export const stable = true;\n');
-  const result = await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'v1', cause: 'large clean tracked file' });
+  const result = await startCycle(f.store, { workItemId: f.workItemId, configDigest: digest('v1'), cause: 'large clean tracked file' });
   await f.runGit('add', 'candidate.mjs');
-  const staged = await startCycle(f.store, { workItemId: f.workItemId, configDigest: 'v1', cause: 'staging only' });
+  const staged = await startCycle(f.store, { workItemId: f.workItemId, configDigest: digest('v1'), cause: 'staging only' });
   assert.equal(staged.reset, false);
   assert.equal(currentCycle((await f.store.load(f.workItemId)).records, (await f.store.load(f.workItemId)).checkpoint).id, result.cycle.id);
   await f.runGit('commit', '-qm', 'Commit unchanged reviewed candidate bytes');
@@ -283,10 +284,10 @@ test('T-28/T-29 candidate and Test Plan identities ignore staging and execution-
   await f.runGit('config', 'core.autocrlf', 'true');
   await fs.writeFile(path.join(f.repo, 'normalized.txt'), 'first\r\nsecond\r\n');
   const normalized = await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'normalized text candidate' });
+    configDigest: digest('v1'), cause: 'normalized text candidate' });
   await f.runGit('add', 'normalized.txt');
   const normalizedStaged = await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'normalized text staging only' });
+    configDigest: digest('v1'), cause: 'normalized text staging only' });
   assert.equal(normalizedStaged.reset, false);
   assert.equal(normalizedStaged.cycle.id, normalized.cycle.id);
 });
@@ -298,7 +299,7 @@ test('T-20/T-32 push commit must contain the complete reviewed candidate', async
   await fs.writeFile(path.join(f.repo, 'part-a.mjs'), 'export const a = true;\n');
   await fs.writeFile(path.join(f.repo, 'part-b.mjs'), 'export const b = true;\n');
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'two-part candidate' })).cycle;
+    configDigest: digest('v1'), cause: 'two-part candidate' })).cycle;
   await passLocal(f, cycle);
   await completeReview(f, cycle);
   await f.runGit('add', 'part-a.mjs');
@@ -306,7 +307,7 @@ test('T-20/T-32 push commit must contain the complete reviewed candidate', async
   f.clock.advance(1);
   await observeFixtureRepository(f);
   await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'partial content-preserving commit' });
+    configDigest: digest('v1'), cause: 'partial content-preserving commit' });
   const partial = await grantPush(f);
   const request = { toolName: 'bash', toolArgs: {
     command: 'git push --no-follow-tags --no-recurse-submodules origin refs/heads/feature/fixture:refs/heads/feature/fixture',
@@ -319,7 +320,7 @@ test('T-20/T-32 push commit must contain the complete reviewed candidate', async
   f.clock.advance(1);
   await observeFixtureRepository(f);
   await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'complete content-preserving commit' });
+    configDigest: digest('v1'), cause: 'complete content-preserving commit' });
   const complete = await grantPush(f);
   const prepared = await prepareOperation(f.store, { workItemId: f.workItemId, sessionId: f.sessionId,
     action: complete.action, request, correlationKey: 'complete-push',
@@ -354,7 +355,7 @@ test('T-28/T-32 symlink changes remain part of the reviewed candidate identity',
   await fs.unlink(path.join(f.repo, 'entry.mjs'));
   await fs.symlink('target.mjs', path.join(f.repo, 'entry.mjs'));
   const cycle = (await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'symlink candidate' })).cycle;
+    configDigest: digest('v1'), cause: 'symlink candidate' })).cycle;
   await passLocal(f, cycle);
   await completeReview(f, cycle);
   const push = await grantPush(f);
@@ -381,19 +382,19 @@ test('T-28/T-29 candidate modes respect core.filemode during staging', async t =
   await f.runGit('commit', '-qm', 'Commit non-executable script baseline');
   await fs.writeFile(script, '#!/bin/sh\nexit 1\n', { mode: 0o755 });
   const cycle = await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'filemode-disabled candidate' });
+    configDigest: digest('v1'), cause: 'filemode-disabled candidate' });
   await f.runGit('add', 'script.sh');
   const staged = await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'filemode-disabled staging' });
+    configDigest: digest('v1'), cause: 'filemode-disabled staging' });
   assert.equal(staged.reset, false);
   assert.equal(staged.cycle.id, cycle.cycle.id);
   const untracked = path.join(f.repo, 'new-script.sh');
   await fs.writeFile(untracked, '#!/bin/sh\nexit 2\n', { mode: 0o755 });
   const untrackedCycle = await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'untracked executable with filemode disabled' });
+    configDigest: digest('v1'), cause: 'untracked executable with filemode disabled' });
   await f.runGit('add', 'new-script.sh');
   const untrackedStaged = await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'stage untracked executable with filemode disabled' });
+    configDigest: digest('v1'), cause: 'stage untracked executable with filemode disabled' });
   assert.equal(untrackedStaged.reset, false);
   assert.equal(untrackedStaged.cycle.id, untrackedCycle.cycle.id);
 
@@ -404,10 +405,10 @@ test('T-28/T-29 candidate modes respect core.filemode during staging', async t =
   await fs.unlink(path.join(f.repo, 'entry-link'));
   await fs.writeFile(path.join(f.repo, 'entry-link'), 'link-target');
   const regularCycle = await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'replace symlink with regular file' });
+    configDigest: digest('v1'), cause: 'replace symlink with regular file' });
   await f.runGit('add', 'entry-link');
   const regularStaged = await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: 'v1', cause: 'stage regular replacement with filemode disabled' });
+    configDigest: digest('v1'), cause: 'stage regular replacement with filemode disabled' });
   assert.equal(regularStaged.reset, false);
   assert.equal(regularStaged.cycle.id, regularCycle.cycle.id);
 });

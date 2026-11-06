@@ -1,33 +1,102 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
+import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
-import { canonical, readZip } from '../packaging/standalone/archive.mjs';
-import { extractEntries } from '../packaging/standalone/protocol.mjs';
-import { runtimePreflight } from '../packaging/standalone/runtime.mjs';
-import { buildLauncher } from '../packaging/winget/build-launcher.mjs';
-import { validateManifests } from '../packaging/winget/validate.mjs';
-import { renderManifests } from '../packaging/winget/generate.mjs';
-import { verifyPlatformPackage, verifyRelease } from './verify-platform-package.mjs';
+import { canonical, sha256 } from '../packaging/standalone/archive.mjs';
+import { verifyPlatformPackage } from './verify-platform-package.mjs';
 import { buildPackage } from './package.mjs';
-import { buildPlatforms } from './package-platforms.mjs';
-import { verifyPackage } from './verify-package.mjs';
+import { buildPlatforms, renderChecksums } from './package-platforms.mjs';
 import { verifyHomebrewQuality } from './homebrew-quality.mjs';
-import { ROOT, MACOS_ARCHITECTURES, RELEASE_TARGETS, RELEASE_GATE_TARGETS, RELEASE_SCOPE, archiveRecord, homebrewMetadata, options,
-  readJson, trustedEnvironment, validateHomebrewQualityEvidence, verifyCandidate, writeJson } from './release-bundle.mjs';
-
-const execute = promisify(execFile);
+import { nativeToolchain, homebrewToolchain } from './toolchain-baseline.mjs';
+import { createOwnedCommandRunner, processDiagnostic } from './validation-tools.mjs';
+import { ROOT, MACOS_ARCHITECTURES, RELEASE_GATE_TARGETS, RELEASE_PRE_CASES, RELEASE_SCOPE, archiveRecord, copyNativeReports, homebrewMetadata, options, releaseIntent,
+  readJson, trustedEnvironment, validateHomebrewQualityEvidence, validateInitialHomebrewFormula, verifyCandidate, writeJson } from './release-bundle.mjs';
 
 function integrationBlocked(message) {
   return Object.assign(new Error(message), { code: 'RELEASE_INTEGRATION_BLOCKED',
     homebrewResult: { nativeValidation: 'NotRun', reason: message } });
 }
 
-export async function verifyNativeHomebrew({ candidate, candidateDir, scratch,
-  brew = process.env.SDLC_HOMEBREW_BREW, verifyLifecycle, verifyQuality = verifyHomebrewQuality, generator } = {}) {
+export function validateNativeHomebrewEvidence(result, { candidate, targetArch,
+  mode = 'candidate', expectedNodeVersion = nativeToolchain.node }) {
+  const evidence = result?.evidence;
+  const previous = candidate.context.previousRelease;
+  if (!['arm64', 'x64'].includes(targetArch) || result?.nativeValidation !== 'Passed' ||
+      evidence?.passed !== true || evidence.platform !== 'darwin' || evidence.architecture !== targetArch ||
+      evidence.uname !== (targetArch === 'arm64' ? 'arm64' : 'x86_64') ||
+      [true, 1, '1'].includes(evidence.sysctlProcTranslated) ||
+      (targetArch === 'arm64' && evidence.sysctlProcTranslated !== '0') ||
+      (targetArch === 'x64' && !['0', 'unavailable on native Intel'].includes(evidence.sysctlProcTranslated)) ||
+      evidence.homebrewNodeVersion !== expectedNodeVersion ||
+      canonical(evidence.homebrewRuntime) !== canonical({ platform: 'darwin', arch: targetArch, major: homebrewToolchain.major }) ||
+      !previous || evidence.upgradeKind !== 'version' ||
+      evidence.previousIdentity?.version !== previous.version ||
+      evidence.previousIdentity?.descriptorSha256 !== previous.descriptorSha256 ||
+      evidence.previousIdentity?.checksumsSha256 !== previous.checksumsSha256 ||
+      canonical(evidence.currentIdentity) !== canonical(candidate.context.identity) ||
+      evidence.previousIdentity.version === evidence.currentIdentity.version ||
+      evidence.cleanupError || !evidence.failedPromotionRetry?.passed ||
+      evidence.failedPromotionRetry.priorKeg === evidence.failedPromotionRetry.candidateKeg) {
+    throw new Error('Missing actual native Homebrew lifecycle, upgrade/rollback, retained Node or cleanup proof');
+  }
+  const previousDescriptor = result.previousMetadata?.descriptor;
+  const previousChecksums = result.previousMetadata?.checksums;
+  if (!previousDescriptor || typeof previousChecksums !== 'string' ||
+      sha256(Buffer.from(canonical(previousDescriptor))) !== previous.descriptorSha256 ||
+      sha256(Buffer.from(previousChecksums)) !== previous.checksumsSha256 ||
+      renderChecksums(previousDescriptor, Buffer.from(canonical(previousDescriptor))) !== previousChecksums ||
+      previousDescriptor.version !== evidence.previousIdentity.version ||
+      previousDescriptor.sourceCommit !== evidence.previousIdentity.sourceCommit ||
+      previousDescriptor.payload?.sha256 !== evidence.previousIdentity.payloadSha256) {
+    throw new Error('Original supported-previous identity is not bound to its independently pinned public descriptor/checksums');
+  }
+  const formula = result.formula;
+  if (!formula || typeof formula.contents !== 'string' ||
+      sha256(Buffer.from(formula.contents)) !== result.quality?.formula?.sha256) {
+    throw new Error('Native Homebrew requires the original exact candidate formula source');
+  }
+  validateInitialHomebrewFormula({ descriptor: candidate.descriptor, repository: candidate.context.releaseRepository,
+    contents: formula.contents, candidateBaseUrl: formula.candidateBaseUrl, mode });
+  const formulaRecord = { filename: 'ai-sdlc-framework.rb', kind: 'homebrew',
+    sha256: sha256(Buffer.from(formula.contents)), size: Buffer.byteLength(formula.contents) };
+  validateHomebrewQualityEvidence(result.quality, { identity: candidate.context.identity,
+    targetArch, formula: formulaRecord, mode });
+  const archive = archiveRecord(candidate, `macos-${targetArch}`);
+  if (!evidence.archiveInputs?.some(record => record.filename === archive.filename &&
+      record.sha256 === archive.sha256 && record.size === archive.size)) throw new Error('Native Homebrew did not consume the exact frozen Mac archive');
+  const previousArchive = archiveRecord({ descriptor: previousDescriptor }, `macos-${targetArch}`);
+  if (!evidence.archiveInputs.some(record => record.filename === previousArchive.filename &&
+      record.sha256 === previousArchive.sha256 && record.size === previousArchive.size)) {
+    throw new Error('Native upgrade did not install the authentic supported-previous Mac archive');
+  }
+  const commands = evidence.commands;
+  if (!Array.isArray(commands)) throw new Error('Original native Homebrew commands are missing');
+  for (const name of ['install', 'test', 'uninstall', 'link', 'unlink', 'autoremove', 'tab']) {
+    if (!commands.some(command => command.command === result.quality.brew &&
+        command.args?.[0] === name && command.success === true &&
+        command.noInstallCleanup === '1')) throw new Error(`Native Homebrew did not execute ${name}`);
+  }
+  const channelCommands = commands.filter(command => command.command === result.quality.brew &&
+    ['install', 'uninstall', 'autoremove', 'tab'].includes(command.args?.[0]) && command.success === true);
+  if (!channelCommands.length || channelCommands.some(command =>
+    !/^[a-f0-9]{64}$/u.test(command.homeBeforeSha256 ?? '') ||
+    command.homeBeforeSha256 !== command.homeAfterSha256)) throw new Error('Native Homebrew commands lack home-preservation evidence');
+  if (!commands.some(command => command.success === true && command.args?.includes('hook')) ||
+      !commands.some(command => command.success === true && command.args?.includes('doctor'))) {
+    throw new Error('Native Homebrew did not execute retained installed hooks and doctor');
+  }
+  return result;
+}
+
+// A supplied lifetime is the caller's actual in-process cleanup authority, never serialized evidence.
+export async function verifyNativeHomebrew({ candidate, candidateDir, scratch, lifetime,
+  brew = process.env.SDLC_HOMEBREW_BREW, verifyLifecycle, verifyQuality = verifyHomebrewQuality, generator,
+  targetArch = 'arm64', mode = 'candidate', previous, verifyUpgradeInputs, environment = process.env,
+  expectedNodeVersion = nativeToolchain.node } = {}) {
+  if (!['arm64', 'x64'].includes(targetArch) || !['candidate', 'stable'].includes(mode)) {
+    throw new Error('Select an explicit native Mac architecture and formula mode');
+  }
   if (!candidate.context.prerelease && candidate.context.homebrew.status !== 'Generated') {
     throw integrationBlocked('Mandatory native Homebrew validation requires the integrated dual-architecture stable generator');
   }
@@ -42,37 +111,92 @@ export async function verifyNativeHomebrew({ candidate, candidateDir, scratch,
   }
   if (typeof verifyLifecycle !== 'function') throw new Error('Homebrew lifecycle module must export verifyHomebrewLifecycle');
   if (!brew || !path.isAbsolute(brew)) throw integrationBlocked('Provide SDLC_HOMEBREW_BREW for an approved isolated Homebrew prefix');
-  const root = path.join(scratch, 'homebrew-native');
-  const mode = candidate.context.prerelease ? 'candidate' : 'stable';
-  const candidateBaseUrl = mode === 'candidate' ? 'http://127.0.0.1:8765/' : undefined;
-  let formula = candidate.descriptor.files.find(file => file.kind === 'homebrew');
-  let formulaPath = formula && path.resolve(candidateDir, 'assets', formula.filename);
-  if (mode === 'candidate') {
-    const generated = await homebrewMetadata({ descriptor: candidate.descriptor, artifactDirectory: path.resolve(candidateDir, 'assets'),
-      outputDir: path.join(scratch, 'arm-formula-quality'), repository: candidate.context.releaseRepository,
-      mode, candidateBaseUrl, generator });
-    if (generated.status !== 'Generated') throw integrationBlocked('Native prerelease audit/style requires the Homebrew generator');
-    const { artifact, ...record } = generated.files[0];
-    formula = record;
-    formulaPath = artifact;
+  const previousPins = candidate.context.previousRelease;
+  if (!previousPins) throw integrationBlocked('Native R-PRE needs independently frozen supported-previous release pins');
+  if (!previous) {
+    const { downloadPreviousRelease } = await import('./accept-release.mjs');
+    previous = await downloadPreviousRelease({ repository: previousPins.repository,
+      version: previousPins.version, descriptorSha256: previousPins.descriptorSha256,
+      checksumsSha256: previousPins.checksumsSha256, directory: path.join(scratch, 'previous-public-release') });
   }
-  if (!formulaPath) throw integrationBlocked('Native Homebrew audit/style requires candidate-bound formula metadata');
-  const quality = await verifyQuality({ candidate, formulaPath, mode, candidateBaseUrl,
-    targetArch: 'arm64', outputDir: path.join(scratch, 'arm-homebrew-quality'), brew });
-  validateHomebrewQualityEvidence(quality, { identity: candidate.context.identity, targetArch: 'arm64', formula, mode });
+  if (previous.identity?.version !== previousPins.version ||
+      previous.identity?.descriptorSha256 !== previousPins.descriptorSha256 ||
+      previous.identity?.checksumsSha256 !== previousPins.checksumsSha256) {
+    throw new Error('Native R-PRE cannot select a different or same-version upgrade input');
+  }
+  verifyUpgradeInputs ??= (await import('./homebrew-lifecycle.mjs')).verifyHomebrewUpgradeInputs;
+  await verifyUpgradeInputs({ candidateDirectory: previous.directory, upgradeDirectory: path.resolve(candidateDir, 'assets'),
+    previous: previous.identity, current: candidate.context.identity });
+  const root = path.join(scratch, 'homebrew-native');
+  let server;
+  let candidateBaseUrl;
+  if (mode === 'candidate') {
+    const archive = archiveRecord(candidate, `macos-${targetArch}`);
+    const bytes = await fs.readFile(path.resolve(candidateDir, 'assets', archive.filename));
+    if (sha256(bytes) !== archive.sha256 || bytes.length !== archive.size) throw new Error('Frozen Homebrew candidate archive changed');
+    server = createServer((request, response) => {
+      if (request.url !== `/${archive.filename}`) { response.writeHead(404).end(); return; }
+      response.writeHead(200, { 'content-length': bytes.length, 'content-type': 'application/octet-stream' }).end(bytes);
+    });
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    candidateBaseUrl = `http://127.0.0.1:${server.address().port}/`;
+  }
+  let quality;
+  let stage = 'formula';
   try {
-    const evidence = await verifyLifecycle({ brew, candidateDirectory: path.resolve(candidateDir, 'assets'), root });
-    if (evidence?.passed !== true || evidence.platform !== 'darwin' || evidence.architecture !== 'arm64' ||
-        evidence.uname !== 'arm64' || canonical(evidence.homebrewRuntime) !== canonical({ platform: 'darwin', arch: 'arm64', major: 22 }) ||
+    let formula = candidate.descriptor.files.find(file => file.kind === 'homebrew');
+    let formulaPath = formula && path.resolve(candidateDir, 'assets', formula.filename);
+    if (mode === 'candidate') {
+      const generated = await homebrewMetadata({ descriptor: candidate.descriptor, artifactDirectory: path.resolve(candidateDir, 'assets'),
+        outputDir: path.join(scratch, `${targetArch}-formula-quality`), repository: candidate.context.releaseRepository,
+        mode, candidateBaseUrl, generator });
+      if (generated.status !== 'Generated') throw integrationBlocked('Native candidate audit/style requires the Homebrew generator');
+      const { artifact, ...record } = generated.files[0];
+      formula = record;
+      formulaPath = artifact;
+    }
+    if (!formulaPath) throw integrationBlocked('Native Homebrew audit/style requires candidate-bound formula metadata');
+    stage = 'quality';
+    const qualityOwned = lifetime ? createOwnedCommandRunner({ lifetime }) : undefined;
+    quality = await verifyQuality({ candidate, formulaPath, mode, candidateBaseUrl, environment,
+      targetArch, outputDir: path.join(scratch, `${targetArch}-homebrew-quality`), brew,
+      ...(qualityOwned ? { run: qualityOwned.run, processSettlement: qualityOwned.isSettled, lifetime } : {}) });
+    validateHomebrewQualityEvidence(quality, { identity: candidate.context.identity, targetArch, formula, mode });
+    stage = 'lifecycle';
+    const owned = lifetime ? createOwnedCommandRunner({ lifetime }) : undefined;
+    const evidence = await verifyLifecycle({ brew, candidateDirectory: previous.directory, root,
+      targetArch, mode, upgradeDirectory: path.resolve(candidateDir, 'assets'), expectedNodeVersion, environment,
+      expectedPreviousIdentity: previous.identity, expectedCurrentIdentity: candidate.context.identity,
+      ...(owned ? { runCommand: owned.run, processSettlement: owned.isSettled } : {}) });
+    if (owned && !owned.isSettled()) {
+      lifetime.cleanupSafe = false;
+      throw Object.assign(new Error('Native Homebrew writer settlement is unverified.'), { code: 'STOP_UNVERIFIED' });
+    }
+    if (evidence?.passed !== true || evidence.platform !== 'darwin' || evidence.architecture !== targetArch ||
+        evidence.uname !== (targetArch === 'arm64' ? 'arm64' : 'x86_64') ||
+        canonical(evidence.homebrewRuntime) !== canonical({ platform: 'darwin', arch: targetArch, major: homebrewToolchain.major }) ||
+        evidence.homebrewNodeVersion !== expectedNodeVersion ||
         [true, 1, '1'].includes(evidence.sysctlProcTranslated) || evidence.cleanupError) {
       throw new Error('Mandatory Homebrew native lifecycle, architecture or cleanup did not pass');
     }
-    return { nativeValidation: 'Passed', evidence, quality };
+    stage = 'verification';
+    const result = { nativeValidation: 'Passed', evidence, quality,
+      previousMetadata: { descriptor: previous.descriptor, checksums: previous.checksums ??
+        await fs.readFile(path.join(previous.directory, 'SHA256SUMS'), 'utf8') },
+      formula: { contents: await fs.readFile(formulaPath, 'utf8'), ...(candidateBaseUrl ? { candidateBaseUrl } : {}) } };
+    validateNativeHomebrewEvidence(result, { candidate, targetArch, mode, expectedNodeVersion });
+    return result;
   } catch (error) {
     const evidence = await readJson(path.join(root, 'evidence.json')).catch(() => null);
-    error.homebrewResult = { nativeValidation: 'Failed', reason: error.message, evidence, quality };
+    error.homebrewResult = { nativeValidation: error.code === 'RELEASE_INTEGRATION_BLOCKED' ? 'NotRun' : 'Failed',
+      reason: error.message, stage, evidence, quality: quality ?? error.homebrewQuality ?? null };
     error.retainedWorkspace = scratch;
     throw error;
+  } finally {
+    if (server) await new Promise(resolve => server.close(resolve));
   }
 }
 
@@ -83,10 +207,10 @@ export async function verifyMacosArchives({ candidate, candidateDir, scratch, en
   const artifacts = [path.join(assets, candidate.descriptor.payload.filename), fresh.artifact];
   for (const [index, artifact] of artifacts.entries()) {
     const rebuilt = await buildPlatforms({ artifact, outputDir: path.join(scratch, `macos-rebuild-${index}`),
-      sourceCommit: candidate.context.identity.sourceCommit, targets: MACOS_ARCHITECTURES.map(arch => `macos-${arch}`), environment });
+      sourceCommit: candidate.context.identity.sourceCommit, targets: ['macos'], environment });
     for (const arch of MACOS_ARCHITECTURES) {
       const record = archiveRecord(candidate, `macos-${arch}`);
-      const actual = rebuilt.archives.find(file => file.target === `macos-${arch}`);
+      const actual = rebuilt.archives.find(file => file.target === 'macos');
       if (actual.sha256 !== record.sha256 || actual.size !== record.size) throw new Error(`Independent macOS ${arch} archive rebuild mismatch`);
     }
   }
@@ -95,7 +219,7 @@ export async function verifyMacosArchives({ candidate, candidateDir, scratch, en
     expectedPlatform: 'darwin', expectedArch: 'x64',
     expectedDescriptorSha256: candidate.context.identity.descriptorSha256,
     expectedChecksumsSha256: candidate.context.identity.checksumsSha256 });
-  return { validation: 'Passed', target: verified.target, platform: 'darwin', arch: 'x64',
+  return { validation: 'Passed', target: 'macos-x64', archiveTarget: verified.target, platform: 'darwin', arch: 'x64',
     filename: verified.filename, sha256: verified.sha256, size: archive.size,
     payloadSha256: verified.payloadSha256, inventoryDigest: verified.inventoryDigest };
 }
@@ -128,114 +252,82 @@ export async function verifyIntelFormula({ candidate, candidateDir, scratch, gen
     nativeValidation: 'NotRun', quality };
 }
 
-async function command(executable, args, env, cwd = ROOT) {
-  const result = await execute(executable, args, { cwd, env, timeout: 20 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 });
-  process.stdout.write(result.stdout);
-  process.stderr.write(result.stderr);
-  return result;
-}
-
-export async function runGate({ candidateDir, evidenceDir, target, ...expected }) {
+export async function runGate({ candidateDir, evidenceDir, target,
+  releaseIntentId = process.env.RELEASE_INTENT_ID, ...expected }) {
   if (!RELEASE_GATE_TARGETS.includes(target)) throw new Error('Target is outside the release scope');
+  releaseIntentId = releaseIntent(releaseIntentId);
   const candidate = await verifyCandidate(candidateDir, expected);
+  if (candidate.context.releaseIntentId !== releaseIntentId) throw new Error('R-PRE must use the frozen logical release intent');
   const policy = RELEASE_SCOPE[target];
-  const result = { schemaVersion: 1, target, required: policy.required, validation: policy.validation,
+  const lifetime = { cleanupSafe: true, unsettledCommands: [], retainedWorkspaces: [] };
+  let failure;
+  const result = { schemaVersion: 1, profile: 'r-pre', caseId: RELEASE_PRE_CASES[target],
+    releaseIntentId, target, required: policy.required, validation: policy.validation,
     identity: candidate.context.identity, status: 'NotRun', nativeValidation: 'NotRun',
-    host: { platform: process.platform, arch: process.arch, node: process.version,
-      machine: os.machine(), runnerImage: process.env.ImageOS ?? 'local', runnerImageVersion: process.env.ImageVersion ?? null },
+    reportDirectory: `native/${target}`, workspaceCleanup: lifetime, cleanupDiagnostic: null,
     ...(process.env.GITHUB_RUN_ID ? { run: { id: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT } } : {}) };
-  const scratch = path.join(ROOT, '.test-data', `release-gate-${randomUUID()}`);
-  await fs.mkdir(scratch, { recursive: true });
-  const env = { ...process.env, TMPDIR: scratch, TEMP: scratch, TMP: scratch,
-    GOTMPDIR: scratch, GOCACHE: path.join(scratch, 'go-cache'),
-    GOENV: 'off', GOTOOLCHAIN: 'local', GOWORK: 'off', GOPROXY: 'off', GOSUMDB: 'off',
-    NODE_OPTIONS: '', NODE_PATH: '' };
+  const reports = path.join(ROOT, '.test-data', `release-native-${target}-${randomUUID()}`);
   try {
-    if (target === 'macos-x64') {
-      result.deterministicArchive = await verifyMacosArchives({ candidate, candidateDir, scratch, environment: env });
-      result.homebrew = await verifyIntelFormula({ candidate, candidateDir, scratch });
-      result.reason = 'Intel archive and formula were checked with host Homebrew audit/style using macOS/Intel metadata simulation; no Intel payload, package installation, formula test, or native lifecycle was executed.';
-      result.status = 'Passed';
-      return result;
-    }
-    const assets = path.resolve(candidateDir, 'assets');
-    if (target === 'macos-arm64') {
-      if (process.platform !== 'darwin' || process.arch !== 'arm64') {
-        throw new Error('Mandatory lifecycle requires native Apple Silicon Node, not Intel or emulation');
-      }
-      await runtimePreflight();
-      result.host.uname = (await execute('/usr/bin/uname', ['-m'])).stdout.trim();
-      const translated = await execute('/usr/sbin/sysctl', ['-in', 'sysctl.proc_translated'])
-        .then(value => ({ exitCode: 0, stdout: value.stdout.trim(), stderr: value.stderr.trim() }),
-          error => ({ exitCode: error.code, stdout: error.stdout?.trim() ?? '', stderr: error.stderr?.trim() ?? error.message }));
-      result.host.sysctlProcTranslated = translated;
-      if (result.host.uname !== 'arm64' || translated.stdout === '1') throw new Error('macOS arm64 validation cannot use emulation');
-      await verifyPackage({ artifact: path.join(assets, candidate.descriptor.payload.filename), environment: env });
-      await command(process.execPath, ['--test', 'test/distribution-channels.test.mjs'], {
-        ...env, SDLC_DISTRIBUTION_TARGET: target,
-        SDLC_DISTRIBUTION_TARGETS: RELEASE_TARGETS.join(','),
-        SDLC_RELEASE_DIR: assets,
-        SDLC_WINDOWS_LAUNCHER: path.resolve(candidateDir, 'launcher/sdlc.exe'),
-      });
-      result.standaloneNativeValidation = 'Passed';
-      result.networkDeniedLifecycle = 'Passed';
-      result.homebrew = await verifyNativeHomebrew({ candidate, candidateDir, scratch });
-      result.nativeValidation = 'Passed';
-    } else {
-      if (process.platform === 'win32') throw new Error('Windows gate is deliberately non-native cross-validation');
-      const launcher = await buildLauncher({ outputDir: path.join(scratch, 'launcher'), environment: env });
-      if (launcher.sha256 !== candidate.context.launcher.sha256) throw new Error('Independent Windows launcher rebuild mismatch');
-      await verifyRelease({ outputDir: assets, windowsLauncher: launcher.artifact,
-        targets: RELEASE_TARGETS, sourceCommit: candidate.context.identity.sourceCommit, environment: env });
-      const input = await readJson(path.join(candidateDir, 'winget-input.json'));
-      const archive = archiveRecord(candidate, target);
-      if (JSON.stringify(input.archive) !== JSON.stringify(archive) || input.version !== candidate.descriptor.version ||
-          input.releaseRepository !== candidate.context.releaseRepository) throw new Error('WinGet input is not candidate-bound');
-      result.winget = await validateManifests({ ...input,
-        archivePath: path.join(assets, archive.filename), manifestDir: path.join(candidateDir, 'winget') });
-      const expectedMetadata = candidate.context.prerelease ? [] :
-        renderManifests(input).map(({ content, ...record }) => record);
-      if (canonical(candidate.descriptor.files.filter(file => file.kind === 'winget')) !== canonical(expectedMetadata)) {
-        throw new Error('Frozen public WinGet metadata differs from the validated manifest set');
-      }
-      const schema = await command(process.env.SDLC_PYTHON || 'python3',
-        ['scripts/validate-winget-schema.py', '--manifest-dir', path.join(candidateDir, 'winget'),
-          '--schema-dir', path.join(ROOT, '.test-data/winget-schemas')], env);
-      result.schema = JSON.parse(schema.stdout);
-      const extracted = path.join(scratch, 'shared-windows-payload');
-      await extractEntries(readZip(await fs.readFile(path.join(assets, archive.filename))), extracted);
-      const goEnv = { ...env, SDLC_VERIFY_SHARED_ROOT: extracted };
-      delete goEnv.GOOS;
-      delete goEnv.GOARCH;
-      delete goEnv.GOCACHEPROG;
-      await command(process.env.SDLC_GO || 'go', ['test', '-run',
-        '^(TestNativePayload|TestInventoryRejects|TestSharedCanonicalArchiveContract)', './...'],
-      goEnv, path.join(ROOT, 'cmd/sdlc-launcher'));
-      await command(process.env.SDLC_GO || 'go', ['vet', './...'], goEnv, path.join(ROOT, 'cmd/sdlc-launcher'));
-      await command(process.execPath, ['--test', 'test/winget.test.mjs'], env);
-      result.deterministicCrossBuild = 'Passed';
-      result.payloadIntegrity = 'Passed';
-      result.testerInputValidation = 'Passed';
-      result.reason = 'No Windows executable, WinGet client, or Windows lifecycle was executed.';
-    }
+    const { runNativeValidation } = await import('./native-validation.mjs');
+    const native = await runNativeValidation({ target, profile: 'r-pre', candidateDir,
+      evidenceDir: reports, buildCandidate: false }, { lifetime });
+    const original = await readJson(path.join(reports, 'execution.json'));
+    result.host = native.context.native;
+    result.finishedAt = original.finishedAt;
+    result.nativeValidation = native.status;
+    if (native.status !== 'Passed') throw Object.assign(new Error(`Complete native ${target} R-PRE inventory did not pass`),
+      { code: native.status === 'NotRun' ? 'RELEASE_INTEGRATION_BLOCKED' : 'NATIVE_VALIDATION_FAILED' });
+    result.nativeValidation = 'Passed';
     result.status = 'Passed';
     return result;
   } catch (error) {
-    result.status = error.code === 'RELEASE_INTEGRATION_BLOCKED' ? 'NotRun' : 'Failed';
-    if (error.code === 'RELEASE_INTEGRATION_BLOCKED') result.diagnosticStatus = 'Blocked';
+    failure = error;
+    result.status = result.nativeValidation === 'Failed' ? 'Failed' : 'NotRun';
+    result.diagnosticStatus = result.status === 'Failed' ? 'FailedExecution' : 'Blocked';
     if (error.homebrewResult) result.homebrew = error.homebrewResult;
     if (error.homebrewQuality) result.homebrew = { ...result.homebrew, quality: error.homebrewQuality };
-    if (error.retainedWorkspace) result.retainedWorkspace = error.retainedWorkspace;
     result.reason = error.message;
     if (error.stdout) process.stdout.write(error.stdout);
     if (error.stderr) process.stderr.write(error.stderr);
     throw error;
   } finally {
-    await writeJson(path.join(evidenceDir, `${target}.json`), result);
-    if (!result.retainedWorkspace) await fs.rm(scratch, { recursive: true, force: true });
+    try {
+      if (!lifetime.cleanupSafe) {
+        throw Object.assign(new Error('Owned native workspaces and original reports are retained until writer termination is established.'),
+          { code: 'UNSETTLED_WRITERS' });
+      }
+      if (await fs.lstat(reports).then(() => true, error => {
+        if (error.code !== 'ENOENT') throw error;
+        return false;
+      })) {
+        await copyNativeReports(reports, path.join(evidenceDir, 'native', target));
+        await fs.rm(reports, { recursive: true, force: true });
+      }
+    } catch (error) {
+      lifetime.retainedWorkspaces = [...new Set([...lifetime.retainedWorkspaces, reports])];
+      result.cleanupDiagnostic = processDiagnostic(error);
+      result.status = result.status === 'Passed' ? 'Failed' : result.status;
+      result.diagnosticStatus = result.status === 'Failed' ? 'FailedCleanup' : 'Blocked';
+      result.reason ??= error.message;
+      failure ??= error;
+    }
+    try { await writeJson(path.join(evidenceDir, `${target}.json`), result); }
+    catch (error) {
+      if (!failure) throw error;
+      failure.retentionDiagnostic = processDiagnostic(error);
+    }
+    if (failure) {
+      failure.workspaceCleanup = lifetime;
+      if (result.cleanupDiagnostic) failure.cleanupDiagnostic = result.cleanupDiagnostic;
+      throw failure;
+    }
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+async function main() {
   console.log(JSON.stringify(await runGate({ ...options(process.argv.slice(2)), ...trustedEnvironment() }), null, 2));
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  main().catch(error => { console.error(error.stack ?? error.message); process.exitCode = 1; });
 }

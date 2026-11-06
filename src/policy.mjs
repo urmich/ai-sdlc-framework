@@ -6,6 +6,7 @@ import { cycleTests } from './validation-catalog.mjs';
 import { effectiveStagingExecution, stagingExecutionMatches } from './staging.mjs';
 import { currentArtifact, currentDeployment, matchesArtifactContent, publicationDestination } from './current-evidence.mjs';
 import { validateRepositoryIdentity } from './repository-observations.mjs';
+import { PR_DESCRIPTION_FIELDS, validatePrDescriptionAction } from './pr-description.mjs';
 
 export const ACTIONS = ['read', 'bookkeeping', 'document', 'configuration', 'code', 'local-build', 'test', 'push', 'build', 'artifact', 'artifact-produce', 'notification', 'deploy',
   'pipeline', 'pr-create', 'pr-update', 'pr-validation', 'merge', 'auto-merge', 'policy-bypass', 'destructive', 'unknown', 'recommend-staging', 'recommend-prod'];
@@ -39,9 +40,11 @@ export function validateAction(action) {
     'artifactImmutableVersion', 'artifactRetrievalContext', 'artifactName',
     'producingExecutionRef', 'producingAttemptRef', 'candidateDigest',
     'testSpecDigest', 'contentDigest', 'prId',
-    'previousPolicyVersion', 'requestedState', 'recipient', 'toolOptions'],
+    'previousPolicyVersion', 'requestedState', 'recipient', 'toolOptions',
+    ...PR_DESCRIPTION_FIELDS],
   ['class']);
   choice(action.class, ACTIONS, 'operation class');
+  validatePrDescriptionAction(action);
   for (const key of ['paths', 'stages', 'implicitEnvironments']) if (action[key]) strings(action[key], key);
   if (action.environment) choice(action.environment, ['local', 'DEV', 'STAGING', 'PROD'], 'target environment');
   for (const field of ['provider', 'pipeline']) {
@@ -392,7 +395,7 @@ export function evaluatePolicy(state, action, {
           test.owner === action.owner && test.location === action.host,
         'Execution owner or authorized host differs from the plan');
       }
-      try { checkTestStart(cycle, records, test); }
+      try { checkTestStart(cycle, records, test, { clock }); }
       catch (error) { if (error.code !== 'UNIT_FIRST') throw error; rule('unit-first', false, error.message); }
       if (test.environment === 'DEV') {
         const deployment = records.find(r => r.id === cycle.deployments.DEV);

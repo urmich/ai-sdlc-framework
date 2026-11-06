@@ -26,6 +26,7 @@ import { allOperationClaims, appendTestObservation, bindExecutionEvidence,
   selectTestObservation, stageCycleEvidence, testResetBarrier } from './validation-evidence.mjs';
 import { resolveTestSpecification } from './artifacts.mjs';
 import { MAPPABLE_FIELDS } from './tool-arguments.mjs';
+import { prDescriptionWriteConflicts } from './pr-description.mjs';
 
 const dispatchSecurityFields = [...new Set([
   'class', 'repositoryId', 'environment', 'target', 'configDigest', 'stages',
@@ -491,6 +492,8 @@ async function dispatchOperationInTransaction(store, tx, operationId, { atomicCl
   const operation = tx.get(operationId);
   requireThat(operation?.type === 'operation', 'OPERATION', 'Prepared operation is unavailable');
   requireThat(operation.status === 'prepared' || (operation.status === 'dispatching' && !operation.dispatchBound), 'UNCERTAIN', 'Operation was dispatched or is uncertain; reconcile instead of retrying');
+  requireThat(!tx.all().some(other => prDescriptionWriteConflicts(operation, other)),
+    'UNCERTAIN', 'A previous PR description write is unresolved; reconcile it before another dispatch');
   const member = tx.metadata.members.find(m => m.repositoryId === operation.repositoryId);
   await validateBinding(member);
   const configuration = await loadConfig(tx.metadata, member.repositoryId);
@@ -789,6 +792,7 @@ export async function recordOperation(store, input, { reconcile = false } = {}) 
     }
     operation.status = status;
     if (checked && status !== 'uncertain' && TERMINAL.includes(status)) {
+      delete operation.resultGap;
       operation.resultProof = checked;
       operation.evidenceRef = verifiedObservation.evidence.ref;
       if (checked.providerResultId) operation.handle = checked.providerResultId;

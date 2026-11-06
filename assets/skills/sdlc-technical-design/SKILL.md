@@ -22,6 +22,10 @@ proportionate. Expose uncertainty and alternatives that matter to the user.
 Automatically maintain in-scope earlier documents and report each logical batch;
 do not redefine out-of-scope work or treat maintenance as new approval.
 Add new test needs to the living plan.
+When definitions change, use the shipped PR-coverage guide and CLI helpers to
+refresh the in-memory coverage section and expose gaps. Preserve current
+source/specification identities; do not create a coverage sidecar, claim tests
+passed, publish a PR or change consumer CI policy merely by preparing metadata.
 
 By default, produce no implementation, test code or runnable prototype in this
 phase. Apply the shared lifecycle-intent guide if the user explicitly bypasses
