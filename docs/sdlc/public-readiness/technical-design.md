@@ -2318,6 +2318,16 @@ results, conversation work or diagnostic. This is not native-validation,
 approval or provider-enforcement credit; incomplete/error/blocked observations
 remain non-passing.
 
+The shared GitHub SDK applies HTTP `If-None-Match` weak comparison to a 304
+validator: optional `W/` strength may change while the case-sensitive opaque tag
+stays identical. Keep the original conditional header and all exact acquired
+request, credential, visibility, connection, epoch and scope bindings. A 304
+without compatible acquired cache or with a different opaque tag remains a
+proof gap. Reused data retains its old observation version and does not gain a
+fresh observation timestamp. This corrects the observed provider weak-to-strong
+transition; it does not grant a passing observer result or change trusted-source
+adoption.
+
 The provider status key is exactly `(repository identity, SHA, context)`, not
 PR number, description digest or target URL. For each actual head/eligible
 test-merge target, enumerate every open in-scope PR that can consume that key.

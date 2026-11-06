@@ -1213,6 +1213,16 @@ a Test Design/review responsibility.
 
 ### 5.2 Complete PR coverage, trust and provider enforcement
 
+The existing conditional-cache roots in `test/github-transport.unit.test.mjs`
+remain PR-only, Node-only, process-isolated and owned by `github-transport` on all
+four lanes. Reproduce the provider's 200 weak validator followed by a 304 strong
+validator with the same opaque tag, and the reverse transition. Preserve the
+original conditional request tag, cached body and observation version, without
+inventing a new observation time. Missing cache, different opaque tags, changed
+tag case and incompatible authorization/request contexts must still fail closed.
+These injected-response checks require no credentials or network and do not
+grow the critical profile. Actual hosted observer results remain separate.
+
 `T-PRD085 idle observer reconciliation completes without granting validation
 credit` in `test/public-readiness-ci.test.mjs` is maintainer-owned, PR-only,
 Node-only and process-isolated on all four existing native lanes. Its one-slot
