@@ -2,6 +2,13 @@ export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [{"coverage": "direct", "paths": ["src/github/transport.mjs", "src/github/connection.mjs"]}],
   "applicability": [{
+    "names": ["304 reuses only exact-context ETag facts and keeps the old observation version",
+      "304 without cache or with a contradictory ETag is a proof gap"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "github-transport",
+    "reason": "PR-only conditional-cache regression: HTTP If-None-Match weak comparison permits a changed validator strength for the same opaque tag, never a different tag or authorization context. Pure injected responses, no network, credentials, shared state or critical promotion.",
+    "prerequisites": ["Node"]
+  }, {
     "names": ["T-PRD037 GitHub transport redacts every token family in captured headers and injected errors"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "github-transport",
@@ -600,21 +607,28 @@ for (const [name, link, maxPages] of [
 }
 
 test('304 reuses only exact-context ETag facts and keeps the old observation version', async () => {
-  const calls = [];
-  const transport = createGitHubTransport({ connection: connection(), fetch: async (_, init) => {
-    calls.push(init);
-    return calls.length === 1 ? response({ id: 17 }, 200, { etag: '"etag-1"' }) : response(null, 304);
-  } });
-  const request = rest(transport);
-  const original = await transport.execute(request);
-  const cacheEntry = transport.createCacheEntry(original, { observationVersion: 'observation-1' });
-  const capture = await transport.execute(request, { cacheEntry });
-  assert.equal(calls[1].headers['if-none-match'], '"etag-1"');
-  assert.deepEqual(capture.body, original.body);
-  assert.equal(capture.status, 304);
-  assert.equal(capture.source, 'conditional-cache');
-  assert.equal(capture.observationVersion, 'observation-1');
-  assert.equal(capture.observedAt, undefined);
+  for (const [originalTag, returnedTag] of [
+    ['"etag-1"', undefined],
+    ['W/"etag-1"', '"etag-1"'],
+    ['"etag-1"', 'W/"etag-1"'],
+  ]) {
+    const calls = [];
+    const transport = createGitHubTransport({ connection: connection(), fetch: async (_, init) => {
+      calls.push(init);
+      return calls.length === 1 ? response({ id: 17 }, 200, { etag: originalTag }) :
+        response(null, 304, returnedTag === undefined ? {} : { etag: returnedTag });
+    } });
+    const request = rest(transport);
+    const original = await transport.execute(request);
+    const cacheEntry = transport.createCacheEntry(original, { observationVersion: 'observation-1' });
+    const capture = await transport.execute(request, { cacheEntry });
+    assert.equal(calls[1].headers['if-none-match'], originalTag);
+    assert.deepEqual(capture.body, original.body);
+    assert.equal(capture.status, 304);
+    assert.equal(capture.source, 'conditional-cache');
+    assert.equal(capture.observationVersion, 'observation-1');
+    assert.equal(capture.observedAt, undefined);
+  }
 });
 
 for (const change of ['request', 'profile', 'generation', 'visibility', 'connection', 'forged-entry']) {
@@ -649,16 +663,18 @@ for (const change of ['request', 'profile', 'generation', 'visibility', 'connect
 }
 
 test('304 without cache or with a contradictory ETag is a proof gap', async () => {
-  let calls = 0;
-  const transport = createGitHubTransport({ connection: connection(), fetch: async () => {
-    calls++;
-    return calls === 2 ? response({}, 200, { etag: '"etag-1"' }) :
-      response(null, 304, { etag: '"etag-2"' });
-  } });
-  const request = rest(transport);
-  await assert.rejects(transport.execute(request), { code: 'CACHE_GAP' });
-  const cacheEntry = transport.createCacheEntry(await transport.execute(request), { observationVersion: 'observation-1' });
-  await assert.rejects(transport.execute(request, { cacheEntry }), { code: 'CACHE_GAP' });
+  for (const returnedTag of ['"etag-2"', 'W/"etag-2"', '"ETAG-1"']) {
+    let calls = 0;
+    const transport = createGitHubTransport({ connection: connection(), fetch: async () => {
+      calls++;
+      return calls === 2 ? response({}, 200, { etag: '"etag-1"' }) :
+        response(null, 304, { etag: returnedTag });
+    } });
+    const request = rest(transport);
+    await assert.rejects(transport.execute(request), { code: 'CACHE_GAP' });
+    const cacheEntry = transport.createCacheEntry(await transport.execute(request), { observationVersion: 'observation-1' });
+    await assert.rejects(transport.execute(request, { cacheEntry }), { code: 'CACHE_GAP' });
+  }
 });
 
 test('GraphQL uses a named static document, explicit variables and a real schema profile without a REST header', async () => {
