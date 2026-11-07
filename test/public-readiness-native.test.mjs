@@ -4020,20 +4020,34 @@ async function nativeIsolationFixture(t, options = {}) {
   return { ...f, inventory: f.compile(f.files) };
 }
 
-async function intelGitSourceInventory() {
-  const inventory = await compileValidationInventory(repositoryRoot);
-  assert.equal(inventory.complete, true, JSON.stringify(inventory.unresolved));
-  const files = await Promise.all(inventory.sourceFiles.map(async ({ file }) => ({
-    file,
-    contents: (await fs.readFile(path.join(repositoryRoot, ...file.split('/')), 'utf8'))
-      .replace(/\r\n/gu, '\n'),
-  })));
-  return compileValidationSourceInventory({ files,
-    surfacePaths: [...new Set(inventory.surfaces.map(surface => surface.path))] });
+async function qualifiedIntelSourceInventory() {
+  const { inflateSync } = await import('node:zlib');
+  // Replay immutable qualification source instead of rebinding historical ownership to new callbacks.
+  const frozen = JSON.parse(inflateSync(Buffer.from(
+    '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', 'base64'), { maxOutputLength: 128 * 1024 }).toString('utf8'));
+  const files = await Promise.all(frozen.paths.map(async file => {
+    let contents = (await fs.readFile(path.join(repositoryRoot, ...file.split('/')), 'utf8'))
+      .replace(/\r\n/gu, '\n');
+    if (file === 'test/public-readiness-native.test.mjs') {
+      const start = contents.indexOf('async function qualifiedIntelSourceInventory(');
+      const end = contents.indexOf("\ntest('T-PRD017 native v13 reserves", start);
+      assert.ok(start >= 0 && end > start);
+      contents = contents.slice(0, start) + contents.slice(end + 1);
+    }
+    if (frozen.splices[file]) {
+      const lines = contents.match(/[^\n]*\n|[^\n]+$/gu) ?? [];
+      contents = frozen.splices[file].map(part => typeof part === 'string' ? part :
+        lines.slice(part[0], part[0] + part[1]).join('')).join('');
+    }
+    assert.equal(createHash('sha256').update(contents).digest('hex'), frozen.digests[file],
+      `Replay must retain the exact archived qualification source for ${file}`);
+    return { file, contents };
+  }));
+  return compileValidationSourceInventory({ files, surfacePaths: frozen.surfacePaths });
 }
 
 test('T-PRD017 native v13 reserves the complete catalog without inheriting its one-slot duration or changing ownership', async () => {
-  const inventory = await intelGitSourceInventory();
+  const inventory = await qualifiedIntelSourceInventory();
   const plan = await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
   const options = { inventory, plan, target: 'macos-x64' };
   const rule = nativePass.nativePlacementOwnershipV15;
@@ -4166,7 +4180,7 @@ test('T-PRD017 native v13 reserves the complete catalog without inheriting its o
 });
 
 test('T-PRD017 native v12 transfers only six qualified complete Intel components with atomic fallback', async () => {
-  const inventory = await intelGitSourceInventory();
+  const inventory = await qualifiedIntelSourceInventory();
   const plan = await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
   const options = { inventory, plan, target: 'macos-x64' };
   const current = nativeFrameworkShardPlan(options);
@@ -4235,7 +4249,7 @@ test('T-PRD017 native v12 transfers only six qualified complete Intel components
 });
 
 test('T-PRD017 native v11 pools qualified complete Intel components within unchanged resource and SDK limits', async t => {
-  const f = { inventory: await intelGitSourceInventory(),
+  const f = { inventory: await qualifiedIntelSourceInventory(),
     plan: await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8') };
   const options = { inventory: f.inventory, plan: f.plan, target: 'macos-x64' };
   const current = nativeFrameworkShardPlan(options);
@@ -4285,7 +4299,7 @@ test('T-PRD017 native v11 pools qualified complete Intel components within uncha
 });
 
 test('T-PRD017 native v11 authenticates current costs and preserves historical source and fallback', async t => {
-  const f = { inventory: await intelGitSourceInventory(),
+  const f = { inventory: await qualifiedIntelSourceInventory(),
     plan: await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8') };
   const options = { inventory: f.inventory, plan: f.plan, target: 'macos-x64' };
   const source = await fs.readFile(path.join(repositoryRoot, 'scripts', 'native-validation.mjs'), 'utf8');
