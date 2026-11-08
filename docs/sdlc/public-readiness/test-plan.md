@@ -825,6 +825,22 @@ pin, size and integrity failures remain terminal;
 current-public acceptance and required native assertions remain unchanged.
 These roots add no critical selectors or budget growth and grant no native cure.
 The new test file is current source, not an invented archived v15 input.
+Frozen SDK `c4883a2d` passed the complete local gate, 179 affected assertions and
+Sol/max review, but its hosted run `42473096631` attempt one subsequently
+retained separate Linux and Windows `T-PRD020` failures (`14 !== 7`).
+The old diagnostic names Intel generically; the current workflow-graph loop
+first reaches ARM body fourteen against its unchanged seven-GiB host fixture.
+Correct the existing PR-only, one-slot actual-CI graph root to require ARM body
+and refresh fourteen while retaining ARM units seven, Intel units four and
+the other observed-memory allocations. Keep the hardware facts, all twenty-five
+producer roles, complete recipes, dependency/pin/safety assertions and both
+critical caps unchanged. The exact pre-fix isolated Node-only root failed;
+its corrected candidate requires fresh validation, not an unchanged CI retry.
+Reconstruct this changed captured test from authentic archived v15 Git text,
+preserving the immutable historical seven-worker workflow/model and protocol
+rows. Current required local, affected, Sol review and hosted acceptance remain
+NotRun until their own frozen-candidate results exist; `c4883a2d`'s failures
+and pending hosted evidence are separate historical observations.
 Successor roles in the failed hosted attempt remained unexpanded or skipped.
 Neither the passing metadata-only edit run nor the local admission correction
 satisfies hosted completeness. Preserve the reboot observation gap, accessible

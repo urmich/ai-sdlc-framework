@@ -1366,6 +1366,22 @@ The original two failures and one pass remain historical; all three final
 controlled roots passed without npm, Homebrew or provider execution.
 Their current test file is not added fictitiously to the archived v15 snapshot;
 required current inventory/placement still must include it.
+Frozen SDK `c4883a2d` passed its full local gate, 179 affected assertions and
+Sol/max review; hosted run `42473096631` attempt one then retained independent
+Linux and Windows `T-PRD020` allocation assertion failures (`14 !== 7`).
+Despite the generic Intel diagnostic, the actual-CI graph loop first reaches
+ARM body fourteen against the existing seven-GiB hardware fixture.
+Keep those hardware facts and production allocations unchanged. Update only
+the existing PR-only, one-slot graph root's expected ARM regression reservation:
+body and refresh fourteen, units seven. Intel units still match four CPUs and
+other roles still use their observed-memory allocations. Retain every producer,
+recipe, dependency, source-safety and pin assertion and both critical caps.
+Its exact isolated pre-fix root failed; the corrected source requires a newly
+frozen full local gate, affected root, Sol/max review and hosted validation.
+Authentically regenerate the captured current-test splice against the unchanged
+archived v15 Git blob, not by changing historical cost models, seven-worker
+workflow semantics or protocol rows. Prior results remain historical; all new
+candidate checkpoints stay NotRun until applicable executions are recorded.
 Unexpanded/skipped successor roles remain separate original outcomes.
 Metadata-only edited CI is not native
 acceptance, and the reboot's monitoring gap is not erased by later observations.
