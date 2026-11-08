@@ -1339,6 +1339,39 @@ The new source/configuration, specification and fixture invalidate bootstrap07/
 bootstrap08 whole-candidate credit. Their originals remain historical; the fresh
 full required local gate, affected cases, Sol Review and native validation remain
 NotRun until separately applicable new-candidate executions are recorded.
+Frozen SDK `1dcdb754` subsequently passed its local gate and Sol/max review,
+but hosted run `42469133642` attempt one failed. Four unit producers shared
+the existing `T-MACADM009` current-workflow assertion of ARM body seven,
+now obsolete after the body/refresh fourteen-worker servicing. Correct that
+existing PR-only root to require body fourteen, refresh parity and unchanged
+ARM units seven; retain its native identities, dependency graph, pins and both
+finite critical caps. The isolated original failed and the corrected full
+twenty-six-root admission family passed. No new root, critical promotion,
+historical cost-model change or native execution credit follows.
+The independent ARM Homebrew producer failed anonymous prior-release
+acquisition with HTTP 504 before entering lifecycle assertions. Its original
+artifact cannot identify the asset request or upstream cause. Preserve that
+uncertainty, the original lifecycle NotRun and separately verified owned-prefix
+removal with matching allocation/request identity and zero delegated commands.
+Classify HTTP 504 as retryable only for prior-release acquisition, using the
+existing backoff, shared ten-minute phase deadline and thirty-second request
+cap. Cancel error bodies and retain bounded asset/status/attempt diagnostics
+without URLs or credentials. Preserve existing HTTP 404 eventual-readback
+handling; do not retry other HTTP, permission, pin, size or integrity failures.
+Current-public acceptance behavior is unchanged.
+Three new PR-only, one-slot, process-isolated Node-controlled `TOOL03` roots
+exercise recovery, cross-asset/persistent deadline exhaustion and terminal
+denial/integrity/current-public controls with owned, verified-clean data.
+The original two failures and one pass remain historical; all three final
+controlled roots passed without npm, Homebrew or provider execution.
+Their current test file is not added fictitiously to the archived v15 snapshot;
+required current inventory/placement still must include it.
+Unexpanded/skipped successor roles remain separate original outcomes.
+Metadata-only edited CI is not native
+acceptance, and the reboot's monitoring gap is not erased by later observations.
+Changing this captured test requires authentic inventory-splice reconstruction
+before newly frozen full local validation, Sol review and hosted completeness.
+Those new-candidate checkpoints remain NotRun until their own results exist.
 Retain the original Intel uninstall watchdog and before-correction admission
 failures. The 15-second command watchdog, POSIX one-second stop, native
 assertions, enforced network/npm denial and sandbox remain unchanged.

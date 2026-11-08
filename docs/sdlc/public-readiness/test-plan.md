@@ -795,6 +795,43 @@ The new source/configuration, specification and reconstructed fixture invalidate
 bootstrap07/bootstrap08 whole-candidate credit. Their originals remain historical;
 the fresh full required local gate, affected cases, Sol Review and native validation
 remain NotRun until their applicable newly frozen candidate results are recorded.
+The subsequent frozen SDK `1dcdb754` local gate and Sol/max review passed, but
+hosted run `42469133642` attempt one failed. Four unit producers retained
+`T-MACADM009`'s obsolete current ARM body expectation of seven instead of fourteen;
+preserve all four original reports and their shared assertion failure.
+The existing PR-only, one-slot root now requires body fourteen, equal refresh
+allocation and unchanged ARM units seven, retaining every native identity,
+dependency, pin and finite-budget assertion. Its pre-fix isolated run failed
+and the corrected twenty-six-root admission family passed. This adds no critical
+selector or root and does not rewrite the archived seven-worker cost model.
+ARM Homebrew failed independently with HTTP 504 during anonymous prior-release
+acquisition before any Homebrew lifecycle assertion. The original artifact
+does not identify the failed asset request or upstream cause. Owned prefix
+cleanup was separately observed removed with matching allocation/request
+identity and zero delegated commands. Retain the original lifecycle NotRun.
+`TOOL03 prior-release acquisition` adds three maintainer-owned PR-only,
+one-slot, process-isolated Node-controlled roots in
+`test/previous-release-download.test.mjs`: classified metadata/checksum/payload
+recovery, persistent/shared-deadline exhaustion and terminal denial/integrity/
+current-public controls. Owned data fixtures are removed and absence verified;
+no real provider, npm or Homebrew commands run. The original selection failed
+two roots and passed one; the final three passed, with strengthened deadline
+and corrupt-payload controls retained in their actual final source identity.
+Retry only prior-release HTTP 504 through the existing backoff within the shared
+ten-minute phase deadline and thirty-second request cap. Cancel error bodies
+and retain bounded asset/status/attempt diagnostics, not URLs or credentials.
+Preserve existing HTTP 404 eventual-readback handling; other HTTP, permission,
+pin, size and integrity failures remain terminal;
+current-public acceptance and required native assertions remain unchanged.
+These roots add no critical selectors or budget growth and grant no native cure.
+The new test file is current source, not an invented archived v15 input.
+Successor roles in the failed hosted attempt remained unexpanded or skipped.
+Neither the passing metadata-only edit run nor the local admission correction
+satisfies hosted completeness. Preserve the reboot observation gap, accessible
+run pages, original failures and all thirty-four-job/twenty-five-producer/
+thirteen-cleanup acceptance obligations. Regenerate affected authentic test
+inventory splices, then require a newly frozen full local gate, Sol review and
+hosted validation; those new-candidate checkpoints remain NotRun.
 Preserve the original Intel sandbox uninstall watchdog failure and controlled
 before-correction admission failure. Positive enforced network/npm controls and
 observed cleanup do not make an expired watchdog pass. Keep the 15-second command
