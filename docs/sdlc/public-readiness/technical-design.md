@@ -723,6 +723,13 @@ source-bound evidence, owned cleanup and the requested candidate reviews remain
 required. Version-specific timing checks and finite command/allocation
 watchdogs below retain their original semantics; the deferral changes the
 current release decision, not test results or process-lifetime safeguards.
+The current observer's native admission requires the complete source-bound
+aggregate and canonical component projection to pass; it does not add elapsed
+target misses to correctness blockers. Retain `laneTimings`, actual durations,
+version-specific `withinBudget` verdicts and separate `timingDiagnostics`.
+Malformed timing/source data and missing required cleanup still fail admission.
+This implements the owner's correctness-only CI direction without changing any
+historical latency result, command watchdog or required assertion.
 V9 uses the new twenty-five-minute limit; historical v1-v8 timing interpretation
 retains its original twenty-minute limit without retrospective passing credit.
 Its delivery observation cutoff is twenty-five minutes, without changing command watchdogs,

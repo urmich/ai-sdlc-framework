@@ -186,6 +186,10 @@ counts.
   performance targets as gates for the current public-launch release candidate
   and announcement, prioritizing correctness and early delivery. Report actual
   spans and unmet targets without converting a timing failure into Passed.
+  This deferral applies to the current native admission and trusted PR
+  validation statuses, not only the eventual announcement decision: elapsed
+  time alone cannot block complete passing correctness evidence. The observer
+  retains unmet timing targets as diagnostics outside its correctness blockers.
   Complete native correctness, regression checks, source-bound evidence, owned
   cleanup and the requested reviews remain mandatory. This deferral does not
   change command watchdogs, resource allowances or required assertions.

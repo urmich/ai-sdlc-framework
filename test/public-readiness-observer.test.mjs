@@ -14,11 +14,11 @@ export const validationDeclarations = {
   "applicability": [{
     "names": [
       "T-PRD020 RC66 CI01 platform timing limits preserve inclusive strict and invalid boundaries",
-      "T-PRD020 RC66 CI01 current twenty-five-part observer admits Intel 1185s and blocks Linux 500s"
+      "T-PRD020 RC66 CI01 current observer defers timing gates but still requires owned cleanup"
     ],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "maintainer",
-    "reason": "PR-only Node regressions for AC-202.7 and AC-203.4; controlled provider data, no native tools or network.",
+    "reason": "PR-only Node regressions for AC-202.7 and AC-203.4; preserve timing diagnostics without current admission gates, and require source-bound cleanup. Controlled provider data, no native tools or network; one process-isolated root with no shared external resource or critical promotion.",
     "prerequisites": ["Node and repository-local owned fixtures"]
   }, {
     "names": ["T-PRD021 protocol row pool drains failed children stops dispatch and respects one-slot fallback"],
@@ -647,11 +647,11 @@ test('T-PRD020 RC66 CI01 platform timing limits preserve inclusive strict and in
   }
 });
 
-test('T-PRD020 RC66 CI01 current twenty-five-part observer admits Intel 1185s and blocks Linux over fifteen minutes', async t => {
+test('T-PRD020 RC66 CI01 current observer defers timing gates but still requires owned cleanup', async t => {
   const f = await observerApiFixture(t, { frameworkShards: true, nodeArtifactReader: true, ambient: false });
   const intel = f.jobs.find(job => job.name === 'native-macos-x64-homebrew');
   const start = Date.parse(intel.started_at);
-  intel.completed_at = new Date(start + 1185000).toISOString();
+  intel.completed_at = new Date(start + 1688000).toISOString();
   const { host, policy } = f.connect();
   const snapshot = await host.snapshot();
   assert.equal(verdict(snapshot).status, 'Passed', JSON.stringify(verdict(snapshot).blockers));
@@ -659,12 +659,16 @@ test('T-PRD020 RC66 CI01 current twenty-five-part observer admits Intel 1185s an
   assert.equal(retained.nativeParts.length, 25);
   assert.equal(retained.nativeParts.filter(part => part.cleanupArtifactId).length, 13);
   assert.equal(retained.sourceCommit, f.revisions.merge);
+  const intelTiming = retained.laneTimings.find(lane => lane.target === 'macos-x64');
+  assert.equal(intelTiming.durationMs, 1688000);
+  assert.equal(intelTiming.withinBudget, false);
   const summary = renderObserverSummary({ status: 'Passed', results: [] }, {
     componentEvidence: [retained],
     completeReportRef: 'https://github.com/urmich/ai-sdlc-framework/actions/runs/999/attempts/1',
   });
   assert.match(summary, /Within budget/u);
   assert.match(summary, /strictly below 1500000ms/u);
+  assert.match(summary, /1688000/u);
   assert.doesNotMatch(summary, /Under 15m/u);
   intel.steps.find(step => step.name === 'Remove owned short Homebrew prefix').conclusion = 'skipped';
   assert.equal(verdict(await host.snapshot()).status, 'NotRun');
@@ -673,12 +677,15 @@ test('T-PRD020 RC66 CI01 current twenty-five-part observer admits Intel 1185s an
   const linuxStart = Math.min(...f.jobs.filter(job => job.name.startsWith('native-linux-x64-'))
     .map(job => Date.parse(job.started_at)));
   linux.completed_at = new Date(linuxStart + 900001).toISOString();
-  const blocked = verdict(await host.snapshot());
-  assert.equal(blocked.status, 'NotRun');
-  assert.ok(blocked.blockers.some(message => message.includes('linux-x64') &&
-    message.includes('at most 900000ms')), JSON.stringify(blocked.blockers));
+  const slow = verdict(await host.snapshot());
+  assert.equal(slow.status, 'Passed', JSON.stringify(slow.blockers));
+  assert.deepEqual(slow.blockers, []);
+  assert.ok(slow.timingDiagnostics.some(message => message.includes('linux-x64') &&
+    message.includes('at most 900000ms')), JSON.stringify(slow.timingDiagnostics));
+  assert.ok(slow.timingDiagnostics.some(message => message.includes('macos-x64') &&
+    message.includes('strictly below 1500000ms')), JSON.stringify(slow.timingDiagnostics));
   await reconcilePrReadiness(host, policy);
-  assert.ok(f.writes.some(row => row.context === 'framework/validation' && row.state === 'pending'));
+  assert.ok(f.writes.some(row => row.context === 'framework/validation' && row.state === 'success'));
 });
 
 test('T-PRD021 versioned twenty-five twenty-four and twenty-part originals require exact closures cleanup and protected SDK replay', async t => {

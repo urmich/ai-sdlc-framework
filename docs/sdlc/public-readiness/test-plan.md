@@ -1601,6 +1601,15 @@ and the requested reviews remain mandatory. Record actual whole-lane durations
 and any Failed timing verdict without relabelling it Passed; performance
 improvement is deferred, not proven. Preserve historical timing interpretation,
 strict-boundary regression assertions, finite watchdogs and resource contracts.
+The PR-only Node root
+`T-PRD020 RC66 CI01 current observer defers timing gates but still requires owned cleanup`
+in `test/public-readiness-observer.test.mjs` uses controlled, checkout-owned
+provider fixtures to admit complete Intel 1,688-second and Linux 900,001-ms
+correctness results while retaining false timing verdicts and diagnostics.
+A missing mandatory cleanup step still makes admission NotRun. The existing
+boundary root retains historical strict/inclusive limits and rejects malformed
+or incomplete timing tuples. These process-isolated assertions require no
+network, credentials or native tools and add no critical selectors or budget.
 The recorded Linux **460 seconds (7m40s)**, Windows **665 seconds (11m05s)** and
 Apple Silicon **627 seconds (10m27s)** are historical lane measurements, not
 current delivery limits or new stretch targets.
