@@ -2515,6 +2515,10 @@ and page captures. API origin/prefix, filters, page caps and authorization
 context remain unchanged. A different repository, including another authorized
 connection scope, a changed resource/filter or an alias cycle remains a proof
 gap; this compatibility correction grants no provider-setting authority.
+Historical native replay removes only the new transport-test additions before
+applying its existing archived source splices and exact digest assertions.
+Keep the qualification capsule and cost/placement history unchanged; those
+historical callbacks cannot satisfy execution evidence for the new candidate.
 The trusted observer still pins `native-validation.mjs`, `ci.yml` and every
 non-test helper to its adopted revision and uses its imported native planner.
 Adopt the exact Windows15/15/15/7 implementation/workflow correction as well as

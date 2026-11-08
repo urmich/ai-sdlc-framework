@@ -4029,6 +4029,22 @@ async function qualifiedIntelSourceFiles() {
   const files = await Promise.all(frozen.paths.map(async file => {
     let contents = (await fs.readFile(path.join(repositoryRoot, ...file.split('/')), 'utf8'))
       .replace(/\r\n/gu, '\n');
+    if (file === 'test/github-transport.unit.test.mjs') {
+      const classification = contents.indexOf('    "names": ["T-PRD027 REST pagination follows only');
+      const separator = '  }, {\n';
+      const classificationEnd = contents.indexOf(separator, classification);
+      assert.ok(classification >= 0 && classificationEnd > classification);
+      contents = contents.slice(0, classification) + contents.slice(classificationEnd + separator.length);
+      const root = contents.indexOf("test('T-PRD027 REST pagination follows only");
+      const rootEnd = contents.indexOf('for (const [name, link, maxPages] of [', root);
+      assert.ok(root >= 0 && rootEnd > root);
+      contents = (contents.slice(0, root) + contents.slice(rootEnd))
+        .replace(', "other named repository", "other repository ID", "ID alias changed resource", "ID alias changed filters", "repository alias cycle"', '')
+        .replace(/^  \['(?:other named repository|other repository ID|ID alias changed resource|ID alias changed filters|repository alias cycle)',[^\n]*\n/gmu, '')
+        .replace('connection: connection({ scopes: [scope,\n' +
+          "      { kind: 'repository', id: 18, owner: 'fixture-owner', name: 'other-repo' }] }), fetch:",
+        'connection: connection(), fetch:');
+    }
     if (file === 'test/public-readiness-native.test.mjs') {
       const start = contents.indexOf('async function qualifiedIntelSourceFiles(');
       const end = contents.indexOf("\ntest('T-PRD017 native v13 reserves", start);

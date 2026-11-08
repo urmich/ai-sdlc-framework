@@ -1522,6 +1522,11 @@ changed resource/filter and alias cycles before another dispatch. These injected
 credential/network-free Node assertions apply on all four native platforms,
 have no prerequisite roots or shared resources, and do not enter critical27.
 Retain the original-source proof-gap failure separately from corrected results.
+Existing PR-only T-PRD017 historical native replay roots reconstruct their
+pre-alias transport-test input before applying the immutable archived splices
+and digest checks. Preserve qualification capsules, timings and original source
+identity; replay never supplies current-candidate execution credit. No new
+capability, shared resource or critical assertion is introduced.
 
 ### 5.3 Release orchestration and published consumers
 
