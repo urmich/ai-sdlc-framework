@@ -190,7 +190,8 @@ descendant and Windows termination controller or POSIX observation query.
 The existing admission regression uses that real source selection: three slots
 must reject before callback dispatch, while four admit the complete group.
 Retain every strict process-absence, cancellation, sanitization, journal and
-stop-race assertion and the original one-second stop deadline. Correcting this
+stop-race assertion and the current stop deadline: five seconds on Windows,
+one second on POSIX. Correcting this
 under-reservation does not establish the cause of an earlier native failure or
 grant a current native correctness or timing pass.
 The PR-only Windows termination-observation regression exercises controlled
@@ -198,11 +199,18 @@ controller/root completion orders and timeout/error paths. Require bounded
 dispatch/event observations and the immutable pre-cleanup snapshot in both the
 final report and durable journal; unobserved events stay null and caller source,
 arguments and secrets stay absent. Preserve real cancellation, strict root
-closure, the one-second stop bound and every original failure outcome. Passing
-diagnostics do not attribute the historical C18 timeout or prove native cleanup.
+closure, the five-second Windows stop bound and every original failure outcome.
+Passing diagnostics do not attribute the historical C18 timeout or prove native cleanup.
 Run the Windows VM root with POSIX path composition and without error-stack
 labels. Both controlled variants must preserve the exact backend, flags, PID,
 watchdog snapshot and all ten settlement outcomes, without changing host globals.
+The same PR-only VM root aligns its controlled clock with the 5,000ms settlement
+budget: retain the 5,005ms exhausted-spawn case, 4,975ms/zero watchdog remainders
+and clock bounds of at least 5,000ms. Queue active drain timers at any duration,
+leave unreferenced progress timers passive and require affirmative original
+controller closure in cleanup. Keep all ten permutations, privacy/failure
+assertions and the 10,000ms outer guard unchanged. Preserve the earlier fixture
+timeout; this clock-compatibility correction does not establish a native cure.
 Observer artifact readers finish before their exact owned scratch directory is
 removed. Use the existing bounded filesystem-cleanup retry policy for classified
 transient sharing conflicts; persistent removal failure remains an error, never
@@ -266,8 +274,8 @@ establishes their causes; diagnostic changes do not claim to fix those causes.
 
 The original Windows capture/cancellation root additionally observes the actual
 `taskkill.exe` spawn without changing that invocation, the production backend or
-its one-second stop budget. Before creating the controller or command, an optional
-owned PowerShell 5.1 observer compiles a small C# bridge inside its new
+its current five-second Windows stop budget. Before creating the controller or
+command, an optional owned PowerShell 5.1 observer compiles a small C# bridge inside its new
 repository-local compiler directory. The isolated controller atomically publishes
 only the dispatched PID and original spawn-event UTC bound to the observer's
 nonce-owned request. Neither observation nor publication is awaited by the
@@ -702,18 +710,29 @@ period. Native ownership failures retain safe code/signal/cleanup observations
 before assertions. The real-kernel root reserves four aggregate slots for its
 test worker, owned root, descendant writer and unrelated sibling; host worker
 limits and the one-second settlement bound remain unchanged.
+Current Windows servicing applies the same 5,000ms settlement budget to the raw
+owned command and validation command executors, with an immediate single owned
+PID-tree dispatch and affirmative original root/controller closure required.
+Timeout, denial and unknown ownership remain failed/uncertain; no second tree
+request, later destructive signal or unsafe fixture deletion is permitted.
+POSIX retains its 1,000ms settlement budget. Earlier Windows one-second stop
+references describe superseded source baselines, not rewritten execution history
+or approval snapshots.
 The separate TOOL02 controlled Windows settlement root retains all six modes
-under its twenty-second ceiling. Its pre-cancellation root-exit observation
+under its current 60,000ms ceiling. Its pre-cancellation root-exit observation
 has a separate five-second window after writer/peer readiness; preparation
 cannot consume that observation window. Preserve native ownership/drain checks,
-the cancellation settlement assertion and the one-second production stop budget.
+the actual 5,000ms Windows backend budget assertion and the separate 10,000ms
+cancellation/durable-I/O guard.
 Admit at most two independent VM/root/writer
 scopes together and declare five slots for the test process plus their four
 children. Require both first-pair provenance announcements before release;
 serial-execution mutation must fail this bounded overlap check. Drain every
 in-flight scope before surfacing cleanup failure, verify all six modes cleaned,
 and preserve the original cancellation, controller, persistence, owner and
-one-second settlement assertions. This changes no native host capacity.
+five-second backend and ten-second durable-I/O guard assertions. This changes
+no native host capacity. The earlier twenty-second root and 1500ms guard are
+historical, superseded fixture baselines, not current checks.
 For atomic writer publication, advance the test clock while the writer is
 intentionally blocked: the post-release ready deadline must not yet expire.
 Arm the same five-second ready allowance immediately before release, retain
@@ -723,11 +742,34 @@ diagnostics rather than exposing raw rejected failure text.
 Advance virtual time before the real pause announcement too: it must not
 consume or disable the distinct real five-second pause watchdog. Missing
 announcements still require bounded cleanup rather than the outer timeout.
-The npm-denied lifecycle also reserves four slots for its test worker, outer
-installer runtime, activated runtime and framework CLI. Phase observations
-establish those concurrent process identities, not a CPU or I/O contention
-cause; host capacities, the 15-second execution watchdog and all lifecycle
-assertions remain unchanged.
+The current npm-denied lifecycle declaration in
+`test/distribution-channels.test.mjs` reserves fourteen aggregate slots.
+This is a contention reservation of the complete available native pool, not
+fourteen actual child processes. Its earlier four-slot declaration accounted
+for the observed test/runtime/runtime/CLI chain; preserve that archived resource
+vector and its original protocol controls as historical inputs.
+The source-derived native selection places this root in Windows `body-0` and
+both Mac architectures' `body-1`. Each job requests fifteen slots, leaving
+fourteen available to its nested pool; the current reservation must exclude
+competing roots throughout the timed denial lifecycle.
+The PR-only, one-slot Node regression
+`T-PRD020 denial lifecycle reserves the complete native pool before competing roots start`
+in `test/test-runner.test.mjs` uses the actual compiled inventory and ready-pool
+barriers. At capacity fourteen, a competing root must wait until the denial
+root releases its reservation; capacity thirteen must reject before any callback
+dispatch. It runs in an isolated process with controlled callbacks, not a native
+installer or sandbox, and adds no critical selector or growth to either
+27-check/27-assertion cap.
+Changing this reservation and adding the regression invalidates current source
+qualification for ownership/admission before fresh native validation. Keep
+historical four-slot placement/cost vectors and protocol controls authentic;
+fixture reconstruction must not relabel them as the changed current source.
+Preserve the original Intel sandbox uninstall watchdog failure and controlled
+before-correction admission failure. Positive enforced network/npm controls and
+observed cleanup do not make an expired watchdog pass. Keep the 15-second command
+watchdog, POSIX one-second settlement, native assertions and sandbox unchanged.
+The controlled admission defect establishes neither a kernel cause nor a hosted
+cure or passing native result.
 A failure during provider cancellation is not discarded or
 attributed to cancellation without evidence.
 Optional broker inspection uses an abortable owned request socket. Timeout
@@ -1238,11 +1280,17 @@ The existing PR-only `TOOL02 Windows validation settlement bounds exited roots
 and failed or stalled tree termination` root in
 `test/distribution-boundary-lifetime.test.mjs` must await its first durable running
 checkpoint before starting cancellation accounting. Model cold preparation with
-an injected clock advance and retain the real 1500ms watchdog plus a command-clock
-assertion. Keep all six modes, the original one-second production stop deadline,
-five-second preparation bound, twenty-second root timeout, five-slot declaration
-and owned writer/controller/retention cleanup proofs. This fixes a fixture race,
-not a demonstrated sole cause or fresh cure of the hosted cancellation failure.
+an injected clock advance and retain the real 10,000ms cancellation/durable-I/O
+guard plus command-clock accounting. Assert the actual 5,000ms Windows backend
+budget, separately from that guard. Keep all six modes, the five-second preparation
+bound, 60,000ms root timeout, five-slot declaration and owned writer/controller/
+retention cleanup proofs. For a stalled stop, require the durable uncertain
+cancelling checkpoint with `STOP_TIMEOUT` before releasing the final-report
+writer; finalization must await its write. Release that writer and the owned
+descendant barrier in cleanup. The earlier one-second Windows production stop,
+1500ms guard and twenty-second root are superseded baselines; their original
+executions and claims remain historical. Neither servicing nor fixture success
+establishes a sole cause or fresh hosted cure.
 
 `T-PRD018 native timing notices retain only ten source-bound actual group and
 root durations` in `test/public-readiness-native.test.mjs` is maintainer-owned,

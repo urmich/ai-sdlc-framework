@@ -42,7 +42,7 @@ export const validationDeclarations = {
     "names": ["T-PRD018 Windows termination observations durably distinguish dispatch and original handle settlement without exposing caller data"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "runner-termination-evidence-contract",
-    "reason": "PR-only VM-controlled Windows termination evidence, privacy, event ordering and fail-closed permutations; no real OS process or critical promotion.",
+    "reason": "PR-only VM-controlled Windows termination evidence, privacy, event ordering and fail-closed permutations across the five-second Windows settlement window; owned VM teardown drains even after assertion failure. No real OS process or critical promotion.",
     "prerequisites": ["Node VM and owned repository-local report/journal fixtures"]
   }, {
     "names": ["T-PRD018 Windows native runtime observations retain original handle facts without changing target lifetime"],
@@ -210,6 +210,7 @@ test('T-PRD018 Windows termination observations durably distinguish dispatch and
     t.after(() => fs.rm(directory, { recursive: true, force: true }));
     const privateValue = 'fixture-termination-private-caller-value';
     const stderr = `Authorization: ${privateValue}\n`;
+    const windowsSettlementMs = 5000;
     for (const mode of ['timeout-live', 'spawn-consumes-budget', 'timeout-root-closed',
       'timeout-controller-exited', 'root-first', 'controller-first', 'controller-error',
       'spawn-error', 'root-exited-before-stop', 'natural-success']) {
@@ -250,14 +251,15 @@ test('T-PRD018 Windows termination observations durably distinguish dispatch and
         setTimeout(callback, milliseconds) {
           // The backend registers its watchdog synchronously after the owned controller dispatch.
           const timer = { callback, milliseconds, stop: controllerDispatched && !watchdogRegistered,
-            unref() {}, cleared: false };
+            unref() { this.passive = true; }, cleared: false };
           timers.push(timer);
           if (timer.stop) {
             watchdogRegistered = true;
             watchdogScheduled.resolve(timer);
           }
-          if (!timer.stop && milliseconds < 1000) queueMicrotask(() => {
-            if (!timer.cleared) { clock += milliseconds; callback(); }
+          // Keep passive progress checkpoints idle, not the longer settlement-drain timer.
+          if (!timer.stop) queueMicrotask(() => {
+            if (!timer.cleared && !timer.passive) { clock += milliseconds; callback(); }
           });
           return timer;
         },
@@ -271,7 +273,7 @@ test('T-PRD018 Windows termination observations durably distinguish dispatch and
           assert.equal(command, path.join('C:\\Windows', 'System32', 'taskkill.exe'));
           assert.deepEqual(Array.from(args), ['/PID', String(owned.pid), '/T', '/F']);
           assert.equal(options.shell, false);
-          clock += mode === 'spawn-consumes-budget' ? 1005 : 25;
+          clock += mode === 'spawn-consumes-budget' ? windowsSettlementMs + 5 : 25;
           if (mode === 'spawn-error') throw Object.assign(new Error('Owned controller unavailable'), { code: 'EAGAIN' });
           controllerDispatched = true;
           return killer;
@@ -321,8 +323,8 @@ test('T-PRD018 Windows termination observations durably distinguish dispatch and
             }
             const watchdog = timers.find(timer => timer.stop);
             assert.ok(watchdog);
-            assert.equal(watchdog.milliseconds, mode === 'spawn-consumes-budget' ? 0 : 975);
-            clock = Math.max(clock, 1000);
+            assert.equal(watchdog.milliseconds, mode === 'spawn-consumes-budget' ? 0 : windowsSettlementMs - 25);
+            clock = Math.max(clock, windowsSettlementMs);
             watchdog.callback();
           }
         }
@@ -372,7 +374,7 @@ test('T-PRD018 Windows termination observations durably distinguish dispatch and
         }
         assert.equal(observation.controller.pid, killer.pid);
         assert.equal(observation.dispatch.afterMs - observation.dispatch.beforeMs,
-          mode === 'spawn-consumes-budget' ? 1005 : 25);
+          mode === 'spawn-consumes-budget' ? windowsSettlementMs + 5 : 25);
         assert.deepEqual(observation.controller.stderr, { sha256: digest(stderr), bytes: Buffer.byteLength(stderr) });
         const serialized = JSON.stringify(observation);
         assert.ok(Buffer.byteLength(serialized) < 4096);
@@ -410,6 +412,7 @@ test('T-PRD018 Windows termination observations durably distinguish dispatch and
         }
       } finally {
         if (!rootClosed) closeRoot(1);
+        if (controllerDispatched && killer.exitCode === null && killer.signalCode === null) closeController();
         await pending;
       }
     }

@@ -1218,8 +1218,8 @@ The raw denial-boundary executor shares the existing owned-group stop and
 settlement policy with validation commands, without substituting sanitized
 reports for its raw stream/Error contract. A live tracked child anchors its
 dedicated POSIX group; one 15,000ms watchdog requests synchronous owned
-termination. The 1,000ms settlement bound includes root close and observed group
-disappearance. No delayed destructive signal follows ownership loss. Uncertain
+termination. The POSIX 1,000ms settlement bound includes root close and observed
+group disappearance. No delayed destructive signal follows ownership loss. Uncertain
 writers keep the primary timeout/overflow failure and prevent fixture deletion;
 the raw 4MiB stream limits and native negative-control outcomes stay intact.
 Darwin can report `EPERM` while a signaled group's zombies are being reaped.
@@ -1237,10 +1237,24 @@ exit and close callbacks, stderr identity and a pre-cleanup watchdog snapshot.
 Missing events remain null; these are JavaScript observations, not independent
 kernel-exit measurements. Recording adds no timer, process, critical-path
 filesystem write or wait, and never converts uncertainty into safe cleanup.
+Current Windows servicing gives both `executeOwnedRawCommand` and
+`executeValidationCommand` a 5,000ms settlement budget; POSIX retains 1,000ms.
+This supersedes the earlier Windows one-second baseline, not its immutable
+execution results or approval snapshots. Dispatch the owned PID-tree request
+immediately and once; require affirmative original root/controller closure.
+A stalled, denied or unverified stop remains failed/uncertain and cannot
+authorize fixture deletion, a second tree request or a later destructive signal.
 The cross-platform Windows VM fixture composes its exact mock executable path
 with the supplied host path module. Identify its termination watchdog through
 owned dispatch and registration, not platform-specific separators or error-stack
 text. Neither portability control changes the real termination implementation.
+The same PR-only VM fixture uses a 5,000ms Windows settlement constant for its
+5,005ms exhausted-spawn case, 4,975ms/zero watchdog remainders and stop-clock
+bounds. Active drain timers queue at any duration; unreferenced progress remains
+passive. Cleanup must affirmatively observe original controller closure.
+Preserve all ten permutations, privacy/failure assertions, the 10,000ms outer
+guard and the original fixture timeout. This aligns controlled clocks with
+current servicing, not a native cure or a critical-profile addition.
 The command-capture root reserves five process slots; its writer/producer peers
 reserve their actual two- or three-process minima before timed work begins.
 The separate CI tool-cancellation root reserves four: its worker, command,
@@ -1252,13 +1266,16 @@ Historical costs with the former one-slot resource shape cannot supply a
 qualified lead for the corrected group.
 The native ownership fixture reserves four aggregate worker slots for its
 test process and three real child processes, without changing host capacities
-or the one-second settlement bound.
+or the POSIX one-second settlement bound.
 The controlled Windows settlement fixture separately reserves five slots for
 its test process and at most two independent owned root/writer pairs. Fresh
 VM contexts and unique paths isolate all six scenarios; each pair settles
 before another is admitted. Real peer provenance proves overlap, all six
-cleanup closures remain required, and the existing twenty-second test and
-one-second stop deadlines remain unchanged. Retain per-mode phase diagnostics
+cleanup closures remain required. The current root has a 60,000ms ceiling and a
+10,000ms cancellation/durable-I/O guard, separate from the actual 5,000ms Windows
+backend budget assertion. Its earlier twenty-second root and 1500ms guard are
+superseded fixture baselines, not current deadlines or rewritten results.
+Retain per-mode phase diagnostics
 so a later timeout identifies the unfinished boundary.
 The publication fixture arms its five-second ready deadline only when the
 parent releases the intentional write barrier, not while that barrier forbids
@@ -1268,11 +1285,30 @@ remain required within the unchanged fifteen-second test ceiling.
 Its separate five-second pause-announcement watchdog uses real timers even
 while the readiness regression controls virtual time, so a missing announcement
 still enters bounded failure cleanup.
-The denied installer lifecycle likewise reserves four slots for its observed
-test/runtime/runtime/CLI process chain. Its child environment still excludes
-broker credentials, so the owning test reserves their capacity in advance.
-This is process accounting, not a change to host limits, execution deadlines,
-durability or a claim about contention causality.
+The current denied installer lifecycle reserves fourteen aggregate slots in
+`test/distribution-channels.test.mjs`, replacing the earlier four-slot declaration
+for its observed test/runtime/runtime/CLI chain. Fourteen is a whole-pool
+contention reservation, not a claim of fourteen actual child processes.
+Windows assigns this root to `body-0`; both Mac architectures assign it to
+`body-1`. Each native job requests fifteen slots and its nested pool has fourteen
+available. Reserve all fourteen before the timed lifecycle begins so a competing
+root cannot start until the reservation is released; reject capacity thirteen
+before callback dispatch. The child still receives no broker credentials.
+The existing-file, one-slot, isolated Node regression
+`T-PRD020 denial lifecycle reserves the complete native pool before competing roots start`
+in `test/test-runner.test.mjs` exercises those barriers through the actual
+compiled inventory and ready pool with controlled callbacks. It is PR-only;
+neither the critical selectors nor either 27-count cap grows.
+The resource declaration and added source root invalidate current ownership/
+admission qualification before fresh native validation. Preserve authentic
+archived four-slot resource/cost vectors and all original protocol controls;
+reconstruct historical v15 fixture splices from authentic archived Git text,
+without laundering changed current inputs into old qualification.
+Retain the original Intel uninstall watchdog and before-correction admission
+failures. The 15-second command watchdog, POSIX one-second stop, native
+assertions, enforced network/npm denial and sandbox remain unchanged.
+Observed process-group cleanup does not convert an expired watchdog to success;
+the admission correction does not prove a kernel cause, native cure or hosted pass.
 The Windows periodic-checkpoint fixture injects its classified failure without
 asynchronous preparation inside the timed replacement attempt. Its marker is
 prepared beforehand and published only after a subsequent real replacement;
@@ -1908,14 +1944,15 @@ TOOL02 records separate closed phases for cancellation return or watchdog,
 cleanup lifetime, retention/result checks, retained report/stdout and controller
 dispatch/stop. A phase timestamp describes entry into that assertion block, not
 the duration or cause of a termination failure. Preserve the six real scenarios,
-their assertions, controller ownership and original budgets.
+their assertions, controller ownership and the current platform-specific stop
+budgets and TOOL02 guard above.
 
 For the recurring Windows capture root, keep native observation test-only.
 Interpose `spawn` only in its isolated controller, invoke the original function
 unchanged, and observe only the exact SystemRoot `System32/taskkill.exe` child.
 Publish the actual PID and spawn-event UTC bound atomically to the prestarted
 observer's nonce request. Do not await it inside `executeValidationCommand` or
-alter the unchanged 1000ms stop deadline. Complete existing command/controller
+alter the current 5,000ms Windows stop deadline. Complete existing command/controller
 cleanup before awaiting native finalization; append compact validated facts to
 the same assertion error, preserving a concurrent cleanup failure separately.
 Retain the exact spawn request bound, target binding reason/capture timestamp,
@@ -1984,7 +2021,8 @@ compiling marker observed before that preparation deadline arms exactly one
 further five-second window.
 Missing, invalid, foreign-source or late markers cannot rearm it. This changes
 maximum startup polling to twenty seconds; it does not change the one-second
-observation window, 1500ms capture wait or actual target termination deadlines.
+native observation window or 1500ms native capture wait. Those diagnostic windows
+are distinct from the current 5,000ms Windows target-termination settlement budget.
 The native multi-observer root has a 120-second watchdog and command capture
 has a sixty-second watchdog, including their finite setup and owned cleanup.
 A preparation marker is neither readiness nor compiler-settlement
@@ -2067,10 +2105,15 @@ that the initial running checkpoint is durable: the command awaits that write
 before its stop/close race. Await the actual first running `atomicWrite` under
 the remaining original five-second preparation allowance, racing early command
 settlement. A controlled clock advance models cold preparation without sleeps.
-Keep the original production stop deadline, physical 1500ms watchdog, all six
-settlement modes and real writer-drain/retention/controller cleanup proofs.
-No production termination behavior changes, and later persistence remains part
-of actual return latency; this fixture correction does not prove a hosted cure.
+Keep the current 5,000ms Windows backend budget assertion, physical 10,000ms
+cancellation/durable-I/O guard, 60,000ms root ceiling, all six settlement modes
+and real writer-drain/retention/controller cleanup proofs. A stalled stop must
+durably retain its uncertain cancelling checkpoint and `STOP_TIMEOUT` before
+the final report writer is released. Command finalization must await that write;
+release both final-report and descendant-writer barriers in cleanup.
+The guard includes actual persistence latency; it does not extend the production
+stop budget or prove a hosted cure. The earlier one-second Windows deadline and
+1500ms fixture watchdog remain historical, superseded baselines.
 
 The standalone simultaneous-activation fixture similarly separates cold staging
 from the contender's lock-wait allowance. Hold the first real promotion after
