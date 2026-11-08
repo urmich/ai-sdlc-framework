@@ -2507,6 +2507,14 @@ incomplete data is Unavailable. All remain NotRun without verified enforcement;
 unresolved threads still block when enforcement is genuinely enabled.
 This compatibility path adds no workflow permission elevation, setting write or
 F04 provider-administration scope.
+REST pagination accepts GitHub's `/repositories/{id}` Link route only when it
+denotes the same resource as `/repos/{owner}/{name}` in the request's immutable
+selected repository scope. Normalize just that repository identity for resource
+comparison and cycle detection; retain original Link headers, dispatched URLs
+and page captures. API origin/prefix, filters, page caps and authorization
+context remain unchanged. A different repository, including another authorized
+connection scope, a changed resource/filter or an alias cycle remains a proof
+gap; this compatibility correction grants no provider-setting authority.
 The trusted observer still pins `native-validation.mjs`, `ci.yml` and every
 non-test helper to its adopted revision and uses its imported native planner.
 Adopt the exact Windows15/15/15/7 implementation/workflow correction as well as

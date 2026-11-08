@@ -1513,6 +1513,16 @@ failure or grants delivery-limit credit.
 | T-PRD026 | local | integration | post-review | automated | agent | provider-policy | FR-205; AC-205.3 | P: safe approved PRs with failing, absent, stale or skipped required results cannot merge; current complete checks, applicable review and resolved conversations permit normal merge eligibility without executing a merge unless specifically authorized. | procedure: section-8-policy | NotRun | |
 | T-PRD027 | local | unit | post-review | automated | provider | github-pr-matrix | FR-205; AC-205.1; AC-205.4 | F: classic denied/unavailable reads use complete validated effective native rules under existing Metadata-read access; only genuine true conversation enforcement can qualify. False/absent rules, effective denial/unavailability, malformed/duplicate/incomplete data or absent scoped setting authority retain precise blockers and dispatch no mutation; source config or owner-read access alone cannot satisfy workflow enforcement. | test/public-readiness-ci.test.mjs#T-PRD027; test/public-readiness-observer.test.mjs#T-PRD027 three declared effective-rule roots and original denied/unavailable regression | NotRun | |
 
+The PR-only `T-PRD027 REST pagination follows only the proof-bound repository
+name/ID alias` root in `test/github-transport.unit.test.mjs` verifies actual
+GitHub-style workflow-run Links on GitHub and an enterprise API prefix, retaining
+exact page captures and proof scope. Five alias-negative variants reject another
+named/ID repository (even when separately authorized on the same connection),
+changed resource/filter and alias cycles before another dispatch. These injected,
+credential/network-free Node assertions apply on all four native platforms,
+have no prerequisite roots or shared resources, and do not enter critical27.
+Retain the original-source proof-gap failure separately from corrected results.
+
 ### 5.3 Release orchestration and published consumers
 
 | ID | Environment | Level | Checkpoint | Mode | Owner | Location | Requirements | Observe or assert | Implementation | Status | Evidence |

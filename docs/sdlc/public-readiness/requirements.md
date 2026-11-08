@@ -320,6 +320,9 @@ Required tests must be real merge prerequisites, not advisory green decorations.
   can establish conversation enforcement only from a genuine native
   `pull_request.required_review_thread_resolution: true`; false, absent,
   malformed, duplicated or incomplete rules cannot supply passing enforcement.
+  Complete provider pagination may follow the selected repository's canonical
+  name/ID route aliases only; preserve the exact resource, filters, proof scope,
+  trusted origin/API prefix, cycle rejection and acquisition limits.
 
 The retained owner read on 2026-11-08 observed effective ruleset `26728403`:
 deletion/non-fast-forward restrictions and a PR rule with zero required approvals,
