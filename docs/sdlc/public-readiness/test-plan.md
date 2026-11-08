@@ -751,13 +751,16 @@ vector and its original protocol controls as historical inputs.
 For frozen `e1f4490`, the actual source-derived selection places this root in
 Windows `body-1` and both Mac architectures' `body-0`; recompute the owning role
 for each changed candidate. Current CI requests fourteen workers for all three
-ARM body roles and the Intel body roles, and fifteen for Windows bodies.
-ARM unit/refresh roles remain seven. Both Mac body pools now request fourteen;
+ARM body roles, ARM refresh and Intel body roles, and fifteen for Windows bodies.
+ARM unit roles remain seven. Both Mac body pools now request fourteen;
 compare group admission with the actual owning CI request and broker allocation,
 without assuming a one-slot deduction. On those fourteen-slot Mac pools, the
 reservation excludes competing roots throughout the timed denial lifecycle.
 Keep the existing maximum of thirty-two, dynamic broker and process isolation;
 no jobs or blanket callback concurrency are added.
+ARM refresh's fourteen-worker request preserves the unchanged strict `sameRecipe`
+body/refresh recipe and environment parity; environment differences remain errors,
+not fields to ignore for admission.
 The PR-only, one-slot Node regression
 `T-PRD020 denial lifecycle reserves the complete native pool before competing roots start`
 in `test/test-runner.test.mjs` derives `nativeFrameworkShardPlan` and the exact
@@ -774,13 +777,24 @@ historical four-slot placement/cost vectors and protocol controls authentic;
 fixture reconstruction must not relabel them as the changed current source.
 Preserve `nativePlacementCosts.workers` ARM seven as an immutable historical
 measurement/model, not evidence of the changed current CI body allocation.
+Historical `authenticV14Workflow` reconstruction must undo fourteen to seven
+only for `native-ma` and `native-ma-refresh` requests. Keep the pinned archived
+v14 workflow digest (prefix `530002ff`) and v10 helper digest (prefix `409c458`)
+unchanged; this is historical reconstruction, not current allocation guidance.
 The actual source/CI-derived ARM before-control failed with `BUDGET` and zero
 dispatch at seven; the corrected controlled after-result passed. Preserve both
 originals without attributing a kernel cause or granting hosted acceptance.
+The bootstrap08 native-source original was Failed: six passed and twenty-one
+failed when historical reconstruction inherited current ARM fourteen instead
+of archived seven. Preserve that failure and bootstrap08's other originals.
+The bootstrap09 SDK recipe failure correctly reported `MAC_ADMISSION_POLICY_DIFFERS`;
+production's strict guard remains unchanged. Matching ARM refresh to body fourteen
+and the scoped historical undo produced three passing existing historical/full-SDK
+protocol roots, not a native cure or whole-candidate passing result.
 The new source/configuration, specification and reconstructed fixture invalidate
-bootstrap07 whole-candidate credit. Keep its originals historical; the fresh
-full required local gate, affected cases and Sol Review remain NotRun until
-recorded for the newly frozen candidate, and native validation remains NotRun.
+bootstrap07/bootstrap08 whole-candidate credit. Their originals remain historical;
+the fresh full required local gate, affected cases, Sol Review and native validation
+remain NotRun until their applicable newly frozen candidate results are recorded.
 Preserve the original Intel sandbox uninstall watchdog failure and controlled
 before-correction admission failure. Positive enforced network/npm controls and
 observed cleanup do not make an expired watchdog pass. Keep the 15-second command
@@ -2279,8 +2293,8 @@ the original subset. A new legitimate test must not erase preservation checks.
    whole-lane delivery limits; queued time inside a running lane still counts.
    Preserve ARM's own unit barrier, both Intel units and all
    twenty-five native parts, thirty-four expanded jobs and all five Linux
-   coordinators. Current ARM body roles request fourteen workers; ARM unit/refresh
-   roles remain seven, Intel bodies fourteen and Intel unit hosts four.
+   coordinators. Current ARM body and refresh roles request fourteen workers;
+   ARM unit roles remain seven, Intel bodies fourteen and Intel unit hosts four.
    Keep the historical ARM seven-worker cost model unchanged; verify real overlap and queues
    again on the next frozen candidate. Verify the split ARM refresh and Intel
    primary body cleanup receipts bind their actual `GITHUB_JOB` identities,

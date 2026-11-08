@@ -774,8 +774,8 @@ It never waits for primary completion, ARM allocation or future foreign units.
 This makes primary request priority source-controlled rather than assuming
 which matrix entry a provider allocates first. Preserve the existing job
 separation, all twenty-five producers and thirty-four expanded jobs, including
-the five coordinators. Current ARM body roles request fourteen workers,
-ARM unit/refresh roles seven, Intel bodies fourteen and Intel unit hosts four.
+the five coordinators. Current ARM body and refresh roles request fourteen workers,
+ARM unit roles seven, Intel bodies fourteen and Intel unit hosts four.
 Preserve the historical ARM seven-worker cost model; the body allocation change
 is not new measured performance evidence.
 V10 otherwise preserves v9's readiness fairness and both platforms' own complete
@@ -1296,13 +1296,16 @@ reservation, not a claim of fourteen actual child processes.
 For frozen `e1f4490`, actual source-derived placement assigns Windows `body-1`
 and both Mac architectures' `body-0`; derive the owning role afresh for each
 changed candidate. Current CI requests fourteen workers for all three ARM body
-roles and Intel bodies, fifteen for Windows bodies; ARM unit/refresh roles remain
+roles, ARM refresh and Intel bodies, fifteen for Windows bodies; ARM unit roles remain
 seven. Both Mac body pools now request fourteen. Use the actual owning CI request
 and broker allocation, not an assumed one-slot deduction, for admission.
 The fourteen-slot reservation excludes competitors throughout the timed lifecycle
 on those fourteen-slot Mac pools. Keep the existing maximum thirty-two, dynamic
 broker and process isolation, with no added jobs or blanket callback concurrency.
 The child still receives no broker credentials.
+ARM refresh's fourteen-worker request preserves production's unchanged strict
+`sameRecipe` body/refresh recipe and environment parity. Differing environment
+values remain admission errors, not fields omitted from comparison.
 The existing-file, one-slot, isolated Node regression
 `T-PRD020 denial lifecycle reserves the complete native pool before competing roots start`
 in `test/test-runner.test.mjs` derives `nativeFrameworkShardPlan` and exact owning
@@ -1316,14 +1319,26 @@ archived four-slot resource/cost vectors and all original protocol controls;
 reconstruct historical v15 fixture splices from authentic archived Git text,
 without laundering changed current inputs into old qualification.
 Keep `nativePlacementCosts.workers` ARM seven immutable as a historical
-measurement/model, not evidence of the new CI allocation. The actual ARM
+measurement/model, not evidence of the new CI allocation.
+Historical `authenticV14Workflow` reconstruction undoes fourteen to seven only
+for `native-ma` and `native-ma-refresh` requests. Preserve the pinned archived
+v14 workflow digest (prefix `530002ff`) and v10 helper digest (prefix `409c458`)
+unchanged; neither historical identity is revised to match current CI.
+The actual ARM
 source/CI-derived before-control failed with `BUDGET` and zero dispatch at seven;
 the corrected controlled after-result passed. Preserve both originals: this
 is admission evidence, not a kernel diagnosis or hosted/native cure.
-The new source/configuration, specification and fixture invalidate bootstrap07
-whole-candidate credit. Its originals remain historical; the fresh full required
-local gate, affected cases, Sol Review and native validation remain NotRun until
-their separately applicable new-candidate executions are recorded.
+The bootstrap08 native-source original was Failed, with six passed and twenty-one
+failed because historical reconstruction retained current ARM fourteen rather
+than archived seven; preserve this and its other original results.
+The bootstrap09 SDK `MAC_ADMISSION_POLICY_DIFFERS` failure confirms the unchanged
+strict recipe guard rejected body/refresh environment differences. Matching
+current ARM refresh to body fourteen and the scoped historical undo yielded three
+passing existing historical/full-SDK protocol roots, not a hosted/native cure.
+The new source/configuration, specification and fixture invalidate bootstrap07/
+bootstrap08 whole-candidate credit. Their originals remain historical; the fresh
+full required local gate, affected cases, Sol Review and native validation remain
+NotRun until separately applicable new-candidate executions are recorded.
 Retain the original Intel uninstall watchdog and before-correction admission
 failures. The 15-second command watchdog, POSIX one-second stop, native
 assertions, enforced network/npm denial and sandbox remain unchanged.
