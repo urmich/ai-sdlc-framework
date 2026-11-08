@@ -196,7 +196,17 @@ function staticDocument(value, operationName, operationKind) {
   return document;
 }
 
-function nextRestUrl(link, current, connection, pageParameter) {
+function restResourcePath(url, connection, scope) {
+  const parts = url.pathname.slice(connection.apiPathPrefix.length).split('/');
+  if (scope.kind === 'repository' && parts[1] === 'repos' &&
+    decodeURIComponent(parts[2] ?? '') === scope.owner &&
+    decodeURIComponent(parts[3] ?? '') === scope.name) {
+    return `${connection.apiPathPrefix}${['', 'repositories', scope.id, ...parts.slice(4)].join('/')}`;
+  }
+  return url.pathname;
+}
+
+function nextRestUrl(link, current, connection, pageParameter, scope) {
   if (link === undefined) return undefined;
   requireThat(link !== '[redacted]', 'PROOF_GAP', 'GitHub pagination header cannot be safely retained');
   const pattern = /\s*<([^<>]+)>((?:;\s*[A-Za-z][A-Za-z0-9_-]*=(?:"[^"]*"|[^;,\s]+))*)\s*(?:,|$)/gyu;
@@ -214,7 +224,7 @@ function nextRestUrl(link, current, connection, pageParameter) {
     const url = githubUrl(match[1], {
       origin: connection.apiOrigin, prefix: connection.apiPathPrefix || '/',
     });
-    requireThat(url.pathname === currentUrl.pathname &&
+    requireThat(restResourcePath(url, connection, scope) === restResourcePath(currentUrl, connection, scope) &&
       canonical(filters(url)) === baseline &&
       url.searchParams.getAll(pageParameter).length <= 1,
     'PROOF_GAP', 'GitHub pagination changed the resource or filters');
@@ -799,6 +809,7 @@ export function createGitHubTransport(options) {
     requireThat(internal && request.requestIdentity.protocol === 'rest' &&
       request.requestIdentity.method === 'GET' && internal.responseType === 'json',
     'INPUT', 'GitHub REST pagination requires a prepared GET JSON request');
+    const scope = selectGitHubScope(connection, request.requestIdentity.proofScope);
     const pageParameter = input.pageParameter ?? 'page';
     choice(pageParameter, ['page', 'after', 'before', 'since'], 'GitHub page parameter');
     const bound = input.maxPages === undefined ? pageMaximum :
@@ -811,15 +822,17 @@ export function createGitHubTransport(options) {
     let paginationContext;
     while (current !== undefined) {
       const url = prepared.get(current).url;
-      requireThat(!visited.has(url), 'PROOF_GAP', 'GitHub REST pagination cycle');
+      const identity = new URL(url);
+      identity.pathname = restResourcePath(identity, connection, scope);
+      requireThat(!visited.has(identity.href), 'PROOF_GAP', 'GitHub REST pagination cycle');
       requireThat(pages.length < bound, 'PROOF_GAP', 'GitHub REST pagination exceeds page limit');
-      visited.add(url);
+      visited.add(identity.href);
       const observation = await run(current, {
         signal: input.signal, timeoutMs: input.timeoutMs,
       }, false, paginationContext);
       paginationContext ??= authorizationContext(observation.cacheIdentity);
       pages.push(observation);
-      const next = nextRestUrl(observation.headers.link, url, connection, pageParameter);
+      const next = nextRestUrl(observation.headers.link, url, connection, pageParameter, scope);
       current = next === undefined ? undefined :
         prepare({ ...request.requestIdentity,
           path: next.slice(connection.apiOrigin.length + connection.apiPathPrefix.length) },

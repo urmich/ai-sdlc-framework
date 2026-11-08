@@ -50,6 +50,23 @@ Parent performs built-in Copilot `/review` separately on the complete main delta
 No hosted, native, provider, release or 99-case acceptance is supplied by these
 local controls; all canonical statuses remain NotRun.
 
+**Local SDK15 integration cycle:** The new primary candidate normally merges
+SDK15 `6c4d23ed20131e2a798082a7786445b6066b8298` into primary
+`942f5d1df05b4c9f4e0d6e682ab998eed2246ec8`, without transferring either
+source's execution or Review credit. Freeze its commit/tree, every tracked raw
+input and owned Node 24.20.0 before the protected-host sequence: critical with
+five workers (the canonical unit stage occurs once), static checks, one combined
+five-worker targeted selection of `github-transport.unit.test.mjs`,
+`public-readiness-native.test.mjs` and `public-readiness-observer.test.mjs`,
+then the exact existing actual-CI root:
+`T-PRD020 actual CI schedules twenty-five producer parts behind both Intel unit jobs and distinguishes edited base retargets`.
+Capture original streams, exits and `SDLC_TEST_REPORT_FILE` reports from the
+first executions in the owned worktree. Preserve any failure and verify final
+source/toolchain identity and owned cleanup. Alias regressions remain PR-only
+on all four platforms; critical retains its 27-root/27-assertion cap. These local
+controls grant no hosted/native, full 99-case, minimum-Node, release or Review
+credit; fresh whole-candidate built-in Review remains separate and NotRun.
+
 ## 1. Scope and execution status
 
 This is the one living Test Plan for `wi-public-readiness`, artifact
@@ -1647,6 +1664,21 @@ failure or grants delivery-limit credit.
 | T-PRD025 | local | integration | post-review | automated | agent | provider-policy | FR-205; AC-205.2 | P: read actual effective rules; authorized disposable-ref probe verifies direct push/force/delete/admin behavior against approved policy; never infer owner exemptions or use force/admin to perform the probe. | procedure: section-8-policy | NotRun | |
 | T-PRD026 | local | integration | post-review | automated | agent | provider-policy | FR-205; AC-205.3 | P: safe approved PRs with failing, absent, stale or skipped required results cannot merge; current complete checks, applicable review and resolved conversations permit normal merge eligibility without executing a merge unless specifically authorized. | procedure: section-8-policy | NotRun | |
 | T-PRD027 | local | unit | post-review | automated | provider | github-pr-matrix | FR-205; AC-205.1; AC-205.4 | F: classic denied/unavailable reads use complete validated effective native rules under existing Metadata-read access; only genuine true conversation enforcement can qualify. False/absent rules, effective denial/unavailability, malformed/duplicate/incomplete data or absent scoped setting authority retain precise blockers and dispatch no mutation; source config or owner-read access alone cannot satisfy workflow enforcement. | test/public-readiness-ci.test.mjs#T-PRD027; test/public-readiness-observer.test.mjs#T-PRD027 three declared effective-rule roots and original denied/unavailable regression | NotRun | |
+
+The PR-only `T-PRD027 REST pagination follows only the proof-bound repository
+name/ID alias` root in `test/github-transport.unit.test.mjs` verifies actual
+GitHub-style workflow-run Links on GitHub and an enterprise API prefix, retaining
+exact page captures and proof scope. Five alias-negative variants reject another
+named/ID repository (even when separately authorized on the same connection),
+changed resource/filter and alias cycles before another dispatch. These injected,
+credential/network-free Node assertions apply on all four native platforms,
+have no prerequisite roots or shared resources, and do not enter critical27.
+Retain the original-source proof-gap failure separately from corrected results.
+Existing PR-only T-PRD017 historical native replay roots reconstruct their
+pre-alias transport-test input before applying the immutable archived splices
+and digest checks. Preserve qualification capsules, timings and original source
+identity; replay never supplies current-candidate execution credit. No new
+capability, shared resource or critical assertion is introduced.
 
 ### 5.3 Release orchestration and published consumers
 

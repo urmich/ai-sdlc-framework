@@ -42,6 +42,17 @@ release preflight controls and both authentic 105/315 historical capsules.
 Prior whole-candidate passes and reviews stay historical; all 99 canonical
 acceptance projections remain NotRun.
 
+**Local SDK15 pagination integration:** Normally merge reviewed SDK source
+`6c4d23ed20131e2a798082a7786445b6066b8298`, tree
+`f661ed81b87987ac230aa5d3d9178662a3de0540`, into frozen primary
+`942f5d1df05b4c9f4e0d6e682ab998eed2246ec8`. The actual merge base is SDK14
+`de5a392ff372e47224699c36ad014f516b3fa79e`. Retain primary-specific behavior,
+both authentic historical capsules and the immutable source/qualification
+history while integrating proof-bound repository name/ID pagination. This is
+the same F01/F02/F03/F05/F06/F13 follow-up, not F04 administration or deferred
+F07-F12 work. Earlier SDK/primary passes and reviews do not validate this new
+candidate; publication, main integration and release remain separate.
+
 **2026-10-20 revision:** The user rejected the broad, 18-minute local
 "critical" loop. The required replacement is a small explicit local sanity gate,
 repository-only instructions for classifying future tests, complete applicable
@@ -351,6 +362,9 @@ Required tests must be real merge prerequisites, not advisory green decorations.
   can establish conversation enforcement only from a genuine native
   `pull_request.required_review_thread_resolution: true`; false, absent,
   malformed, duplicated or incomplete rules cannot supply passing enforcement.
+  Complete provider pagination may follow the selected repository's canonical
+  name/ID route aliases only; preserve the exact resource, filters, proof scope,
+  trusted origin/API prefix, cycle rejection and acquisition limits.
 
 The retained owner read on 2026-11-08 observed effective ruleset `26728403`:
 deletion/non-fast-forward restrictions and a PR rule with zero required approvals,

@@ -2,6 +2,17 @@ export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [{"coverage": "direct", "paths": ["src/github/transport.mjs", "src/github/connection.mjs"]}],
   "applicability": [{
+    "names": ["T-PRD027 REST pagination follows only the proof-bound repository name/ID alias",
+      "REST pagination rejects other named repository without a false complete result",
+      "REST pagination rejects other repository ID without a false complete result",
+      "REST pagination rejects ID alias changed resource without a false complete result",
+      "REST pagination rejects ID alias changed filters without a false complete result",
+      "REST pagination rejects repository alias cycle without a false complete result"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "github-transport",
+    "reason": "PR-only AC-205.3/AC-205.4 regression for actual GitHub repository-ID Link URLs. Only the selected immutable proof scope may alias the same resource; preserve filters, origin, API prefix, original captures and cycle rejection. Injected responses, no network, credentials, shared resources or prerequisite roots; no critical promotion.",
+    "prerequisites": ["Node"]
+  }, {
     "names": ["304 reuses only exact-context ETag facts and keeps the old observation version",
       "304 without cache or with a contradictory ETag is a proof gap"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
@@ -22,7 +33,7 @@ export const validationDeclarations = {
     {"expression": "`${name} fails the bounded response contract`", "domains": {"name": ["malformed JSON", "wrong JSON type", "login HTML", "declared oversized", "streamed oversized", "malformed UTF-8"]}},
     {"expression": "`unsafe/out-of-scope relative route is rejected: ${pathIndex}`", "domains": {"pathIndex": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]}},
     {"expression": "`connection rejects noncanonical origin ${originIndex}`", "domains": {"originIndex": ["0", "1", "2", "3", "4", "5"]}},
-    {"expression": "`REST pagination rejects ${name} without a false complete result`", "domains": {"name": ["other origin", "changed filters", "changed resource", "malformed link", "cycle", "bounded pages", "duplicate next"]}},
+    {"expression": "`REST pagination rejects ${name} without a false complete result`", "domains": {"name": ["other origin", "changed filters", "changed resource", "malformed link", "cycle", "bounded pages", "duplicate next", "other named repository", "other repository ID", "ID alias changed resource", "ID alias changed filters", "repository alias cycle"]}},
     {"expression": "`cache isolation rejects a changed ${change} before conditional dispatch`", "domains": {"change": ["request", "profile", "generation", "visibility", "connection", "forged-entry"]}},
     {"expression": "`${protocol} pagination rejects actor/credential generation changes before the second page`", "domains": {"protocol": ["rest", "graphql"]}},
     {"expression": "`cleanup failure preserves the primary ${code} category and reports the additional gap`", "domains": {"code": ["PERMISSION", "REDIRECT", "PROVIDER"]}},
@@ -585,6 +596,38 @@ test('REST pagination preserves exact filters, page captures and authentication 
   assert.equal(result.pages[1].requestIdentity.proofScope, 'repository:17');
 });
 
+test('T-PRD027 REST pagination follows only the proof-bound repository name/ID alias', async () => {
+  for (const [origin, prefix, webOrigin] of [
+    [api, '', 'https://github.com'],
+    ['https://ghe.fixture.invalid', '/api/v3', 'https://ghe.fixture.invalid'],
+  ]) {
+    const named = '/repos/fixture-owner/fixture-repo/actions/workflows/41/runs?per_page=100';
+    const numeric = '/repositories/17/actions/workflows/41/runs?per_page=100';
+    const urls = [`${origin}${prefix}${named}`, `${origin}${prefix}${numeric}&page=2`,
+      `${origin}${prefix}${named}&page=3`];
+    const firstLink = `<${urls[1]}>; rel="next", <${urls[2]}>; rel="last"`;
+    const calls = [];
+    const bodies = [1, 2, 3].map(id => ({ workflow_runs: [{ id }] }));
+    const transport = createGitHubTransport({
+      connection: connection({ apiOrigin: origin, apiPathPrefix: prefix, webOrigin,
+        profiles: GITHUB_REST_PROFILES }),
+      fetch: async url => {
+        calls.push(url);
+        return response(bodies[calls.length - 1], 200, calls.length === 1 ?
+          { link: firstLink } : calls.length === 2 ? { link: `<${urls[2]}>; rel="next"` } : {});
+      },
+    });
+    const result = await transport.paginateRest(rest(transport, { path: named }));
+    assert.deepEqual(calls, urls);
+    assert.deepEqual(result.pages.map(page => page.body), bodies);
+    assert.deepEqual(result.pagination, { complete: true, pageCount: 3 });
+    assert.deepEqual(result.pages.map(page => page.requestIdentity.proofScope),
+      ['repository:17', 'repository:17', 'repository:17']);
+    assert.equal(result.pages[0].headers.link, firstLink);
+    assert.equal(result.pages[1].requestIdentity.path, `${numeric}&page=2`);
+  }
+});
+
 for (const [name, link, maxPages] of [
   ['other origin', `<https://attacker.invalid${route}&page=2>; rel="next"`],
   ['changed filters', `<${api}/repos/fixture-owner/fixture-repo/issues?state=closed&per_page=2&page=2>; rel="next"`],
@@ -593,10 +636,16 @@ for (const [name, link, maxPages] of [
   ['cycle', `<${api}${route}>; rel="next"`],
   ['bounded pages', `<${api}${route}&page=2>; rel="next"`, 1],
   ['duplicate next', `<${api}${route}&page=2>; rel="next", <${api}${route}&page=3>; rel="next"`],
+  ['other named repository', `<${api}/repos/fixture-owner/other-repo/issues?state=open&per_page=2&page=2>; rel="next"`],
+  ['other repository ID', `<${api}/repositories/18/issues?state=open&per_page=2&page=2>; rel="next"`],
+  ['ID alias changed resource', `<${api}/repositories/17/pulls?state=open&per_page=2&page=2>; rel="next"`],
+  ['ID alias changed filters', `<${api}/repositories/17/issues?state=closed&per_page=2&page=2>; rel="next"`],
+  ['repository alias cycle', `<${api}/repositories/17/issues?state=open&per_page=2>; rel="next"`],
 ]) {
   test(`REST pagination rejects ${name} without a false complete result`, async () => {
     let calls = 0;
-    const transport = createGitHubTransport({ connection: connection(), fetch: async () => {
+    const transport = createGitHubTransport({ connection: connection({ scopes: [scope,
+      { kind: 'repository', id: 18, owner: 'fixture-owner', name: 'other-repo' }] }), fetch: async () => {
       calls++;
       return response([], 200, { link });
     } });

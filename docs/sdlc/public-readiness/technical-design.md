@@ -76,6 +76,19 @@ or a passing enforcement claim. Genuine false or absent
 conversation/status enforcement remains F04 and requires separate authorization;
 this integration does not include it.
 
+The local SDK15 successor normally merges reviewed
+`6c4d23ed20131e2a798082a7786445b6066b8298` into primary
+`942f5d1df05b4c9f4e0d6e682ab998eed2246ec8`, whose actual shared ancestor is
+SDK14 `de5a392ff372e47224699c36ad014f516b3fa79e`. Its source integration
+preserves primary's empty/noWork completion, version-neutral documentation,
+release controls, Windows15/15/15/7 destination capacities and authentic
+105/315-blob capsules. The historical reconstruction removes only new
+transport alias-test additions before the unchanged archived source splices
+and exact digest assertions. No capsule, weight, timing, archived source,
+fetch-depth prerequisite, product version or release history is rewritten.
+The resulting candidate requires its own frozen local sequence and separate
+whole-candidate Review; SDK15's prior review supplies neither.
+
 ## 1. Design summary and boundaries
 
 Implement [FR-200 through FR-215](requirements.md) against the
@@ -2655,6 +2668,18 @@ incomplete data is Unavailable. All remain NotRun without verified enforcement;
 unresolved threads still block when enforcement is genuinely enabled.
 This compatibility path adds no workflow permission elevation, setting write or
 F04 provider-administration scope.
+REST pagination accepts GitHub's `/repositories/{id}` Link route only when it
+denotes the same resource as `/repos/{owner}/{name}` in the request's immutable
+selected repository scope. Normalize just that repository identity for resource
+comparison and cycle detection; retain original Link headers, dispatched URLs
+and page captures. API origin/prefix, filters, page caps and authorization
+context remain unchanged. A different repository, including another authorized
+connection scope, a changed resource/filter or an alias cycle remains a proof
+gap; this compatibility correction grants no provider-setting authority.
+Historical native replay removes only the new transport-test additions before
+applying its existing archived source splices and exact digest assertions.
+Keep the qualification capsule and cost/placement history unchanged; those
+historical callbacks cannot satisfy execution evidence for the new candidate.
 The trusted observer still pins `native-validation.mjs`, `ci.yml` and every
 non-test helper to its adopted revision and uses its imported native planner.
 Adopt the exact Windows15/15/15/7 implementation/workflow correction as well as
