@@ -222,7 +222,11 @@ automatic retries. Monitor
 every framework-triggered and user-reported run, even standalone PROD runs.
 Use provider run metadata and verify the actual accessible run page, not a login
 page. Attach status polling immediately, independently of link verification.
-Poll every 60 seconds via the host scheduler and authorized provider tools.
+Poll at the monitor's stored interval via the host scheduler and authorized
+provider tools: new monitors default to 300 seconds (five minutes); existing
+records retain their actual interval. Use lightweight status reads while active,
+not repeated full logs or unchanged notifications. Report denied reads without
+automatically retrying them; do not claim unsupported reset-aware scheduling.
 Report origin, monitoring gaps and terminal results; observation grants no consent.
 The offline ledger has no connector access and cannot poll while its host stops.
 

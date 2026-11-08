@@ -89,7 +89,8 @@ These goals describe development work managed by the framework.
   candidate is pushed, published through a PR, or sent to DEV. A changed
   candidate invalidates the prior review and repeats local validation and Review.
 - Verified CI/CD provider build/deployment run links, explicit user notifications, and
-  completion monitoring every 60 seconds.
+  immediate observation and stored-interval completion monitoring
+  (300 seconds/five minutes by default for new monitors).
 - Explicit user completion confirmation or override before stage advancement
   or recommending the next stage; jobs inside an authorized DEV attempt run
   without separate per-job confirmation.
@@ -1294,7 +1295,7 @@ environment/pipeline policy requires one.
   tests in the Test Plan and records results against the actual deployed
   artifact. Any genuinely manual test still follows FR-022.
 - AC-034.5: Builds and deployments follow the notification, verified-link, and
-  one-minute monitoring requirements in FR-035.
+  stored-interval monitoring requirements in FR-035.
 - AC-034.6: Failed, canceled, or uncertain builds/deployments do not advance to
   dependent deployment/testing steps as if successful. The framework reports
   the condition and follows the existing diagnosis/recovery loop.
@@ -1314,32 +1315,42 @@ environment/pipeline policy requires one.
 
 **Source:** S-30, S-36, S-39, S-40, S-41.
 
-#### FR-035 - Visible pipeline execution and one-minute monitoring
+#### FR-035 - Visible pipeline execution and economical monitoring
 
 The framework must monitor every pipeline it triggers and every user-triggered
 pipeline run the user reports, not only runs in its current DEV/STAGING workflow.
 It must identify who triggered the run, provide its verified working run link,
-monitor completion every minute, and notify the user of the terminal outcome.
+observe status immediately, then monitor completion at its stored interval
+(300 seconds/five minutes by default for new monitors), and notify the user of
+the terminal outcome. Existing records retain their actual interval.
 The existing CI/CD provider link requirements apply to CI/CD provider runs.
 
 **Definition of Done**
 
 - AC-035.1: For a framework-triggered or user-reported run, the framework identifies
   the pipeline, run, environment when applicable, and trigger origin; provides
-  the verified run link; and states that monitoring runs every minute.
+  the verified run link; and states the monitor's actual polling interval.
   It does not claim to have triggered a user-triggered run.
 - AC-035.2: Links come from actual CI/CD provider run metadata and are checked against the
   intended run and its accessible web page. A fabricated link, API URL, generic
   pipeline page, or successful login-page response is not a verified run link.
-- AC-035.3: While a run is nonterminal, the framework checks its status every
-  60 seconds until completion, failure, cancellation, or an explicitly reported
-  interruption. A matching run already in progress receives the same monitoring.
+- AC-035.3: Observe immediately, then check nonterminal status at the stored
+  interval until completion, failure, cancellation, or an explicitly reported
+  interruption. New monitors default to 300 seconds; retained 60-second records
+  remain compatible. Scheduling, missed slots, gap detection and displayed
+  cadence use a validated positive integer interval, not a fixed minute.
+  Slow reads advance to the first future due slot without catch-up bursts.
+  Lightweight status reads and meaningful-change notices avoid repeated full
+  logs or unchanged updates. Pipeline cadence does not relax Git/PR freshness.
+  A matching run already in progress receives the same monitoring.
 - AC-035.4: On a terminal result, the framework informs the user of the result
   and applicable next action, preserving the link to that run.
 - AC-035.5: Failure to resolve a link or read run status is reported accurately.
   Monitoring that has stopped or cannot run is reported as interrupted or
   blocked, never described as active. Recovery resumes the existing run's
   monitoring rather than blindly queueing another run.
+  Denied reads are reported without automatic retries or success-shaped
+  fallback; reset-aware scheduling is not claimed without supported host behavior.
 - AC-035.6: Monitoring preserves only current status, next check, run identity,
   and evidence references in active records; it does not grow lifecycle context
   with a transcript of every poll.
@@ -1374,7 +1385,7 @@ local testing or permission to start DEV is not permission to skip it.
   Staging build for the confirmed source revision, then triggers the
   appropriate deployment pipeline using the successful build's artifact.
 - AC-036.4: Both runs use FR-035's notifications, verified CI/CD provider links, and
-  60-second monitoring. A build failure does not trigger the dependent deployment.
+  stored-interval monitoring. A build failure does not trigger the dependent deployment.
 - AC-036.5: If the user has not responded, the decision remains pending.
   A declined or deferred suggestion causes no automatic advancement. Neither
   counts as successful STAGING testing or an inferred override.

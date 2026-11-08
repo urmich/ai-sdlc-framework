@@ -259,8 +259,11 @@ inventory is source fact, not execution acceptance or a coverage denominator.
   revocation, stale context and history; never blindly repeat a mutation.
 - AC-151.4: Observe triggered and reported runs with exact attempt and source,
   independent accessible-page proof, real scheduler/read capability and
-  60-second polling. Report host interruption, monitoring gaps and terminal
-  results without treating observation as consent.
+  immediate observation followed by the monitor's stored polling interval
+  (300 seconds/five minutes by default for new monitors; existing records retain
+  their actual interval). Use lightweight status reads without repeated unchanged
+  notices. Report host interruption, monitoring gaps, denied reads and terminal
+  results without treating observation as consent or automatically retrying denial.
 
 ## Authorized instruction maintenance
 

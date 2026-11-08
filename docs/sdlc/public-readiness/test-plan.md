@@ -1034,7 +1034,10 @@ steps/assertions:
   record dispatching before one call, retain the actual handle and reconcile
   uncertainty before retry. Observe steps/results from the provider. Verify the
   exact accessible human run/attempt page independently of status polling.
-  Live runs get 60-second monitoring; report any host interruption/gap.
+  Observe live runs immediately, then use their stored polling interval
+  (300 seconds/five minutes by default for new monitors; existing records retain
+  their actual interval). Use lightweight status reads and report any host
+  interruption/gap or denied read without automatically retrying denial.
 - **E - evidence admission:** generate real normalized execution evidence through
   the selected producer/public framework interface; independently establish
   candidate/spec/configuration/host/artifact identities; assert current credit

@@ -132,7 +132,7 @@ The hooks observe/gate tool events; they do not give the local CLI network acces
 | Local `sdlc` CLI | Identity checks, state transitions, decision records, gate evaluation, recovery plans, conformance | Inherited access to Copilot's MCP tools |
 | Runtime hook adapter | Capture actual input provenance, evaluate supported tool requests, emit one-time stage advisories, mark other actions unmanaged, observe outcomes | Authority to veto tool execution, override external systems, or completely intercept all side effects |
 | Copilot CLI `/review` | Run the built-in code review agent over current changes and return findings | Requirements traceability proof, provider reviewer approval, or authority to publish |
-| Pipeline monitoring task | Monitor every framework-triggered or user-reported run every 60 seconds, identify its origin, and notify terminal outcomes | Authority to launch another run, infer stage completion, or monitor while its execution host is stopped |
+| Pipeline monitoring task | Observe every framework-triggered or user-reported run immediately, then at its stored interval (new default 300 seconds), identify its origin, and notify terminal outcomes | Authority to launch another run, infer stage completion, or monitor while its execution host is stopped |
 | Git | Document/code revisions, meaningful change history, compact audit events | Proof of when code was written or that a user really approved it |
 | External systems | Actual build/deployment state and execution evidence | Exactly-once execution unless that system provides it |
 
@@ -1422,7 +1422,7 @@ execution requires a separate explicit user instruction and existing production
 permissions. FR-006 overrides remain explicit, scoped deviations with truthful
 reporting, never fabricated local/DEV/STAGING success.
 
-### 7.3 Verified pipeline links and one-minute monitoring
+### 7.3 Verified pipeline links and economical monitoring
 
 Monitor every run the framework triggers and every user-triggered run the user
 reports, including PROD and runs outside the current development workflow.
@@ -1456,10 +1456,13 @@ As soon as the run ID is known:
    to its run page, not an API endpoint, generic page, or sign-in page. Record
    verification outcome and time.
 3. Notify the user of trigger origin, pipeline/run, environment when known,
-   verified link, and that monitoring is active every minute. For a user report,
+   verified link, and the actual active polling interval. For a user report,
    say the framework attached monitoring, not that it triggered the pipeline.
-4. Poll every 60 seconds while nonterminal. Notify meaningful changes and always
-   notify the terminal outcome; unchanged polls need not create user messages.
+4. Poll at the stored interval while nonterminal: new monitors default to
+   300 seconds (five minutes), while existing records retain their actual
+   interval. Use lightweight exact-run status reads, not repeated full logs.
+   Notify meaningful changes and always notify the terminal outcome; unchanged
+   polls need not create user messages.
 
 If the first status read is already terminal, report that result and the verified
 link immediately; do not claim that a finished run is still being monitored.
@@ -1483,7 +1486,8 @@ orchestrator or load full run details into its conversation.
 Scheduler capability is checked before claiming active monitoring. If no
 supported timed execution path is available, report a monitoring blocker.
 
-The operation record retains `pollIntervalSeconds: 60`, `lastPollStartedAt`,
+The operation record retains `pollIntervalSeconds` (300 for new monitors),
+`lastPollStartedAt`,
 `lastSuccessfulPollAt`, `nextPollAt`, current run state, link-verification
 metadata, `monitorStatus`, and worker identity. A per-run worker claim prevents
 duplicate monitors; there is never more than one poll in flight for that run.
@@ -1492,13 +1496,22 @@ result; an obsolete callback cannot advance a replacement subflow.
 Run monitoring survives validation-cycle replacement so superseded runs still
 produce completion notices. The owning deployment flow separately checks cycle
 identity before using a result; a monitor event never grants a stage transition.
-Schedule by the next due time rather than adding 60 seconds after a lengthy
-query. Report missed checks or degraded access; do not disguise runtime/network
-delays as continuous monitoring.
+Validate the stored interval as a positive safe integer number of seconds whose
+millisecond conversion is also a safe integer. Use it for scheduling, missed
+slots, gap detection and displayed cadence. Schedule by the previous due time,
+advancing to the first future slot after a lengthy query, rather than adding an
+interval after the response or issuing catch-up bursts. Retained 60-second
+records keep their interval and identity; attachment does not silently migrate
+them or introduce a new configuration API. Pipeline cadence does not change
+independent Git/PR freshness checks. Report missed checks or degraded access;
+do not disguise runtime/network delays as continuous monitoring.
 
 Normal terminal states end that run's monitoring task. A waiting infrastructure
-approval is nonterminal and remains monitored. Read failures leave completion
-unknown and trigger another scheduled read, not a deployment retry. On session
+approval is nonterminal and remains monitored. Transient read failures leave
+completion unknown and may trigger another scheduled read, not a deployment
+retry. Denied provider reads stop host polling and are reported without automatic
+retries. Existing SDK denial/reset headers are diagnostic data, not an
+implemented reset-aware monitor scheduler. On session
 resumption, inspect the worker and run: reattach a live worker or resume polling
 the existing run immediately, preserving its ID and candidate binding. A stopped
 host cannot poll; mark monitoring suspended/interrupted and disclose the gap
@@ -1509,10 +1522,10 @@ worker ownership, and returns a nonterminal monitor to pending or blocked state.
 Reattaching the run alone never silently upgrades capabilities.
 
 Only current observations and notification references remain in active state.
-Do not append every poll or require a Git commit per minute. Notification replay
+Do not append every poll or require a Git commit per polling interval. Notification replay
 may repeat a notice after a crash, but must not repeat a remote operation.
 Due reads may be batched where the provider supports it, while retaining each
-run's identity, one-minute schedule, and completion notice.
+run's identity, actual stored schedule, and completion notice.
 
 Monitor adoption is observation, not retrospective permission. A reported STAGING
 or PROD run does not establish that prior local/DEV tests passed or that the
@@ -1731,7 +1744,7 @@ when its provenance matches the candidate; readiness does not always require a
 new active PR. A branch name, PR title, or earlier successful run alone is not
 proof.
 
-PR checks use the existing one-minute monitor and verified run-link contract.
+PR checks use the existing stored-interval monitor and verified run-link contract.
 Each successful required check carries the complete normalized execution
 identity plus PR record, check ID, source revision, and target revision.
 Readiness resolves that identity to an actual capable monitor with a verified
@@ -2358,7 +2371,7 @@ with visible consequences and stated limits.
 | FR-032 | Runtime provenance and permission boundaries, information minimization (6.1, 8, 13) |
 | FR-033 | Compact progress, blockers and targeted retrieval (12) |
 | FR-034 | User-authorized DEV step after local success, artifact/build/deploy/test sequencing, and no per-fix remote replay (6.2, 7.2, 8.1) |
-| FR-035 | Every framework-triggered/user-reported run, standalone observation, origin-aware notifications, 60-second monitoring and recovery (4.2, 7.3, 7.4, 9, 12) |
+| FR-035 | Every framework-triggered/user-reported run, standalone immediate observation, origin-aware notifications, stored-interval monitoring (new default 300 seconds), compatibility and recovery (4.2, 7.3, 7.4, 9, 12) |
 | FR-036 | Authorized DEV validation after local success, user-confirmed DEV completion, and separate STAGING consent (6.2, 7.2, 8.1) |
 | FR-037 | Policy-governed STAGING owner/location, truthful results, and separate completion confirmation bound to deployment/cycle (6.2, 7.2, 7.4) |
 | FR-038 | PROD recommendation after STAGING confirmation, with PR readiness/missing prerequisites reported and no automatic PROD operation (7.2, 7.5, 8.1) |

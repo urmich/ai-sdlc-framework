@@ -56,8 +56,11 @@ Timeouts/missing handles remain uncertain until read reconciliation.
 
 Within the authorized DEV attempt, build/reuse, deploy and execute DEV tests without
 per-job prompts. A live DEV test from a local host remains DEV. Monitor every run
-through a capable host scheduler at 60-second intervals with verified provider
-links, origin-aware updates and terminal notices. A stopped monitor is not active.
+through a capable host scheduler at its stored interval: new monitors default to
+300 seconds (five minutes); existing records retain their actual interval. Use
+lightweight status reads, verified provider links, origin-aware updates and
+terminal notices without repeated unchanged notifications. Stop/report denied
+reads without automatic retries. A stopped monitor is not active.
 
 Obtain current DEV completion before recommending STAGING. Capture STAGING consent before
 its build/deployment; one response may confirm DEV and authorize STAGING. After

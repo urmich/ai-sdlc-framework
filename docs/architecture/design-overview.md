@@ -135,7 +135,10 @@ conflicts are presented for your resolution.
 
 With an actual host recurring scheduler, authorized provider-read tools and a
 running host, the agent monitors framework-triggered or user-reported pipelines
-every **60 seconds**, verifies the run page and reports completion. Missing
+at the monitor's stored interval (**300 seconds/five minutes** for new monitors),
+verifies the run page and reports completion. Existing records retain their
+actual interval; lightweight status reads avoid repeated logs and unchanged
+notifications. Missing
 capabilities or host interruptions remain explicit monitoring gaps. The offline
 CLI has no standalone polling timer. Observation grants no deployment or
 stage-advancement permission.
