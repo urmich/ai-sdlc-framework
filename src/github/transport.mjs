@@ -607,7 +607,9 @@ export function createGitHubTransport(options) {
         });
       }
       if (response.status === 304) {
-        requireThat(cached && (responseHeaders.etag === undefined || responseHeaders.etag === cached.etag),
+        // If-None-Match compares opaque tags weakly, even when validator strength changes.
+        requireThat(cached && (responseHeaders.etag === undefined ||
+          responseHeaders.etag.replace(/^W\//u, '') === cached.etag.replace(/^W\//u, '')),
           'CACHE_GAP', 'GitHub 304 has no matching identified cached facts');
         requireThat(acquisitionEpoch.cacheEpoch === cacheEpoch &&
           acquisitionEpoch.scopeEpoch === (scopeEpochs.get(request.requestIdentity.proofScope) ?? 0),

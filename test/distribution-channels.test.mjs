@@ -4,11 +4,11 @@ export const validationDeclarations = {
     {"options": "{skip:process.platform==='win32'}", "platforms": ["linux-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "POSIX shell/runtime rejection contracts; Windows has separate PowerShell/cmd and PE assertions.", "prerequisites": ["Native POSIX shell and Node runtime"]},
     {"options": "{skip:process.platform!=='darwin'}", "platforms": ["macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Actual legacy-to-shared Mac installer migration requires each native Mac architecture.", "prerequisites": ["Verified shared Mac candidate and legacy fixture"]},
     {"options": "{skip:!hostTarget||process.platform==='win32'&&!windowsLauncher}", "excludeNames": ["T-51 npm-denied standalone lifecycle preserves unrelated content and runtime until explicit purge"], "platforms": ["windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Supported standalone distributions require their native host; missing Windows launcher is blocked, not an exemption.", "prerequisites": ["Frozen supported archive", "Real Windows PE launcher on Windows", "Isolated channel and Copilot home"]},
-    {"names": ["T-51 npm-denied standalone lifecycle preserves unrelated content and runtime until explicit purge"], "platforms": ["macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Real network-and-npm denial uses the supported Mac adapter. Windows network denial has no validated adapter and remains a separate explicit limitation, not a native Windows pass.", "prerequisites": ["Verified Mac network negative controls", "Isolated standalone archive lifecycle"]}
+    {"names": ["T-51 npm-denied standalone lifecycle preserves unrelated content and runtime until explicit purge"], "platforms": ["macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Real network-and-npm denial uses the supported Mac adapter. A fourteen-slot reservation isolates its unchanged command watchdog from competing root work; this is not a claim of fourteen child processes. Windows network denial has no validated adapter and remains a separate explicit limitation, not a native Windows pass.", "prerequisites": ["Verified Mac network negative controls", "Isolated standalone archive lifecycle", "Fourteen available aggregate worker slots before module setup"]}
   ],
   "groups": [{
     "root": "T-51 npm-denied standalone lifecycle preserves unrelated content and runtime until explicit purge",
-    "minimumSlots": 4
+    "minimumSlots": 14
   }],
   "surfaces": [
     {"coverage": "direct", "paths": ["scripts/package-platforms.mjs", "scripts/verify-platform-package.mjs", "packaging/standalone/archive.mjs", "packaging/standalone/protocol.mjs"]},

@@ -79,6 +79,7 @@ const currentSchedulingSource = await fs.readFile(new URL('../scripts/test-sched
 
 function authenticV14Workflow(contents) {
   const original = contents.replace(/\r\n/gu, '\n')
+    .replace(/(^  native-ma(?:-refresh)?:\n[\s\S]*?^      SDLC_TEST_WORKERS: )'14'$/gmu, "$1'7'")
     .replaceAll(nativeFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol)
     .replaceAll('arm-regression-allocation-v11-ready-arm-frontier',
       'arm-regression-allocation-v10-intel-primary-first')

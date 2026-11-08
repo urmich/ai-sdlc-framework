@@ -2,6 +2,10 @@ export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [{"coverage": "process", "paths": ["scripts/test-runner.mjs", "scripts/test-worker.mjs"]}],
   "groups": [{
+    "root": "T-PRD020 denial lifecycle reserves the complete native pool before competing roots start",
+    "minimumSlots": 1,
+    "exclusiveResources": []
+  }, {
     "root": "T-PRD018 rejected failure diagnostics retain only closed error and owned phase facts",
     "minimumSlots": 1,
     "exclusiveResources": []
@@ -27,6 +31,12 @@ export const validationDeclarations = {
     "reason": "These actual overlap/cancellation callbacks need two slots reserved before their deadlines start."
   },
   "applicability": [{
+    "names": ["T-PRD020 denial lifecycle reserves the complete native pool before competing roots start"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "PR-only source-derived native-plan and owning-job admission control; isolated ready-pool doubles prove contention exclusion and rejection without dispatch, not native execution.",
+    "prerequisites": ["Node; one aggregate worker slot; current canonical Test Plan and native CI job allocations"]
+  }, {
     "names": ["T-PRD018 rejected failure diagnostics retain only closed error and owned phase facts"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "runner-resource-contract",
@@ -71,6 +81,9 @@ export const validationDeclarations = {
     {"expression": "`T-136 public runner enforces ${workers} real file workers and executes every file once`", "domains": {"workers": ["1", "2"]}}
   ],
   "plannedCases": [
+    {"id": "T-PRD020", "selectors": [
+      {"name": "T-PRD020 denial lifecycle reserves the complete native pool before competing roots start", "parents": []}
+    ]},
     {"id": "T-PRD010", "selectors": [
       {"name": "T-130 public runner preserves caller file order rather than sorting the expensive-first queue", "parents": []},
       {"name": "T-136 public runner enforces 1 real file workers and executes every file once", "parents": []},
@@ -106,8 +119,9 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createPlan, parseOptions, repositoryRoot, unitFiles, validationSelectionDescriptor,
   validationSelectionProtocol, writeValidationSelection } from '../scripts/test-runner.mjs';
-import { declarationTokens, discoverDeclarations } from '../scripts/validation-inventory.mjs';
-import { nativeStageSelections, validateNativeGroupReport } from '../scripts/native-validation.mjs';
+import { compileValidationInventory, declarationTokens, discoverDeclarations } from '../scripts/validation-inventory.mjs';
+import { nativeFrameworkShardPlan, nativeStageSelections, validateNativeGroupReport } from '../scripts/native-validation.mjs';
+import { runValidationReadyPool, validationExecutionGroups } from '../scripts/test-scheduling.mjs';
 import { readTestBudget } from '../scripts/test-budget.mjs';
 import { digest, SdlcError } from '../src/core.mjs';
 import { atomicWrite } from '../src/files.mjs';
@@ -133,6 +147,61 @@ const canonicalNames = [
   'T-109 configured adapters classify only complete direct calls and expose conflicts',
   'T-109 the gate rejects a prepared PR ID different from the actual tool argument',
 ];
+
+test('T-PRD020 denial lifecycle reserves the complete native pool before competing roots start', async () => {
+  const inventory = await compileValidationInventory(repositoryRoot);
+  const groups = validationExecutionGroups(inventory, {
+    files: ['test/distribution-channels.test.mjs'],
+    pattern: '^T-51 npm-denied standalone lifecycle preserves unrelated content and runtime until explicit purge$',
+  });
+  assert.equal(groups.length, 1);
+  const [denial] = groups;
+  const plan = await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
+  const workflow = await fs.readFile(path.join(repositoryRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+  const jobs = workflow.split(/(?=^  [A-Za-z0-9_-]+:\s*$)/mu);
+  for (const target of ['macos-arm64', 'macos-x64']) {
+    const assignment = nativeFrameworkShardPlan({ inventory, plan, target });
+    const part = assignment.parts.find(part => part.assertionIds.includes(denial.rootId));
+    assert.ok(part, 'The native plan must preserve the complete denial root');
+    const declared = jobs.filter(job => job.includes(
+      `target: ${target}, component: framework, shard: ${part.shard}, role: ${part.role},`));
+    assert.equal(declared.length, 1, 'Exactly one current native job must own the denial root');
+    const allocations = [...declared[0].matchAll(/^      SDLC_TEST_WORKERS: '([1-9]\d*)'$/gmu)];
+    assert.equal(allocations.length, 1, 'Use the actual owning native job allocation');
+    const capacity = Number(allocations[0][1]);
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const releasePeer = Promise.withResolvers();
+    const active = new Set();
+    const peer = { id: 'owned-contention-peer', minimumSlots: 1, dependsOn: [], exclusiveResources: [] };
+    const pool = runValidationReadyPool([denial, peer], {
+      capacity, concurrency: capacity,
+      execute: async group => {
+        active.add(group.id);
+        if (group.id === denial.id) {
+          entered.resolve();
+          await release.promise;
+        } else await releasePeer.promise;
+        active.delete(group.id);
+        return 'Passed';
+      },
+    });
+    try {
+      assert.equal(await Promise.race([entered.promise.then(() => true), pool.then(() => false)]), true);
+      assert.deepEqual([...active], [denial.id], 'Timed lifecycle work must exclude competing source roots');
+    } finally {
+      release.resolve();
+      releasePeer.resolve();
+      await pool;
+    }
+    let dispatched = 0;
+    await assert.rejects(runValidationReadyPool([denial], {
+      capacity: capacity - 1, concurrency: capacity - 1,
+      execute: async () => { dispatched++; return 'Passed'; },
+    }), { code: 'BUDGET' });
+    assert.equal(dispatched, 0, 'Insufficient isolation capacity must fail before module setup or dispatch');
+  }
+});
 
 async function scratch(t, root = repositoryRoot) {
   const directory = await fs.mkdtemp(path.join(root, 'test', '.runner-fixture-'));

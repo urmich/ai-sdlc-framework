@@ -32,17 +32,26 @@ const suffixes = consumerTargetSuffixes;
 const NPM_TOOL_INTEGRITY = 'sha512-A74XL8OxmcegZDMWPkWb5bEQppg8HdYwW3rBD2sPoS4UQHVajfaxBkqyzLeJ3wR0kZ+5xoTjItxXaF7eIXUsyw==';
 const blocked = reason => Object.assign(new Error(reason), { code: 'RELEASE_INTEGRATION_BLOCKED' });
 
-async function anonymousBytes(url, fetcher = fetch, deadline = Date.now() + 600_000) {
-  const remaining = deadline - Date.now();
+async function anonymousBytes(url, fetcher = fetch, deadline = Date.now() + 600_000,
+  { retryGatewayTimeout = false, now = Date.now, sleep, observe } = {}) {
+  const remaining = deadline - now();
   if (remaining <= 0) throw Object.assign(new Error('Anonymous publication readback exceeded the ten-minute phase budget'),
     { code: 'PUBLICATION_UNCERTAIN' });
+  let status = null;
   return boundedReadback(async () => {
-    if (Date.now() >= deadline) return null;
-    const response = await fetcher(url, { signal: AbortSignal.timeout(Math.max(1, Math.min(30_000, deadline - Date.now()))) });
+    status = null;
+    if (now() >= deadline) return null;
+    const response = await fetcher(url, { signal: AbortSignal.timeout(Math.max(1, Math.min(30_000, deadline - now()))) });
+    status = response.status;
     if (response.status === 404) return null;
+    if (retryGatewayTimeout && response.status === 504) {
+      await response.body?.cancel();
+      return null;
+    }
     if (!response.ok) throw new Error(`Anonymous public download failed: ${response.status}`);
     return Buffer.from(await response.arrayBuffer());
-  }, { timeoutMs: Math.min(600_000, remaining) });
+  }, { timeoutMs: Math.min(600_000, remaining), now, sleep,
+    observe: observation => observe?.({ ...observation, status }) });
 }
 
 export async function downloadPublicAssets(bundle, directory, fetcher = fetch) {
@@ -69,17 +78,29 @@ export async function downloadPublicAssets(bundle, directory, fetcher = fetch) {
 }
 
 export async function downloadPreviousRelease({ repository, version, descriptorSha256, checksumsSha256,
-      directory, fetcher = fetch }) {
+      directory, fetcher = fetch, readbackOptions = {} }) {
       releaseRepository(repository);
       if (!/^\d+\.\d+\.\d+$/u.test(version ?? '') ||
           !/^[a-f0-9]{64}$/u.test(descriptorSha256 ?? '') || !/^[a-f0-9]{64}$/u.test(checksumsSha256 ?? '')) {
         throw blocked('Authentic prior public release identity is required; never synthesize an old package for acceptance');
       }
+      const { timeoutMs = 600_000, now = Date.now, sleep, observe } = readbackOptions;
+      if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 600_000) {
+        throw new Error('Readback budget must be at most ten minutes');
+      }
       await emptyDirectory(directory);
       const base = `https://github.com/${repository}/releases/download/v${version}/`;
-      const deadline = Date.now() + 600_000;
+      const deadline = now() + timeoutMs;
+      const download = name => anonymousBytes(`${base}${encodeURIComponent(name)}`, fetcher, deadline,
+        { retryGatewayTimeout: true, now, sleep, observe: observation => {
+          const record = { asset: name, ...observation };
+          if (observation.status === 504 && !observation.available) {
+            console.error(JSON.stringify({ kind: 'previous-release-readback', ...record }));
+          }
+          observe?.(record);
+        } });
       for (const [name, hash] of [['release-descriptor.json', descriptorSha256], ['SHA256SUMS', checksumsSha256]]) {
-        const bytes = await anonymousBytes(`${base}${name}`, fetcher, deadline);
+        const bytes = await download(name);
         if (sha256(bytes) !== hash) throw new Error('Previous release metadata differs from the independently saved public identity');
         await fs.writeFile(path.join(directory, name), bytes, { flag: 'wx' });
       }
@@ -87,7 +108,7 @@ export async function downloadPreviousRelease({ repository, version, descriptorS
         expectedDescriptorSha256: descriptorSha256, expectedChecksumsSha256: checksumsSha256 });
       if (descriptor.version !== version) throw new Error('Previous release descriptor version mismatch');
       for (const record of descriptor.files) {
-        const bytes = await anonymousBytes(`${base}${encodeURIComponent(record.filename)}`, fetcher, deadline);
+        const bytes = await download(record.filename);
         if (bytes.length !== record.size || sha256(bytes) !== record.sha256) throw new Error('Previous public release asset integrity mismatch');
         await fs.writeFile(path.join(directory, record.filename), bytes, { flag: 'wx' });
       }
