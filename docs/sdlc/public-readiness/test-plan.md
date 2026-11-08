@@ -744,26 +744,43 @@ consume or disable the distinct real five-second pause watchdog. Missing
 announcements still require bounded cleanup rather than the outer timeout.
 The current npm-denied lifecycle declaration in
 `test/distribution-channels.test.mjs` reserves fourteen aggregate slots.
-This is a contention reservation of the complete available native pool, not
-fourteen actual child processes. Its earlier four-slot declaration accounted
+This is a contention reservation, not fourteen actual child processes.
+Its earlier four-slot declaration accounted
 for the observed test/runtime/runtime/CLI chain; preserve that archived resource
 vector and its original protocol controls as historical inputs.
-The source-derived native selection places this root in Windows `body-0` and
-both Mac architectures' `body-1`. Each job requests fifteen slots, leaving
-fourteen available to its nested pool; the current reservation must exclude
-competing roots throughout the timed denial lifecycle.
+For frozen `e1f4490`, the actual source-derived selection places this root in
+Windows `body-1` and both Mac architectures' `body-0`; recompute the owning role
+for each changed candidate. Current CI requests fourteen workers for all three
+ARM body roles and the Intel body roles, and fifteen for Windows bodies.
+ARM unit/refresh roles remain seven. Both Mac body pools now request fourteen;
+compare group admission with the actual owning CI request and broker allocation,
+without assuming a one-slot deduction. On those fourteen-slot Mac pools, the
+reservation excludes competing roots throughout the timed denial lifecycle.
+Keep the existing maximum of thirty-two, dynamic broker and process isolation;
+no jobs or blanket callback concurrency are added.
 The PR-only, one-slot Node regression
 `T-PRD020 denial lifecycle reserves the complete native pool before competing roots start`
-in `test/test-runner.test.mjs` uses the actual compiled inventory and ready-pool
-barriers. At capacity fourteen, a competing root must wait until the denial
-root releases its reservation; capacity thirteen must reject before any callback
-dispatch. It runs in an isolated process with controlled callbacks, not a native
+in `test/test-runner.test.mjs` derives `nativeFrameworkShardPlan` and the exact
+owning CI job requests for both Mac targets, then uses the actual compiled
+inventory and ready-pool barriers. At each actual fourteen-slot Mac allocation,
+a competing root must wait until the denial root releases its reservation;
+below-capacity admission must reject before any callback dispatch. It runs in
+an isolated process with controlled callbacks, not a native
 installer or sandbox, and adds no critical selector or growth to either
 27-check/27-assertion cap.
 Changing this reservation and adding the regression invalidates current source
 qualification for ownership/admission before fresh native validation. Keep
 historical four-slot placement/cost vectors and protocol controls authentic;
 fixture reconstruction must not relabel them as the changed current source.
+Preserve `nativePlacementCosts.workers` ARM seven as an immutable historical
+measurement/model, not evidence of the changed current CI body allocation.
+The actual source/CI-derived ARM before-control failed with `BUDGET` and zero
+dispatch at seven; the corrected controlled after-result passed. Preserve both
+originals without attributing a kernel cause or granting hosted acceptance.
+The new source/configuration, specification and reconstructed fixture invalidate
+bootstrap07 whole-candidate credit. Keep its originals historical; the fresh
+full required local gate, affected cases and Sol Review remain NotRun until
+recorded for the newly frozen candidate, and native validation remains NotRun.
 Preserve the original Intel sandbox uninstall watchdog failure and controlled
 before-correction admission failure. Positive enforced network/npm controls and
 observed cleanup do not make an expired watchdog pass. Keep the 15-second command
@@ -2102,7 +2119,8 @@ the original subset. A new legitimate test must not erase preservation checks.
    selection: capacity six rejects before dispatch; capacity seven admits the
    complete reservation. Its real owned seven-slot lease must settle before
    peer reuse. Retain every cancellation/capture-pressure/peer assertion. The
-   root now reserves seven slots, fitting the unchanged seven-slot ARM host;
+   root retains its seven-slot declaration and historical seven-slot ARM baseline;
+   the current ARM body request is fourteen, not a revised historical measurement.
    no expensive catalog execution is needed for this small admission control.
    The coordinator's affected gate independently includes the real catalog root.
    Authenticate `nativePlacementReservationV13` and its exact current source,
@@ -2261,8 +2279,9 @@ the original subset. A new legitimate test must not erase preservation checks.
    whole-lane delivery limits; queued time inside a running lane still counts.
    Preserve ARM's own unit barrier, both Intel units and all
    twenty-five native parts, thirty-four expanded jobs and all five Linux
-   coordinators. Keep seven ARM and fourteen Intel regression workers and four
-   on each Intel unit host; verify real overlap and queues
+   coordinators. Current ARM body roles request fourteen workers; ARM unit/refresh
+   roles remain seven, Intel bodies fourteen and Intel unit hosts four.
+   Keep the historical ARM seven-worker cost model unchanged; verify real overlap and queues
    again on the next frozen candidate. Verify the split ARM refresh and Intel
    primary body cleanup receipts bind their actual `GITHUB_JOB` identities,
    alongside the existing split Intel refresh/Homebrew bindings. Reject stale

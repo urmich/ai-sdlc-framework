@@ -618,7 +618,9 @@ The existing capture-admission regression uses the real selected catalog group:
 six slots reject before callback/child dispatch, seven admit its complete
 reservation, and an actual owned lease settles before peer capacity reuse.
 Keep its original cancellation and capture/peer controls; its declaration is
-seven slots, within the unchanged ARM allocation, and it remains PR-only.
+seven slots against the historical seven-slot ARM baseline, and it remains
+PR-only. The current ARM body request is fourteen; that does not revise the
+historical resource/cost model.
 Changing catalog's minimum invalidates its historical one-slot service lead.
 Authenticate the new complete inventory/root binding and explicit unknowns;
 catalog remains null/unmeasured-resources, never a borrowed C74/C76/C79 cost.
@@ -772,8 +774,10 @@ It never waits for primary completion, ARM allocation or future foreign units.
 This makes primary request priority source-controlled rather than assuming
 which matrix entry a provider allocates first. Preserve the existing job
 separation, all twenty-five producers and thirty-four expanded jobs, including
-the five coordinators. Keep seven ARM and fourteen Intel regression workers
-and four workers on each Intel unit host.
+the five coordinators. Current ARM body roles request fourteen workers,
+ARM unit/refresh roles seven, Intel bodies fourteen and Intel unit hosts four.
+Preserve the historical ARM seven-worker cost model; the body allocation change
+is not new measured performance evidence.
 V10 otherwise preserves v9's readiness fairness and both platforms' own complete
 unit barriers.
 After ARM's own unit barrier, `mac-admission` selects `arm-refresh-ready`:
@@ -1287,23 +1291,39 @@ while the readiness regression controls virtual time, so a missing announcement
 still enters bounded failure cleanup.
 The current denied installer lifecycle reserves fourteen aggregate slots in
 `test/distribution-channels.test.mjs`, replacing the earlier four-slot declaration
-for its observed test/runtime/runtime/CLI chain. Fourteen is a whole-pool
-contention reservation, not a claim of fourteen actual child processes.
-Windows assigns this root to `body-0`; both Mac architectures assign it to
-`body-1`. Each native job requests fifteen slots and its nested pool has fourteen
-available. Reserve all fourteen before the timed lifecycle begins so a competing
-root cannot start until the reservation is released; reject capacity thirteen
-before callback dispatch. The child still receives no broker credentials.
+for its observed test/runtime/runtime/CLI chain. Fourteen is a contention
+reservation, not a claim of fourteen actual child processes.
+For frozen `e1f4490`, actual source-derived placement assigns Windows `body-1`
+and both Mac architectures' `body-0`; derive the owning role afresh for each
+changed candidate. Current CI requests fourteen workers for all three ARM body
+roles and Intel bodies, fifteen for Windows bodies; ARM unit/refresh roles remain
+seven. Both Mac body pools now request fourteen. Use the actual owning CI request
+and broker allocation, not an assumed one-slot deduction, for admission.
+The fourteen-slot reservation excludes competitors throughout the timed lifecycle
+on those fourteen-slot Mac pools. Keep the existing maximum thirty-two, dynamic
+broker and process isolation, with no added jobs or blanket callback concurrency.
+The child still receives no broker credentials.
 The existing-file, one-slot, isolated Node regression
 `T-PRD020 denial lifecycle reserves the complete native pool before competing roots start`
-in `test/test-runner.test.mjs` exercises those barriers through the actual
-compiled inventory and ready pool with controlled callbacks. It is PR-only;
+in `test/test-runner.test.mjs` derives `nativeFrameworkShardPlan` and exact owning
+CI requests for both Mac targets, then exercises exclusion and below-capacity
+zero-dispatch barriers through the actual compiled inventory and ready pool
+with controlled callbacks. It is PR-only;
 neither the critical selectors nor either 27-count cap grows.
 The resource declaration and added source root invalidate current ownership/
 admission qualification before fresh native validation. Preserve authentic
 archived four-slot resource/cost vectors and all original protocol controls;
 reconstruct historical v15 fixture splices from authentic archived Git text,
 without laundering changed current inputs into old qualification.
+Keep `nativePlacementCosts.workers` ARM seven immutable as a historical
+measurement/model, not evidence of the new CI allocation. The actual ARM
+source/CI-derived before-control failed with `BUDGET` and zero dispatch at seven;
+the corrected controlled after-result passed. Preserve both originals: this
+is admission evidence, not a kernel diagnosis or hosted/native cure.
+The new source/configuration, specification and fixture invalidate bootstrap07
+whole-candidate credit. Its originals remain historical; the fresh full required
+local gate, affected cases, Sol Review and native validation remain NotRun until
+their separately applicable new-candidate executions are recorded.
 Retain the original Intel uninstall watchdog and before-correction admission
 failures. The 15-second command watchdog, POSIX one-second stop, native
 assertions, enforced network/npm denial and sandbox remain unchanged.
