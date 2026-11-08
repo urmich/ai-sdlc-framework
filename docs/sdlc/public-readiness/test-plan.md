@@ -1610,6 +1610,9 @@ A missing mandatory cleanup step still makes admission NotRun. The existing
 boundary root retains historical strict/inclusive limits and rejects malformed
 or incomplete timing tuples. These process-isolated assertions require no
 network, credentials or native tools and add no critical selectors or budget.
+The existing PR-only native v8-v10 compatibility and settlement roots reconstruct
+their observer source from the same authenticated single-v15 capsule; current
+observer edits must not rewrite historical source digests, costs or qualifiers.
 The recorded Linux **460 seconds (7m40s)**, Windows **665 seconds (11m05s)** and
 Apple Silicon **627 seconds (10m27s)** are historical lane measurements, not
 current delivery limits or new stretch targets.
