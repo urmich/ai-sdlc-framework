@@ -1013,7 +1013,7 @@ function qualifyNativeParallelPlacement(placement, groups, inventory, plan) {
             placement.groups.some(group => !group.allowedShards.length) ? 'changed-sdk-capabilities' : 'qualified';
 }
 
-function partitionNativeBodyGroups(groups, count, placement = null) {
+function partitionNativeBodyGroups(groups, count, placement = null, capacities = null) {
   const parents = new Map(groups.map(group => [group.id, group.id]));
   const find = id => {
     requireThat(parents.has(id), 'INVENTORY', 'Native body dependency must remain inside the complete body selection');
@@ -1131,12 +1131,16 @@ function partitionNativeBodyGroups(groups, count, placement = null) {
   for (const component of ranked) {
     const parallel = placement?.parallel?.status === 'applied';
     // Frozen ownership avoids treating the newly unmeasured catalog as free backfill capacity.
-    const available = reservedOwners ? [partitions[reservedOwners.get(component.groups[0].rootId)]] :
+    const candidates = reservedOwners ? [partitions[reservedOwners.get(component.groups[0].rootId)]] :
       parallel ? component.primaryAnchor ? [partitions[0]] :
       partitions.filter(partition => component.allowedShards.includes(`body-${partition.index}`)) :
       phasedComponents.length ? phasedComponents.includes(component) ?
       [partitions[0]] : partitions.slice(1) :
       isolatedComponent ? component === isolatedComponent ? [partitions[0]] : partitions.slice(1) : partitions;
+    const available = candidates.filter(partition => !capacities ||
+      component.groups.every(group => group.minimumSlots <= capacities[partition.index]));
+    requireThat(available.length > 0, 'BUDGET',
+      'No native body allocation can admit the complete connected root closure');
     const parallelLoad = partition => nativePlacementReadyPoolV11.shards[partition.index].historicalFixedMs +
       partition.weightedSlotMs / nativePlacementReadyPoolV11.capacity;
     const selected = [...available].sort((left, right) => (parallel ?
@@ -1160,7 +1164,7 @@ function partitionNativeBodyGroups(groups, count, placement = null) {
   return partitions;
 }
 
-function applyNativePlacementAffinities(groups, partitions, placement, target) {
+function applyNativePlacementAffinities(groups, partitions, placement, target, capacities = null) {
   const planning = new Map(placement.groups.map(group => [group.rootId, group]));
   placement.affinities = { declarationDigest: digest(nativePlacementAffinities),
     evidenceCredit: false, predictedSavingMs: null, rules: [] };
@@ -1169,6 +1173,8 @@ function applyNativePlacementAffinities(groups, partitions, placement, target) {
     const selected = roots.map(root => groups.find(group => group.rootId === root.rootId));
     const components = roots.map(root => placement.components.find(component =>
       component.roots.includes(planning.get(root.rootId)?.planningId)));
+    const destinationCapacity = components[0] && capacities ?
+      capacities[Number(components[0].shard.slice(5))] : affinity.capacity;
     const status = target !== affinity.target ? 'unsupported-target' :
       nativeToolchain.node !== nativePlacementAffinities.node ? 'unsupported-runtime' :
         nativePlacementCosts.workers[target] !== affinity.capacity ? 'unsupported-capacity' :
@@ -1176,7 +1182,8 @@ function applyNativePlacementAffinities(groups, partitions, placement, target) {
             roots.some((root, index) => root.shapeDigest !== planning.get(root.rootId).shapeDigest ||
               root.minimumSlots !== selected[index].minimumSlots) ? 'changed-closure-or-resources' :
               components.some(component => !component || component.roots.length !== 1) ? 'changed-component' :
-                selected.reduce((sum, group) => sum + group.minimumSlots, 0) > affinity.capacity ?
+                selected.reduce((sum, group) => sum + group.minimumSlots, 0) >
+                  Math.min(affinity.capacity, destinationCapacity) ?
                   'insufficient-capacity' : 'qualified';
     const record = { id: affinity.id, status, target: affinity.target, capacity: affinity.capacity,
       roots: roots.map(root => root.rootId) };
@@ -1385,19 +1392,22 @@ export function nativeFrameworkShardPlan({ inventory, plan, target, protocol = n
     } : {}),
   } : null;
   if (placement?.parallel) qualifyNativeParallelPlacement(placement, bodyGroups, inventory, plan);
+  // Windows body-3 has a distinct seven-slot workflow allocation.
+  const bodyCapacities = target === 'windows-x64' ?
+    Array.from({ length: bodyCount }, (_, index) => index === 3 ? 7 : nativePlacementCosts.workers[target]) : null;
   const partitions = [nativeRootComponentFrameworkShardProtocol, nativeStableCostFrameworkShardProtocol,
     nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
     nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
     nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
     nativeCatalogReservationFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol) ?
-    partitionNativeBodyGroups(bodyGroups, bodyCount, placement) :
+    partitionNativeBodyGroups(bodyGroups, bodyCount, placement, bodyCapacities) :
     partitionValidationInventory({ ...inventory, cases: bodyCases,
       files: inventory.files.filter(file => bodyFiles.has(file.file)) }, bodyCount);
   if ([nativeResourceAffinityFrameworkShardProtocol, nativeCatalogIsolationFrameworkShardProtocol,
     nativePhasedIsolationFrameworkShardProtocol, nativeComponentRebalanceFrameworkShardProtocol,
     nativeParallelReadyPoolFrameworkShardProtocol, nativeServiceBalanceFrameworkShardProtocol,
     nativeCatalogReservationFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol, nativeFrameworkShardProtocol].includes(protocol))
-    applyNativePlacementAffinities(bodyGroups, partitions, placement, target);
+    applyNativePlacementAffinities(bodyGroups, partitions, placement, target, bodyCapacities);
   if (placement?.transfers) applyNativeServiceTransfers(bodyGroups, partitions, placement);
   const procedureFile = 'test/public-readiness-ci.test.mjs';
   const toolRoot = inventory.cases.find(test => test.file === procedureFile && !test.parents.length &&

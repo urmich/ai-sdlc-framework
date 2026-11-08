@@ -322,7 +322,15 @@ selection, including six- and seven-slot roots; other Windows parts retain
 fifteen. The T-PRD020 control checks every selected group's declared demand
 against its literal owning seven- or fifteen-slot request. Retain the independent
 body-3 whole-group seven-slot capacity check and five-slot BUDGET rejection with zero
-dispatch. The controlled scheduler must admit every group under the configured
+dispatch. The existing T-PRD020 failing regression also requires production
+fallback to filter candidate partitions by every root's demand in each complete
+dependency/resource-connected component. Keep the fourteen-slot `T-51` npm-denied
+lifecycle root on an eligible literal fifteen-slot Windows owner, never
+seven-slot body-3. Affinity coassignment must fit the actual destination's
+capacity; no eligible owner means BUDGET before any dispatch. Preserve the whole
+component, all assertions, reservations, watchdogs and literal seven/fifteen-slot
+requests rather than weakening demand or enlarging a pool.
+The controlled scheduler must admit every group under the configured
 budget; these doubles grant no native execution credit. All twenty-five producers, thirty-four
 expanded jobs and thirteen Mac cleanup roles remain required. Preserve original
 main-attempt failures; this contention reduction is not full cancellation
@@ -345,9 +353,19 @@ The current v11 fallback control must use `intelGitSourceInventory`, not the
 merged legacy single-v15/105-blob historical helper. Keep the authentic
 v11/v12/v15 triple-315 positive controls unchanged. Current Intel Crypto
 requirements follow the actual complete closure owning the authentic Sigstore
-root, not frozen v11 per-shard omissions. These fixture expectation/selection
-corrections neither change immutable qualification models/identities/durations
-nor drop assertions, grow critical27 or supply current execution credit.
+root, not frozen v11 per-shard omissions. Authentic v11/v10 fixtures retain all
+three original anchors; current fallback binds the actual renamed
+`T-PRD020 RC66 CI01 current observer defers timing gates but still requires owned cleanup`
+root, its complete descendants and the original catalog/retained anchors.
+Require the changed current assertion identity instead of expecting the archived
+third anchor to remain in the current inventory.
+The earlier fixture expectation/selection corrections are not the full scope of
+this successor: it also repairs production resource-capacity-safe fallback and
+affinity placement. Neither changes immutable qualification
+models/identities/observed durations nor drops assertions, grows critical27 or
+supplies current execution credit. Keep the preceding candidate's local and
+PRD028 passes and native/CI failures immutable; the changed successor remains
+NotRun across all 99 canonical cases until its own required gates and Review.
 
 The observer pins original owner/target process handles once, then uses only
 handle-based image, creation/CPU/exit-time, wait and exit-code queries. Retain at

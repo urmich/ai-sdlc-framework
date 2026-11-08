@@ -40,8 +40,18 @@ Current fallback controls use the current Git-source inventory
 helper. Keep primary's triple-capsule historical positive controls separate.
 Derive current Intel Crypto requirements from the actual complete closure owning
 the authentic Sigstore root; historical v11 per-shard omissions cannot qualify
-a changed current owner. This corrects fixture selection/expectations, not
-immutable qualification identities, models, durations or resource allowances.
+a changed current owner. The earlier batch corrected fixture selection and
+expectations; its successor also repairs production fallback placement to honor
+actual destination resource capacity. Neither changes immutable qualification
+identities, models, observed durations or resource allowances.
+
+Authentic v11/v10 controls retain all three original primary anchors. Current
+fallback instead binds the actual renamed
+`T-PRD020 RC66 CI01 current observer defers timing gates but still requires owned cleanup`
+root alongside the original catalog and retained anchors. A renamed
+current root has its own assertion identity; do not splice that identity or the
+current correctness-only policy into historical anchors or timing observations.
+Each complete root and its descendants stay on one source-derived owner.
 
 Historical SDK source `7bb3b8fa807353f9ddb4fea4896ca7f58e8acd19`, run
 `42485325717` attempt 1, completed its 25 producers, 7,705 assertions,
@@ -1280,7 +1290,15 @@ root's actual owner from the frozen source plan; changed source qualification
 may legitimately move it to another body. Check every selected root's demand
 against its literal owning seven- or fifteen-slot request, retaining the separate
 body-3 whole-group seven-slot capacity check and undersized-five rejection before
-dispatch. A five-slot cancellation root may still overlap smaller peers on its
+dispatch. Filter candidate destinations by every root's minimum demand in the
+whole dependency/resource-connected component before balancing placement,
+including unqualified fallback. The complete fourteen-slot `T-51` npm-denied
+lifecycle root cannot enter seven-slot body-3; it requires an eligible
+fifteen-slot Windows owner. Affinity coassignment must also fit the actual
+destination capacity, not merely a historical fifteen-slot affinity allowance.
+If no eligible owner exists, fail with BUDGET before dispatch; never split a
+component or increase a literal request to make it fit.
+A five-slot cancellation root may still overlap smaller peers on its
 actual owning pool; the body-3 request does not prove fixed cancellation ownership
 or full isolation. Other Windows parts retain fifteen. A job-level expression selects the request
 from the existing closed shard identity; no matrix metadata or trusted-parser
