@@ -751,13 +751,27 @@ vector and its original protocol controls as historical inputs.
 For frozen `e1f4490`, the actual source-derived selection places this root in
 Windows `body-1` and both Mac architectures' `body-0`; recompute the owning role
 for each changed candidate. Current CI requests fourteen workers for all three
-ARM body roles, ARM refresh and Intel body roles, and fifteen for Windows bodies.
+ARM body roles, ARM refresh and Intel body roles. Windows body-0/1/2 request
+fifteen; body-3 requests seven through the literal source-owned matrix expression.
 ARM unit roles remain seven. Both Mac body pools now request fourteen;
 compare group admission with the actual owning CI request and broker allocation,
 without assuming a one-slot deduction. On those fourteen-slot Mac pools, the
 reservation excludes competing roots throughout the timed denial lifecycle.
 Keep the existing maximum of thirty-two, dynamic broker and process isolation;
 no jobs or blanket callback concurrency are added.
+The existing PR-only, one-slot T-PRD020 actual-CI root checks that literal
+expression and every Windows body's selected groups against its actual owner
+capacity. Whole dependency/exclusive-resource-connected components are filtered
+for all root minimum slots before balancing; no eligible owner yields BUDGET.
+Affinity coassignment is bounded by the actual destination too. Other-platform
+allocations, historical cost/placement/qualifier models and both critical caps
+remain unchanged. Regenerate captured current helper/test splices only against
+the authentic single-v15/105 Git-blob capsule with its original source pins and
+128-KiB decoded bound. Controlled local passes are not the complete 99-case
+acceptance or native/provider validation; current case statuses remain NotRun.
+The existing `authenticV14Workflow` reconstructs the current Windows matrix
+expression as the historical fifteen-slot literal without changing its original
+v14 digest, ARM reconstruction or capability facts.
 ARM refresh's fourteen-worker request preserves the unchanged strict `sameRecipe`
 body/refresh recipe and environment parity; environment differences remain errors,
 not fields to ignore for admission.

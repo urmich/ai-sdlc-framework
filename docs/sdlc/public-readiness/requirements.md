@@ -158,6 +158,10 @@ counts.
 - AC-202.2: Shared environment variables, module patches, registries, filesystem
   fixtures and package-manager prefixes cannot race between concurrent cases.
   Stateful scenarios preserve their necessary internal ordering.
+  Windows body owners request literal capacities 15/15/15/7. Assign a complete
+  dependency/exclusive-resource-connected component only where every root's
+  minimum slots fit that destination; reject with BUDGET if none can admit it.
+  Affinity coassignment must also fit the actual destination capacity.
 - AC-202.3: Compare baseline and candidate under the same selected assertions,
   runtime, platform, resources and concurrency conditions. Report elapsed time
   and pass/fail/skip counts; do not infer speedup from unlike environments.
@@ -324,6 +328,12 @@ This observation does not establish the required conversation or status-check
 enforcement, nor the workflow credential's access. The independent observer
 repair is read-only source compatibility, not F04 provider administration;
 remediating genuinely missing enforcement requires separate scoped authority.
+The trusted observer's imported native planner and workflow must also adopt
+the exact Windows body capacities before accepting a matching producer.
+Preserve adopted-revision checks for every non-test helper; a Metadata-read
+fallback alone does not align producer implementation. An optional
+`READINESS_PRODUCER_REVISION` pin remains separately authorized provider
+administration, not a source correction or evidence of enforcement.
 
 ### FR-206: Provide one automated, authorized release flow
 

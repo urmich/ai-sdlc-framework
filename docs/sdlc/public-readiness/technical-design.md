@@ -1303,12 +1303,27 @@ reservation, not a claim of fourteen actual child processes.
 For frozen `e1f4490`, actual source-derived placement assigns Windows `body-1`
 and both Mac architectures' `body-0`; derive the owning role afresh for each
 changed candidate. Current CI requests fourteen workers for all three ARM body
-roles, ARM refresh and Intel bodies, fifteen for Windows bodies; ARM unit roles remain
-seven. Both Mac body pools now request fourteen. Use the actual owning CI request
+roles, ARM refresh and Intel bodies. Windows body-0/1/2 request fifteen and
+body-3 seven; ARM unit roles remain seven. Both Mac body pools now request fourteen.
+Use the actual owning CI request
 and broker allocation, not an assumed one-slot deduction, for admission.
 The fourteen-slot reservation excludes competitors throughout the timed lifecycle
 on those fourteen-slot Mac pools. Keep the existing maximum thirty-two, dynamic
 broker and process isolation, with no added jobs or blanket callback concurrency.
+Pass destination capacities 15/15/15/7 into Windows body partitioning. Before
+balancing, filter the complete dependency/exclusive-resource-connected component
+to owners that admit every root's minimum slots; if none fits, throw BUDGET.
+Bound affinity coassignment by the lesser of its qualified historical allowance
+and the actual destination capacity. Preserve all other-platform rules and the
+immutable costs, placement, qualifiers, scheduling and watchdog data.
+The existing PR-only T-PRD020 actual-CI root verifies the literal body-3 expression
+and every selected Windows group's actual owner capacity without new critical
+roots or callback concurrency. Historical single-v15/105 fixture regeneration
+reconstructs changed helper/test inputs from original Git blobs; neither source
+pins nor the 128-KiB decoded-envelope bound is replaced.
+The existing `authenticV14Workflow` undoes only the current Windows matrix
+expression to its historical fifteen-slot literal, preserving the pinned v14
+workflow digest and original ARM reconstruction.
 The child still receives no broker credentials.
 ARM refresh's fourteen-worker request preserves production's unchanged strict
 `sameRecipe` body/refresh recipe and environment parity. Differing environment
@@ -2492,6 +2507,12 @@ incomplete data is Unavailable. All remain NotRun without verified enforcement;
 unresolved threads still block when enforcement is genuinely enabled.
 This compatibility path adds no workflow permission elevation, setting write or
 F04 provider-administration scope.
+The trusted observer still pins `native-validation.mjs`, `ci.yml` and every
+non-test helper to its adopted revision and uses its imported native planner.
+Adopt the exact Windows15/15/15/7 implementation/workflow correction as well as
+this Metadata-read fallback; do not weaken adoption checks or transfer producer
+results. An optional `READINESS_PRODUCER_REVISION` setting remains a separate
+provider-admin operation. Source alignment alone grants no native acceptance.
 
 The retained 2026-11-08 owner read found active effective ruleset `26728403`
 with deletion/non-fast-forward restrictions, PRs and zero required approvals,

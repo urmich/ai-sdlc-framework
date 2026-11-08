@@ -1740,6 +1740,7 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.deepEqual(ci.jobs['native-homebrew'].needs, ['intent', 'source']);
   assert.equal(ci.env.SDLC_MAC_ADMISSION_POLICY, 'arm-regression-allocation-v11-ready-arm-frontier');
   const historicalV10 = structuredClone(ci);
+  historicalV10.jobs['native-wx'].env.SDLC_TEST_WORKERS = '15';
   historicalV10.env.SDLC_MAC_ADMISSION_POLICY = 'arm-regression-allocation-v10-intel-primary-first';
   const primaryStep = historicalV10.jobs['intel-retained-admission'].steps[4];
   primaryStep.name = 'Wait for actual Intel primary body worker allocation';
@@ -1930,6 +1931,17 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   const plan = await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
   const assignments = new Map([...new Set(parts.map(part => part.target))].map(target =>
     [target, nativeFrameworkShardPlan({ inventory, plan, target })]));
+  assert.equal(ci.jobs['native-wx'].env.SDLC_TEST_WORKERS,
+    "${{ matrix.shard == 'body-3' && '7' || '15' }}");
+  for (const body of assignments.get('windows-x64').parts.filter(part => part.shard.startsWith('body-'))) {
+    const capacity = nativeResourceFacts({ availableParallelism: 4, totalMemoryBytes: 17174360064,
+      configuredWorkers: body.shard === 'body-3' ? '7' : '15' }).workerCapacity;
+    const groups = body.stages.flatMap(stage => stage.groups);
+    assert.ok(groups.every(group => group.minimumSlots <= capacity),
+      `Windows ${body.shard} capacity ${capacity} must admit every selected group: ${JSON.stringify(
+        groups.filter(group => group.minimumSlots > capacity).map(group =>
+          ({ root: group.name, minimumSlots: group.minimumSlots })))}`);
+  }
   const expectedRoles = { go: [], python: [], schema: [] };
   for (const part of parts) {
     const expected = part.shard?.startsWith('body-') ?
@@ -1980,14 +1992,15 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
         'macos-x64': { availableParallelism: 4, totalMemoryBytes: 15032385536 },
       };
       const host = hosts[part.target];
-      const configuredWorkers = ci.jobs[key].env.SDLC_TEST_WORKERS;
+      const configuredWorkers = ci.jobs[key].env.SDLC_TEST_WORKERS ===
+        "${{ matrix.shard == 'body-3' && '7' || '15' }}" ?
+        part.shard === 'body-3' ? '7' : '15' :
+        ci.jobs[key].env.SDLC_TEST_WORKERS;
       assert.match(configuredWorkers ?? '', /^[1-9]\d*$/u);
       const resources = nativeResourceFacts({ ...host, configuredWorkers });
       const cpuMatched = part.target === 'macos-x64' && key === 'native-units-mi';
-      const armRegression = part.target === 'macos-arm64' && part.shard !== 'units';
-      assert.equal(resources.workerCapacity, cpuMatched ? host.availableParallelism :
-        armRegression ? 14 : Math.min(32, Math.floor(host.totalMemoryBytes / (1024 ** 3))),
-      'Intel units match CPUs; ARM regression reserves fourteen slots; other roles retain memory budgets');
+      assert.equal(resources.workerCapacity, Number(configuredWorkers),
+      'Every producer inherits its literal source-bound worker request, including fourteen-slot ARM bodies');
       assert.equal(resources.workerCapacity > host.availableParallelism, !cpuMatched);
       assert.equal(resources.configuredWorkers, configuredWorkers);
       assert.ok(ci.jobs[key].steps.every(step => step.env?.SDLC_TEST_WORKERS === undefined),
