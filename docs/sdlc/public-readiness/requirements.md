@@ -158,6 +158,10 @@ counts.
 - AC-202.2: Shared environment variables, module patches, registries, filesystem
   fixtures and package-manager prefixes cannot race between concurrent cases.
   Stateful scenarios preserve their necessary internal ordering.
+  Windows body owners request literal capacities 15/15/15/7. Assign a complete
+  dependency/exclusive-resource-connected component only where every root's
+  minimum slots fit that destination; reject with BUDGET if none can admit it.
+  Affinity coassignment must also fit the actual destination capacity.
 - AC-202.3: Compare baseline and candidate under the same selected assertions,
   runtime, platform, resources and concurrency conditions. Report elapsed time
   and pass/fail/skip counts; do not infer speedup from unlike environments.
@@ -311,6 +315,28 @@ Required tests must be real merge prerequisites, not advisory green decorations.
 - AC-205.4: Document unavailable account-tier controls and owner actions
   truthfully. Repository settings, trust relationships and access changes require
   explicit scoped approval before applying them.
+  Distinguish inaccessible classic protection from effective native branch rules
+  available through existing Metadata-read access. A complete validated rule read
+  can establish conversation enforcement only from a genuine native
+  `pull_request.required_review_thread_resolution: true`; false, absent,
+  malformed, duplicated or incomplete rules cannot supply passing enforcement.
+  Complete provider pagination may follow the selected repository's canonical
+  name/ID route aliases only; preserve the exact resource, filters, proof scope,
+  trusted origin/API prefix, cycle rejection and acquisition limits.
+
+The retained owner read on 2026-11-08 observed effective ruleset `26728403`:
+deletion/non-fast-forward restrictions and a PR rule with zero required approvals,
+`required_review_thread_resolution: false`, and no `required_status_checks` rule.
+This observation does not establish the required conversation or status-check
+enforcement, nor the workflow credential's access. The independent observer
+repair is read-only source compatibility, not F04 provider administration;
+remediating genuinely missing enforcement requires separate scoped authority.
+The trusted observer's imported native planner and workflow must also adopt
+the exact Windows body capacities before accepting a matching producer.
+Preserve adopted-revision checks for every non-test helper; a Metadata-read
+fallback alone does not align producer implementation. An optional
+`READINESS_PRODUCER_REVISION` pin remains separately authorized provider
+administration, not a source correction or evidence of enforcement.
 
 ### FR-206: Provide one automated, authorized release flow
 

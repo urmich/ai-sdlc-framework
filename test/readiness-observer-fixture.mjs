@@ -80,6 +80,7 @@ const currentSchedulingSource = await fs.readFile(new URL('../scripts/test-sched
 function authenticV14Workflow(contents) {
   const original = contents.replace(/\r\n/gu, '\n')
     .replace(/(^  native-ma(?:-refresh)?:\n[\s\S]*?^      SDLC_TEST_WORKERS: )'14'$/gmu, "$1'7'")
+    .replace(/(^  native-wx:\n[\s\S]*?^      SDLC_TEST_WORKERS: )"\$\{\{ matrix\.shard == 'body-3' && '7' \|\| '15' \}\}"$/gmu, "$1'15'")
     .replaceAll(nativeFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol)
     .replaceAll('arm-regression-allocation-v11-ready-arm-frontier',
       'arm-regression-allocation-v10-intel-primary-first')
@@ -1208,6 +1209,24 @@ jobs:
       if (options.protectionStatus) return new Response(JSON.stringify({ message: 'Controlled denied capability' }),
         { status: options.protectionStatus, headers: { 'content-type': 'application/json' } });
       return json({ required_conversation_resolution: { enabled: true } });
+    }
+    if (route === '/rules/branches/main') {
+      const headers = new Headers(request.headers);
+      assert.equal(headers.get('authorization'), 'Bearer controlled-fixture-ephemeral-token');
+      assert.equal(headers.get('x-github-api-version'), '2022-11-28');
+      const page = Number(parsed.searchParams.get('page'));
+      const status = options.effectiveRulesStatus ??
+        (options.effectiveRulesPages ? 200 : options.protectionStatus ?? 404);
+      if (status !== 200) return new Response(JSON.stringify({ message: 'Controlled rules capability gap' }),
+        { status, headers: { 'content-type': 'application/json' } });
+      assert.equal(parsed.searchParams.get('per_page'), '100');
+      assert.ok(Number.isSafeInteger(page) && page > 0);
+      const next = options.effectiveRulesCycle ? page :
+        page < options.effectiveRulesPages.length ? page + 1 : null;
+      return new Response(JSON.stringify(options.effectiveRulesPages[page - 1]), {
+        headers: { 'content-type': 'application/json',
+          ...(next ? { link: `<${parsed.origin}${parsed.pathname}?per_page=100&page=${next}>; rel="next"` } : {}) },
+      });
     }
     if (route === '/pulls') return json([...members.values()].map(member => member.pr)
       .filter(pr => pr.state === 'open'));
