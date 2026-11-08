@@ -1980,19 +1980,26 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   const plan = await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
   const assignments = new Map([...new Set(parts.map(part => part.target))].map(target =>
     [target, nativeFrameworkShardPlan({ inventory, plan, target })]));
-  const windowsBody = assignments.get('windows-x64').parts.find(part => part.shard === 'body-3');
-  const groups = windowsBody.stages.flatMap(stage => stage.groups);
+  const windowsAssignment = assignments.get('windows-x64');
+  const limitedBody = windowsAssignment.parts.find(part => part.shard === 'body-3');
   assert.equal(ci.jobs['native-wx'].env.SDLC_TEST_WORKERS,
     "${{ matrix.shard == 'body-3' && '7' || '15' }}");
+  const limitedCapacity = nativeResourceFacts({ availableParallelism: 4, totalMemoryBytes: 17174360064,
+    configuredWorkers: '7' }).workerCapacity;
+  assert.ok(limitedBody.stages.flatMap(stage => stage.groups).every(group =>
+    group.minimumSlots <= limitedCapacity), 'Every body-3 root must fit its contention-limited allocation');
+  const cancellationRoot = inventory.cases.find(test => test.file === 'test/public-readiness-inventory.test.mjs' &&
+    test.name === 'T-PRD018 command capture durably retains dispatched identity and sanitized progress before cancellation or abrupt termination');
+  assert.ok(cancellationRoot);
+  const windowsBody = windowsAssignment.parts.find(part => part.assertionIds.includes(cancellationRoot.id));
+  assert.ok(windowsBody, 'The cancellation closure must retain a complete source-derived owner');
+  const groups = windowsBody.stages.flatMap(stage => stage.groups);
+  assert.equal(groups.filter(group => group.rootId === cancellationRoot.id).length, 1);
   const workerRequest = windowsBody.shard === 'body-3' ? '7' : '15';
   const capacity = nativeResourceFacts({ availableParallelism: 4, totalMemoryBytes: 17174360064,
     configuredWorkers: workerRequest }).workerCapacity;
-  const cancellationRoot = inventory.cases.find(test => test.file === 'test/public-readiness-inventory.test.mjs' &&
-    test.name === 'T-PRD018 command capture durably retains dispatched identity and sanitized progress before cancellation or abrupt termination');
-  assert.ok(groups.some(group => group.rootId === cancellationRoot?.id),
-    'The cancellation root must remain in the contention-limited shard');
   assert.ok(groups.every(group => group.minimumSlots <= capacity),
-    `Windows body-3 capacity ${capacity} must admit every selected group: ${JSON.stringify(
+    `Windows ${windowsBody.shard} capacity ${capacity} must admit every selected group: ${JSON.stringify(
       groups.filter(group => group.minimumSlots > capacity).map(group =>
         ({ root: group.name, minimumSlots: group.minimumSlots })))}`);
   let dispatched = 0;

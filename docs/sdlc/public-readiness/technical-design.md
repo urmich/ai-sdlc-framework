@@ -35,6 +35,14 @@ Changed current inputs require complete source-derived fallback where historical
 qualification no longer matches. Fixture reconstruction grants no current
 native or performance credit.
 
+Current fallback controls use the current Git-source inventory
+(`intelGitSourceInventory`), not the SDK branch's legacy single-v15/105-blob
+helper. Keep primary's triple-capsule historical positive controls separate.
+Derive current Intel Crypto requirements from the actual complete closure owning
+the authentic Sigstore root; historical v11 per-shard omissions cannot qualify
+a changed current owner. This corrects fixture selection/expectations, not
+immutable qualification identities, models, durations or resource allowances.
+
 Historical SDK source `7bb3b8fa807353f9ddb4fea4896ca7f58e8acd19`, run
 `42485325717` attempt 1, completed its 25 producers, 7,705 assertions,
 37 stage commands, 29 SDK commands, 69 component cases/1,621 assertions and
@@ -44,6 +52,12 @@ Those original results remain bound to that SDK source, not the new primary
 candidate. Primary's required current local checkpoint, candidate Review,
 native/complete trusted PR validation and release checkpoints remain NotRun
 until their own applicable evidence exists.
+
+The actual-main observer's earlier `CACHE_GAP` is closed. Its current HTTP 403
+requires read-only Metadata/effective-rule compatibility reconciliation, not a
+provider-setting change or a passing enforcement claim. Genuine false or absent
+conversation/status enforcement remains F04 and requires separate authorization;
+this integration does not include it.
 
 ## 1. Design summary and boundaries
 
@@ -1261,9 +1275,14 @@ controller latency without retries, relaxed ownership or uncertain-cleanup
 success. Whole return latency still includes awaited durable retention.
 
 Windows body-3 requests seven shared slots, admitting its complete selected
-closure, including six- and seven-slot roots. The five-slot cancellation root
-can still overlap smaller peers; this reduces contention, not full isolation.
-Other Windows parts retain fifteen. A job-level expression selects the request
+closure, including six- and seven-slot roots. Derive the complete cancellation
+root's actual owner from the frozen source plan; changed source qualification
+may legitimately move it to another body. Check every selected root's demand
+against its literal owning seven- or fifteen-slot request, retaining the separate
+body-3 whole-group seven-slot capacity check and undersized-five rejection before
+dispatch. A five-slot cancellation root may still overlap smaller peers on its
+actual owning pool; the body-3 request does not prove fixed cancellation ownership
+or full isolation. Other Windows parts retain fifteen. A job-level expression selects the request
 from the existing closed shard identity; no matrix metadata or trusted-parser
 extension is introduced. Requested workers remain in the native configuration
 digest and actual bootstrap/resource proof.

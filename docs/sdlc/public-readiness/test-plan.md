@@ -314,14 +314,16 @@ new native-positive substitute is introduced.
 The existing PR-only T-PRD020/T-PRD022 workflow controls verify the exact
 job-level worker-request expression against the closed source shard identities.
 Historical fixtures retain their literal worker budgets; no matrix/parser
-extension is introduced. The cancellation root must remain in the
-contention-limited shard.
+extension is introduced. Locate the actual source-derived complete cancellation
+owner; fallback after changed source qualification may legitimately change its
+body assignment rather than retain the historical contention-limited owner.
 Windows body-3 requests seven slots to admit its complete source-derived
 selection, including six- and seven-slot roots; other Windows parts retain
 fifteen. The T-PRD020 control checks every selected group's declared demand
-against actual host capacity, reproduces five-slot BUDGET rejection with zero
-dispatch, and admits every group under the configured budget using scheduler
-doubles, not native execution credit. All twenty-five producers, thirty-four
+against its literal owning seven- or fifteen-slot request. Retain the independent
+body-3 whole-group seven-slot capacity check and five-slot BUDGET rejection with zero
+dispatch. The controlled scheduler must admit every group under the configured
+budget; these doubles grant no native execution credit. All twenty-five producers, thirty-four
 expanded jobs and thirteen Mac cleanup roles remain required. Preserve original
 main-attempt failures; this contention reduction is not full cancellation
 isolation or a proven hosted cure until fresh
@@ -339,6 +341,13 @@ digest and planner qualifiers before positive v11 pooling/SDK, v12 complete
 six-component transfer and seven-slot catalog-reservation controls. Keep the
 current-source fallback and mutation-negative controls separate; reconstructed
 fixture success is not current native execution or performance evidence.
+The current v11 fallback control must use `intelGitSourceInventory`, not the
+merged legacy single-v15/105-blob historical helper. Keep the authentic
+v11/v12/v15 triple-315 positive controls unchanged. Current Intel Crypto
+requirements follow the actual complete closure owning the authentic Sigstore
+root, not frozen v11 per-shard omissions. These fixture expectation/selection
+corrections neither change immutable qualification models/identities/durations
+nor drop assertions, grow critical27 or supply current execution credit.
 
 The observer pins original owner/target process handles once, then uses only
 handle-based image, creation/CPU/exit-time, wait and exit-code queries. Retain at
