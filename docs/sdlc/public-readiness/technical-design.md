@@ -35,6 +35,15 @@ Changed current inputs require complete source-derived fallback where historical
 qualification no longer matches. Fixture reconstruction grants no current
 native or performance credit.
 
+Economical-polling maintenance restores `test/monitors.test.mjs` from genuine
+archived Git blob `1b3775f6c3073636c7ed8e3cdc78ebad5d6c3d11` before both
+historical reconstruction paths apply their unchanged capsule splices.
+Additional data-only pre-splices retain the complete original monitor-test text
+and its exact SHA-256; native-test reconstruction also removes those inserted
+calls before the original native-test splices. Neither capsule nor inventory
+digest changes, and CI needs no additional Git history. Current monitoring
+source and 300-second/retained-record behavior remain unchanged.
+
 Current fallback controls use the current Git-source inventory
 (`intelGitSourceInventory`), not the SDK branch's legacy single-v15/105-blob
 helper. Keep primary's triple-capsule historical positive controls separate.

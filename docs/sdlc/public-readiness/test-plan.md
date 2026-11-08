@@ -389,6 +389,12 @@ digest and planner qualifiers before positive v11 pooling/SDK, v12 complete
 six-component transfer and seven-slot catalog-reservation controls. Keep the
 current-source fallback and mutation-negative controls separate; reconstructed
 fixture success is not current native execution or performance evidence.
+The existing four PR-only v13 reservation, v12 transfer and v11 pooling/
+authentication roots must also retain the exact archived monitor-test source
+after the economical-polling change. Restore its genuine Git blob in both
+105/315 reconstruction paths before unchanged capsule splices and inventory
+assertions; retain the old-candidate failures and current 300/legacy60 monitor
+controls. This adds no root or critical-budget growth.
 The current v11 fallback control must use `intelGitSourceInventory`, not the
 merged legacy single-v15/105-blob historical helper. Keep the authentic
 v11/v12/v15 triple-315 positive controls unchanged. Current Intel Crypto

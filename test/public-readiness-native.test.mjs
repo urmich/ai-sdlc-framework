@@ -4042,6 +4042,7 @@ async function qualifiedIntelSourceFiles() {
   const files = await Promise.all(frozen.paths.map(async file => {
     let contents = (await fs.readFile(path.join(repositoryRoot, ...file.split('/')), 'utf8'))
       .replace(/\r\n/gu, '\n');
+    if (file === 'test/monitors.test.mjs') contents = historicalMonitorSource(contents);
     if (file === 'test/github-transport.unit.test.mjs') {
       const classification = contents.indexOf('    "names": ["T-PRD027 REST pagination follows only');
       const separator = '  }, {\n';
@@ -4093,6 +4094,7 @@ async function qualifiedIntelSourceFixture(protocol) {
   assert.equal(actual.complete, true, JSON.stringify(actual.unresolved));
   const files = await Promise.all(snapshot.paths.map(async file => {
     let contents = (await fs.readFile(path.join(repositoryRoot, ...file.split('/')), 'utf8')).replace(/\r\n/gu, '\n');
+    if (file === 'test/monitors.test.mjs') contents = historicalMonitorSource(contents);
     if (file === 'test/github-transport.unit.test.mjs') {
       const classification = contents.indexOf('    "names": ["T-PRD027 REST pagination follows only');
       const separator = '  }, {\n';
@@ -4110,6 +4112,7 @@ async function qualifiedIntelSourceFixture(protocol) {
         'connection: connection(), fetch:');
     }
     if (file === 'test/public-readiness-native.test.mjs') {
+      contents = contents.replaceAll("    if (file === 'test/monitors.test.mjs') contents = historicalMonitorSource(contents);\n", '');
       const helper = contents.indexOf('async function qualifiedIntelSourceFiles(');
       const alias = contents.indexOf("    if (file === 'test/github-transport.unit.test.mjs') {", helper);
       const following = contents.indexOf("    if (file === 'test/public-readiness-native.test.mjs') {", alias);
@@ -4151,6 +4154,36 @@ async function qualifiedIntelSourceFixture(protocol) {
       'Authentic v12 transfers every descendant of the original six complete components');
   }
   return { inventory, plan, assignment, protocol, revision: snapshot.revision };
+}
+
+function historicalMonitorSource(contents) {
+  // Genuine Git blob 1b3775f6c3073636c7ed8e3cdc78ebad5d6c3d11 at both
+  // bc3fba8f899939674879bab4b1ab51c8c674393b and 32571554ba60acb89ea36b94099ad659b3b4b7c7.
+  // Restore before either immutable capsule's splices without requiring Git history in CI.
+  const lines = contents.split(/(?<=\n)/u);
+  const splices = [
+    [0, 2],
+    '  "surfaces": [{"coverage": "direct", "paths": ["src/monitors.mjs"]}]\n',
+    [19, 253],
+    "test('T-25/T-30 standalone user-reported runs poll immediately and every fake-clock minute without granting authority', async t => {\n",
+    [273, 17],
+    '  assert.equal(Date.parse(result.nextPollAt), f.clock.now() + 60000);\n',
+    [293, 8],
+    [304, 14],
+    '  f.clock.advance(60000);\n',
+    [319, 78],
+    [401, 1],
+    [404, 15],
+    [471, 157],
+    '  f.clock.advance(60000);\n',
+    [629, 208],
+  ];
+  const original = splices.map(part => typeof part === 'string' ? part :
+    lines.slice(part[0], part[0] + part[1]).join('')).join('');
+  assert.equal(createHash('sha256').update(original).digest('hex'),
+    '478945606d0a2ea88eebc30df31c2e40cf5f302600c187e5817692f2d59d742f',
+    'Historical monitor tests must retain the complete genuine archived Git source');
+  return original;
 }
 
 function assertCurrentIntelFallback(inventory, plan) {

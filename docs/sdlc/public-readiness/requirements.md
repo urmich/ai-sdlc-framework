@@ -57,6 +57,13 @@ triple-capsule pre-alias reconstruction gap. Restore only those changed current
 inputs before its unchanged archived splices; preserve the failed original and
 restart the complete local checkpoint for the corrected candidate.
 
+**Economical-polling historical replay repair:** Preserve current 300-second
+monitor defaults and retained-record intervals. Both native historical fixture
+paths must restore the genuine archived monitor-test Git bytes before their
+unchanged capsule splices and complete inventory checks. Preserve failed
+originals, all historical qualification/digests and deferred F07-F12 scope;
+local reconstruction success grants no current native or release credit.
+
 **2026-10-20 revision:** The user rejected the broad, 18-minute local
 "critical" loop. The required replacement is a small explicit local sanity gate,
 repository-only instructions for classifying future tests, complete applicable
