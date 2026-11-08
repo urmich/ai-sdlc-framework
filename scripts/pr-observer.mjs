@@ -1295,13 +1295,13 @@ export function createPrReadinessHost({
           ...(frameworkShards ? { role } : {}),
           runId: run.id, attempt: run.run_attempt,
         })) });
-      const timingBlockers = laneTimings.filter(lane => !lane.withinBudget)
+      const timingDiagnostics = laneTimings.filter(lane => !lane.withinBudget)
         .map(lane => `Native ${lane.target} complete required worker span ${lane.durationMs}ms exceeds its ` +
-          `${nativeLaneBudgetDescription(lane)} limit`);
-      const passed = result.status === 'Passed' && projection.evaluation.status === 'Passed' && !timingBlockers.length;
+          `${nativeLaneBudgetDescription(lane)} diagnostic target`);
+      const passed = result.status === 'Passed' && projection.evaluation.status === 'Passed';
       return { status: passed ? 'Passed' : 'NotRun',
-        laneTimings,
-        blockers: [...result.blockers, ...timingBlockers, ...projection.evaluation.cases.filter(test => test.status !== 'Passed')
+        laneTimings, timingDiagnostics,
+        blockers: [...result.blockers, ...projection.evaluation.cases.filter(test => test.status !== 'Passed')
           .map(test => `Required component ${test.testId}: ${test.status}`)],
         inputDigest: digest({ run: run.id, attempt: run.run_attempt,
           minimumNode,

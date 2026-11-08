@@ -2063,9 +2063,8 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
       assert.match(configuredWorkers ?? '', /^[1-9]\d*$/u);
       const resources = nativeResourceFacts({ ...host, configuredWorkers });
       const cpuMatched = part.target === 'macos-x64' && key === 'native-units-mi';
-      assert.equal(resources.workerCapacity, Math.min(Number(configuredWorkers),
-        32, Math.floor(host.totalMemoryBytes / (1024 ** 3))),
-      'Explicit source-bound requests cap the observed memory budget without changing producer coverage');
+      assert.equal(resources.workerCapacity, Number(configuredWorkers),
+      'Every producer inherits its literal source-bound worker request, including fourteen-slot ARM bodies');
       assert.equal(resources.workerCapacity > host.availableParallelism, !cpuMatched);
       assert.equal(resources.configuredWorkers, configuredWorkers);
       assert.ok(ci.jobs[key].steps.every(step => step.env?.SDLC_TEST_WORKERS === undefined),

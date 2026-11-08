@@ -851,7 +851,10 @@ test('T-MACADM009 Linux admission preserves all twenty-five native identities ba
     assert.equal(job['timeout-minutes'], 360);
     assert.equal(job.strategy['fail-fast'], false);
   }
-  assert.equal(ci.jobs['native-ma'].env.SDLC_TEST_WORKERS, '7');
+  assert.equal(ci.jobs['native-ma'].env.SDLC_TEST_WORKERS, '14');
+  assert.equal(ci.jobs['native-ma-refresh'].env.SDLC_TEST_WORKERS,
+    ci.jobs['native-ma'].env.SDLC_TEST_WORKERS);
+  assert.equal(ci.jobs['native-units-ma'].env.SDLC_TEST_WORKERS, '7');
   assert.equal(ci.jobs['native-mi'].env.SDLC_TEST_WORKERS, '14');
   assert.equal(ci.jobs['native-units-mi'].env.SDLC_TEST_WORKERS, '4');
   assert.ok(parts.filter(part => part.target === 'macos-arm64').every(part =>

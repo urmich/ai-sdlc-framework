@@ -20,6 +20,17 @@ Current execution projections belong to the living Test Plan and retained
 evidence, not this header. Source implementation or document maintenance alone
 does not grant passing execution credit.
 
+**Primary PR #21 SDK integration:** The authorized integration consumes actual
+SDK main `09499701af20b05ff2415be616e296b016303199`, tree
+`58e8ffbecea35265e7598034f0eafb2f886480d4`, into primary source
+`470e1d8acf69258660c2423f32b83fab1f7c11f0`. The reconciled primary candidate is
+new and unvalidated; earlier SDK/main executions do not supply its current
+passing credit. Preserve primary's distinct authentic v11/v12/v15, 315-Git-blob
+historical fixture, rather than substitute the SDK branch's single-v15,
+105-blob fixture. Current native and trusted PR admission are correctness-only
+under AC-202.7's owner-directed timing deferral; actual missed timing targets,
+historical results and all mandatory watchdogs/assertions remain unchanged.
+
 **2026-10-20 revision:** The user rejected the broad, 18-minute local
 "critical" loop. The required replacement is a small explicit local sanity gate,
 repository-only instructions for classifying future tests, complete applicable
@@ -186,6 +197,10 @@ counts.
   performance targets as gates for the current public-launch release candidate
   and announcement, prioritizing correctness and early delivery. Report actual
   spans and unmet targets without converting a timing failure into Passed.
+  This deferral applies to the current native admission and trusted PR
+  validation statuses, not only the eventual announcement decision: elapsed
+  time alone cannot block complete passing correctness evidence. The observer
+  retains unmet timing targets as diagnostics outside its correctness blockers.
   Complete native correctness, regression checks, source-bound evidence, owned
   cleanup and the requested reviews remain mandatory. This deferral does not
   change command watchdogs, resource allowances or required assertions.
@@ -797,6 +812,10 @@ remains separate acceptance evidence.
 - This document is the canonical requirement artifact for `wi-public-readiness`.
   Existing registered specifications must be migrated with explicit path mapping,
   not deleted or reinterpreted as newly approved work.
+- The current primary SDK integration is limited to F01/F02/F03/F05/F06/F13.
+  F07-F12 remain deferred; F04 and new provider-administration work are not
+  included. Historical provider-policy requirements and observations do not
+  authorize settings changes, administrative bypasses, publication or release.
 - The no-extra-files rule concerns coverage generation in consuming projects:
   no generated coverage/index/binding/policy sidecars are added to their source
   trees. Framework implementation code, user-authored specifications/tests and

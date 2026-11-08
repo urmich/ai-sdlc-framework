@@ -13,6 +13,38 @@ Current execution credit comes from the declared checkpoints and retained
 native/public/provider proof, not this header. Maintenance updates references
 without rewriting approved snapshots.
 
+**Primary PR #21 integration boundary:** Integrate actual SDK main
+`09499701af20b05ff2415be616e296b016303199`, tree
+`58e8ffbecea35265e7598034f0eafb2f886480d4`, with primary
+`470e1d8acf69258660c2423f32b83fab1f7c11f0`. The SDK merge has ordered parents
+`9a35f81c066f91784403cd04616afc1a0622f633` and
+`7bb3b8fa807353f9ddb4fea4896ca7f58e8acd19`; its normal PR #22 merge is not
+primary validation, provider-administration authority or release acceptance.
+Keep F01/F02/F03/F05/F06/F13 in scope, F07-F12 deferred and F04 outside this
+integration.
+
+Primary retains its distinct authentic v11/v12/v15 historical capsule:
+315 Git blobs, 105 per captured source. The SDK branch's authentic single-v15
+105-blob capsule is a different fixture, not a replacement. Reconstruct each
+historical inventory, workflow, observer, callback/resource closure, literal
+and SDK envelope from its own authenticated source before applying narrowly
+qualified current-test splices. Historical ARM seven-worker semantics, timing
+versions and pinned digests remain historical; current ARM body/refresh fourteen
+and Intel unit four-worker requests cannot be relabelled as archived facts.
+Changed current inputs require complete source-derived fallback where historical
+qualification no longer matches. Fixture reconstruction grants no current
+native or performance credit.
+
+Historical SDK source `7bb3b8fa807353f9ddb4fea4896ca7f58e8acd19`, run
+`42485325717` attempt 1, completed its 25 producers, 7,705 assertions,
+37 stage commands, 29 SDK commands, 69 component cases/1,621 assertions and
+13 Mac cleanups successfully. Its Intel 25m26s `withinBudget: false` remains an
+actual missed target, retained diagnostically under correctness-only admission.
+Those original results remain bound to that SDK source, not the new primary
+candidate. Primary's required current local checkpoint, candidate Review,
+native/complete trusted PR validation and release checkpoints remain NotRun
+until their own applicable evidence exists.
+
 ## 1. Design summary and boundaries
 
 Implement [FR-200 through FR-215](requirements.md) against the
@@ -586,8 +618,9 @@ rows. C74 observations and conservative quantized intervals are historical
 scheduling leads only: changed callbacks, new controls and shared-host contention
 remain unmeasured. Neither the placement projection nor local controls establish
 current native overlap, correctness or whole-lane timing. Require fresh native
-correctness and the unchanged non-Intel fifteen-minute and strict Intel
-under-twenty-five-minute limits.
+correctness and report the unchanged non-Intel fifteen-minute and strict Intel
+under-twenty-five-minute targets separately. These elapsed targets are deferred
+as current correctness gates; historical false verdicts remain unchanged.
 V12 retains authentic v11 through `nativeParallelReadyPoolFrameworkShardProtocol`
 and adds the strict `nativePlacementTransfersV12` literal with
 `native-intel-service-balance-v1`. After the qualified parallel base placement,
@@ -618,7 +651,9 @@ The existing capture-admission regression uses the real selected catalog group:
 six slots reject before callback/child dispatch, seven admit its complete
 reservation, and an actual owned lease settles before peer capacity reuse.
 Keep its original cancellation and capture/peer controls; its declaration is
-seven slots, within the unchanged ARM allocation, and it remains PR-only.
+seven slots against the historical seven-slot ARM baseline, and it remains
+PR-only. The current ARM body request is fourteen; that does not revise the
+historical resource/cost model.
 Changing catalog's minimum invalidates its historical one-slot service lead.
 Authenticate the new complete inventory/root binding and explicit unknowns;
 catalog remains null/unmeasured-resources, never a borrowed C74/C76/C79 cost.
@@ -662,10 +697,10 @@ Append the actual v14/bootstrap twenty-fourth causal row without replacing its
 twenty-three predecessors. Local fixture timings are developmental observations,
 not native scaling predictions or proof of the complete lane limit. Current
 whole-candidate validation, Review and native acceptance remain NotRun.
-V15 preserves authentic v14 and binds the current inventory, callbacks, resource
+V15 preserves authentic v14 and binds its original inventory, callbacks, resource
 closures and SDK destinations to the final C81 ownership from source
 `51de4c9ff6a62c655dede580d8328eb6e9ea47c8`. This is source-qualified ownership,
-not a duration model: all 1,016 current body service costs are explicitly
+not a duration model: all 1,016 body service costs in that captured source are explicitly
 unmeasured. Keep the existing component owners, non-Intel selections, unit
 partition algorithm, resource reservations and complete assertion union.
 The catalog fixture removes only an unused caller-authored report from its
@@ -677,8 +712,10 @@ Preserve the original twenty-four causal rows: the authentic C81 v14 row retains
 its v10 admission graph and original bootstrap v6. Append current v15/bootstrap
 v6 with v11 admission as row twenty-five; do not relabel or replace the old row,
 and do not introduce a bootstrap version merely for this qualification change.
-The current inventory contains 1,855 assertions; the two new ARM-frontier unit
-controls add no body group or critical member. The interrupted local baseline
+That original v15 inventory contains 1,855 assertions; its two ARM-frontier unit
+controls add no body group or critical member. These counts describe the captured
+source, not the new integrated primary inventory, which must be derived afresh.
+The interrupted local baseline
 provides no comparison or speedup claim. Fresh frozen-candidate local checks,
 Review and complete native correctness remain required, while whole-lane
 performance improvement is deferred by the owner.
@@ -721,6 +758,13 @@ source-bound evidence, owned cleanup and the requested candidate reviews remain
 required. Version-specific timing checks and finite command/allocation
 watchdogs below retain their original semantics; the deferral changes the
 current release decision, not test results or process-lifetime safeguards.
+The current observer's native admission requires the complete source-bound
+aggregate and canonical component projection to pass; it does not add elapsed
+target misses to correctness blockers. Retain `laneTimings`, actual durations,
+version-specific `withinBudget` verdicts and separate `timingDiagnostics`.
+Malformed timing/source data and missing required cleanup still fail admission.
+This implements the owner's correctness-only CI direction without changing any
+historical latency result, command watchdog or required assertion.
 V9 uses the new twenty-five-minute limit; historical v1-v8 timing interpretation
 retains its original twenty-minute limit without retrospective passing credit.
 Its delivery observation cutoff is twenty-five minutes, without changing command watchdogs,
@@ -772,8 +816,10 @@ It never waits for primary completion, ARM allocation or future foreign units.
 This makes primary request priority source-controlled rather than assuming
 which matrix entry a provider allocates first. Preserve the existing job
 separation, all twenty-five producers and thirty-four expanded jobs, including
-the five coordinators. Keep seven ARM and fourteen Intel regression workers
-and four workers on each Intel unit host.
+the five coordinators. Current ARM body and refresh roles request fourteen workers,
+ARM unit roles seven, Intel bodies fourteen and Intel unit hosts four.
+Preserve the historical ARM seven-worker cost model; the body allocation change
+is not new measured performance evidence.
 V10 otherwise preserves v9's readiness fairness and both platforms' own complete
 unit barriers.
 After ARM's own unit barrier, `mac-admission` selects `arm-refresh-ready`:
@@ -1041,11 +1087,14 @@ SDK decisions and worker allocations remain unchanged. Controlled Node-only
 dispatch/absence tests establish no native elapsed improvement, authentic
 verification success or achievement of the complete native lane timing limits.
 
-The PR workflow explicitly allocates 15 shared test-worker slots on Linux and
+The earlier PR measurement allocated 15 shared test-worker slots on Linux and
 Windows, 7 on Apple Silicon, four on both Intel unit hosts and fourteen on Intel
-regression hosts. The two CPU-matched Intel unit jobs completed their measured
+regression hosts. Current ARM body/refresh requests are fourteen, ARM units
+remain seven, and Windows body-3 requests seven while other Windows roles
+retain fifteen. Preserve the archived seven-worker ARM cost model rather than
+rewriting it to the current request. The two CPU-matched Intel unit jobs completed their measured
 barrier in 5m20s, but the four-slot regression trial did not finish before the
-cutoff. The next measurement changes only Intel regression concurrency back to
+cutoff. That historical successor measurement changed only Intel regression concurrency back to
 its memory-bounded allocation; it does not extrapolate CPU-heavy unit behavior
 to I/O-heavy regression roots. A whole-lane speedup remains unverified until
 complete hosted measurement. The other memory-bounded allocations
@@ -1251,8 +1300,8 @@ The raw denial-boundary executor shares the existing owned-group stop and
 settlement policy with validation commands, without substituting sanitized
 reports for its raw stream/Error contract. A live tracked child anchors its
 dedicated POSIX group; one 15,000ms watchdog requests synchronous owned
-termination. The POSIX 1,000ms settlement bound includes root close and observed group
-disappearance. No delayed destructive signal follows ownership loss. Uncertain
+termination. The POSIX 1,000ms settlement bound includes root close and observed
+group disappearance. No delayed destructive signal follows ownership loss. Uncertain
 writers keep the primary timeout/overflow failure and prevent fixture deletion;
 the raw 4MiB stream limits and native negative-control outcomes stay intact.
 Darwin can report `EPERM` while a signaled group's zombies are being reaped.
@@ -1270,17 +1319,26 @@ exit and close callbacks, stderr identity and a pre-cleanup watchdog snapshot.
 Missing events remain null; these are JavaScript observations, not independent
 kernel-exit measurements. Recording adds no timer, process, critical-path
 filesystem write or wait, and never converts uncertainty into safe cleanup.
+Current Windows servicing gives both `executeOwnedRawCommand` and
+`executeValidationCommand` a 5,000ms settlement budget; POSIX retains 1,000ms.
+This supersedes the earlier Windows one-second baseline, not its immutable
+execution results or approval snapshots. Dispatch the owned PID-tree request
+immediately and once; require affirmative original root/controller closure.
+A stalled, denied or unverified stop remains failed/uncertain and cannot
+authorize fixture deletion, a second tree request or a later destructive signal.
 The cross-platform Windows VM fixture composes its exact mock executable path
 with the supplied host path module. Identify its termination watchdog through
 owned dispatch and registration, not platform-specific separators or error-stack
 text. Neither portability control changes the real termination implementation.
-Its ten-scenario evidence root models the actual five-second Windows budget,
-including dispatch latency, without extending its ten-second outer watchdog.
-Drive active settlement-drain timers even beyond the former one-second boundary,
-but keep passive progress checkpoints idle. Failure-path teardown closes both
-owned handles and awaits settlement so a primary assertion is not masked by
-hung cleanup. Preserve the existing privacy, ordering and uncertainty checks;
-this is a VM fixture correction, not a production or native-acceptance change.
+The same PR-only VM fixture uses a 5,000ms Windows settlement constant for its
+5,005ms exhausted-spawn case, 4,975ms/zero watchdog remainders and stop-clock
+bounds, including dispatch latency. Active drain timers queue at any duration;
+unreferenced progress remains passive. Failure-path teardown closes both
+owned handles and awaits settlement, including affirmative original controller
+closure, so a primary assertion is not masked by hung cleanup.
+Preserve all ten permutations, privacy/failure assertions, the 10,000ms outer
+guard and the original fixture timeout. This aligns controlled clocks with
+current servicing, not a native cure or a critical-profile addition.
 The command-capture root reserves five process slots; its writer/producer peers
 reserve their actual two- or three-process minima before timed work begins.
 The separate CI tool-cancellation root reserves four: its worker, command,
@@ -1292,13 +1350,17 @@ Historical costs with the former one-slot resource shape cannot supply a
 qualified lead for the corrected group.
 The native ownership fixture reserves four aggregate worker slots for its
 test process and three real child processes, without changing host capacities
-or the platform settlement contract.
+or the platform settlement contract: five seconds on Windows and one second
+on POSIX.
 The controlled Windows settlement fixture separately reserves five slots for
 its test process and at most two independent owned root/writer pairs. Fresh
 VM contexts and unique paths isolate all six scenarios; each pair settles
 before another is admitted. Real peer provenance proves overlap, all six
-cleanup closures remain required. Its enclosing test watchdog is sixty seconds,
-and Windows production termination settlement is five seconds. Retain per-mode phase diagnostics
+cleanup closures remain required. The current root has a 60,000ms ceiling and a
+10,000ms cancellation/durable-I/O guard, separate from the actual 5,000ms Windows
+backend budget assertion. Its earlier twenty-second root and 1500ms guard are
+superseded fixture baselines, not current deadlines or rewritten results.
+Retain per-mode phase diagnostics
 so a later timeout identifies the unfinished boundary.
 The publication fixture arms its five-second ready deadline only when the
 parent releases the intentional write barrier, not while that barrier forbids
@@ -1308,11 +1370,110 @@ remain required within the unchanged fifteen-second test ceiling.
 Its separate five-second pause-announcement watchdog uses real timers even
 while the readiness regression controls virtual time, so a missing announcement
 still enters bounded failure cleanup.
-The denied installer lifecycle likewise reserves four slots for its observed
-test/runtime/runtime/CLI process chain. Its child environment still excludes
-broker credentials, so the owning test reserves their capacity in advance.
-This is process accounting, not a change to host limits, execution deadlines,
-durability or a claim about contention causality.
+The current denied installer lifecycle reserves fourteen aggregate slots in
+`test/distribution-channels.test.mjs`, replacing the earlier four-slot declaration
+for its observed test/runtime/runtime/CLI chain. Fourteen is a contention
+reservation, not a claim of fourteen actual child processes.
+For frozen `e1f4490`, actual source-derived placement assigns Windows `body-1`
+and both Mac architectures' `body-0`; derive the owning role afresh for each
+changed candidate. Current CI requests fourteen workers for all three ARM body
+roles, ARM refresh and Intel bodies, fifteen for Windows bodies; ARM unit roles remain
+seven. Both Mac body pools now request fourteen. Use the actual owning CI request
+and broker allocation, not an assumed one-slot deduction, for admission.
+The fourteen-slot reservation excludes competitors throughout the timed lifecycle
+on those fourteen-slot Mac pools. Keep the existing maximum thirty-two, dynamic
+broker and process isolation, with no added jobs or blanket callback concurrency.
+The child still receives no broker credentials.
+ARM refresh's fourteen-worker request preserves production's unchanged strict
+`sameRecipe` body/refresh recipe and environment parity. Differing environment
+values remain admission errors, not fields omitted from comparison.
+The existing-file, one-slot, isolated Node regression
+`T-PRD020 denial lifecycle reserves the complete native pool before competing roots start`
+in `test/test-runner.test.mjs` derives `nativeFrameworkShardPlan` and exact owning
+CI requests for both Mac targets, then exercises exclusion and below-capacity
+zero-dispatch barriers through the actual compiled inventory and ready pool
+with controlled callbacks. It is PR-only;
+neither the critical selectors nor either 27-count cap grows.
+The resource declaration and added source root invalidate current ownership/
+admission qualification before fresh native validation. Preserve authentic
+archived four-slot resource/cost vectors and all original protocol controls;
+reconstruct historical v15 fixture splices from authentic archived Git text,
+without laundering changed current inputs into old qualification.
+Keep `nativePlacementCosts.workers` ARM seven immutable as a historical
+measurement/model, not evidence of the new CI allocation.
+Historical `authenticV14Workflow` reconstruction undoes fourteen to seven only
+for `native-ma` and `native-ma-refresh` requests. Preserve the pinned archived
+v14 workflow digest (prefix `530002ff`) and v10 helper digest (prefix `409c458`)
+unchanged; neither historical identity is revised to match current CI.
+The actual ARM
+source/CI-derived before-control failed with `BUDGET` and zero dispatch at seven;
+the corrected controlled after-result passed. Preserve both originals: this
+is admission evidence, not a kernel diagnosis or hosted/native cure.
+The bootstrap08 native-source original was Failed, with six passed and twenty-one
+failed because historical reconstruction retained current ARM fourteen rather
+than archived seven; preserve this and its other original results.
+The bootstrap09 SDK `MAC_ADMISSION_POLICY_DIFFERS` failure confirms the unchanged
+strict recipe guard rejected body/refresh environment differences. Matching
+current ARM refresh to body fourteen and the scoped historical undo yielded three
+passing existing historical/full-SDK protocol roots, not a hosted/native cure.
+The new source/configuration, specification and fixture invalidate bootstrap07/
+bootstrap08 whole-candidate credit. Their originals remain historical; the fresh
+full required local gate, affected cases, Sol Review and native validation remain
+NotRun until separately applicable new-candidate executions are recorded.
+Frozen SDK `1dcdb754` subsequently passed its local gate and Sol/max review,
+but hosted run `42469133642` attempt one failed. Four unit producers shared
+the existing `T-MACADM009` current-workflow assertion of ARM body seven,
+now obsolete after the body/refresh fourteen-worker servicing. Correct that
+existing PR-only root to require body fourteen, refresh parity and unchanged
+ARM units seven; retain its native identities, dependency graph, pins and both
+finite critical caps. The isolated original failed and the corrected full
+twenty-six-root admission family passed. No new root, critical promotion,
+historical cost-model change or native execution credit follows.
+The independent ARM Homebrew producer failed anonymous prior-release
+acquisition with HTTP 504 before entering lifecycle assertions. Its original
+artifact cannot identify the asset request or upstream cause. Preserve that
+uncertainty, the original lifecycle NotRun and separately verified owned-prefix
+removal with matching allocation/request identity and zero delegated commands.
+Classify HTTP 504 as retryable only for prior-release acquisition, using the
+existing backoff, shared ten-minute phase deadline and thirty-second request
+cap. Cancel error bodies and retain bounded asset/status/attempt diagnostics
+without URLs or credentials. Preserve existing HTTP 404 eventual-readback
+handling; do not retry other HTTP, permission, pin, size or integrity failures.
+Current-public acceptance behavior is unchanged.
+Three new PR-only, one-slot, process-isolated Node-controlled `TOOL03` roots
+exercise recovery, cross-asset/persistent deadline exhaustion and terminal
+denial/integrity/current-public controls with owned, verified-clean data.
+The original two failures and one pass remain historical; all three final
+controlled roots passed without npm, Homebrew or provider execution.
+Their current test file is not added fictitiously to the archived v15 snapshot;
+required current inventory/placement still must include it.
+Frozen SDK `c4883a2d` passed its full local gate, 179 affected assertions and
+Sol/max review; hosted run `42473096631` attempt one then retained independent
+Linux and Windows `T-PRD020` allocation assertion failures (`14 !== 7`).
+Despite the generic Intel diagnostic, the actual-CI graph loop first reaches
+ARM body fourteen against the existing seven-GiB hardware fixture.
+Keep those hardware facts and production allocations unchanged. Update only
+the existing PR-only, one-slot graph root's expected ARM regression reservation:
+body and refresh fourteen, units seven. Intel units still match four CPUs and
+other roles still use their observed-memory allocations. Retain every producer,
+recipe, dependency, source-safety and pin assertion and both critical caps.
+Its exact isolated pre-fix root failed; the corrected source requires a newly
+frozen full local gate, affected root, Sol/max review and hosted validation.
+Authentically regenerate the captured current-test splice against the unchanged
+archived v15 Git blob, not by changing historical cost models, seven-worker
+workflow semantics or protocol rows. Prior results remain historical; all new
+candidate checkpoints stay NotRun until applicable executions are recorded.
+Unexpanded/skipped successor roles remain separate original outcomes.
+Metadata-only edited CI is not native
+acceptance, and the reboot's monitoring gap is not erased by later observations.
+Changing this captured test requires authentic inventory-splice reconstruction
+before newly frozen full local validation, Sol review and hosted completeness.
+Those new-candidate checkpoints remain NotRun until their own results exist.
+Retain the original Intel uninstall watchdog and before-correction admission
+failures. The 15-second command watchdog, POSIX one-second stop, native
+assertions, enforced network/npm denial and sandbox remain unchanged.
+Observed process-group cleanup does not convert an expired watchdog to success;
+the admission correction does not prove a kernel cause, native cure or hosted pass.
 The Windows periodic-checkpoint fixture injects its classified failure without
 asynchronous preparation inside the timed replacement attempt. Its marker is
 prepared beforehand and published only after a subsequent real replacement;
@@ -1948,14 +2109,16 @@ TOOL02 records separate closed phases for cancellation return or watchdog,
 cleanup lifetime, retention/result checks, retained report/stdout and controller
 dispatch/stop. A phase timestamp describes entry into that assertion block, not
 the duration or cause of a termination failure. Preserve the six real scenarios,
-their assertions, controller ownership and original budgets.
+their assertions, controller ownership and the current platform-specific stop
+budgets and TOOL02 guard above.
 
 For the recurring Windows capture root, keep native observation test-only.
 Interpose `spawn` only in its isolated controller, invoke the original function
 unchanged, and observe only the exact SystemRoot `System32/taskkill.exe` child.
 Publish the actual PID and spawn-event UTC bound atomically to the prestarted
 observer's nonce request. Do not await it inside `executeValidationCommand` or
-alter stop dispatch or the platform settlement deadline. Complete existing command/controller
+alter immediate stop dispatch or the current 5,000ms Windows settlement
+deadline. Complete existing command/controller
 cleanup before awaiting native finalization; append compact validated facts to
 the same assertion error, preserving a concurrent cleanup failure separately.
 Retain the exact spawn request bound, target binding reason/capture timestamp,
@@ -2024,7 +2187,8 @@ compiling marker observed before that preparation deadline arms exactly one
 further five-second window.
 Missing, invalid, foreign-source or late markers cannot rearm it. This changes
 maximum startup polling to twenty seconds; it does not change the one-second
-observation window, 1500ms capture wait or actual target termination deadlines.
+native observation window or 1500ms native capture wait. Those diagnostic windows
+are distinct from the current 5,000ms Windows target-termination settlement budget.
 The native multi-observer root has a 120-second watchdog and command capture
 has a sixty-second watchdog, including their finite setup and owned cleanup.
 A preparation marker is neither readiness nor compiler-settlement
@@ -2112,26 +2276,23 @@ that the initial running checkpoint is durable: the command awaits that write
 before its stop/close race. Await the actual first running `atomicWrite` under
 the remaining original five-second preparation allowance, racing early command
 settlement. A controlled clock advance models cold preparation without sleeps.
-Keep immediate production stop dispatch, all six settlement modes
-and real writer-drain/retention/controller cleanup proofs. The separate physical
-and command-clock test watchdogs allow ten seconds for cancellation plus durable
-retention, under a sixty-second enclosing test timeout. The earlier 1500ms test
-guard left only half a second after the earlier production termination budget for real
-journal/report I/O; a native-host observation exceeded that allowance without
-establishing the sole hosted cause. This test-only correctness-first allowance
-does not define production termination or T-PRD018's separate diagnostic capture
-deadline. Under the owner's subsequent direction to resolve the native blocker,
-the shared Windows production settlement budget is five seconds, while POSIX
-retains one second. Both preserve affirmative closure, timeout failure and
-single-dispatch ownership; the original failed one-second observations remain
-historical, not passing evidence for the changed candidate.
-Block the stalled mode's actual final report write and verify its prior durable
-uncertain checkpoint, original `STOP_TIMEOUT` and watchdog facts while the command
-remains pending. Release in `finally`, await the real retained report and preserve
-the single-stop/controller, unchanged preparation-clock offset and complete
-owned cleanup assertions. No dispatch, ownership or durability algorithm changes;
-later persistence remains part of actual return latency, not proof of a hosted
-cure or permission to return before retention.
+Keep immediate single production stop dispatch, the current 5,000ms Windows
+backend budget assertion, physical 10,000ms cancellation/durable-I/O guard,
+command-clock accounting, 60,000ms root ceiling, all six settlement modes
+and real writer-drain/retention/controller cleanup proofs. A stalled stop must
+durably retain its uncertain cancelling checkpoint, `STOP_TIMEOUT` and watchdog
+facts while its actual final report write is blocked and the command remains
+pending. Command finalization must await that write; release both final-report
+and descendant-writer barriers in `finally` and await the retained report.
+Preserve the single-stop/controller, unchanged preparation-clock offset and
+complete owned cleanup assertions.
+The guard includes actual persistence latency; it does not extend the production
+stop budget, change durability or T-PRD018's separate diagnostic capture deadline,
+or permit return before retention. POSIX retains one second. The earlier
+one-second Windows deadline, twenty-second root and 1500ms fixture watchdog
+remain historical, superseded baselines. Observed local flush latency does not
+establish the sole hosted cause; original failures are not passing evidence
+for the changed candidate.
 
 The standalone simultaneous-activation fixture similarly separates cold staging
 from the contender's lock-wait allowance. Hold the first real promotion after
