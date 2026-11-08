@@ -2477,6 +2477,29 @@ reporting merge readiness, paginate actual review-thread facts and keep them
 distinct from approving reviews and CI validation. Native conversation rules
 handle resolve/reopen transitions independently of a cached CI status.
 
+The observer's `conversationRule` keeps an accessible classic protection read
+authoritative. Only a classic 403/404 initiates the bounded, completely paginated
+SDK read of `/rules/branches/{branch}` under the existing Metadata-read credential.
+Validate every provider capture, rule collection, native source identity,
+positive ruleset ID and boolean pull-request conversation parameter; reject
+duplicate rule identities and incomplete pagination. Retain the original
+classic facts in `classicProtection`, even when effective rules are available.
+Only a validated native `pull_request` rule with
+`required_review_thread_resolution: true` establishes enforcement. Accessible
+empty or false rules remain observed/Available but do not pass conversation
+readiness. Effective 403 is Denied; effective 404, malformed, duplicate or
+incomplete data is Unavailable. All remain NotRun without verified enforcement;
+unresolved threads still block when enforcement is genuinely enabled.
+This compatibility path adds no workflow permission elevation, setting write or
+F04 provider-administration scope.
+
+The retained 2026-11-08 owner read found active effective ruleset `26728403`
+with deletion/non-fast-forward restrictions, PRs and zero required approvals,
+but conversation resolution false and no required-status-check rule. Do not
+reinterpret that owner read as workflow-token capability or passing enforcement.
+Source compatibility cannot create genuinely absent provider controls; their
+remediation remains separately authorized.
+
 Conditional approval via a status has event/reevaluation latency; it is not an
 atomic native author-specific approval rule. Document that limitation and the
 maintainer's responsibility to verify fresh external approval before normal

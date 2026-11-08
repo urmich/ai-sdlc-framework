@@ -311,6 +311,19 @@ Required tests must be real merge prerequisites, not advisory green decorations.
 - AC-205.4: Document unavailable account-tier controls and owner actions
   truthfully. Repository settings, trust relationships and access changes require
   explicit scoped approval before applying them.
+  Distinguish inaccessible classic protection from effective native branch rules
+  available through existing Metadata-read access. A complete validated rule read
+  can establish conversation enforcement only from a genuine native
+  `pull_request.required_review_thread_resolution: true`; false, absent,
+  malformed, duplicated or incomplete rules cannot supply passing enforcement.
+
+The retained owner read on 2026-11-08 observed effective ruleset `26728403`:
+deletion/non-fast-forward restrictions and a PR rule with zero required approvals,
+`required_review_thread_resolution: false`, and no `required_status_checks` rule.
+This observation does not establish the required conversation or status-check
+enforcement, nor the workflow credential's access. The independent observer
+repair is read-only source compatibility, not F04 provider administration;
+remediating genuinely missing enforcement requires separate scoped authority.
 
 ### FR-206: Provide one automated, authorized release flow
 
