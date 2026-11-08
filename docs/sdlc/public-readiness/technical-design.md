@@ -88,6 +88,13 @@ and exact digest assertions. No capsule, weight, timing, archived source,
 fetch-depth prerequisite, product version or release history is rewritten.
 The resulting candidate requires its own frozen local sequence and separate
 whole-candidate Review; SDK15's prior review supplies neither.
+Primary has a second independent reconstruction path for its authentic
+v11/v12/v15 sources. Before applying its unchanged per-source splices, strip
+the new transport alias-test additions and restore the native-test input by
+removing only the newly inserted single-capsule alias block. Then remove the
+triple-capsule helper as before. Preserve all exact inventory-digest and original
+planner-qualification assertions; never substitute the single-source fixture
+for primary's three independently authenticated sources.
 
 ## 1. Design summary and boundaries
 

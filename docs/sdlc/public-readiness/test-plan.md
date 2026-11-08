@@ -66,6 +66,15 @@ source/toolchain identity and owned cleanup. Alias regressions remain PR-only
 on all four platforms; critical retains its 27-root/27-assertion cap. These local
 controls grant no hosted/native, full 99-case, minimum-Node, release or Review
 credit; fresh whole-candidate built-in Review remains separate and NotRun.
+The first affected execution failed four existing T-PRD017 historical
+v11/v12/v13 roots because the independent triple-capsule reconstruction received
+post-alias source text. Keep that original Failed execution immutable. Restore
+only new alias additions before unchanged splices in both reconstruction paths,
+including the new single-capsule helper block in the triple-capsule native-test
+input. These existing PR-only roots provide the regression assertions; their
+capsules, digests, qualifiers and critical membership remain unchanged. A new
+commit resets current local projections to NotRun and receives the full
+unit-first protected-host sequence, not a flaky retry or borrowed pass.
 
 ## 1. Scope and execution status
 

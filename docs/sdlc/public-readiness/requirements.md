@@ -52,6 +52,10 @@ history while integrating proof-bound repository name/ID pagination. This is
 the same F01/F02/F03/F05/F06/F13 follow-up, not F04 administration or deferred
 F07-F12 work. Earlier SDK/primary passes and reviews do not validate this new
 candidate; publication, main integration and release remain separate.
+The first new-candidate local affected execution exposed primary's independent
+triple-capsule pre-alias reconstruction gap. Restore only those changed current
+inputs before its unchanged archived splices; preserve the failed original and
+restart the complete local checkpoint for the corrected candidate.
 
 **2026-10-20 revision:** The user rejected the broad, 18-minute local
 "critical" loop. The required replacement is a small explicit local sanity gate,
