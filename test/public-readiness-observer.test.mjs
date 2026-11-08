@@ -21,6 +21,16 @@ export const validationDeclarations = {
     "reason": "PR-only Node regressions for AC-202.7 and AC-203.4; preserve timing diagnostics without current admission gates, and require source-bound cleanup. Controlled provider data, no native tools or network; one process-isolated root with no shared external resource or critical promotion.",
     "prerequisites": ["Node and repository-local owned fixtures"]
   }, {
+    "names": [
+      "T-PRD027 effective native conversation rules recover classic denied reads without privileged credentials",
+      "T-PRD027 accessible empty and false effective conversation rules never grant enforcement",
+      "T-PRD027 denied malformed and incomplete effective rules remain unverified"
+    ],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "maintainer",
+    "reason": "PR-only AC-205.1/AC-205.4 SDK acquisition regressions for T-PRD027: controlled provider responses, no network or privileged credentials. Independent process-isolated roots use one slot and owned fixture cleanup; no critical promotion.",
+    "prerequisites": ["Node and repository-local owned fixtures"]
+  }, {
     "names": ["T-PRD021 protocol row pool drains failed children stops dispatch and respects one-slot fallback"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "runner-resource-contract",
@@ -1125,6 +1135,96 @@ test('T-PRD027 API denied and unavailable conversation controls retain exact cap
     assert.equal(f.writes.length, 0);
     f.assertReadOnly();
   }
+});
+
+function effectiveConversationRule(enabled, id = 42) {
+  return { type: 'pull_request', ruleset_source_type: 'Repository',
+    ruleset_source: 'urmich/ai-sdlc-framework', ruleset_id: id,
+    parameters: { dismiss_stale_reviews_on_push: false, require_code_owner_review: false,
+      require_last_push_approval: false, required_approving_review_count: 0,
+      required_review_thread_resolution: enabled } };
+}
+
+test('T-PRD027 effective native conversation rules recover classic denied reads without privileged credentials', async t => {
+  const options = { protectionStatus: 403, nodeArtifactReader: true, ambient: false, effectiveRulesPages: [
+    [effectiveConversationRule(false)], [effectiveConversationRule(true, 43)],
+  ] };
+  const f = await observerApiFixture(t, options);
+  for (const protectionStatus of [403, 404]) {
+    options.protectionStatus = protectionStatus;
+    const { client, host } = f.connect();
+    const rule = await client.conversationRule('main');
+    assert.equal(rule.observed, true);
+    assert.equal(rule.conversations, true);
+    assert.equal(rule.capability, 'Available');
+    assert.equal(rule.classicProtection.providerStatus, protectionStatus);
+    const member = f.members.get(1);
+    member.threads = [];
+    assert.equal((await host.snapshot()).prs[0].conversations.status, 'Passed');
+    member.threads.push({ id: 'effective-rule-unresolved', isResolved: false });
+    const unresolved = (await host.snapshot()).prs[0].conversations;
+    assert.equal(unresolved.status, 'NotRun');
+    assert.deepEqual(unresolved.blockers, ['All review conversations must be resolved']);
+  }
+  assert.ok(f.calls.some(call => new URL(call.url).searchParams.get('page') === '2'));
+  delete options.protectionStatus;
+  const effectiveReads = f.calls.filter(call => new URL(call.url).pathname.endsWith('/rules/branches/main')).length;
+  assert.deepEqual(await f.connect().client.conversationRule('main'),
+    { observed: true, conversations: true, capability: 'Available' });
+  assert.equal(f.calls.filter(call => new URL(call.url).pathname.endsWith('/rules/branches/main')).length,
+    effectiveReads, 'Accessible classic protection remains authoritative without a fallback read');
+  assert.equal(f.writes.length, 0);
+  f.assertReadOnly();
+});
+
+test('T-PRD027 accessible empty and false effective conversation rules never grant enforcement', async t => {
+  const options = { protectionStatus: 403, nodeArtifactReader: true, ambient: false, effectiveRulesPages: [[]] };
+  const f = await observerApiFixture(t, options);
+  for (const rules of [[], [effectiveConversationRule(false)]]) {
+    options.effectiveRulesPages = [rules];
+    const result = (await f.connect().host.snapshot()).prs[0].conversations;
+    assert.equal(result.status, 'NotRun');
+    assert.equal(result.protection.observed, true);
+    assert.equal(result.protection.conversations, false);
+    assert.equal(result.capability, 'Available');
+    assert.equal(result.enforcement, 'provider-enforcement-unverified');
+  }
+  assert.equal(f.writes.length, 0);
+  f.assertReadOnly();
+});
+
+test('T-PRD027 denied malformed and incomplete effective rules remain unverified', async t => {
+  const options = { protectionStatus: 403, nodeArtifactReader: true, ambient: false,
+    effectiveRulesPages: [[effectiveConversationRule(true)]] };
+  const f = await observerApiFixture(t, options);
+  for (const effectiveRulesStatus of [403, 404]) {
+    options.effectiveRulesStatus = effectiveRulesStatus;
+    const result = (await f.connect().host.snapshot()).prs[0].conversations;
+    assert.equal(result.status, 'NotRun');
+    assert.equal(result.capability, effectiveRulesStatus === 403 ? 'Denied' : 'Unavailable');
+    assert.equal(result.protection.classicProtection.providerStatus, 403);
+    assert.equal(result.enforcement, 'provider-enforcement-unverified');
+  }
+  delete options.effectiveRulesStatus;
+  for (const rules of [null, [effectiveConversationRule('true')],
+    [effectiveConversationRule(true), { type: 'pull_request' }],
+    [effectiveConversationRule(true), effectiveConversationRule(true)]]) {
+    options.effectiveRulesPages = [rules];
+    const result = (await f.connect().host.snapshot()).prs[0].conversations;
+    assert.equal(result.status, 'NotRun');
+    assert.equal(result.protection.observed, false);
+    assert.equal(result.capability, 'Unavailable');
+    assert.equal(result.enforcement, 'provider-enforcement-unverified');
+  }
+  options.effectiveRulesPages = [[effectiveConversationRule(true)]];
+  options.effectiveRulesCycle = true;
+  const incomplete = (await f.connect().host.snapshot()).prs[0].conversations;
+  assert.equal(incomplete.status, 'NotRun');
+  assert.equal(incomplete.protection.observed, false);
+  assert.equal(incomplete.capability, 'Unavailable');
+  assert.equal(incomplete.protection.diagnostic.code, 'PROOF_GAP');
+  assert.equal(f.writes.length, 0);
+  f.assertReadOnly();
 });
 
 test('T-PRD074 archived native reconstruction uses original source and commands at an explicit as-of time without renewing current credit', async t => {

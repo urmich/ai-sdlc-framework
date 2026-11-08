@@ -63,9 +63,16 @@ candidate. Primary's required current local checkpoint, candidate Review,
 native/complete trusted PR validation and release checkpoints remain NotRun
 until their own applicable evidence exists.
 
-The actual-main observer's earlier `CACHE_GAP` is closed. Its current HTTP 403
-requires read-only Metadata/effective-rule compatibility reconciliation, not a
-provider-setting change or a passing enforcement claim. Genuine false or absent
+The actual-main observer's earlier `CACHE_GAP` is closed. The local SDK14 bridge
+integrates reviewed source `de5a392ff372e47224699c36ad014f516b3fa79e` into
+primary `a37baa500a2d2e99c91c235413af85d5005e6fd8` to reconcile classic HTTP
+403/404 with bounded Metadata-read effective-rule acquisition. The production
+native planner and CI workflow blobs already match those sources and need no
+replacement. Preserve primary's successful empty/noWork completion,
+version-neutral README/doc checks, release controls and both authentic
+105/315 capsules; regenerate only their necessary current-input splices from
+actual archived Git objects. This is not a provider-setting change, SDK adoption
+or a passing enforcement claim. Genuine false or absent
 conversation/status enforcement remains F04 and requires separate authorization;
 this integration does not include it.
 
@@ -1414,12 +1421,27 @@ reservation, not a claim of fourteen actual child processes.
 For frozen `e1f4490`, actual source-derived placement assigns Windows `body-1`
 and both Mac architectures' `body-0`; derive the owning role afresh for each
 changed candidate. Current CI requests fourteen workers for all three ARM body
-roles, ARM refresh and Intel bodies, fifteen for Windows bodies; ARM unit roles remain
-seven. Both Mac body pools now request fourteen. Use the actual owning CI request
+roles, ARM refresh and Intel bodies. Windows body-0/1/2 request fifteen and
+body-3 seven; ARM unit roles remain seven. Both Mac body pools now request fourteen.
+Use the actual owning CI request
 and broker allocation, not an assumed one-slot deduction, for admission.
 The fourteen-slot reservation excludes competitors throughout the timed lifecycle
 on those fourteen-slot Mac pools. Keep the existing maximum thirty-two, dynamic
 broker and process isolation, with no added jobs or blanket callback concurrency.
+Pass destination capacities 15/15/15/7 into Windows body partitioning. Before
+balancing, filter the complete dependency/exclusive-resource-connected component
+to owners that admit every root's minimum slots; if none fits, throw BUDGET.
+Bound affinity coassignment by the lesser of its qualified historical allowance
+and the actual destination capacity. Preserve all other-platform rules and the
+immutable costs, placement, qualifiers, scheduling and watchdog data.
+The existing PR-only T-PRD020 actual-CI root verifies the literal body-3 expression
+and every selected Windows group's actual owner capacity without new critical
+roots or callback concurrency. Historical single-v15/105 and triple-315 fixture regeneration
+reconstructs changed helper/test inputs from original Git blobs; neither source
+pins nor the 128-KiB decoded-envelope bound is replaced.
+The existing `authenticV14Workflow` undoes only the current Windows matrix
+expression to its historical fifteen-slot literal, preserving the pinned v14
+workflow digest and original ARM reconstruction.
 The child still receives no broker credentials.
 ARM refresh's fourteen-worker request preserves production's unchanged strict
 `sameRecipe` body/refresh recipe and environment parity. Differing environment
@@ -2617,6 +2639,35 @@ resolved** natively for all PRs; it applies even to owner-authored PRs. When
 reporting merge readiness, paginate actual review-thread facts and keep them
 distinct from approving reviews and CI validation. Native conversation rules
 handle resolve/reopen transitions independently of a cached CI status.
+
+The observer's `conversationRule` keeps an accessible classic protection read
+authoritative. Only a classic 403/404 initiates the bounded, completely paginated
+SDK read of `/rules/branches/{branch}` under the existing Metadata-read credential.
+Validate every provider capture, rule collection, native source identity,
+positive ruleset ID and boolean pull-request conversation parameter; reject
+duplicate rule identities and incomplete pagination. Retain the original
+classic facts in `classicProtection`, even when effective rules are available.
+Only a validated native `pull_request` rule with
+`required_review_thread_resolution: true` establishes enforcement. Accessible
+empty or false rules remain observed/Available but do not pass conversation
+readiness. Effective 403 is Denied; effective 404, malformed, duplicate or
+incomplete data is Unavailable. All remain NotRun without verified enforcement;
+unresolved threads still block when enforcement is genuinely enabled.
+This compatibility path adds no workflow permission elevation, setting write or
+F04 provider-administration scope.
+The trusted observer still pins `native-validation.mjs`, `ci.yml` and every
+non-test helper to its adopted revision and uses its imported native planner.
+Adopt the exact Windows15/15/15/7 implementation/workflow correction as well as
+this Metadata-read fallback; do not weaken adoption checks or transfer producer
+results. An optional `READINESS_PRODUCER_REVISION` setting remains a separate
+provider-admin operation. Source alignment alone grants no native acceptance.
+
+The retained 2026-11-08 owner read found active effective ruleset `26728403`
+with deletion/non-fast-forward restrictions, PRs and zero required approvals,
+but conversation resolution false and no required-status-check rule. Do not
+reinterpret that owner read as workflow-token capability or passing enforcement.
+Source compatibility cannot create genuinely absent provider controls; their
+remediation remains separately authorized.
 
 Conditional approval via a status has event/reevaluation latency; it is not an
 atomic native author-specific approval rule. Document that limitation and the

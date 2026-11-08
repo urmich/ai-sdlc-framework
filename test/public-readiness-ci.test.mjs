@@ -2013,6 +2013,17 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   assert.equal(dispatched, groups.length, 'The configured budget admits the complete source-derived selection');
   assert.equal(admitted.completed.size, groups.length);
   assert.deepEqual(admitted.notRun, []);
+  assert.equal(ci.jobs['native-wx'].env.SDLC_TEST_WORKERS,
+    "${{ matrix.shard == 'body-3' && '7' || '15' }}");
+  for (const body of assignments.get('windows-x64').parts.filter(part => part.shard.startsWith('body-'))) {
+    const capacity = nativeResourceFacts({ availableParallelism: 4, totalMemoryBytes: 17174360064,
+      configuredWorkers: body.shard === 'body-3' ? '7' : '15' }).workerCapacity;
+    const groups = body.stages.flatMap(stage => stage.groups);
+    assert.ok(groups.every(group => group.minimumSlots <= capacity),
+      `Windows ${body.shard} capacity ${capacity} must admit every selected group: ${JSON.stringify(
+        groups.filter(group => group.minimumSlots > capacity).map(group =>
+          ({ root: group.name, minimumSlots: group.minimumSlots })))}`);
+  }
   const expectedRoles = { go: [], python: [], schema: [] };
   for (const part of parts) {
     const expected = part.shard?.startsWith('body-') ?

@@ -36,6 +36,20 @@ native/trusted PR checks and separately authorized release obligations.
 This integration covers F01/F02/F03/F05/F06/F13 only; F07-F12 remain deferred,
 and F04/provider-administration actions are not included.
 
+**Local SDK14 bridge cycle:** Integrate reviewed source
+`de5a392ff372e47224699c36ad014f516b3fa79e` with primary
+`a37baa500a2d2e99c91c235413af85d5005e6fd8`, preserving prior execution/review
+originals as history. Freeze the exact new commit/tree and raw Git bindings
+before the Node-only critical command (16 units plus 11 roots, once), then static
+checks. Subsequently run the existing 27 safe native roots, actual-CI root,
+all 34 controlled observer roots and four Node-only T-PRD028 preflight roots.
+Independent native4/CI1/observer4 processes use distinct owned outputs (nine
+aggregate slots); the preflight batch is separate. Require complete originals,
+zero unexpected skips/cancellations/failures, unchanged source and owned cleanup.
+Parent performs built-in Copilot `/review` separately on the complete main delta.
+No hosted, native, provider, release or 99-case acceptance is supplied by these
+local controls; all canonical statuses remain NotRun.
+
 ## 1. Scope and execution status
 
 This is the one living Test Plan for `wi-public-readiness`, artifact
@@ -831,13 +845,27 @@ vector and its original protocol controls as historical inputs.
 For frozen `e1f4490`, the actual source-derived selection places this root in
 Windows `body-1` and both Mac architectures' `body-0`; recompute the owning role
 for each changed candidate. Current CI requests fourteen workers for all three
-ARM body roles, ARM refresh and Intel body roles, and fifteen for Windows bodies.
+ARM body roles, ARM refresh and Intel body roles. Windows body-0/1/2 request
+fifteen; body-3 requests seven through the literal source-owned matrix expression.
 ARM unit roles remain seven. Both Mac body pools now request fourteen;
 compare group admission with the actual owning CI request and broker allocation,
 without assuming a one-slot deduction. On those fourteen-slot Mac pools, the
 reservation excludes competing roots throughout the timed denial lifecycle.
 Keep the existing maximum of thirty-two, dynamic broker and process isolation;
 no jobs or blanket callback concurrency are added.
+The existing PR-only, one-slot T-PRD020 actual-CI root checks that literal
+expression and every Windows body's selected groups against its actual owner
+capacity. Whole dependency/exclusive-resource-connected components are filtered
+for all root minimum slots before balancing; no eligible owner yields BUDGET.
+Affinity coassignment is bounded by the actual destination too. Other-platform
+allocations, historical cost/placement/qualifier models and both critical caps
+remain unchanged. Regenerate captured current helper/test splices only against
+the authentic single-v15/105 and distinct triple-315 Git-blob capsules with their original source pins and
+128-KiB decoded bound. Controlled local passes are not the complete 99-case
+acceptance or native/provider validation; current case statuses remain NotRun.
+The existing `authenticV14Workflow` reconstructs the current Windows matrix
+expression as the historical fifteen-slot literal without changing its original
+v14 digest, ARM reconstruction or capability facts.
 ARM refresh's fourteen-worker request preserves the unchanged strict `sameRecipe`
 body/refresh recipe and environment parity; environment differences remain errors,
 not fields to ignore for admission.
@@ -1395,6 +1423,32 @@ diagnostics, failed results, required conversation work and blocked current PRs
 remain non-passing. Existing shared-key, pagination, capacity and publication
 race controls remain required; neither critical cap grows.
 
+The three maintainer-owned T-PRD027 roots in
+`test/public-readiness-observer.test.mjs` cover AC-205.1/AC-205.4:
+
+- `T-PRD027 effective native conversation rules recover classic denied reads without privileged credentials`;
+- `T-PRD027 accessible empty and false effective conversation rules never grant enforcement`;
+- `T-PRD027 denied malformed and incomplete effective rules remain unverified`.
+
+These are PR-only, Node-only, network/credential-free controlled-provider roots
+on all four existing native lanes. Each independent process-isolated root uses
+one slot, owned fixture cleanup and no prerequisite roots or external shared
+resources. Verify complete multi-page acquisition after classic 403/404,
+authoritative accessible classic reads, exact native true/false/absent rule
+semantics, retained classic facts, denied/unavailable distinctions, strict
+malformed/duplicate/incomplete rejection and zero writes. A true enforcement
+rule never excuses an unresolved thread. Preserve the existing T-PRD027
+denied/unavailable and T-PRD080 same-head resolve/reopen regressions.
+No root enters the critical profile; both 27-count caps remain unchanged.
+The original pre-fix recovery failure and later focused outcomes retained under
+`.test-data/observer-ruleset-regression` remain immutable fixture history, not
+current whole-candidate, native or provider-enforcement acceptance. All 99
+canonical cases remain NotRun pending the separately frozen required checks.
+Primary retains both its authentic single-v15/105-blob and distinct
+v11/v12/v15 triple-315 historical capsules; changed observer/specification inputs
+require source-bound regeneration and
+fresh validation, never rewritten historical identities or borrowed credit.
+
 `T-PRD018 rejected failure diagnostics retain only closed error and owned phase
 facts` in `test/test-runner.test.mjs` is maintainer-owned, PR-only and Node-only
 on all four native lanes. Its isolated actual formatter VM reserves one slot,
@@ -1592,7 +1646,7 @@ failure or grants delivery-limit credit.
 | T-PRD024 | local | unit | post-review | automated | provider | github-pr-matrix | FR-205; AC-205.1 | F: evaluate owner-authored and external PR review facts separately with the same required CI and zero-unresolved-conversation policy; external missing/stale approval or any unresolved thread blocks, owner self-approval is not required, and unverified enforcement is not called active. | test/public-readiness-ci.test.mjs#T-PRD024 | NotRun | |
 | T-PRD025 | local | integration | post-review | automated | agent | provider-policy | FR-205; AC-205.2 | P: read actual effective rules; authorized disposable-ref probe verifies direct push/force/delete/admin behavior against approved policy; never infer owner exemptions or use force/admin to perform the probe. | procedure: section-8-policy | NotRun | |
 | T-PRD026 | local | integration | post-review | automated | agent | provider-policy | FR-205; AC-205.3 | P: safe approved PRs with failing, absent, stale or skipped required results cannot merge; current complete checks, applicable review and resolved conversations permit normal merge eligibility without executing a merge unless specifically authorized. | procedure: section-8-policy | NotRun | |
-| T-PRD027 | local | unit | post-review | automated | provider | github-pr-matrix | FR-205; AC-205.4 | F: denied/unavailable account feature or absent scoped setting authority retains a precise blocker and dispatches no mutation; source config without provider observation cannot satisfy enforcement. | test/public-readiness-ci.test.mjs#T-PRD027 | NotRun | |
+| T-PRD027 | local | unit | post-review | automated | provider | github-pr-matrix | FR-205; AC-205.1; AC-205.4 | F: classic denied/unavailable reads use complete validated effective native rules under existing Metadata-read access; only genuine true conversation enforcement can qualify. False/absent rules, effective denial/unavailability, malformed/duplicate/incomplete data or absent scoped setting authority retain precise blockers and dispatch no mutation; source config or owner-read access alone cannot satisfy workflow enforcement. | test/public-readiness-ci.test.mjs#T-PRD027; test/public-readiness-observer.test.mjs#T-PRD027 three declared effective-rule roots and original denied/unavailable regression | NotRun | |
 
 ### 5.3 Release orchestration and published consumers
 
@@ -1672,7 +1726,7 @@ failure or grants delivery-limit credit.
 | T-PRD079-WX | local | integration | post-review | automated | provider | github-windows-x64 | FR-203; FR-206; FR-208; FR-213; AC-203.3; AC-206.2; AC-208.2; AC-213.5 | P/N/E: execute complete applicable Windows regression and native PE/PowerShell/cmd/installed-hook lifecycle assertions against the frozen unpublished release bytes; verify runtime/preservation and exact source/artifact reports. No cross-build, public consumer or earlier PR result substitutes for this fresh native prepublication case. | procedure: section-11-release-prepublication | NotRun | |
 | T-PRD079-MA | local | integration | post-review | automated | provider | github-macos-arm64 | FR-206; FR-208; FR-212; FR-213; AC-206.2; AC-208.3; AC-212.4; AC-212.5; AC-213.5 | P/N/E: on native arm64 run complete applicable Mac regression, standalone/hook and real isolated Homebrew audit/style/install/upgrade/test/uninstall assertions using the frozen unpublished shared archive; match its digest with Intel, record all case results and reject translation or changed bytes. | procedure: section-11-release-prepublication | NotRun | |
 | T-PRD079-MI | local | integration | post-review | automated | provider | github-macos-x64 | FR-206; FR-208; FR-212; FR-213; AC-206.2; AC-208.3; AC-212.4; AC-212.5; AC-213.5 | P/N/E: independently run the corresponding complete native x86_64 regression, standalone/hook and isolated Homebrew lifecycle on the identical frozen shared archive; verify actual Intel runtime and same digest, not ARM metadata simulation or later publication acceptance. | procedure: section-11-release-prepublication | NotRun | |
-| T-PRD080 | local | unit | post-review | automated | provider | github-pr-matrix | FR-205; AC-205.1; AC-205.3 | F/E: for owner and external fixture PRs, unresolved conversation count above zero prevents merge readiness despite otherwise passing checks/review; resolved fresh facts remove only that blocker, reopening restores it, and missing/stale conversation facts never imply resolved. | test/public-readiness-ci.test.mjs#T-PRD080 | NotRun | |
+| T-PRD080 | local | unit | post-review | automated | provider | github-pr-matrix | FR-205; AC-205.1; AC-205.3 | F/E: for owner and external fixture PRs, unresolved conversation count above zero prevents merge readiness despite otherwise passing checks/review; resolved fresh facts remove only that blocker, reopening restores it, and missing/stale conversation facts never imply resolved. | test/public-readiness-ci.test.mjs#T-PRD080; test/public-readiness-observer.test.mjs#T-PRD080 existing same-head resolve/reopen regression | NotRun | |
 | T-PRD081 | local | integration | post-review | automated | agent | provider-policy | FR-205; AC-205.1; AC-205.3 | P: after exact disposable-PR/thread authority, verify effective require-all-conversations-resolved policy and actual unresolved/resolved/reopened thread behavior for owner and external PRs. Both keep mandatory CI; owner exception affects only second-human approval. Missing capability/facts is NotRun/Blocked, not a resolved conversation. | procedure: section-8-policy | NotRun | |
 | T-PRD082 | local | integration | post-review | automated | provider | github-pr-matrix | FR-213; AC-213.1; AC-213.9; AC-213.10; AC-213.11 | F/E: a headless consumer normalizes verified real producer observations and evaluates its declared profile without interactive Copilot receipts or fabricated phase approvals. The verdict grants no external action authority; importing the unchanged origin into a managed workflow still requires its legitimate current cycle/admission. Unverified JSON flags cannot manufacture passing readiness or managed credit. | test/public-readiness-consumer.test.mjs#T-PRD082 | NotRun | |
 

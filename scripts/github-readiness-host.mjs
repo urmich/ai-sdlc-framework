@@ -14,7 +14,7 @@ const revision = /^[a-f0-9]{40}$/u;
 const hash = /^[a-f0-9]{64}$/u;
 const maxSourceBytes = 64 * 1024 * 1024;
 const permissions = Object.freeze([
-  { name: 'contents', level: 'read' }, { name: 'actions', level: 'read' },
+  { name: 'metadata', level: 'read' }, { name: 'contents', level: 'read' }, { name: 'actions', level: 'read' },
   { name: 'pull-requests', level: 'read' }, { name: 'statuses', level: 'write' },
 ]);
 const threadsDocument = `query ReadinessThreads($owner:String!,$name:String!,$number:Int!,$after:String) {
@@ -184,9 +184,44 @@ export function createReadinessGitHubClient({
     try { capture = await transport.execute(request(`/branches/${encodeURIComponent(branch)}/protection`)); }
     catch (error) {
       if (!(error instanceof SdlcError) || !['PERMISSION', 'INACCESSIBLE'].includes(error.code)) throw error;
-      return { observed: false, conversations: false,
+      const classicProtection = { observed: false, conversations: false,
         capability: error.code === 'PERMISSION' ? 'Denied' : 'Unavailable',
         providerStatus: error.code === 'PERMISSION' ? 403 : 404 };
+      try {
+        const acquired = await transport.paginateRest(request(
+          `/rules/branches/${encodeURIComponent(branch)}?per_page=100&page=1`,
+          { permissions: [{ name: 'metadata', level: 'read' }] }));
+        requireThat(acquired.pagination.complete === true, 'PROOF_GAP',
+          'Effective branch-rule pagination is incomplete');
+        const rules = acquired.pages.flatMap(page => {
+          requireGitHubCapture(page, connection);
+          requireThat(Array.isArray(page.body), 'CONTRACT', 'Effective branch rules must be a provider collection');
+          return page.body;
+        });
+        requireThat(rules.every(rule => rule && Object.getPrototypeOf(rule) === Object.prototype &&
+          typeof rule.type === 'string' && rule.type.length > 0 &&
+          Number.isSafeInteger(rule.ruleset_id) && rule.ruleset_id > 0 &&
+          ['Repository', 'Organization', 'Enterprise'].includes(rule.ruleset_source_type) &&
+          typeof rule.ruleset_source === 'string' && rule.ruleset_source.length > 0 &&
+          (rule.type !== 'pull_request' ||
+            typeof rule.parameters?.required_review_thread_resolution === 'boolean')),
+        'CONTRACT', 'Effective branch-rule source or conversation parameters are invalid');
+        requireThat(new Set(rules.map(rule =>
+          `${rule.ruleset_source_type}:${rule.ruleset_source}:${rule.ruleset_id}:${rule.type}`)).size === rules.length,
+        'PROOF_GAP', 'Effective branch-rule identities are duplicated');
+        return { observed: true,
+          conversations: rules.some(rule => rule.type === 'pull_request' &&
+            rule.parameters.required_review_thread_resolution === true),
+          capability: 'Available', classicProtection };
+      } catch (fallbackError) {
+        if (!(fallbackError instanceof SdlcError) ||
+            !['PERMISSION', 'INACCESSIBLE', 'CONTRACT', 'PROOF_GAP'].includes(fallbackError.code)) throw fallbackError;
+        return { observed: false, conversations: false,
+          capability: fallbackError.code === 'PERMISSION' ? 'Denied' : 'Unavailable',
+          ...(['PERMISSION', 'INACCESSIBLE'].includes(fallbackError.code) ?
+            { providerStatus: fallbackError.code === 'PERMISSION' ? 403 : 404 } : {}),
+          classicProtection, diagnostic: { code: fallbackError.code, message: fallbackError.message } };
+      }
     }
     requireGitHubCapture(capture, connection);
     return { observed: true,
