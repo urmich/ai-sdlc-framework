@@ -90,9 +90,11 @@ test('T-PRD037 observer failure payload retains only allowlisted native transpor
       protocol: 'rest', method: 'GET', retries: 2 },
   });
   assert.doesNotMatch(JSON.stringify(diagnostic), /private-sentinel|privateUri|privateDetails/u);
+  const signedOrigin = new URL('https://api.github.com/private');
+  signedOrigin.searchParams.set('sig', 'private-sentinel');
   for (const invalid of [
     { ...nativeFailure, code: 'UNKNOWN' },
-    { ...nativeFailure, origin: 'https://api.github.com/private?sig=private-sentinel' },
+    { ...nativeFailure, origin: signedOrigin.href },
     Object.defineProperty({}, 'code', { get() { getters++; return 'ECONNRESET'; } }),
     new Proxy(nativeFailure, { getOwnPropertyDescriptor() { traps++; throw Error('private-sentinel'); } }),
   ]) {
