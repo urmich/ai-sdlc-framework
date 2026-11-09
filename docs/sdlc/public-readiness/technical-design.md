@@ -13,6 +13,133 @@ Current execution credit comes from the declared checkpoints and retained
 native/public/provider proof, not this header. Maintenance updates references
 without rewriting approved snapshots.
 
+**Historical primary PR #21 integration boundary:** Integrate actual SDK main
+`09499701af20b05ff2415be616e296b016303199`, tree
+`58e8ffbecea35265e7598034f0eafb2f886480d4`, with primary
+`470e1d8acf69258660c2423f32b83fab1f7c11f0`. The SDK merge has ordered parents
+`9a35f81c066f91784403cd04616afc1a0622f633` and
+`7bb3b8fa807353f9ddb4fea4896ca7f58e8acd19`; its normal PR #22 merge is not
+primary validation, provider-administration authority or release acceptance.
+Keep F01/F02/F03/F05/F06/F13 in scope, F07-F12 deferred and F04 outside this
+integration.
+
+Primary retains its distinct authentic v11/v12/v15 historical capsule:
+315 Git blobs, 105 per captured source. The SDK branch's authentic single-v15
+105-blob capsule is a different fixture, not a replacement. Reconstruct each
+historical inventory, workflow, observer, callback/resource closure, literal
+and SDK envelope from its own authenticated source before applying narrowly
+qualified current-test splices. Historical ARM seven-worker semantics, timing
+versions and pinned digests remain historical; current ARM body/refresh fourteen
+and Intel unit four-worker requests cannot be relabelled as archived facts.
+Changed current inputs require complete source-derived fallback where historical
+qualification no longer matches. Fixture reconstruction grants no current
+native or performance credit.
+
+Economical-polling maintenance restores `test/monitors.test.mjs` from genuine
+archived Git blob `1b3775f6c3073636c7ed8e3cdc78ebad5d6c3d11` before both
+historical reconstruction paths apply their unchanged capsule splices.
+Additional data-only pre-splices retain the complete original monitor-test text
+and its exact SHA-256; native-test reconstruction also removes those inserted
+calls before the original native-test splices. Neither capsule nor inventory
+digest changes, and CI needs no additional Git history. Current monitoring
+source and 300-second/retained-record behavior remain unchanged.
+
+Current fallback controls use the current Git-source inventory
+(`intelGitSourceInventory`), not the SDK branch's legacy single-v15/105-blob
+helper. Keep primary's triple-capsule historical positive controls separate.
+Derive current Intel Crypto requirements from the actual complete closure owning
+the authentic Sigstore root; historical v11 per-shard omissions cannot qualify
+a changed current owner. The earlier batch corrected fixture selection and
+expectations; its successor also repairs production fallback placement to honor
+actual destination resource capacity. Neither changes immutable qualification
+identities, models, observed durations or resource allowances.
+
+Authentic v11/v10 controls retain all three original primary anchors. Current
+fallback instead binds the actual renamed
+`T-PRD020 RC66 CI01 current observer defers timing gates but still requires owned cleanup`
+root alongside the original catalog and retained anchors. A renamed
+current root has its own assertion identity; do not splice that identity or the
+current correctness-only policy into historical anchors or timing observations.
+Each complete root and its descendants stay on one source-derived owner.
+
+Historical SDK source `7bb3b8fa807353f9ddb4fea4896ca7f58e8acd19`, run
+`42485325717` attempt 1, completed its 25 producers, 7,705 assertions,
+37 stage commands, 29 SDK commands, 69 component cases/1,621 assertions and
+13 Mac cleanups successfully. Its Intel 25m26s `withinBudget: false` remains an
+actual missed target, retained diagnostically under correctness-only admission.
+Those original results remain bound to that SDK source, not the new primary
+candidate. Primary's required current local checkpoint, candidate Review,
+native/complete trusted PR validation and release checkpoints remain NotRun
+until their own applicable evidence exists.
+
+The actual-main observer's earlier `CACHE_GAP` is closed. The local SDK14 bridge
+integrates reviewed source `de5a392ff372e47224699c36ad014f516b3fa79e` into
+primary `a37baa500a2d2e99c91c235413af85d5005e6fd8` to reconcile classic HTTP
+403/404 with bounded Metadata-read effective-rule acquisition. The production
+native planner and CI workflow blobs already match those sources and need no
+replacement. Preserve primary's successful empty/noWork completion,
+version-neutral README/doc checks, release controls and both authentic
+105/315 capsules; regenerate only their necessary current-input splices from
+actual archived Git objects. This is not a provider-setting change, SDK adoption
+or a passing enforcement claim. Genuine false or absent
+conversation/status enforcement remains F04 and requires separate authorization;
+this integration does not include it.
+
+The local SDK15 successor normally merges reviewed
+`6c4d23ed20131e2a798082a7786445b6066b8298` into primary
+`942f5d1df05b4c9f4e0d6e682ab998eed2246ec8`, whose actual shared ancestor is
+SDK14 `de5a392ff372e47224699c36ad014f516b3fa79e`. Its source integration
+preserves primary's empty/noWork completion, version-neutral documentation,
+release controls, Windows15/15/15/7 destination capacities and authentic
+105/315-blob capsules. The historical reconstruction removes only new
+transport alias-test additions before the unchanged archived source splices
+and exact digest assertions. No capsule, weight, timing, archived source,
+fetch-depth prerequisite, product version or release history is rewritten.
+The resulting candidate requires its own frozen local sequence and separate
+whole-candidate Review; SDK15's prior review supplies neither.
+Primary has a second independent reconstruction path for its authentic
+v11/v12/v15 sources. Before applying its unchanged per-source splices, strip
+the new transport alias-test additions and restore the native-test input by
+removing only the newly inserted single-capsule alias block. Then remove the
+triple-capsule helper as before. Preserve all exact inventory-digest and original
+planner-qualification assertions; never substitute the single-source fixture
+for primary's three independently authenticated sources.
+
+**Current SDK16 actual-main design:** Prepared normal merge
+`30b97e6ccf513865ab1fd67a3b956da505780d82`, tree
+`988555338c1aab9035c857669c2299afe15fdc4d`, integrates SDK
+`a129d4b0399517b2c2f44c690ee17fd342f83eaa` with primary
+`e9dddc2332604a4d9a24126be5f50cea6772eeda`. Actual accepted protected main is
+`d3305ef97e1a9d3f36895620f8aa8a3452026b90`, tree
+`13ddb9677b4fd06dad422a560e020b8e1c75a9d6`, with ordered parents
+`a1f5654b78d1e40c5e4e22e9f7a3e396905ca850` and
+`a129d4b0399517b2c2f44c690ee17fd342f83eaa`. That tree is identical to the
+integrated SDK source. A normal ancestry-only merge preserves every prepared
+source byte before this update to the three public-readiness canonical
+documents; do not rewrite Git merge metadata or overwrite primary with the
+SDK tree. Verify the resulting candidate contains actual main in its ancestry.
+The single-v15 historical helper and independent v11/v12/v15 helper both
+remove only later transport/observer/private-getter additions from their
+in-memory historical inputs. Historical isolation receives archived retained-
+identity source; self-source normalization removes the added isolation lines
+and their reconstruction text before immutable splices. No archive, capsule,
+hash assertion, cost vector, destination capacity or live regression is replaced.
+Keep current native15/15/15/7 and Mac7/Intel4 execution/planning with Node
+24.20.0; the owner-deferred Intel target remains strictly under 25 minutes.
+No operational API quota or new feature is added. Retained scope includes the
+separately owner-authorized F04, not excluded F07-F12; this source checkpoint
+performs no provider administration. Freeze final source and toolchain before
+the unit-first critical27/static checkpoint and the existing coupled
+transport/native/observer/privacy, actual-CI and source-safety controls.
+Use existing process-isolated groups and one aggregate five-worker test budget.
+The early 248 assertions remain historical; all 99 canonical current
+acceptance projections remain NotRun. Final local execution, the parent's
+separate whole-candidate built-in Review, primary native/trusted PR validation
+and release acceptance require their own exact identities and actual evidence.
+Accepted SDK main and SDK qualification supply no primary passing credit.
+Recovery's BINDING/no-token result remains unmanaged, without invented ACK,
+approval or transferred branch-bound authority.
+
 ## 1. Design summary and boundaries
 
 Implement [FR-200 through FR-215](requirements.md) against the
@@ -596,8 +723,9 @@ rows. C74 observations and conservative quantized intervals are historical
 scheduling leads only: changed callbacks, new controls and shared-host contention
 remain unmeasured. Neither the placement projection nor local controls establish
 current native overlap, correctness or whole-lane timing. Require fresh native
-correctness and the unchanged non-Intel fifteen-minute and strict Intel
-under-twenty-five-minute limits.
+correctness and report the unchanged non-Intel fifteen-minute and strict Intel
+under-twenty-five-minute targets separately. These elapsed targets are deferred
+as current correctness gates; historical false verdicts remain unchanged.
 V12 retains authentic v11 through `nativeParallelReadyPoolFrameworkShardProtocol`
 and adds the strict `nativePlacementTransfersV12` literal with
 `native-intel-service-balance-v1`. After the qualified parallel base placement,
@@ -674,10 +802,10 @@ Append the actual v14/bootstrap twenty-fourth causal row without replacing its
 twenty-three predecessors. Local fixture timings are developmental observations,
 not native scaling predictions or proof of the complete lane limit. Current
 whole-candidate validation, Review and native acceptance remain NotRun.
-V15 preserves authentic v14 and binds the current inventory, callbacks, resource
+V15 preserves authentic v14 and binds its original inventory, callbacks, resource
 closures and SDK destinations to the final C81 ownership from source
 `51de4c9ff6a62c655dede580d8328eb6e9ea47c8`. This is source-qualified ownership,
-not a duration model: all 1,016 current body service costs are explicitly
+not a duration model: all 1,016 body service costs in that captured source are explicitly
 unmeasured. Keep the existing component owners, non-Intel selections, unit
 partition algorithm, resource reservations and complete assertion union.
 The catalog fixture removes only an unused caller-authored report from its
@@ -689,8 +817,10 @@ Preserve the original twenty-four causal rows: the authentic C81 v14 row retains
 its v10 admission graph and original bootstrap v6. Append current v15/bootstrap
 v6 with v11 admission as row twenty-five; do not relabel or replace the old row,
 and do not introduce a bootstrap version merely for this qualification change.
-The current inventory contains 1,855 assertions; the two new ARM-frontier unit
-controls add no body group or critical member. The interrupted local baseline
+That original v15 inventory contains 1,855 assertions; its two ARM-frontier unit
+controls add no body group or critical member. These counts describe the captured
+source, not the new integrated primary inventory, which must be derived afresh.
+The interrupted local baseline
 provides no comparison or speedup claim. Fresh frozen-candidate local checks,
 Review and complete native correctness remain required, while whole-lane
 performance improvement is deferred by the owner.
@@ -1062,11 +1192,14 @@ SDK decisions and worker allocations remain unchanged. Controlled Node-only
 dispatch/absence tests establish no native elapsed improvement, authentic
 verification success or achievement of the complete native lane timing limits.
 
-The PR workflow explicitly allocates 15 shared test-worker slots on Linux and
+The earlier PR measurement allocated 15 shared test-worker slots on Linux and
 Windows, 7 on Apple Silicon, four on both Intel unit hosts and fourteen on Intel
-regression hosts. The two CPU-matched Intel unit jobs completed their measured
+regression hosts. Current ARM body/refresh requests are fourteen, ARM units
+remain seven, and Windows body-3 requests seven while other Windows roles
+retain fifteen. Preserve the archived seven-worker ARM cost model rather than
+rewriting it to the current request. The two CPU-matched Intel unit jobs completed their measured
 barrier in 5m20s, but the four-slot regression trial did not finish before the
-cutoff. The next measurement changes only Intel regression concurrency back to
+cutoff. That historical successor measurement changed only Intel regression concurrency back to
 its memory-bounded allocation; it does not extrapolate CPU-heavy unit behavior
 to I/O-heavy regression roots. A whole-lane speedup remains unverified until
 complete hosted measurement. The other memory-bounded allocations
@@ -1220,6 +1353,52 @@ product-scale or hosted performance benchmark.
 
 ### 4.4 Producer output and cancellation
 
+The Windows capture fixture retains the original root and taskkill handles
+through cleanup. Await controller closure before any subsequent owned-root
+cleanup; do not repeat a requested stop. Unverified stop or close prevents
+directory removal and preserves the primary failed command and diagnostics.
+The separate five-second fixture-cleanup bound neither extends the production
+settlement deadline nor makes an original failed cancellation pass.
+Production stop dispatch is immediate. Its shared settlement window is five
+seconds on Windows and one second on POSIX, for both raw owned commands and
+validation commands. The Windows change accommodates the observed native
+controller latency without retries, relaxed ownership or uncertain-cleanup
+success. Whole return latency still includes awaited durable retention.
+
+Windows body-3 requests seven shared slots, admitting its complete selected
+closure, including six- and seven-slot roots. Derive the complete cancellation
+root's actual owner from the frozen source plan; changed source qualification
+may legitimately move it to another body. Check every selected root's demand
+against its literal owning seven- or fifteen-slot request, retaining the separate
+body-3 whole-group seven-slot capacity check and undersized-five rejection before
+dispatch. Filter candidate destinations by every root's minimum demand in the
+whole dependency/resource-connected component before balancing placement,
+including unqualified fallback. The complete fourteen-slot `T-51` npm-denied
+lifecycle root cannot enter seven-slot body-3; it requires an eligible
+fifteen-slot Windows owner. Affinity coassignment must also fit the actual
+destination capacity, not merely a historical fifteen-slot affinity allowance.
+If no eligible owner exists, fail with BUDGET before dispatch; never split a
+component or increase a literal request to make it fit.
+A five-slot cancellation root may still overlap smaller peers on its
+actual owning pool; the body-3 request does not prove fixed cancellation ownership
+or full isolation. Other Windows parts retain fifteen. A job-level expression selects the request
+from the existing closed shard identity; no matrix metadata or trusted-parser
+extension is introduced. Requested workers remain in the native configuration
+digest and actual bootstrap/resource proof.
+Historical literal-budget definitions and measurements remain unchanged.
+Historical fixtures reconstruct the archived Windows budget before verifying
+their original pinned digests. New or changed roots invalidate the complete
+source-qualified ownership vector; current placement falls back with complete
+closures and source-derived SDKs, not historical primary-placement or cost credit.
+Keep authenticated historical placement controls separate from that fallback.
+Data-only source reconstructions must compile to their immutable inventory
+digests and pass the original callback/resource/SDK qualifiers before exercising
+qualified pooling, transfers or reservations. Never substitute digest metadata
+or transfer historical execution/performance credit to current source.
+The original hosted failure occupied all fifteen slots on four CPUs, but its
+kernel cause is unproven; reduced concurrency is a mitigation requiring fresh hosted CI,
+not demonstrated cancellation repair.
+
 Installer timing observations are opt-in and use a strict non-secret
 `SDLC_INSTALL_TRACE_ID` UUID. A small shared observer emits bounded
 `sdlc-install-v1` fixed-format stderr records, never stdout JSON or file contents,
@@ -1271,8 +1450,10 @@ owned dispatch and registration, not platform-specific separators or error-stack
 text. Neither portability control changes the real termination implementation.
 The same PR-only VM fixture uses a 5,000ms Windows settlement constant for its
 5,005ms exhausted-spawn case, 4,975ms/zero watchdog remainders and stop-clock
-bounds. Active drain timers queue at any duration; unreferenced progress remains
-passive. Cleanup must affirmatively observe original controller closure.
+bounds, including dispatch latency. Active drain timers queue at any duration;
+unreferenced progress remains passive. Failure-path teardown closes both
+owned handles and awaits settlement, including affirmative original controller
+closure, so a primary assertion is not masked by hung cleanup.
 Preserve all ten permutations, privacy/failure assertions, the 10,000ms outer
 guard and the original fixture timeout. This aligns controlled clocks with
 current servicing, not a native cure or a critical-profile addition.
@@ -1287,7 +1468,8 @@ Historical costs with the former one-slot resource shape cannot supply a
 qualified lead for the corrected group.
 The native ownership fixture reserves four aggregate worker slots for its
 test process and three real child processes, without changing host capacities
-or the POSIX one-second settlement bound.
+or the platform settlement contract: five seconds on Windows and one second
+on POSIX.
 The controlled Windows settlement fixture separately reserves five slots for
 its test process and at most two independent owned root/writer pairs. Fresh
 VM contexts and unique paths isolate all six scenarios; each pair settles
@@ -1328,7 +1510,7 @@ and the actual destination capacity. Preserve all other-platform rules and the
 immutable costs, placement, qualifiers, scheduling and watchdog data.
 The existing PR-only T-PRD020 actual-CI root verifies the literal body-3 expression
 and every selected Windows group's actual owner capacity without new critical
-roots or callback concurrency. Historical single-v15/105 fixture regeneration
+roots or callback concurrency. Historical single-v15/105 and triple-315 fixture regeneration
 reconstructs changed helper/test inputs from original Git blobs; neither source
 pins nor the 128-KiB decoded-envelope bound is replaced.
 The existing `authenticV14Workflow` undoes only the current Windows matrix
@@ -2068,7 +2250,8 @@ Interpose `spawn` only in its isolated controller, invoke the original function
 unchanged, and observe only the exact SystemRoot `System32/taskkill.exe` child.
 Publish the actual PID and spawn-event UTC bound atomically to the prestarted
 observer's nonce request. Do not await it inside `executeValidationCommand` or
-alter the current 5,000ms Windows stop deadline. Complete existing command/controller
+alter immediate stop dispatch or the current 5,000ms Windows settlement
+deadline. Complete existing command/controller
 cleanup before awaiting native finalization; append compact validated facts to
 the same assertion error, preserving a concurrent cleanup failure separately.
 Retain the exact spawn request bound, target binding reason/capture timestamp,
@@ -2158,6 +2341,11 @@ hashes. It is considered only when the ordinary compiler-settlement receipt is
 missing. Its `notStarted` receipt means no outstanding compiler writer; only
 the ordinary `verified` compiler receipt can contribute to readiness.
 Await original observer closure before calling cleanup complete.
+Serialize compiler-settlement refreshes through one pending promise. A delayed
+missing ordinary receipt must not overwrite an already verified no-writer
+receipt while another refresh is completing. Clear the pending promise on
+completion or rejection so later affirmative proof can still refine an
+unsettled observation; preserve all source, readiness and cleanup checks.
 If cleanup or compiler settlement remains unknown, the original acquired worker
 requests persistent aggregate admission stop over its existing authenticated
 socket. Mark the broker stopped before acknowledgement and reject queued/new
@@ -2221,15 +2409,23 @@ that the initial running checkpoint is durable: the command awaits that write
 before its stop/close race. Await the actual first running `atomicWrite` under
 the remaining original five-second preparation allowance, racing early command
 settlement. A controlled clock advance models cold preparation without sleeps.
-Keep the current 5,000ms Windows backend budget assertion, physical 10,000ms
-cancellation/durable-I/O guard, 60,000ms root ceiling, all six settlement modes
+Keep immediate single production stop dispatch, the current 5,000ms Windows
+backend budget assertion, physical 10,000ms cancellation/durable-I/O guard,
+command-clock accounting, 60,000ms root ceiling, all six settlement modes
 and real writer-drain/retention/controller cleanup proofs. A stalled stop must
-durably retain its uncertain cancelling checkpoint and `STOP_TIMEOUT` before
-the final report writer is released. Command finalization must await that write;
-release both final-report and descendant-writer barriers in cleanup.
+durably retain its uncertain cancelling checkpoint, `STOP_TIMEOUT` and watchdog
+facts while its actual final report write is blocked and the command remains
+pending. Command finalization must await that write; release both final-report
+and descendant-writer barriers in `finally` and await the retained report.
+Preserve the single-stop/controller, unchanged preparation-clock offset and
+complete owned cleanup assertions.
 The guard includes actual persistence latency; it does not extend the production
-stop budget or prove a hosted cure. The earlier one-second Windows deadline and
-1500ms fixture watchdog remain historical, superseded baselines.
+stop budget, change durability or T-PRD018's separate diagnostic capture deadline,
+or permit return before retention. POSIX retains one second. The earlier
+one-second Windows deadline, twenty-second root and 1500ms fixture watchdog
+remain historical, superseded baselines. Observed local flush latency does not
+establish the sole hosted cause; original failures are not passing evidence
+for the changed candidate.
 
 The standalone simultaneous-activation fixture similarly separates cold staging
 from the contender's lock-wait allowance. Hold the first real promotion after
@@ -2416,6 +2612,22 @@ only the small status reconciler is serialized. Pending notifications may be
 coalesced/replaced by GitHub, so every admitted writer refreshes all current
 in-scope PRs and affected status keys, not just the triggering PR. Events are
 wakeups, not an ordered journal or commands to replay stale payloads.
+When complete acquisition finds no in-scope open PRs, retain `NotRun` with an
+explicit `noWork` operation marker and no status writes. The observer CLI may
+complete successfully for this idle operation only when it has no required
+results, conversation work or diagnostic. This is not native-validation,
+approval or provider-enforcement credit; incomplete/error/blocked observations
+remain non-passing.
+
+The shared GitHub SDK applies HTTP `If-None-Match` weak comparison to a 304
+validator: optional `W/` strength may change while the case-sensitive opaque tag
+stays identical. Keep the original conditional header and all exact acquired
+request, credential, visibility, connection, epoch and scope bindings. A 304
+without compatible acquired cache or with a different opaque tag remains a
+proof gap. Reused data retains its old observation version and does not gain a
+fresh observation timestamp. This corrects the observed provider weak-to-strong
+transition; it does not grant a passing observer result or change trusted-source
+adoption.
 
 The provider status key is exactly `(repository identity, SHA, context)`, not
 PR number, description digest or target URL. For each actual head/eligible
@@ -2552,11 +2764,18 @@ Tests must report actual observed enforcement at that assurance level.
 
 ### 6.4 Branch policy and threat boundary
 
-Proposed `main` protection: PR-only changes, required current
-validation/approval/coverage contexts, up-to-date branch and resolved
-conversations; force push/deletion disabled; no silent CI exemption for
-administrators. Do not enable auto-merge or
-use admin merge flags as a substitute for policy.
+The owner-selected RC `main` protection retains PR-only changes, the strict
+`Native producer completeness` check from GitHub Actions App `15368`, up-to-date
+branch and resolved conversations; force push/deletion disabled. Restore the
+three framework branch-protection guards after RC. Those deferred settings do
+not remove independent required successful source/accepted-PR framework statuses.
+
+The current policy permits zero bypass actors, including no PR-only administrator
+exception. GitHub enforces permissions, approvals and branch policy. The release
+helper does not reconstruct or independently certify those controls or inspect
+hidden bypass lists. Normal checks and conversation resolution still apply to
+every PR, including the owner's. Do not enable auto-merge, use admin merge flags
+or add a direct-push, force-push or branch-deletion exception.
 
 Apply only after explicit owner consent and an actual successful observed status
 from the intended source; then verify positive/negative controlled PR/ref cases
@@ -2649,6 +2868,30 @@ Use native job/check details and `GITHUB_STEP_SUMMARY` for actionable missing
 sections, AC/test identities and source mismatches. Keep declared coverage and
 ordinary pass/fail test reports visibly separate. No LLM or bot service is
 needed, and no extra consumer coverage files are produced.
+
+`publishObserved` in `scripts/pr-readiness.mjs` dispatches each planned
+transition once, then reconciles complete status history under a 15-second
+monotonic readback deadline (optional caller deadline/cancellation can shorten
+it; the bounded override cannot exceed 30 seconds). Inject clock/wall-clock/wait
+for deterministic tests. Only a missing new effect permits semantic readback
+recovery, with 250/500/1000/2000-ms capped backoff. Preserve distinct positive
+IDs, the exact new/current row, writer/context/state/marker/target URL and a
+known returned POST ID. Multiple matches, contradictory IDs, foreign latest
+rows and incomplete proof stop non-passing. A lost POST reply may be reconciled
+only by one independently attributable new effect, never by repeating POST.
+Keep the existing fresh-snapshot source check and non-passing invalidation.
+Explicit denials stop; rate-limited reads respect safe Retry-After/reset timing
+only within the remaining deadline. Unknown timing or exhausted time is NotRun.
+The host `statuses(key, options)` forwards signal/remaining timeout through
+`api.list(relative, field, options)` to the existing SDK pagination contract:
+one abort deadline spans every page, rather than resetting per page. Clear
+owned timers on every exit. Retain only bounded predicate/count/positive IDs,
+allowlisted error code and safe retry timing; never raw provider error objects.
+This is normal Node CI, not an AI service or whole-workflow retry mechanism.
+The privileged workflow continues executing protected default-main helpers
+until the reviewed change lands there; PR source must never replace that checkout.
+Historical a2's underlying mismatch remains unknown, even if controlled
+visibility-lag tests and a later actual workflow pass.
 
 Bootstrap the reviewed checker on the trusted branch, observe a real successful
 context/source, then obtain the separately scoped rule-change/probe authority
@@ -2762,11 +3005,27 @@ Require explicit exact source SHA, version, destination and release intent.
 Source must be the accepted protected-main candidate selected by that invocation;
 workflow SHA and package version must agree.
 
-Before building or writing tags/assets, verify actor/permissions, source/ref/
-version consistency, required policy/checks, destination, tool pins, artifact
+Before building or writing tags/assets, verify source/ref/version consistency,
+required source checks, destination, tool pins, artifact
 retention, registry trust and necessary environment capabilities. Missing
 `RELEASE_REPOSITORY` or an inconsistent input gets an early actionable failure.
 No implicit version bump or existing-version replacement occurs.
+
+GitHub workflow/environment permissions authorize the release start and GitHub
+enforces current approvals and branch protections. Preflight does not query
+collaborator permissions, classic protection, effective rules or full rulesets,
+and does not emit an independently verified actor-permission or policy verdict.
+It requires the selected branch response to say `protected: true` and identify
+the exact dispatch source SHA. Missing, denied, malformed or drifted source
+facts fail. No hidden actor inference, policy snapshot or extra credential exists.
+
+Source validation remains independent: returned required non-success statuses
+on the selected SHA reject; all three successful framework contexts admit it.
+If contexts are absent, complete associated-PR pagination must identify exactly
+one merged PR into `main` whose merge SHA equals that source; its exact head
+must have successful validation/approval/coverage statuses. Native green alone
+cannot satisfy either path. Accepted-PR proof retains fresh release R-PRE as
+NotRun, and actual hosted release acceptance remains NotRun.
 
 A single authorized release start covers the declared jobs; configure their
 normal environment policy accordingly. Do not programmatically approve or
@@ -3049,6 +3308,12 @@ fabricated ACK or budget change substitutes for that admission.
 Provide contributor, support, security-reporting, conduct, ownership/review and
 change/release guidance. Derive versions/commands/platforms from current metadata
 and tested examples; remove stale public pins and implementation-status claims.
+Use repository Releases links for framework-version guidance in README. Keep
+four outcome-oriented, source-supported value bullets immediately before the
+existing explanatory image. Audit every capability-table row against actual
+framework code/docs and explicitly separate host-agent session restoration,
+review execution, scheduler/provider infrastructure and external permissions
+from framework work-item/evidence/operation recordkeeping.
 
 Adopt the relevant reader/governance guidance from proposed FR-054 rather than
 duplicate it: public third-party identity, reporting/support/contribution routes

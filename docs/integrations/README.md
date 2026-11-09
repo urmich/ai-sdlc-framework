@@ -25,7 +25,8 @@ and **Azure Pipelines**:
   use the built-in adapter's declared attempt capability.
 - Associate PR checks with the observed execution and retain matching
   execution/artifact evidence rather than trusting a green job label.
-- Monitor existing or newly reported runs every 60 seconds when a running host
+- Observe existing or newly reported runs immediately, then poll at their
+  recorded intervals (300 seconds for new monitors), when a running host
   supplies an actual scheduler and authorized provider-read tools.
 
 This is implemented integration behavior, not an automatic network client:

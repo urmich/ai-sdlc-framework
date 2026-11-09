@@ -308,8 +308,13 @@ through repository-standard safe diagnostics; do not expose arbitrary causes
 or evaluate thrown getters to classify errors.
 
 Monitoring uses actual authorized read tools and the host scheduler for immediate
-attachment and subsequent 60-second polling of exact run/attempt/source. Page
-verification is independent. Retain reported/triggered origin, interrupted
+attachment and subsequent polling of exact run/attempt/source at the stored
+interval. New monitors default to 300 seconds/five minutes; existing records
+retain their actual interval. Scheduling, gap accounting and displayed cadence
+use that validated interval. Lightweight status reads avoid repeated full logs
+and unchanged notices. Denied acquisition remains explicit, without automatic
+retry or invented reset-aware scheduling. Git/PR freshness remains independent.
+Page verification is independent. Retain reported/triggered origin, interrupted
 ownership, terminal notices and explicit capability gaps. The offline ledger
 cannot poll after its host stops; observation never grants action authority.
 

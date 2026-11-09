@@ -10,6 +10,14 @@ import { assertMonitorRecordSize, validateMonitorEvidence,
 import { validateCheckpoint } from './store.mjs';
 
 const TERMINAL = ['succeeded', 'failed', 'cancelled'];
+function pollIntervalMilliseconds(record) {
+  const seconds = record.pollIntervalSeconds;
+  const milliseconds = seconds * 1000;
+  requireThat(Number.isSafeInteger(seconds) && seconds > 0 &&
+    Number.isSafeInteger(milliseconds), 'SCHEMA',
+  'Monitor polling interval must be a positive safe integer number of seconds');
+  return milliseconds;
+}
 function nextNotice(record, kind) {
   return {
     status: 'pending',
@@ -297,7 +305,7 @@ export async function attachMonitor(store, input) {
     const created = safeRecord({ schemaVersion: 1,
       revision: (previous?.revision ?? 0) + 1, key,
       identity, ...details,
-      pollIntervalSeconds: 60, monitorStatus: capable ? 'pending' : 'blocked', workerId: null, claimGeneration: 0,
+      pollIntervalSeconds: 300, monitorStatus: capable ? 'pending' : 'blocked', workerId: null, claimGeneration: 0,
       pollGeneration: 0, inFlight: false, runStatus: 'unknown',
       nextPollAt: now(store.clock), lastPollStartedAt: null, lastSuccessfulPollAt: null,
       link: { status: 'pending', generation: 0 },
@@ -364,9 +372,10 @@ export async function beginPoll(store, input) {
   object(input, ['runKey', 'workerId', 'claimGeneration'], ['runKey', 'workerId', 'claimGeneration']);
   return updateMonitor(store, input.runKey, record => {
     verifyClaim(record, input);
+    const intervalMs = pollIntervalMilliseconds(record);
     requireThat(!record.inFlight && !TERMINAL.includes(record.runStatus), 'MONITOR', 'Run is terminal or already has a poll in flight');
     requireThat(store.clock.now() >= Date.parse(record.nextPollAt), 'NOT_DUE', 'Poll is not yet due');
-    if (store.clock.now() - Date.parse(record.nextPollAt) >= 60000) record.gapCount++;
+    if (store.clock.now() - Date.parse(record.nextPollAt) >= intervalMs) record.gapCount++;
     record.pollGeneration = (record.pollGeneration ?? 0) + 1;
     record.inFlight = true; record.lastPollStartedAt = now(store.clock);
     record.scheduledPollAt = record.nextPollAt;
@@ -480,9 +489,10 @@ export async function observeMonitor(store, input) {
       record.monitorStatus = TERMINAL.includes(input.status) ? 'completed' : 'active';
     }
     record.inFlight = false;
-    const planned = Date.parse(record.scheduledPollAt) + 60000;
-    const missed = Math.max(0, Math.floor((store.clock.now() - planned) / 60000) + 1);
-    record.nextPollAt = TERMINAL.includes(record.runStatus) ? null : new Date(planned + missed * 60000).toISOString();
+    const intervalMs = pollIntervalMilliseconds(record);
+    const planned = Date.parse(record.scheduledPollAt) + intervalMs;
+    const missed = Math.max(0, Math.floor((store.clock.now() - planned) / intervalMs) + 1);
+    record.nextPollAt = TERMINAL.includes(record.runStatus) ? null : new Date(planned + missed * intervalMs).toISOString();
     if (missed) record.gapCount += missed;
     if (old !== record.runStatus || TERMINAL.includes(record.runStatus) || input.error) {
       record.notice = nextNotice(record,
@@ -623,9 +633,10 @@ export async function monitorNotice(store, input) {
       return after;
     });
   requireThat(record, 'MONITOR', 'Monitor record is unavailable');
+  const pollIntervalSeconds = pollIntervalMilliseconds(record) / 1000;
   return { runKey: record.key, origin: record.origin, status: record.runStatus, monitorStatus: record.monitorStatus,
     link: record.link, notice: record.notice, nextPollAt: record.nextPollAt, gapCount: record.gapCount,
-    message: `${record.origin === 'user-reported' ? 'Attached monitoring to user-reported' : 'Monitoring framework-triggered'} execution ${record.identity.executionRef}${record.identity.definitionRef ? ` of definition ${record.identity.definitionRef}` : ''}: ${record.runStatus}. ${record.monitorStatus === 'active' ? 'Polling every 60 seconds.' : `Monitoring ${record.monitorStatus}.`} ${record.link.status === 'verified' ? record.link.url : 'Run link verification pending or unavailable.'}` };
+    message: `${record.origin === 'user-reported' ? 'Attached monitoring to user-reported' : 'Monitoring framework-triggered'} execution ${record.identity.executionRef}${record.identity.definitionRef ? ` of definition ${record.identity.definitionRef}` : ''}: ${record.runStatus}. ${record.monitorStatus === 'active' ? `Polling every ${pollIntervalSeconds} seconds.` : `Monitoring ${record.monitorStatus}.`} ${record.link.status === 'verified' ? record.link.url : 'Run link verification pending or unavailable.'}` };
 }
 export async function interruptMonitor(store, input) {
   object(input, ['runKey', 'reason'], ['runKey', 'reason']);
@@ -643,7 +654,7 @@ export async function dueMonitors(store) {
     const record = await readJson(await safePath(directory, name), { limit: LIMITS.record });
     if (!TERMINAL.includes(record.runStatus) && record.nextPollAt && Date.parse(record.nextPollAt) <= store.clock.now()) {
       due.push({ runKey: record.key, workerId: record.workerId, claimGeneration: record.claimGeneration,
-        inFlight: record.inFlight, dueAt: record.nextPollAt, gapDetected: store.clock.now() - Date.parse(record.nextPollAt) >= 60000 });
+        inFlight: record.inFlight, dueAt: record.nextPollAt, gapDetected: store.clock.now() - Date.parse(record.nextPollAt) >= pollIntervalMilliseconds(record) });
     }
   }
   return due;

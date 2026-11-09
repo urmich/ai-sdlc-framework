@@ -25,6 +25,141 @@ API read returned `enabled: true`. The earlier disabled observation remains
 historical. No report was submitted; setting readback alone does not complete
 the newcomer walkthrough or change T-PRD050 from NotRun.
 
+**Historical primary PR #21 integration status:** The candidate integrating actual SDK main
+`09499701af20b05ff2415be616e296b016303199` into primary
+`470e1d8acf69258660c2423f32b83fab1f7c11f0` is new and unvalidated. All 99
+canonical case projections remain NotRun with no borrowed SDK/main execution
+credit; prior executions and failures remain immutable under their original
+identities. Candidate-bound local validation and built-in Copilot `/review`
+remain required before the next publication, followed by the complete applicable
+native/trusted PR checks and separately authorized release obligations.
+This integration covers F01/F02/F03/F05/F06/F13 only; F07-F12 remain deferred,
+and F04/provider-administration actions are not included.
+
+**Local SDK14 bridge cycle:** Integrate reviewed source
+`de5a392ff372e47224699c36ad014f516b3fa79e` with primary
+`a37baa500a2d2e99c91c235413af85d5005e6fd8`, preserving prior execution/review
+originals as history. Freeze the exact new commit/tree and raw Git bindings
+before the Node-only critical command (16 units plus 11 roots, once), then static
+checks. Subsequently run the existing 27 safe native roots, actual-CI root,
+all 34 controlled observer roots and four Node-only T-PRD028 preflight roots.
+Independent native4/CI1/observer4 processes use distinct owned outputs (nine
+aggregate slots); the preflight batch is separate. Require complete originals,
+zero unexpected skips/cancellations/failures, unchanged source and owned cleanup.
+Parent performs built-in Copilot `/review` separately on the complete main delta.
+No hosted, native, provider, release or 99-case acceptance is supplied by these
+local controls; all canonical statuses remain NotRun.
+
+**Local SDK15 integration cycle:** The new primary candidate normally merges
+SDK15 `6c4d23ed20131e2a798082a7786445b6066b8298` into primary
+`942f5d1df05b4c9f4e0d6e682ab998eed2246ec8`, without transferring either
+source's execution or Review credit. Freeze its commit/tree, every tracked raw
+input and owned Node 24.20.0 before the protected-host sequence: critical with
+five workers (the canonical unit stage occurs once), static checks, one combined
+five-worker targeted selection of `github-transport.unit.test.mjs`,
+`public-readiness-native.test.mjs` and `public-readiness-observer.test.mjs`,
+then the exact existing actual-CI root:
+`T-PRD020 actual CI schedules twenty-five producer parts behind both Intel unit jobs and distinguishes edited base retargets`.
+Capture original streams, exits and `SDLC_TEST_REPORT_FILE` reports from the
+first executions in the owned worktree. Preserve any failure and verify final
+source/toolchain identity and owned cleanup. Alias regressions remain PR-only
+on all four platforms; critical retains its 27-root/27-assertion cap. These local
+controls grant no hosted/native, full 99-case, minimum-Node, release or Review
+credit; fresh whole-candidate built-in Review remains separate and NotRun.
+The first affected execution failed four existing T-PRD017 historical
+v11/v12/v13 roots because the independent triple-capsule reconstruction received
+post-alias source text. Keep that original Failed execution immutable. Restore
+only new alias additions before unchanged splices in both reconstruction paths,
+including the new single-capsule helper block in the triple-capsule native-test
+input. These existing PR-only roots provide the regression assertions; their
+capsules, digests, qualifiers and critical membership remain unchanged. A new
+commit resets current local projections to NotRun and receives the full
+unit-first protected-host sequence, not a flaky retry or borrowed pass.
+
+**Current SDK16 actual-main checkpoint:** Prepared normal merge
+`30b97e6ccf513865ab1fd67a3b956da505780d82`, tree
+`988555338c1aab9035c857669c2299afe15fdc4d`, integrated exact SDK source
+`a129d4b0399517b2c2f44c690ee17fd342f83eaa` with frozen primary
+`e9dddc2332604a4d9a24126be5f50cea6772eeda`. Actual accepted protected main is
+`d3305ef97e1a9d3f36895620f8aa8a3452026b90`, tree
+`13ddb9677b4fd06dad422a560e020b8e1c75a9d6`, with ordered parents
+`a1f5654b78d1e40c5e4e22e9f7a3e396905ca850` and
+`a129d4b0399517b2c2f44c690ee17fd342f83eaa`. Its normal ancestry-only merge
+preserves the prepared source; only the three canonical public-readiness
+documents change for the new context. Preserve primary's five
+additional registered tests together with every SDK correction and PR-only
+regression; derive the eventual required inventory from the final source,
+never from the old 7,761-tuple denominator. Both historical reconstruction
+paths restore only the new transport/observer/private-getter additions before
+their unchanged archived splices and exact source/inventory assertions.
+
+The prepared source's early critical27, static check, historical18,
+transport/privacy168, observer1 and source-safety34 results remain immutable
+early-only history: 248 assertions, not a final main-bound pass. Recovery
+returned BINDING/no token; no ACK, approval or managed credit is invented.
+All 99 canonical current acceptance projections remain NotRun.
+Freeze the final commit/tree, every tracked raw input and owned Node 24.20.0.
+Run critical27 first (canonical16 once, then 11 risks), then the Node-only
+static check. Use one combined five-worker, process-isolated targeted selection
+of the existing transport, native and observer files plus
+`github-acquisition-binding.unit.test.mjs` and
+`github-retained-identity-acceptance.test.mjs` for the complete coupled privacy
+closure. Then run the existing exact actual-CI and source-safety selections.
+Honor existing dependencies, minimum slots and exclusive resources within one
+aggregate five-slot test budget; do not multiply runner budgets or enable
+blanket callback concurrency. Retain complete original reporters, journals,
+streams, exits, final source/toolchain hashes and verified owned cleanup.
+No npm operation or protected-host workaround is part of this local checkpoint.
+Stop on an actual failure and preserve its first execution for the coordinator.
+Built-in whole-candidate Review and applicable primary native/trusted PR checks
+remain separate and NotRun until their own actual evidence exists; accepted
+SDK main and its runs supply no primary credit or publication authority.
+Retain Windows15/15/15/7, current Mac7/Intel4 execution/planning, pinned Node
+24.20.0 and the owner-deferred under-25-minute Intel timing target.
+Timing deferral never supplies a passing result or waives correctness,
+cleanup, provenance or credential protection. Community-guardrail acceptance
+remains deferred and NotRun.
+
+**Current Mac admission deadline determinism cycle:** SDK-main run
+`42606641576`, attempt 1, job `129124952854` failed T-PRD014-MA at assertion
+`2b173c3209f0e45fe028b5aa183b8dbe990fd28df8f129eafba7b91b1f3a9630`
+(`0 !== 1`). Preserve its original log SHA-256
+`f463979c4f66d9cd017d1b732d1eb131f8ceb7eb6ae367e186fb0c88d9d60f13`.
+The inherited root `T-MACADM010 cancellation and the overall deadline interrupt in-flight synthetic HTTP without admission`
+overrode the adapter's virtual clock with real elapsed time, so scheduler delay
+could correctly expire the deadline before the first synthetic request.
+An owned isolated fixture reproduced that failure with a controlled 11 ms
+pre-request clock advance. Remove only the root's real-clock override:
+the existing virtual clock holds pre-request checks at zero, while production's
+owned real timer still aborts the entered pending request. Preserve both modes,
+the exact cancellation/timeout codes, null observation, one-request assertion
+and original deadlines; production admission behavior is unchanged.
+
+This existing network-free root remains PR-only on all four native platforms,
+owned by the Mac admission controls, with one process slot, no prerequisites
+and no shared external resources. It is not promoted into critical27.
+Preserve both authentic historical source reconstruction paths and all immutable
+capsules, digests and qualification assertions. The first early historical
+selection retained 13 failures out of 18: removing this line also changed the
+archived admission-test reconstruction and its complete inventory. Restore that
+one line only in both in-memory historical inputs before their unchanged
+splices, and remove the added restoration text from reconstructed self-source.
+Do not restore the real-clock override in the live test or change any archived
+Git bytes, capsule, count, digest or assertion. Preserve the failed originals.
+Freeze a new commit/tree,
+all 352 raw tracked inputs, native definition inputs and owned Node 24.20.0.
+Run critical27 (canonical16 once, then risk11), static checks, the existing
+combined transport/native/observer/privacy closure, exact actual-CI root and
+source-safety selection, plus this exact affected root once, within the existing
+aggregate five-slot process-isolated budget. Retain first-execution originals,
+complete reporters/journals, source identities and verified cleanup.
+The prior `e295ff7e3e967facdefa1d806652a1efc82cec1f` local checkpoint and Review
+stay historical; changed source requires fresh local validation and separate
+whole-candidate built-in Review. All 99 canonical current statuses, primary
+native/trusted validation, community acceptance and release acceptance remain
+NotRun. Recovery remains BINDING/no token and unmanaged; no provider action,
+publication permission or new requirement is supplied by this test repair.
+
 ## 1. Scope and execution status
 
 This is the one living Test Plan for `wi-public-readiness`, artifact
@@ -190,7 +325,7 @@ descendant and Windows termination controller or POSIX observation query.
 The existing admission regression uses that real source selection: three slots
 must reject before callback dispatch, while four admit the complete group.
 Retain every strict process-absence, cancellation, sanitization, journal and
-stop-race assertion and the current stop deadline: five seconds on Windows,
+stop-race assertion and the current platform settlement deadline: five seconds on Windows,
 one second on POSIX. Correcting this
 under-reservation does not establish the cause of an earlier native failure or
 grant a current native correctness or timing pass.
@@ -199,7 +334,7 @@ controller/root completion orders and timeout/error paths. Require bounded
 dispatch/event observations and the immutable pre-cleanup snapshot in both the
 final report and durable journal; unobserved events stay null and caller source,
 arguments and secrets stay absent. Preserve real cancellation, strict root
-closure, the five-second Windows stop bound and every original failure outcome.
+closure, the five-second Windows settlement bound and every original failure outcome.
 Passing diagnostics do not attribute the historical C18 timeout or prove native cleanup.
 Run the Windows VM root with POSIX path composition and without error-stack
 labels. Both controlled variants must preserve the exact backend, flags, PID,
@@ -274,8 +409,11 @@ establishes their causes; diagnostic changes do not claim to fix those causes.
 
 The original Windows capture/cancellation root additionally observes the actual
 `taskkill.exe` spawn without changing that invocation, the production backend or
-its current five-second Windows stop budget. Before creating the controller or
-command, an optional owned PowerShell 5.1 observer compiles a small C# bridge inside its new
+its immediate stop dispatch. Windows termination settlement allows five seconds;
+POSIX retains one second. This bounded wait still requires affirmative closure
+and never converts a timeout into successful cleanup. Before creating the
+controller or command, an optional owned PowerShell 5.1 observer compiles a small
+C# bridge inside its new
 repository-local compiler directory. The isolated controller atomically publishes
 only the dispatched PID and original spawn-event UTC bound to the observer's
 nonce-owned request. Neither observation nor publication is awaited by the
@@ -286,6 +424,78 @@ creating any controller/command; unknown startup lifetime fails without creating
 additional processes. PowerShell closure alone never proves compiler settlement.
 Complete the original root/controller cleanup before awaiting observer
 finalization, so diagnostics add no delay before existing fixture cleanup.
+
+The same maintainer-owned, five-slot Windows PR root uses
+`test/command-capture-controller.mjs` to retain original process handles through
+cleanup. Controlled cases require controller close before owned-root cleanup,
+one stop when a stop is refused, and refusal of removal on unsettled closure.
+Keep the original failed outcome and diagnostics; cleanup completion is not
+passing cancellation. Preserve immediate stop dispatch, the platform production
+settlement bounds and all original
+native, journal, redaction and closure assertions. No critical promotion or
+new native-positive substitute is introduced.
+
+The existing PR-only T-PRD020/T-PRD022 workflow controls verify the exact
+job-level worker-request expression against the closed source shard identities.
+Historical fixtures retain their literal worker budgets; no matrix/parser
+extension is introduced. Locate the actual source-derived complete cancellation
+owner; fallback after changed source qualification may legitimately change its
+body assignment rather than retain the historical contention-limited owner.
+Windows body-3 requests seven slots to admit its complete source-derived
+selection, including six- and seven-slot roots; other Windows parts retain
+fifteen. The T-PRD020 control checks every selected group's declared demand
+against its literal owning seven- or fifteen-slot request. Retain the independent
+body-3 whole-group seven-slot capacity check and five-slot BUDGET rejection with zero
+dispatch. The existing T-PRD020 failing regression also requires production
+fallback to filter candidate partitions by every root's demand in each complete
+dependency/resource-connected component. Keep the fourteen-slot `T-51` npm-denied
+lifecycle root on an eligible literal fifteen-slot Windows owner, never
+seven-slot body-3. Affinity coassignment must fit the actual destination's
+capacity; no eligible owner means BUDGET before any dispatch. Preserve the whole
+component, all assertions, reservations, watchdogs and literal seven/fifteen-slot
+requests rather than weakening demand or enlarging a pool.
+The controlled scheduler must admit every group under the configured
+budget; these doubles grant no native execution credit. All twenty-five producers, thirty-four
+expanded jobs and thirteen Mac cleanup roles remain required. Preserve original
+main-attempt failures; this contention reduction is not full cancellation
+isolation or a proven hosted cure until fresh
+matching CI completes.
+
+Historical protocol controls reconstruct the original literal Windows budget
+before checking the unchanged archived workflow and admission-helper digests.
+The existing PR-only T-PRD016/T-PRD017 controls retain authentic historical
+primary anchors and SDK limits. Changed current source must instead prove
+unqualified fallback, complete disjoint root closures, actual source-derived
+SDK requirements and no borrowed timing or execution credit. A new root cannot
+inherit the frozen complete ownership vector.
+Compile the captured historical source text and require its original inventory
+digest and planner qualifiers before positive v11 pooling/SDK, v12 complete
+six-component transfer and seven-slot catalog-reservation controls. Keep the
+current-source fallback and mutation-negative controls separate; reconstructed
+fixture success is not current native execution or performance evidence.
+The existing four PR-only v13 reservation, v12 transfer and v11 pooling/
+authentication roots must also retain the exact archived monitor-test source
+after the economical-polling change. Restore its genuine Git blob in both
+105/315 reconstruction paths before unchanged capsule splices and inventory
+assertions; retain the old-candidate failures and current 300/legacy60 monitor
+controls. This adds no root or critical-budget growth.
+The current v11 fallback control must use `intelGitSourceInventory`, not the
+merged legacy single-v15/105-blob historical helper. Keep the authentic
+v11/v12/v15 triple-315 positive controls unchanged. Current Intel Crypto
+requirements follow the actual complete closure owning the authentic Sigstore
+root, not frozen v11 per-shard omissions. Authentic v11/v10 fixtures retain all
+three original anchors; current fallback binds the actual renamed
+`T-PRD020 RC66 CI01 current observer defers timing gates but still requires owned cleanup`
+root, its complete descendants and the original catalog/retained anchors.
+Require the changed current assertion identity instead of expecting the archived
+third anchor to remain in the current inventory.
+The earlier fixture expectation/selection corrections are not the full scope of
+this successor: it also repairs production resource-capacity-safe fallback and
+affinity placement. Neither changes immutable qualification
+models/identities/observed durations nor drops assertions, grows critical27 or
+supplies current execution credit. Keep the preceding candidate's local and
+PRD028 passes and native/CI failures immutable; the changed successor remains
+NotRun across all 99 canonical cases until its own required gates and Review.
 
 The observer pins original owner/target process handles once, then uses only
 handle-based image, creation/CPU/exit-time, wait and exit-code queries. Retain at
@@ -730,7 +940,7 @@ children. Require both first-pair provenance announcements before release;
 serial-execution mutation must fail this bounded overlap check. Drain every
 in-flight scope before surfacing cleanup failure, verify all six modes cleaned,
 and preserve the original cancellation, controller, persistence, owner and
-five-second backend and ten-second durable-I/O guard assertions. This changes
+platform settlement, five-second backend and ten-second durable-I/O guard assertions. This changes
 no native host capacity. The earlier twenty-second root and 1500ms guard are
 historical, superseded fixture baselines, not current checks.
 For atomic writer publication, advance the test clock while the writer is
@@ -766,7 +976,7 @@ for all root minimum slots before balancing; no eligible owner yields BUDGET.
 Affinity coassignment is bounded by the actual destination too. Other-platform
 allocations, historical cost/placement/qualifier models and both critical caps
 remain unchanged. Regenerate captured current helper/test splices only against
-the authentic single-v15/105 Git-blob capsule with its original source pins and
+the authentic single-v15/105 and distinct triple-315 Git-blob capsules with their original source pins and
 128-KiB decoded bound. Controlled local passes are not the complete 99-case
 acceptance or native/provider validation; current case statuses remain NotRun.
 The existing `authenticV14Workflow` reconstructs the current Windows matrix
@@ -914,7 +1124,10 @@ steps/assertions:
   record dispatching before one call, retain the actual handle and reconcile
   uncertainty before retry. Observe steps/results from the provider. Verify the
   exact accessible human run/attempt page independently of status polling.
-  Live runs get 60-second monitoring; report any host interruption/gap.
+  Observe live runs immediately, then use their stored polling interval
+  (300 seconds/five minutes by default for new monitors; existing records retain
+  their actual interval). Use lightweight status reads and report any host
+  interruption/gap or denied read without automatically retrying denial.
 - **E - evidence admission:** generate real normalized execution evidence through
   the selected producer/public framework interface; independently establish
   candidate/spec/configuration/host/artifact identities; assert current credit
@@ -1310,6 +1523,25 @@ a Test Design/review responsibility.
 
 ### 5.2 Complete PR coverage, trust and provider enforcement
 
+The existing conditional-cache roots in `test/github-transport.unit.test.mjs`
+remain PR-only, Node-only, process-isolated and owned by `github-transport` on all
+four lanes. Reproduce the provider's 200 weak validator followed by a 304 strong
+validator with the same opaque tag, and the reverse transition. Preserve the
+original conditional request tag, cached body and observation version, without
+inventing a new observation time. Missing cache, different opaque tags, changed
+tag case and incompatible authorization/request contexts must still fail closed.
+These injected-response checks require no credentials or network and do not
+grow the critical profile. Actual hosted observer results remain separate.
+
+`T-PRD085 idle observer reconciliation completes without granting validation
+credit` in `test/public-readiness-ci.test.mjs` is maintainer-owned, PR-only,
+Node-only and process-isolated on all four existing native lanes. Its one-slot
+owned status fixture proves zero writes, retained `NotRun` and successful CLI
+completion only for completely acquired empty membership. Incomplete membership,
+diagnostics, failed results, required conversation work and blocked current PRs
+remain non-passing. Existing shared-key, pagination, capacity and publication
+race controls remain required; neither critical cap grows.
+
 The three maintainer-owned T-PRD027 roots in
 `test/public-readiness-observer.test.mjs` cover AC-205.1/AC-205.4:
 
@@ -1331,8 +1563,9 @@ The original pre-fix recovery failure and later focused outcomes retained under
 `.test-data/observer-ruleset-regression` remain immutable fixture history, not
 current whole-candidate, native or provider-enforcement acceptance. All 99
 canonical cases remain NotRun pending the separately frozen required checks.
-This branch retains its authentic single-v15/105-blob historical capsule;
-changed observer/specification inputs require source-bound regeneration and
+Primary retains both its authentic single-v15/105-blob and distinct
+v11/v12/v15 triple-315 historical capsules; changed observer/specification inputs
+require source-bound regeneration and
 fresh validation, never rewritten historical identities or borrowed credit.
 
 `T-PRD018 rejected failure diagnostics retain only closed error and owned phase
@@ -1348,6 +1581,16 @@ evidence and fatal opaque-event rejection. TOOL02 adds observed mode/phase facts
 to its original error only on failure; all six real modes, assertions, five-slot
 allocation, deadlines and cleanup remain unchanged. No critical promotion,
 historical Intel-cause claim or native pass follows from these diagnostic tests.
+
+The existing PR-only `T-PRD018 Windows termination observations durably
+distinguish dispatch and original handle settlement without exposing caller
+data` VM root keeps all ten scenarios and its ten-second outer watchdog on all
+four lanes. Its controlled clock must model the five-second Windows settlement
+budget, including dispatch that consumes that budget. Drive active settlement
+drain timers while leaving passive progress checkpoints idle, and settle both
+owned handles during failed-assertion teardown. Preserve dispatch, privacy,
+event-ordering and fail-closed assertions; no production deadline, critical
+membership or real-native cleanup credit changes.
 
 The maintainer-owned, PR-only `T-PRD018 native failure annotations escape
 workflow-command injection without changing the underlying failure` root also
@@ -1391,6 +1634,11 @@ Distinguish a stopped fresh connection from actual duplicate allocation without
 changing the BUDGET code or allowing queued work to start.
 The controlled marker/spawn instrumentation remains process-local,
 Node-only and one-slot, with no critical promotion or native execution credit.
+The same controlled readiness root uses barriers to reproduce concurrent
+compiler-settlement refreshes and delayed ENOENT. Verified `notStarted`/settled
+proof cannot be downgraded to `missing`/settled; invalid or missing proof remains
+unsettled, and later valid proof can refine it. Preserve the separate real
+release-before-compiler root and its exact receipt assertion.
 The new maintainer-owned `T-PRD018 Windows observer release before compiler
 dispatch proves no writer and graceful owned cleanup` root is PR-only on
 Windows x64 with two slots and no added dependencies. Use owned observer paths
@@ -1408,12 +1656,18 @@ guard plus command-clock accounting. Assert the actual 5,000ms Windows backend
 budget, separately from that guard. Keep all six modes, the five-second preparation
 bound, 60,000ms root timeout, five-slot declaration and owned writer/controller/
 retention cleanup proofs. For a stalled stop, require the durable uncertain
-cancelling checkpoint with `STOP_TIMEOUT` before releasing the final-report
-writer; finalization must await its write. Release that writer and the owned
-descendant barrier in cleanup. The earlier one-second Windows production stop,
+cancelling checkpoint with `STOP_TIMEOUT`/watchdog facts while the final-report
+write is blocked, and prove the command has not returned. Finalization must await
+that write. Release the writer and owned descendant barrier in `finally`, then
+await retention and require the original single stop and all six cleanups.
+Keep the cold preparation clock offset unchanged during cancellation, immediate
+production dispatch and POSIX's one-second settlement. Neither the guard nor
+preparation changes T-PRD018's separate 1500ms diagnostic capture contract.
+The earlier one-second Windows production stop,
 1500ms guard and twenty-second root are superseded baselines; their original
-executions and claims remain historical. Neither servicing nor fixture success
-establishes a sole cause or fresh hosted cure.
+hosted and local failures remain historical. Observed local flush latency,
+servicing and controlled fixture success establish neither a sole hosted cause
+nor fresh native CI credit.
 
 `T-PRD018 native timing notices retain only ten source-bound actual group and
 root durations` in `test/public-readiness-native.test.mjs` is maintainer-owned,
@@ -1532,7 +1786,7 @@ capability, shared resource or critical assertion is introduced.
 
 | ID | Environment | Level | Checkpoint | Mode | Owner | Location | Requirements | Observe or assert | Implementation | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| T-PRD028 | local | unit | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.1 | F: missing/wrong destination, version/tag/source, toolchain, required setting or trust authority fails preflight with exact reason before any fake irreversible call is made. | test/release-ci.test.mjs#T-PRD028 | NotRun | |
+| T-PRD028 | local | unit | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.1 | F: wrong destination/version/source/ref/caller/trust fails before publication. A normal read-only fake API forbids collaborator, classic-protection and ruleset audit endpoints; successful preflight fabricates no actor-permission fact. Missing/denied/malformed/private/drifted source or protected-main facts reject. Native alone cannot replace three successful framework source statuses or one exact accepted merged-PR head; missing/failing/ambiguous/foreign merge proof rejects and fresh R-PRE remains required. GitHub owns permissions/approvals/branch enforcement. Four independent complete roots remain PR-only, one slot each with no shared resources or prerequisite roots, Node >=22 on all four native platforms; critical27 unchanged. | test/release-ci.test.mjs#T-PRD028 | NotRun | |
 | T-PRD029 | local | integration | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.2 | F: build independent comparison artifacts, seal only after all exact native gates, and pass the same digest-bound bytes to both publisher fixtures; changed/repacked/swapped data is rejected. | test/release-ci.test.mjs#T-PRD029; four-native-profile, original NDJSON data-only transport and acyclic sealed-handoff assertions all required | NotRun | |
 | T-PRD030 | local | integration | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.3 | F: drive orchestration with fixture provider outcomes; successful publication schedules exact saved-ID acceptance automatically; missing public assets/acceptance handle yields incomplete release, not success or a manual-only hidden step. | test/release-ci.test.mjs#T-PRD030 | NotRun | |
 | T-PRD031 | local | unit | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.4 | F: reject PR events, wrong caller/environment/source, missing OIDC and token fallback; approved token-free exact caller gets only its declared publishing permissions. | test/npm-oidc.test.mjs#T-PRD031 | NotRun | |
@@ -1632,6 +1886,21 @@ The additional `test/public-readiness-observer.test.mjs#T-PRD085` selector
 exercises same-head metadata deletion independently of complete matching native
 fixture evidence through the actual API-only observer boundary.
 
+The PR-only T-PRD085 roots `status publication readback recovers visibility
+without replaying writes`, `status publication readback rejects ambiguous effects
+and preserves source invalidation`, `status publication readback respects denial
+rate timing deadlines cancellation and privacy`, and `status history acquisition
+carries cancellation across every SDK page` in `public-readiness-ci.test.mjs`
+use independent in-memory providers and injected clocks/waits (no real network,
+sleeps or global timer patches). Cover accepted/lost replies with delayed
+visibility, permanent absence, duplicate/wrong IDs, foreign latest rows, wrong
+targets, source changes, incomplete histories, rate/reset timing, denial,
+deadline/cancellation and secret/getter-safe diagnostics. The last root exercises
+the actual SDK pagination cancellation boundary. These do not grow critical27;
+their complete hosted/candidate-bound checkpoint remains NotRun until executed
+for the final combined candidate. A controlled old-source failure and focused
+iteration pass do not establish the historical a2 cause or release acceptance.
+
 ### 5.9 Independent projects and sustained professional structure
 
 | ID | Environment | Level | Checkpoint | Mode | Owner | Location | Requirements | Observe or assert | Implementation | Status | Evidence |
@@ -1665,8 +1934,14 @@ boundary root retains historical strict/inclusive limits and rejects malformed
 or incomplete timing tuples. These process-isolated assertions require no
 network, credentials or native tools and add no critical selectors or budget.
 The existing PR-only native v8-v10 compatibility and settlement roots reconstruct
-their observer source from the same authenticated single-v15 capsule; current
-observer edits must not rewrite historical source digests, costs or qualifiers.
+their observer source from primary's authentic v11/v12/v15 Git-blob capsule:
+315 blobs, 105 per captured historical source. Retain each source's independently
+authenticated inventory, workflow, observer, callback/resource closures, literals
+and SDK envelopes before any qualified current-test splice. The SDK branch's
+distinct authentic single-v15/105-blob fixture must not replace primary's triple
+capsule. Current observer or allocation edits cannot rewrite historical source
+digests, costs, seven-worker ARM semantics or qualifiers, and fixture success
+does not establish current primary correctness or performance.
 The recorded Linux **460 seconds (7m40s)**, Windows **665 seconds (11m05s)** and
 Apple Silicon **627 seconds (10m27s)** are historical lane measurements, not
 current delivery limits or new stretch targets.
@@ -1718,16 +1993,18 @@ is 25 minutes; a still-active lane at that cutoff cannot pass the strict timing
 limit, but its original run must settle naturally. This changes no command watchdog,
 owned-process settlement allowance, assertion, iteration or durability boundary.
 
-For the next PR measurement, explicitly request the native hosts' observed
+The earlier PR measurement requested the native hosts' observed
 memory-bounded shared worker allocations: Linux/Windows 15, Apple Silicon 7,
 four CPU-matched slots on both Intel unit hosts and fourteen slots on Intel
-regression hosts. Keep the two-unit topology, case union and all other selected
-allocations unchanged for this comparison: the four-slot regression trial did
+regression hosts. Those are historical comparison inputs, not current ARM
+body/refresh requests, which are fourteen; ARM units remain seven and current
+Windows body-3 requests seven while other Windows roles retain fifteen.
+Keep the two-unit Intel topology and complete case union. The four-slot regression trial did
 not complete before the cutoff. Do not claim a whole-lane speedup before complete
 hosted results.
 Treat v7 cost overlays and ARM resource affinity as scheduling hypotheses, not
-matched current measurements. Preserve original root closures, the seven-slot
-ARM allocation and the retained-minimum-four/catalog-minimum-one demands; no
+matched current measurements. Preserve their original root closures, historical
+seven-slot ARM allocation and retained-minimum-four/catalog-minimum-one demands; no
 projected saving or sum of overlapping group durations can satisfy a lane cap.
 V10 primary-first admission corrects request eligibility and arrival priority,
 not the catalog's service duration. New-source local, Review and native
@@ -2190,7 +2467,9 @@ the original subset. A new legitimate test must not erase preservation checks.
    nineteen complete causal protocol/bootstrap rows and append v10 as row twenty;
    no historical row or required descendant may disappear. These controls supply
    no native timing credit: the qualified move still requires fresh whole-lane
-   correctness and strict Intel under-twenty-five-minute acceptance.
+   correctness and a separate strict Intel under-twenty-five-minute timing
+   measurement. The owner defers elapsed targets as current correctness gates,
+   not their diagnostic false verdicts or historical interpretation.
    Historical v11 replaces primary phase isolation with the authenticated
    `native-intel-parallel-ready-pool-v1` rule and ordinary `regression` stage.
    Verify `nativePlacementCostsV11` and `nativePlacementReadyPoolV11` against
@@ -2289,12 +2568,14 @@ the original subset. A new legitimate test must not erase preservation checks.
    the real v14/bootstrap twenty-fourth causal row. All twenty-five producers,
    thirteen Mac cleanups, fourteen-slot Intel bodies, four-slot units and the
    twenty-seven critical budget remain unchanged.
-   V15 qualification binds the exact current inventory, callbacks, resource
+   V15 qualification binds its exact original inventory, callbacks, resource
    closures and selected SDK destinations to final C81 source
    `51de4c9ff6a62c655dede580d8328eb6e9ea47c8` ownership. Preserve all original
    component owners and non-Intel selections without estimating new durations:
-   all 1,016 current body service costs remain unmeasured. The current inventory
-   has 1,855 assertions and no additional body group. Preserve all thirteen
+   all 1,016 body service costs in that captured source remain unmeasured. Its
+   original inventory has 1,855 assertions and no additional body group; derive
+   the new integrated primary inventory independently rather than borrow those
+   counts or qualification. Preserve all thirteen
    historical placement literal JSON texts and genuine v14 source qualification,
    including its original reservation, parallel plan and six transfers.
    Keep the complete real catalog with only its unused caller-authored report
@@ -2595,10 +2876,21 @@ PR; it does not exempt CI or conversation resolution. A resolved thread is not
 an approval, and an approval is not evidence that all threads are resolved.
 This defines test expectations, not authority to apply provider settings.
 
+The current owner policy permits zero bypass actors, including no PR-only
+administrator exception. GitHub enforces normal merge permissions, approvals
+and protections; release preflight does not independently audit actor lists or
+reconstruct protection schemas. For RC, retain the strict Native producer check
+from App `15368`; restore the three framework branch-protection guards after RC.
+Neither that deferral nor provider enforcement replaces successful independent
+release-source validation/approval/coverage or fresh native release evidence.
+
 Read actual applicable branch/ruleset/review/check settings, including inherited
-rules and bypass actors. Establish repository identity and exact required check
-contexts. Do not apply or probe writes until the user authorizes the proposed
-settings and exact disposable PR/ref consequences.
+rules, for these separately authorized provider procedures, not as an additional
+release CI audit. Establish repository identity and exact required check contexts.
+Unavailable hidden fields are not inferred empty or called independently verified.
+Do not apply or probe writes until the user authorizes the proposed settings
+and exact disposable PR/ref consequences. Actual provider/release acceptance
+remains NotRun until the corresponding procedures execute.
 
 On approved non-production fixtures, independently exercise failing, missing,
 cancelled, skipped and stale checks, external missing/stale review, and owner
@@ -2766,6 +3058,19 @@ not mean the repository is flawless, attractive to every reader or publicly
 ready; the source-linked published walkthrough remains separate.
 
 ### 10.2 Primary-reference and published-experience assessment
+
+For the current README correction, verify four truthful value bullets, immediate
+placement of the existing explanatory image, release-neutral framework guidance
+linked to repository Releases, and source/doc evidence for each capability row.
+Distinguish framework work-item recovery and evidence from host-agent chat/session
+restoration and external review, monitoring and delivery execution. Required
+runtime constraints and historical release documents are not removed merely to
+make README version-neutral.
+The existing Node-only, PR-only T-PRD049 reader-contract root accepts the
+version-neutral README, requires its repository Releases route and rejects
+even a current package-version pin. Keep stale-version checks for explicit
+supported-release documents, the Node/platform contract and all existing
+claim mutations. No critical expansion or npm capability substitution occurs.
 
 T-PRD089 uses the five immutable reference revisions and adoption matrix in
 Requirements. For each selected practice, inspect its cited primary file and

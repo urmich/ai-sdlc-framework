@@ -19,6 +19,13 @@ merely because CI is green. Source workflows and this policy do not prove
 effective GitHub rules; verification/settings changes need separate owner
 authority and provider capability.
 
+The owner retains a deliberate administrator override for a particular PR,
+without repeatedly changing global rules. Normal validations still apply to
+owner and contributor PRs alike. Only a PR-only capability is intended, not
+always-allow access; an agent needs explicit direction for the particular PR.
+A bypass never changes failed/missing test results into passing release evidence
+or grants publication authority.
+
 ## Ownership declarations and external controls
 
 This document declares responsibility, not an automatically enforced CODEOWNERS

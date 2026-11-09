@@ -82,8 +82,8 @@ export function createReadinessGitHubClient({
     }
     return capture.body;
   };
-  const list = async (relative, field) => {
-    const acquired = await transport.paginateRest(request(relative));
+  const list = async (relative, field, options = {}) => {
+    const acquired = await transport.paginateRest(request(relative), options);
     requireThat(acquired.pagination.complete === true, 'PROOF_GAP', 'Required API pagination is incomplete');
     return acquired.pages.flatMap(page => {
       requireGitHubCapture(page, connection);

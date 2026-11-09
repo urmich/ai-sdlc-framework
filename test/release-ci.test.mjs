@@ -13,6 +13,14 @@ export const validationDeclarations = {
       "minimumSlots": 1, "exclusiveResources": []}
   ],
   "applicability": [
+    {"names": [
+      "T-PRD028 preflight rejects wrong source, destination, settings and trust before any publication mutation",
+      "T-PRD028 preflight relies on GitHub authorization without administration policy reads",
+      "T-PRD028 preflight rejects unavailable protected-main and source facts without publication",
+      "T-PRD028 GitHub branch enforcement cannot substitute for successful release source checks"
+    ], "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer",
+      "reason": "PR-only release-preflight identity, trust and source-evidence regressions; independent root processes forbid administration/permission policy reads and use read-only fake GitHub facts, never packaging, provider writes or critical-profile promotion.",
+      "prerequisites": ["Node >=22", "Read-only source package/workflow configuration; no npm, credentials or network"]},
     {"options": "{skip:packagePrerelease?'Stable Homebrew publication metadata is not generated for prereleases':false}", "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Stable-channel formula negatives remain required; a prerelease source cannot silently waive this declared profile.", "prerequisites": ["Stable source version for the required Homebrew release profile"]},
     {"options": "{skip:packagePrerelease?'Stable Homebrew acceptance is not applicable to prereleases':false}", "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Controlled public-consumer adapter tests do not substitute for actual later native consumers.", "prerequisites": ["Stable source version for the required Homebrew release profile"]}
   ],
@@ -162,8 +170,8 @@ const repository = NPM_TRUST.repository;
 const sourceCommit = 'a'.repeat(40);
 const releaseIntentId = 'unit-fixture-release-not-provider-proof';
 const candidateBaseUrl = 'http://127.0.0.1:8765/';
-const packagePrerelease = isPrerelease(
-  JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8')).version);
+const packageVersion = JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
+const packagePrerelease = isPrerelease(packageVersion);
 
 function fixtureFormula(descriptor, { mode = 'stable', candidateBaseUrl } = {}) {
   const base = mode === 'candidate' ? candidateBaseUrl :
@@ -274,7 +282,8 @@ const sealBundle = options => sealProductionBundle({ ...options, sourceCommit, r
 const verifyBundle = options => verifyProductionBundle({ ...options, verifyEvidence: unitNativeVerifier });
 
 test.beforeEach(async context => {
-  if (context.name === 'T-PRD057 two archive targets retain four mandatory native execution platforms without Linux standalone support') return;
+  if (context.name.startsWith('T-PRD028 ') ||
+      context.name === 'T-PRD057 two archive targets retain four mandatory native execution platforms without Linux standalone support') return;
   fixtureSetup ??= prepareReleaseFixture(context);
   await fixtureSetup;
 });
@@ -1751,6 +1760,28 @@ test('postpublication Homebrew acceptance uses an isolated pinned workspace pref
 });
 
 test('T-PRD028 preflight rejects wrong source, destination, settings and trust before any publication mutation', async () => {
+  const f = releasePreflightFixture();
+  const environment = f.environment;
+  for (const invalid of [
+    { repository: '' }, { sourceCommit: 'f'.repeat(40) }, { version: '999.0.0' },
+    { environment: { ...environment, GITHUB_EVENT_NAME: 'pull_request' } },
+    { environment: { ...environment, GITHUB_REF: 'refs/heads/other' } },
+    { environment: { ...environment, GITHUB_WORKFLOW_REF: `${repository}/.github/workflows/other.yml@refs/heads/main` } },
+    { environment: { ...environment, RELEASE_REPOSITORY: '' } },
+    { environment: { ...environment, NPM_TRUSTED_PUBLISHER_CALLER: 'other.yml' } },
+    { environment: { ...environment, NPM_TRUSTED_PUBLISHER_ENVIRONMENT: 'other' } },
+  ]) await assert.rejects(f.run(invalid));
+  assert.equal((await f.run()).status, 'Passed');
+  assert.ok(f.calls.every(call => !call.method), 'Preflight must never dispatch an irreversible effect');
+});
+
+function releasePreflightFixture() {
+  const contexts = ['framework/validation', 'framework/approval', 'framework/coverage'];
+  const state = { source: { private: false }, responses: new Map(),
+    main: { protected: true, commit: { sha: sourceCommit } },
+    statuses: contexts.map(context => ({ context, state: 'success' })), pulls: [],
+    acceptedStatuses: contexts.map(context => ({ context, state: 'success' })) };
+  const calls = [];
   const environment = {
     GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/main',
     GITHUB_REPOSITORY: repository, GITHUB_SHA: sourceCommit, GITHUB_ACTOR: 'fixture-maintainer',
@@ -1760,35 +1791,105 @@ test('T-PRD028 preflight rejects wrong source, destination, settings and trust b
     NPM_TRUSTED_PUBLISHER_ENVIRONMENT: 'npm', SUPPORTED_PREVIOUS_VERSION: '0.3.0',
     SUPPORTED_PREVIOUS_DESCRIPTOR_SHA256: 'b'.repeat(64), SUPPORTED_PREVIOUS_CHECKSUMS_SHA256: 'c'.repeat(64),
   };
-  const contexts = ['framework/validation', 'framework/approval', 'framework/coverage'];
-  let wrongProtection = false;
-  const calls = [];
   const api = async (route, options = {}) => {
     calls.push({ route, ...options });
-    if (route.endsWith('/permission')) return { status: 200, value: { permission: 'maintain' } };
-    if (route.endsWith('/branches/main/protection')) return { status: 200, value: {
-      required_status_checks: { strict: !wrongProtection, contexts }, required_pull_request_reviews: {},
-      required_conversation_resolution: { enabled: true }, enforce_admins: { enabled: true },
-      allow_force_pushes: { enabled: false }, allow_deletions: { enabled: false } } };
-    if (route.endsWith('/branches/main')) return { status: 200, value: { protected: true, commit: { sha: sourceCommit } } };
-    if (route.endsWith('/status')) return { status: 200, value: { statuses: contexts.map(context => ({ context, state: 'success' })) } };
+    assert.equal(options.method, undefined, 'Preflight must never invoke a mutation or bypass');
+    assert.doesNotMatch(route, /\/(?:collaborators|rules|rulesets)\/|\/protection(?:\/|$)/u,
+      'GitHub authorization and branch policy must not require a separate release audit');
+    if (state.responses.has(route)) {
+      const response = state.responses.get(route);
+      if (response instanceof Error) throw response;
+      return response;
+    }
+    const prefix = `/repos/${repository}`;
+    if (route === prefix) return { status: 200, value: state.source };
+    if (route === `${prefix}/branches/main`) return { status: 200, value: state.main };
+    if (route === `${prefix}/commits/${sourceCommit}/status`) return { status: 200, value: { statuses: state.statuses } };
+    if (route.endsWith('/status')) return { status: 200, value: { statuses: state.acceptedStatuses } };
+    if (route.includes(`/commits/${sourceCommit}/pulls?`)) return { status: 200, value: state.pulls };
     if (route.endsWith('/environments/npm')) return { status: 200, value: { protection_rules: [] } };
     if (route.includes('/actions/artifacts?')) return { status: 200, value: { artifacts: [], total_count: 0 } };
     if (route.includes('/git/ref/')) return { status: 404 };
-    return { status: 200, value: { private: false } };
+    throw new Error(`Unexpected fake provider read: ${route}`);
   };
-  const input = { sourceCommit, version: payload.version, repository, releaseIntentId, environment };
+  return { state, calls, environment,
+    run: (overrides = {}) => preflightRelease({ sourceCommit, version: packageVersion, repository, releaseIntentId,
+      environment, ...overrides },
+      api, async () => null) };
+}
+
+test('T-PRD028 preflight relies on GitHub authorization without administration policy reads', async () => {
+  const f = releasePreflightFixture();
+  const result = await f.run();
+  assert.equal(result.status, 'Passed');
+  assert.deepEqual(result.sourceAcceptance, { kind: 'exact-source-statuses', revision: sourceCommit });
+  assert.equal(Object.hasOwn(result, 'actorPermission'), false, 'Do not fabricate an independently inspected actor permission');
+  assert.equal(result.trustedPublisherAuthentication, 'NotRun');
+  assert.equal(result.irreversibleEffects, 'NotRun');
+  assert.ok(f.calls.every(call => !call.method));
+});
+
+test('T-PRD028 preflight rejects unavailable protected-main and source facts without publication', async () => {
+  for (const [name, mutate] of [
+    ['private source', f => { f.state.source.private = true; }],
+    ['unknown public source', f => { delete f.state.source.private; }],
+    ['malformed source', f => { f.state.source = null; }],
+    ['unprotected main', f => { f.state.main.protected = false; }],
+    ['unknown protection', f => { delete f.state.main.protected; }],
+    ['malformed main', f => { f.state.main = null; }],
+    ['changed main', f => { f.state.main.commit.sha = 'c'.repeat(40); }],
+    ['unknown main identity', f => { delete f.state.main.commit; }],
+    ['missing main', f => { f.state.responses.set(`/repos/${repository}/branches/main`, { status: 404 }); }],
+    ['denied main', f => { f.state.responses.set(`/repos/${repository}/branches/main`, new Error('Fake HTTP 403')); }],
+    ['unavailable source status', f => { f.state.responses.set(`/repos/${repository}/commits/${sourceCommit}/status`,
+      new Error('Fake status read failure')); }],
+    ['private destination', f => { f.state.responses.set('/repos/fixture/destination', { status: 200, value: { private: true } }); }],
+  ]) {
+    const f = releasePreflightFixture();
+    mutate(f);
+    const overrides = name === 'private destination' ? { repository: 'fixture/destination',
+      environment: { ...f.environment, RELEASE_REPOSITORY: 'fixture/destination' } } : {};
+    await assert.rejects(f.run(overrides), undefined, name);
+    assert.ok(!f.calls.some(call => call.route.includes('/actions/artifacts?')), name);
+  }
+});
+
+test('T-PRD028 GitHub branch enforcement cannot substitute for successful release source checks', async () => {
+  const f = releasePreflightFixture();
+  f.state.statuses[0].state = 'failure';
+  await assert.rejects(f.run(), /required current source status is non-passing/u);
+  f.state.statuses = [{ context: 'Native producer completeness', state: 'success' }];
+  await assert.rejects(f.run(), /one accepted protected-main merge record/u);
+  const merged = { number: 123, merged_at: '2026-11-06T00:00:00Z', base: { ref: 'main' },
+    merge_commit_sha: sourceCommit, head: { sha: 'b'.repeat(40) } };
+  f.state.pulls = [merged];
+  const accepted = await f.run();
+  assert.deepEqual(accepted.sourceAcceptance, { kind: 'accepted-protected-main-merge', revision: sourceCommit,
+    pullRequest: 123, acceptedHead: 'b'.repeat(40), releaseNativeCredit: 'NotRun-fresh-R-PRE-required' });
+  const missing = f.state.acceptedStatuses.pop();
+  await assert.rejects(f.run(), /Accepted merge lacks/u);
+  f.state.acceptedStatuses.push(missing);
+  f.state.acceptedStatuses[0].state = 'failure';
+  await assert.rejects(f.run(), /Accepted merge lacks/u);
+  f.state.acceptedStatuses[0].state = 'success';
+  f.state.statuses.push({ context: 'framework/validation', state: 'failure' });
+  await assert.rejects(f.run(), /required current source status is non-passing/u);
+  f.state.statuses = [];
   for (const invalid of [
-    { repository: '' }, { sourceCommit: 'f'.repeat(40) }, { version: '999.0.0' },
-    { environment: { ...environment, GITHUB_EVENT_NAME: 'pull_request' } },
-    { environment: { ...environment, RELEASE_REPOSITORY: '' } },
-    { environment: { ...environment, NPM_TRUSTED_PUBLISHER_CALLER: 'other.yml' } },
-  ]) await assert.rejects(preflightRelease({ ...input, ...invalid }, api, async () => null));
-  wrongProtection = true;
-  await assert.rejects(preflightRelease(input, api, async () => null), /Effective protected-main/u);
-  wrongProtection = false;
-  assert.equal((await preflightRelease(input, api, async () => null)).status, 'Passed');
-  assert.ok(calls.every(call => !call.method), 'Preflight must never dispatch an irreversible effect');
+    { merged_at: null }, { base: { ref: 'other' } }, { merge_commit_sha: 'd'.repeat(40) },
+    { head: { sha: 'invalid' } },
+  ]) {
+    f.state.pulls = [{ ...merged, ...invalid }];
+    await assert.rejects(f.run(), /one accepted protected-main merge record/u);
+  }
+  f.state.pulls = [merged, { ...merged, number: 124 }];
+  await assert.rejects(f.run(), /one accepted protected-main merge record/u);
+  f.state.pulls = [merged];
+  f.state.main.protected = false;
+  await assert.rejects(f.run(), /current accepted protected-main candidate/u);
+  f.state.main.protected = true;
+  f.state.main.commit.sha = 'c'.repeat(40);
+  await assert.rejects(f.run(), /current accepted protected-main candidate/u);
 });
 
 test('T-PRD030 successful publication preserves exact release IDs and schedules automatic saved-bundle acceptance', async t => {

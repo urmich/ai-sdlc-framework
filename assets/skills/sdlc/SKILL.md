@@ -57,7 +57,10 @@ than inventing a skill-specific shortcut.
 7. Attach reported pipelines without creating a work item or queueing another run.
    Record origin `user-reported` and its receipt. Obtain real run identity, check
    scheduler/read capability, claim the monitor and poll immediately. Verify the
-   provider web link independently; use a host recurring task every 60 seconds.
+   provider web link independently; use a host recurring task at the monitor's
+   stored interval (300 seconds/five minutes by default for new monitors;
+   existing records retain their actual interval). Use lightweight status reads,
+   avoid unchanged notifications and stop/report denied reads without automatic retries.
    Record observations and delivered notices; disclose interruption and retain
    terminal notices until delivered. Never infer tests or stage approval from it.
 8. Use `sdlc status` for current work and `sdlc check` for deterministic findings.

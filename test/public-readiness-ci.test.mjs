@@ -8,7 +8,12 @@ export const validationDeclarations = {
     {"root": "T-PRD018 tool processes retain failures, sanitized partial output and cancellation without surviving children", "dependsOn": [], "minimumSlots": 4, "exclusiveResources": []},
     {"root": "T-PRD020 actual CI schedules twenty-five producer parts behind both Intel unit jobs and distinguishes edited base retargets", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD022 actual workflow graph applies semantic YAML, effective permissions and immutable action policy", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
-    {"root": "T-PRD020 required source safety scans complete committed definitions before native bootstrap", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}
+    {"root": "T-PRD020 required source safety scans complete committed definitions before native bootstrap", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD085 idle observer reconciliation completes without granting validation credit", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD085 status publication readback recovers visibility without replaying writes", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD085 status publication readback rejects ambiguous effects and preserves source invalidation", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD085 status publication readback respects denial rate timing deadlines cancellation and privacy", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD085 status history acquisition carries cancellation across every SDK page", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}
   ],
   "applicability": [{
     "names": ["T-PRD018 tool processes retain failures, sanitized partial output and cancellation without surviving children"],
@@ -16,6 +21,23 @@ export const validationDeclarations = {
     "owner": "runner-resource-contract",
     "reason": "PR-only cancellation coverage reserves the worker, command, descendant and native stop/query controller. Existing cancellation, sanitation, original journal, process absence and controlled stop-race assertions remain unchanged; no critical promotion.",
     "prerequisites": ["Node and four aggregate worker slots; owned repository-local process fixtures; stock taskkill on Windows or ps on POSIX"]
+  }, {
+    "names": ["T-PRD085 idle observer reconciliation completes without granting validation credit"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "pr-status-coordinator",
+    "reason": "PR-only complete-empty membership regression distinguishes successful idle operation from validation evidence; incomplete acquisition, errors and blocked current PRs remain non-passing.",
+    "prerequisites": ["Node; in-process owned status fixtures without credentials, network or shared resources"]
+  }, {
+    "names": [
+      "T-PRD085 status publication readback recovers visibility without replaying writes",
+      "T-PRD085 status publication readback rejects ambiguous effects and preserves source invalidation",
+      "T-PRD085 status publication readback respects denial rate timing deadlines cancellation and privacy",
+      "T-PRD085 status history acquisition carries cancellation across every SDK page"
+    ],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "pr-status-coordinator",
+    "reason": "PR-only deterministic semantic readback, single-dispatch, source/current-row safety, privacy and actual SDK pagination cancellation; independent in-process fixtures, no shared timer patches or critical promotion.",
+    "prerequisites": ["Node; owned in-memory provider fixtures and injected clock/wait; no network, credentials, native tools or shared resources"]
   }]
 };
 import test from 'node:test';
@@ -45,14 +67,15 @@ import { nativePrParts, nativeLegacyPrParts, nativePartJobKey, nativeFrameworkSh
   nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol,
   nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
 import { compileValidationInventory } from '../scripts/validation-inventory.mjs';
+import { runValidationReadyPool } from '../scripts/test-scheduling.mjs';
 import { expectedBodySdkRequirements } from './native-sdk-expectations.mjs';
-import { digest } from '../src/core.mjs';
+import { digest, SdlcError } from '../src/core.mjs';
 import { evaluateApproval, evaluateConversations, sharedStatusKeys, planStatusUpdate, reconcileStatusKey,
   reconcilePrReadiness, statusContexts, normalStatusLimit, disposableStatusLimits,
   runDisposablePolicyProbe } from '../scripts/pr-readiness.mjs';
 import { createReadinessGitHubClient } from '../scripts/github-readiness-host.mjs';
 import { createPrReadinessHost, inspectWorkflowTrust, readTrustedJobContext,
-  readTrustedValidationIntent, renderObserverSummary, statusConcurrencyGroup } from '../scripts/pr-observer.mjs';
+  readTrustedValidationIntent, renderObserverSummary, observerExitCode, statusConcurrencyGroup } from '../scripts/pr-observer.mjs';
 import { prepareCoverage, renderCoverageSection } from '../src/coverage.mjs';
 import { inspectWorkflowPolicy, readWorkflowPolicySources } from '../scripts/workflow-policy.mjs';
 import { nativeBootstrapEnvironment, portableRubyBootstrapEnvironment,
@@ -87,8 +110,12 @@ function statusFixture(context = 'framework/coverage', count = 0) {
     id: index + 1, context, state: 'success', description: 'old green result', creatorId: 42,
   }));
   const writes = [];
+  let elapsed = 0;
+  const waits = [];
   const policy = { repositoryId: 17, writerId: 42,
-    detailsUrl: 'https://github.com/fixture/repo/actions/runs/1/attempts/1' };
+    detailsUrl: 'https://github.com/fixture/repo/actions/runs/1/attempts/1',
+    readback: { timeoutMs: 1000, now: () => elapsed, wallNow: () => now + elapsed,
+      wait: async (ms, { signal }) => { signal.throwIfAborted(); waits.push(ms); elapsed += ms; } } };
   const key = { repositoryId: 17, sha: sourceA, context };
   const host = {
     snapshot: async () => structuredClone(snapshot),
@@ -103,7 +130,8 @@ function statusFixture(context = 'framework/coverage', count = 0) {
       return structuredClone(record);
     },
   };
-  return { host, policy, key, snapshot, items, writes };
+  return { host, policy, key, snapshot, items, writes, waits,
+    advance: ms => { elapsed += ms; } };
 }
 
 async function fixture(t) {
@@ -1219,6 +1247,198 @@ test('T-PRD085 all shared status contexts reserve non-passing capacity and recon
   }
 });
 
+test('T-PRD085 status publication readback recovers visibility without replaying writes', async () => {
+  for (const context of statusContexts) for (const lostReply of [false, true]) {
+    const f = statusFixture(context);
+    const statuses = f.host.statuses;
+    const publish = f.host.publish;
+    const hidden = new Set();
+    const acquisitions = [];
+    f.host.publish = async (...args) => {
+      const posted = await publish(...args);
+      if (lostReply && posted.state === 'pending') {
+        throw new SdlcError('TIMEOUT', 'controlled lost response');
+      }
+      return posted;
+    };
+    f.host.statuses = async (key, options) => {
+      const observed = await statuses(key);
+      if (options) acquisitions.push(options);
+      const latest = observed.items.at(-1);
+      if (f.writes.length && latest && !hidden.has(latest.id)) {
+        hidden.add(latest.id);
+        observed.items.pop();
+      }
+      return observed;
+    };
+    const result = await reconcileStatusKey(f.host, f.key, f.policy);
+    assert.equal(result.status, 'Passed');
+    assert.equal(result.readback.predicate, 'observed');
+    assert.equal(result.readback.expectedId, 2);
+    assert.equal(result.readback.readCount, 2);
+    assert.deepEqual(f.writes.map(write => write.value.state), ['pending', 'success']);
+    assert.deepEqual(f.waits, [250, 250]);
+    assert.equal(acquisitions.length, 4);
+    assert.ok(acquisitions.every(item => item.signal instanceof AbortSignal &&
+      item.timeoutMs > 0 && item.timeoutMs <= 1000));
+  }
+});
+
+test('T-PRD085 status publication readback rejects ambiguous effects and preserves source invalidation', async () => {
+  for (const [variant, predicate] of [
+    ['absent', 'deadline'], ['duplicate', 'ambiguous'], ['wrong-id', 'post-id-mismatch'],
+    ['invalid-id', 'invalid-post-id'], ['foreign', 'foreign-latest'], ['target', 'target-mismatch'],
+    ['incomplete', 'incomplete'],
+  ]) {
+    const f = statusFixture();
+    const publish = f.host.publish;
+    const statuses = f.host.statuses;
+    f.host.publish = async (...args) => {
+      const posted = await publish(...args);
+      if (variant === 'duplicate' || variant === 'foreign') {
+        f.items.push({ ...posted, id: posted.id + 1,
+          creatorId: variant === 'foreign' ? 99 : posted.creatorId });
+      }
+      if (variant === 'target') {
+        posted.target_url = 'https://fixture.invalid/other-target';
+        f.items.at(-1).target_url = posted.target_url;
+      }
+      return { ...posted, id: variant === 'wrong-id' ? posted.id + 99 :
+        variant === 'invalid-id' ? 0 : posted.id };
+    };
+    f.host.statuses = async (key, options) => {
+      const result = await statuses(key);
+      if (options && variant === 'absent') result.items = [];
+      if (options && variant === 'incomplete') result.complete = false;
+      return result;
+    };
+    const result = await reconcileStatusKey(f.host, f.key, f.policy);
+    assert.equal(result.status, 'NotRun', variant);
+    assert.equal(result.readback.predicate, predicate, variant);
+    assert.equal(f.writes.length, 1, variant);
+    assert.doesNotMatch(JSON.stringify(result), /fixture\.invalid/u);
+    if (variant === 'duplicate') {
+      assert.equal(result.readback.matchingCount, 2);
+      assert.deepEqual(result.readback.matchingIds, [1, 2]);
+      assert.equal(result.readback.expectedId, 1);
+    }
+    if (variant === 'wrong-id') assert.equal(result.readback.expectedId, 100);
+    if (variant === 'foreign') assert.equal(result.readback.latestCreatorId, 99);
+  }
+  const changed = statusFixture();
+  const statuses = changed.host.statuses;
+  let hidden = false;
+  changed.host.statuses = async (key, options) => {
+    const result = await statuses(key);
+    if (options && changed.writes.at(-1)?.value.state === 'success' && !hidden) {
+      hidden = true;
+      result.items.pop();
+    }
+    return result;
+  };
+  const wait = changed.policy.readback.wait;
+  changed.policy.readback.wait = async (...args) => {
+    await wait(...args);
+    changed.snapshot.prs[0].verdicts[changed.key.context] = {
+      status: 'NotRun', inputDigest: digest('metadata changed during readback'), blockers: ['Stale metadata'],
+    };
+  };
+  assert.equal((await reconcileStatusKey(changed.host, changed.key, changed.policy)).status, 'NotRun');
+  assert.deepEqual(changed.writes.map(write => write.value.state), ['pending', 'success', 'failure']);
+});
+
+test('T-PRD085 status publication readback respects denial rate timing deadlines cancellation and privacy', async () => {
+  for (const headers of [
+    { 'retry-after': '1' },
+    { 'retry-after': new Date(now + 1000).toUTCString() },
+    { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(now / 1000 + 1) },
+  ]) {
+    const f = statusFixture();
+    f.policy.readback.timeoutMs = 4000;
+    const statuses = f.host.statuses;
+    let limited = false;
+    f.host.statuses = async (key, options) => {
+      if (options && !limited) {
+        limited = true;
+        throw new SdlcError('RATE_LIMIT', 'private-sentinel', { headers });
+      }
+      return statuses(key);
+    };
+    assert.equal((await reconcileStatusKey(f.host, f.key, f.policy)).status, 'Passed');
+    assert.deepEqual(f.waits, [1000]);
+    assert.deepEqual(f.writes.map(write => write.value.state), ['pending', 'success']);
+  }
+  for (const [variant, predicate] of [
+    ['PERMISSION', 'acquisition-error'], ['AUTH', 'acquisition-error'],
+    ['RATE_LIMIT', 'rate-limit-deadline'], ['cancel', 'cancelled'],
+    ['late', 'deadline'], ['private', 'acquisition-error'], ['wait', 'wait-error'],
+  ]) {
+    const f = statusFixture();
+    const controller = new AbortController();
+    f.policy.readback.signal = controller.signal;
+    const statuses = f.host.statuses;
+    let getters = 0;
+    f.host.statuses = async (key, options) => {
+      if (!options) return statuses(key);
+      if (variant === 'cancel') {
+        controller.abort();
+        throw new SdlcError('CANCELLED', 'private-sentinel');
+      }
+      if (variant === 'late') { f.advance(1000); return statuses(key); }
+      if (variant === 'wait') return { complete: true, items: [] };
+      if (variant === 'private') throw Object.defineProperty({}, 'code', {
+        get() { getters++; throw Error('private-sentinel'); },
+      });
+      throw new SdlcError(variant, 'private-sentinel', {
+        headers: { 'retry-after': '60', authorization: 'private-sentinel' },
+      });
+    };
+    if (variant === 'wait') f.policy.readback.wait = async () => { throw Error('private-sentinel'); };
+    const result = await reconcileStatusKey(f.host, f.key, f.policy);
+    assert.equal(result.status, 'NotRun', variant);
+    assert.equal(result.readback.predicate, predicate, variant);
+    assert.equal(f.writes.length, 1);
+    assert.equal(getters, 0);
+    assert.doesNotMatch(JSON.stringify(result), /private-sentinel|authorization|headers/u);
+    if (variant === 'RATE_LIMIT') assert.equal(result.readback.retryAfterMs, 60000);
+  }
+  const cancelled = statusFixture();
+  const controller = new AbortController();
+  controller.abort();
+  cancelled.policy.readback.signal = controller.signal;
+  const result = await reconcileStatusKey(cancelled.host, cancelled.key, cancelled.policy);
+  assert.equal(result.status, 'NotRun');
+  assert.equal(result.readback.predicate, 'cancelled');
+  assert.equal(cancelled.writes.length, 0);
+  const expired = statusFixture();
+  expired.policy.readback.deadlineMs = 0;
+  assert.equal((await reconcileStatusKey(expired.host, expired.key, expired.policy)).readback.predicate, 'deadline');
+  assert.equal(expired.writes.length, 0);
+});
+
+test('T-PRD085 status history acquisition carries cancellation across every SDK page', async () => {
+  const controller = new AbortController();
+  const calls = [];
+  const client = createReadinessGitHubClient({
+    repository: 'urmich/ai-sdlc-framework', repositoryId: 17, writerId: 42,
+    token: 'fixture-ephemeral-token', generation: 'readback-pages',
+    fetch: async (url, options) => {
+      calls.push({ url, method: options.method });
+      assert.equal(options.signal.aborted, false);
+      if (calls.length === 1) return new Response('[]', { headers: {
+        'content-type': 'application/json',
+        link: `<https://api.github.com/repos/urmich/ai-sdlc-framework/commits/${sourceA}/statuses?per_page=100&page=2>; rel="next"`,
+      } });
+      controller.abort();
+      throw Error('controlled cancelled page');
+    },
+  });
+  await assert.rejects(client.list(`/commits/${sourceA}/statuses?per_page=100`, undefined,
+    { signal: controller.signal, timeoutMs: 1000 }), { code: 'CANCELLED' });
+  assert.equal(calls.length, 2);
+  assert.ok(calls.every(call => call.method === 'GET'));
+});
+
 test('T-PRD085 shared membership, metadata changes, pagination and stale events cannot overwrite another PR verdict', async () => {
   const f = statusFixture();
   f.snapshot.prs[1].verdicts['framework/coverage'] = {
@@ -1246,6 +1466,45 @@ test('T-PRD085 shared membership, metadata changes, pagination and stale events 
   const before = f.writes.length;
   assert.equal((await reconcileStatusKey(f.host, f.key, f.policy)).status, 'NotRun');
   assert.equal(f.writes.length, before);
+});
+
+test('T-PRD085 idle observer reconciliation completes without granting validation credit', async () => {
+  const empty = statusFixture();
+  empty.snapshot.prs = [];
+  const idle = await reconcilePrReadiness(empty.host, empty.policy);
+  assert.equal(observerExitCode(idle), 0);
+  assert.equal(idle.status, 'NotRun');
+  assert.equal(idle.noWork, true);
+  assert.deepEqual(idle.results, []);
+  assert.equal(empty.writes.length, 0);
+  const summary = renderObserverSummary(idle, {
+    completeReportRef: 'https://github.com/urmich/ai-sdlc-framework/actions/runs/1/attempts/1',
+  });
+  assert.match(summary, /No current in-scope PRs/u);
+  assert.match(summary, /\*\*NotRun\*\*/u);
+
+  empty.snapshot.complete = false;
+  const incomplete = await reconcilePrReadiness(empty.host, empty.policy);
+  assert.equal(incomplete.status, 'NotRun');
+  assert.equal(incomplete.noWork, undefined);
+  assert.equal(observerExitCode(incomplete), 2);
+  assert.equal(empty.writes.length, 0);
+  assert.equal(observerExitCode({ ...idle, diagnostic: { code: 'HOST' } }), 2);
+  assert.equal(observerExitCode({ ...idle, status: 'Failed' }), 2);
+  assert.equal(observerExitCode({ ...idle, results: [{ status: 'NotRun' }] }), 2);
+  assert.equal(observerExitCode({ ...idle, conversations: [{ status: 'NotRun' }] }), 2);
+  assert.equal(observerExitCode({ status: 'Passed', results: [], diagnostic: { code: 'HOST' } }), 2);
+
+  const required = statusFixture();
+  required.snapshot.prs[0].verdicts['framework/validation'].status = 'NotRun';
+  const blocked = await reconcilePrReadiness(required.host, required.policy);
+  assert.equal(blocked.status, 'NotRun');
+  assert.equal(blocked.noWork, undefined);
+  assert.equal(observerExitCode(blocked), 2);
+  const complete = await reconcilePrReadiness(statusFixture().host, required.policy);
+  assert.equal(complete.status, 'Passed');
+  assert.equal(complete.noWork, undefined);
+  assert.equal(observerExitCode(complete), 0);
 });
 
 test('T-PRD027 unavailable writer controls or foreign repository scope dispatch no status mutation or enforcement claim', async () => {
@@ -1342,6 +1601,8 @@ test('T-PRD022 actual workflow graph applies semantic YAML, effective permission
     { actions: 'read', contents: 'read' });
   assert.deepEqual(producer.jobs.find(job => job.id === 'intel-homebrew-admission').effectivePermissions,
     { actions: 'read', contents: 'read' });
+  const windows = producer.document.jobs['native-wx'];
+  assert.equal(windows.env.SDLC_TEST_WORKERS, "${{ matrix.shard == 'body-3' && '7' || '15' }}");
   for (const key of ['intel-retained-admission', 'arm-refresh-admission']) {
     assert.deepEqual(producer.jobs.find(job => job.id === key).effectivePermissions,
       { actions: 'read', contents: 'read' });
@@ -1931,6 +2192,39 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
   const plan = await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
   const assignments = new Map([...new Set(parts.map(part => part.target))].map(target =>
     [target, nativeFrameworkShardPlan({ inventory, plan, target })]));
+  const windowsAssignment = assignments.get('windows-x64');
+  const limitedBody = windowsAssignment.parts.find(part => part.shard === 'body-3');
+  assert.equal(ci.jobs['native-wx'].env.SDLC_TEST_WORKERS,
+    "${{ matrix.shard == 'body-3' && '7' || '15' }}");
+  const limitedCapacity = nativeResourceFacts({ availableParallelism: 4, totalMemoryBytes: 17174360064,
+    configuredWorkers: '7' }).workerCapacity;
+  assert.ok(limitedBody.stages.flatMap(stage => stage.groups).every(group =>
+    group.minimumSlots <= limitedCapacity), 'Every body-3 root must fit its contention-limited allocation');
+  const cancellationRoot = inventory.cases.find(test => test.file === 'test/public-readiness-inventory.test.mjs' &&
+    test.name === 'T-PRD018 command capture durably retains dispatched identity and sanitized progress before cancellation or abrupt termination');
+  assert.ok(cancellationRoot);
+  const windowsBody = windowsAssignment.parts.find(part => part.assertionIds.includes(cancellationRoot.id));
+  assert.ok(windowsBody, 'The cancellation closure must retain a complete source-derived owner');
+  const groups = windowsBody.stages.flatMap(stage => stage.groups);
+  assert.equal(groups.filter(group => group.rootId === cancellationRoot.id).length, 1);
+  const workerRequest = windowsBody.shard === 'body-3' ? '7' : '15';
+  const capacity = nativeResourceFacts({ availableParallelism: 4, totalMemoryBytes: 17174360064,
+    configuredWorkers: workerRequest }).workerCapacity;
+  assert.ok(groups.every(group => group.minimumSlots <= capacity),
+    `Windows ${windowsBody.shard} capacity ${capacity} must admit every selected group: ${JSON.stringify(
+      groups.filter(group => group.minimumSlots > capacity).map(group =>
+        ({ root: group.name, minimumSlots: group.minimumSlots })))}`);
+  let dispatched = 0;
+  await assert.rejects(runValidationReadyPool(groups, {
+    concurrency: 5, capacity: 5, execute: async () => { dispatched++; return 'Passed'; },
+  }), { code: 'BUDGET' });
+  assert.equal(dispatched, 0, 'An undersized whole-shard budget rejects before any group dispatch');
+  const admitted = await runValidationReadyPool(groups, {
+    concurrency: capacity, capacity, execute: async () => { dispatched++; return 'Passed'; },
+  });
+  assert.equal(dispatched, groups.length, 'The configured budget admits the complete source-derived selection');
+  assert.equal(admitted.completed.size, groups.length);
+  assert.deepEqual(admitted.notRun, []);
   assert.equal(ci.jobs['native-wx'].env.SDLC_TEST_WORKERS,
     "${{ matrix.shard == 'body-3' && '7' || '15' }}");
   for (const body of assignments.get('windows-x64').parts.filter(part => part.shard.startsWith('body-'))) {

@@ -186,6 +186,7 @@ export async function startWindowsRuntimeObserver({ directory, ownerPid, expecte
   let spawnFailed = false;
   let observerCreated = Number.isInteger(child.pid) && child.pid > 0;
   let compilerSettled = false;
+  let compilerSettlementRefresh;
   let stopAttempted = false;
   child.once('spawn', () => { observerCreated = true; });
   child.on('error', error => {
@@ -243,31 +244,34 @@ export async function startWindowsRuntimeObserver({ directory, ownerPid, expecte
   }
   async function refreshCompilerSettlement() {
     if (compilerSettled) return true;
-    try {
-      const value = await smallJson(files.compilerSettled, 256);
-      if (exactKeys(value, ['schema', 'compilerSettled', 'observerSha256', 'bridgeSha256'])
-        && value.schema === 1 && value.compilerSettled === true) {
-        compilerReceipt = value.observerSha256 === compilerSources.observerSha256
-          && value.bridgeSha256 === compilerSources.bridgeSha256 ? 'verified' : 'wrongSource';
-        if (compilerReceipt === 'verified') compilerSettled = true;
-      } else compilerReceipt = 'invalid';
-    } catch (error) {
-      compilerReceipt = error.code === 'ENOENT' ? 'missing' : 'unreadable';
-    }
-    if (!compilerSettled && compilerReceipt === 'missing') {
+    compilerSettlementRefresh ??= (async () => {
       try {
-        const value = await smallJson(files.compilerNotStarted, 256);
-        if (exactKeys(value, ['schema', 'compilerStarted', 'reason', 'observerSha256', 'bridgeSha256'])
-          && value.schema === 1 && value.compilerStarted === false && value.reason === 'released') {
+        const value = await smallJson(files.compilerSettled, 256);
+        if (exactKeys(value, ['schema', 'compilerSettled', 'observerSha256', 'bridgeSha256'])
+          && value.schema === 1 && value.compilerSettled === true) {
           compilerReceipt = value.observerSha256 === compilerSources.observerSha256
-            && value.bridgeSha256 === compilerSources.bridgeSha256 ? 'notStarted' : 'wrongSource';
-          if (compilerReceipt === 'notStarted') compilerSettled = true;
+            && value.bridgeSha256 === compilerSources.bridgeSha256 ? 'verified' : 'wrongSource';
+          if (compilerReceipt === 'verified') compilerSettled = true;
         } else compilerReceipt = 'invalid';
       } catch (error) {
         compilerReceipt = error.code === 'ENOENT' ? 'missing' : 'unreadable';
       }
-    }
-    return compilerSettled;
+      if (!compilerSettled && compilerReceipt === 'missing') {
+        try {
+          const value = await smallJson(files.compilerNotStarted, 256);
+          if (exactKeys(value, ['schema', 'compilerStarted', 'reason', 'observerSha256', 'bridgeSha256'])
+            && value.schema === 1 && value.compilerStarted === false && value.reason === 'released') {
+            compilerReceipt = value.observerSha256 === compilerSources.observerSha256
+              && value.bridgeSha256 === compilerSources.bridgeSha256 ? 'notStarted' : 'wrongSource';
+            if (compilerReceipt === 'notStarted') compilerSettled = true;
+          } else compilerReceipt = 'invalid';
+        } catch (error) {
+          compilerReceipt = error.code === 'ENOENT' ? 'missing' : 'unreadable';
+        }
+      }
+      return compilerSettled;
+    })().finally(() => { compilerSettlementRefresh = undefined; });
+    return compilerSettlementRefresh;
   }
   async function startupPhase(file, expected) {
     try {

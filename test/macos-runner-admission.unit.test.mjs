@@ -1060,7 +1060,6 @@ test('T-MACADM010 cancellation and the overall deadline interrupt in-flight synt
       if (mode === 'cancel') queueMicrotask(() => controller.abort());
     }) });
     pending.options.signal = controller.signal;
-    pending.options.now = () => performance.now();
     pending.options.timeoutMs = mode === 'timeout' ? 10 : 1000;
     await assert.rejects(waitForMacAdmission(expected, pending.options), {
       code: mode === 'cancel' ? 'ADMISSION_CANCELLED' : 'ADMISSION_TIMEOUT',

@@ -20,6 +20,50 @@ Current execution projections belong to the living Test Plan and retained
 evidence, not this header. Source implementation or document maintenance alone
 does not grant passing execution credit.
 
+**Historical primary PR #21 SDK integration:** The authorized integration consumes actual
+SDK main `09499701af20b05ff2415be616e296b016303199`, tree
+`58e8ffbecea35265e7598034f0eafb2f886480d4`, into primary source
+`470e1d8acf69258660c2423f32b83fab1f7c11f0`. The reconciled primary candidate is
+new and unvalidated; earlier SDK/main executions do not supply its current
+passing credit. Preserve primary's distinct authentic v11/v12/v15, 315-Git-blob
+historical fixture, rather than substitute the SDK branch's single-v15,
+105-blob fixture. Current native and trusted PR admission are correctness-only
+under AC-202.7's owner-directed timing deferral; actual missed timing targets,
+historical results and all mandatory watchdogs/assertions remain unchanged.
+
+**Local SDK14 bridge integration:** Incorporate reviewed Git source
+`de5a392ff372e47224699c36ad014f516b3fa79e`, tree
+`b55d4b19872ec427f82af742b92c14cef27fb0d4`, into primary
+`a37baa500a2d2e99c91c235413af85d5005e6fd8`. This bounded source integration adds
+Metadata-read effective-native-rule acquisition and its three PR-only controls,
+not F04 settings, SDK adoption or publication authority. Preserve primary's
+successful empty/noWork observer completion, version-neutral documentation,
+release preflight controls and both authentic 105/315 historical capsules.
+Prior whole-candidate passes and reviews stay historical; all 99 canonical
+acceptance projections remain NotRun.
+
+**Local SDK15 pagination integration:** Normally merge reviewed SDK source
+`6c4d23ed20131e2a798082a7786445b6066b8298`, tree
+`f661ed81b87987ac230aa5d3d9178662a3de0540`, into frozen primary
+`942f5d1df05b4c9f4e0d6e682ab998eed2246ec8`. The actual merge base is SDK14
+`de5a392ff372e47224699c36ad014f516b3fa79e`. Retain primary-specific behavior,
+both authentic historical capsules and the immutable source/qualification
+history while integrating proof-bound repository name/ID pagination. This is
+the same F01/F02/F03/F05/F06/F13 follow-up, not F04 administration or deferred
+F07-F12 work. Earlier SDK/primary passes and reviews do not validate this new
+candidate; publication, main integration and release remain separate.
+The first new-candidate local affected execution exposed primary's independent
+triple-capsule pre-alias reconstruction gap. Restore only those changed current
+inputs before its unchanged archived splices; preserve the failed original and
+restart the complete local checkpoint for the corrected candidate.
+
+**Economical-polling historical replay repair:** Preserve current 300-second
+monitor defaults and retained-record intervals. Both native historical fixture
+paths must restore the genuine archived monitor-test Git bytes before their
+unchanged capsule splices and complete inventory checks. Preserve failed
+originals, all historical qualification/digests and deferred F07-F12 scope;
+local reconstruction success grants no current native or release credit.
+
 **2026-10-20 revision:** The user rejected the broad, 18-minute local
 "critical" loop. The required replacement is a small explicit local sanity gate,
 repository-only instructions for classifying future tests, complete applicable
@@ -46,6 +90,37 @@ native assertions, and resolve the owned-prefix incompatibility rather than
 silently forcing bottles or substituting system runtimes. Current versions and
 execution projections belong to the living Test Plan; prior approvals and
 failed executions remain unchanged.
+
+**Current SDK16 actual-main reconciliation:** Exact SDK source
+`a129d4b0399517b2c2f44c690ee17fd342f83eaa`, tree
+`13ddb9677b4fd06dad422a560e020b8e1c75a9d6`, was normally integrated into primary
+`e9dddc2332604a4d9a24126be5f50cea6772eeda` by prepared merge
+`30b97e6ccf513865ab1fd67a3b956da505780d82`, tree
+`988555338c1aab9035c857669c2299afe15fdc4d`. Reconcile that preserved source
+through a normal merge of actual accepted protected SDK main
+`d3305ef97e1a9d3f36895620f8aa8a3452026b90`, whose tree is
+`13ddb9677b4fd06dad422a560e020b8e1c75a9d6` and ordered parents are
+`a1f5654b78d1e40c5e4e22e9f7a3e396905ca850` and
+`a129d4b0399517b2c2f44c690ee17fd342f83eaa`. Its content is identical to the
+SDK source; the ancestry-only merge does not replace primary-specific source.
+Only the three public-readiness canonical documents receive this context update.
+
+This remains owner-directed, unmanaged work: recovery returned BINDING without
+an ACK token. Prior branch-bound Coding authority, local results, Review and
+native qualification do not transfer. The 248 passing early assertions and
+static check remain immutable history for the prepared source, not the final
+main-bound checkpoint. All 99 current canonical acceptance projections remain
+NotRun. Freeze the final candidate before its required unit-first local
+checkpoint; whole-candidate Review, primary native/trusted PR validation and
+release acceptance remain separate. Accepted SDK main and its hosted runs do
+not validate the primary candidate or authorize publication. Current retained
+scope is F01/F02/F03/F05/F06/F13 plus separately owner-authorized F04;
+F07-F12 remain excluded. No provider operation is part of this local work.
+Preserve all primary historical qualification capsules, authentic 105/315-blob
+archives and original cost/placement/resource vectors. Restore only later
+transport, observer and private-getter additions in historical replay inputs;
+live regressions remain intact. Deferred community-guardrail acceptance remains NotRun;
+correctness, credentials and provenance are not deferred.
 
 ## Outcome
 
@@ -226,6 +301,10 @@ merge, even when its author ran nothing locally.
 - AC-203.1: Pushes to a branch with an open PR, new PRs and relevant updates
   automatically run the complete required PR validation for the current
   candidate. A first PR cannot depend on a contributor's local result.
+  A completely acquired empty in-scope PR membership is a successful idle
+  reconciliation operation, not passing validation. Retain `NotRun` and explicit
+  no-work evidence without publishing statuses. Incomplete acquisition, errors
+  and blocked required PRs must not receive that idle-operation success.
 - AC-203.2: Linux, native Windows and native macOS jobs execute their applicable
   substantive tests and utilities, not just command-smoke tests. Windows x64,
   Apple Silicon macOS and Intel macOS native coverage is required. The Test Plan
@@ -252,6 +331,9 @@ merge, even when its author ran nothing locally.
   failure diagnostics and links to complete per-test reports/logs. Do not
   require a custom dashboard or silently hide outcomes because a summary is
   size-limited.
+  Status-publication uncertainty retains a small sanitized predicate, actual
+  safe provider IDs/counts and acquisition classification, not raw errors,
+  credentials, signed URLs or headers.
 - AC-203.7: Every automatable code test that requires capabilities unavailable on
   the normal contributor machine has an explicit required PR runner/group and
   reproducible pinned setup. This includes authentic signature-verification
@@ -308,8 +390,18 @@ Required tests must be real merge prerequisites, not advisory green decorations.
   global review toggle enforces an author-specific rule it cannot express.
   Include this repository's required coverage-metadata check from FR-214;
   installing the framework elsewhere must not impose that repository policy.
+  For the release candidate, retain the owner-selected strict `Native producer
+  completeness` branch check from GitHub Actions App `15368`. Restore the three
+  framework branch-protection guards after RC; deferring those settings does not
+  waive independent successful release-source validation/approval/coverage proof.
 - AC-205.2: Direct pushes, force pushes, deletion and administrative bypasses
   follow the explicitly approved policy. Do not silently exempt maintainers.
+  The current owner policy permits zero bypass actors, including no PR-only
+  administrator exception. GitHub enforces permissions, approvals and branch
+  protections; the release helper does not independently audit that policy or
+  hidden actor lists. Normal required validations apply equally to owner and
+  contributor PRs. Provider enforcement does not turn missing or failing checks
+  into passing release evidence.
 - AC-205.3: Verify that a failing, missing, stale or skipped required result
   prevents merge. Source configuration alone does not prove provider enforcement.
 - AC-205.4: Document unavailable account-tier controls and owner actions
@@ -348,6 +440,14 @@ approved release sequence without manual glue or repeated per-job intervention.
 - AC-206.1: Validate the source/version/tag, destination, toolchains, required
   settings, authority and channel prerequisites before irreversible publication.
   Missing `RELEASE_REPOSITORY` or equivalent configuration fails early and clearly.
+  GitHub workflow/environment permissions authorize entry; release does not
+  duplicate collaborator-permission, classic-protection or ruleset-schema audits.
+  It still binds the exact dispatch/ref/workflow SHA to current protected `main`
+  and requires successful `framework/validation`, `framework/approval` and
+  `framework/coverage` statuses on that source or its one accepted merged-PR head.
+  A Native check alone is not source-validation credit. No inferred empty bypass
+  list, policy snapshot, extra privileged credential or independent policy-pass
+  claim is permitted. Actual hosted release acceptance remains NotRun.
 - AC-206.2: Complete required candidate checks, deterministic packaging and native
   gates before publication. Publish one immutable, source-bound package/bundle
   to the approved npm and GitHub destinations without rebuilding between channels.
@@ -463,6 +563,9 @@ maintain the project.
   examples and unqualified readiness claims. Verify navigation separately in
   source, packaged and installed layouts; essential offline guidance must have
   a shipped target or an explicitly identified online reference.
+  README links to the repository's Releases instead of hardcoding a framework
+  release version; required runtime constraints and immutable release history
+  remain accurate in their own documentation.
 - AC-210.2: Provide discoverable contribution, support, security-reporting,
   ownership/review and change/release guidance appropriate to this personal
   third-party OSS project.
@@ -481,6 +584,11 @@ maintain the project.
   paths. Keep transient test counters, internal work-item bookkeeping and
   implementation-recovery problems out of the public landing-page experience;
   retain their truthful evidence in the internal readiness records instead.
+  README presents four compelling, truthful value bullets followed immediately
+  by its explanatory image. Its capability table includes only implemented
+  framework features, supported by source/documentation; host-agent chat/session
+  restoration, review execution and external control infrastructure are not
+  presented as framework-provided capabilities.
 - AC-210.6: A professional/share-ready assessment identifies the exact published
   branch/revision and verifies its documentation links, current required CI,
   effective merge controls, usable private security route and released-channel
@@ -698,6 +806,12 @@ the installed framework imposes on all consumer repositories.
   privileges.
   Explain shared-key blocking PRs and capacity blockers separately from the
   current PR's test failures.
+  Each status transition dispatches once. Recover temporarily absent readback
+  through deadline-bound read-only acquisition, never blind write retries or
+  an AI agent rerunning CI. Preserve current source/member, latest-row, writer,
+  context/state/marker/target and known positive POST-ID checks; ambiguous,
+  denied, cancelled or unresolved effects remain non-passing. Honor provider
+  rate timing and real execution deadlines without an aggregate API-call quota.
 - AC-214.4: Scope automatic enforcement to this repository. Deliver the reusable
   authoring/inspection capability under FR-213, but leave other projects' CI/CD
   policies unchanged unless their owners explicitly adopt an integration.
@@ -814,6 +928,10 @@ remains separate acceptance evidence.
 - This document is the canonical requirement artifact for `wi-public-readiness`.
   Existing registered specifications must be migrated with explicit path mapping,
   not deleted or reinterpreted as newly approved work.
+- The current primary SDK integration is limited to F01/F02/F03/F05/F06/F13.
+  F07-F12 remain deferred; F04 and new provider-administration work are not
+  included. Historical provider-policy requirements and observations do not
+  authorize settings changes, administrative bypasses, publication or release.
 - The no-extra-files rule concerns coverage generation in consuming projects:
   no generated coverage/index/binding/policy sidecars are added to their source
   trees. Framework implementation code, user-authored specifications/tests and

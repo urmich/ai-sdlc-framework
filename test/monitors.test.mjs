@@ -1,6 +1,22 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
-  "surfaces": [{"coverage": "direct", "paths": ["src/monitors.mjs"]}]
+  "surfaces": [{"coverage": "direct", "paths": ["src/monitors.mjs"]}],
+  "groups": [
+    {"root": "T-25/T-30 standalone user-reported runs poll immediately and every five fake-clock minutes without granting authority", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-25 stale monitor workers, wrong run links and read failures retain observable gaps", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-25 stored polling intervals preserve legacy cadence and reject invalid scheduling records", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}
+  ],
+  "applicability": [{
+    "names": [
+      "T-25/T-30 standalone user-reported runs poll immediately and every five fake-clock minutes without granting authority",
+      "T-25 stale monitor workers, wrong run links and read failures retain observable gaps",
+      "T-25 stored polling intervals preserve legacy cadence and reject invalid scheduling records"
+    ],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "pipeline-monitor-contract",
+    "reason": "PR-only interval, slow-read, gap and retained-record regressions use separate owned homes and clocks. Existing identity, authority, claim, link, failure and terminal assertions remain required; no critical promotion or shared resources.",
+    "prerequisites": ["Node >=22 and Git; owned repository-local fixtures and fake clocks; no credentials, network or native launcher"]
+  }]
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -254,7 +270,7 @@ test('T-110 a current PR/check association alone retains verified terminal evide
   assert.deepEqual((await readMonitor(f.store, key)).evidence, evidence);
 });
 
-test('T-25/T-30 standalone user-reported runs poll immediately and every fake-clock minute without granting authority', async t => {
+test('T-25/T-30 standalone user-reported runs poll immediately and every five fake-clock minutes without granting authority', async t => {
   const f = await fixture(t, { initialize: false });
   const runIdentity = identity('42');
   const attached = await attachMonitor(f.store, { identity: runIdentity,
@@ -272,7 +288,9 @@ test('T-25/T-30 standalone user-reported runs poll immediately and every fake-cl
   const firstPollGeneration = poll.pollGeneration;
   assert.equal(result.monitorStatus, 'active');
   assert.equal(result.link.status, 'pending');
-  assert.equal(Date.parse(result.nextPollAt), f.clock.now() + 60000);
+  assert.equal(Date.parse(result.nextPollAt), f.clock.now() + 300000);
+  assert.match((await monitorNotice(f.store, { runKey: attached.key })).message,
+    /Polling every 300 seconds\./u);
   await verifyMonitorLink(f.store, { runKey: attached.key,
     adapterId: 'azure-devops',
     observation: observation('42', {
@@ -281,6 +299,9 @@ test('T-25/T-30 standalone user-reported runs poll immediately and every fake-cl
     evidenceRef: 'fixture:wrong-final-run' });
   assert.equal((await monitorNotice(f.store, { runKey: attached.key })).link.status, 'unverified');
   f.clock.advance(60000);
+  assert.deepEqual(await dueMonitors(f.store), []);
+  await assert.rejects(beginPoll(f.store, worker), { code: 'NOT_DUE' });
+  f.clock.advance(240000);
   assert.equal((await dueMonitors(f.store)).length, 1);
   poll = await beginPoll(f.store, worker);
   await assert.rejects(observeMonitor(f.store, { ...worker,
@@ -295,7 +316,7 @@ test('T-25/T-30 standalone user-reported runs poll immediately and every fake-cl
     adapterId: 'azure-devops', observation: observation('42'),
     evidenceRef: 'fixture:run-page' });
   const priorNotice = await monitorNotice(f.store, { runKey: attached.key });
-  f.clock.advance(60000);
+  f.clock.advance(300000);
   poll = await beginPoll(f.store, worker);
   result = await observeMonitor(f.store, { ...worker,
     pollGeneration: poll.pollGeneration, identity: runIdentity,
@@ -374,7 +395,13 @@ test('T-25 stale monitor workers, wrong run links and read failures retain obser
     pollGeneration: poll.pollGeneration, identity: runIdentity,
     error: 'Provider read access unavailable' });
   f.clock.advance(180000);
+  assert.deepEqual(await dueMonitors(f.store), []);
+  f.clock.advance(180000);
+  assert.equal((await dueMonitors(f.store))[0].gapDetected, false);
+  f.clock.advance(240000);
   assert.equal((await dueMonitors(f.store))[0].gapDetected, true);
+  await beginPoll(f.store, old);
+  assert.equal((await readMonitor(f.store, attached.key)).gapCount, 1);
   await interruptMonitor(f.store, { runKey: attached.key, reason: 'Host stopped; polling was interrupted' });
   const replacement = await claimMonitor(f.store, { runKey: attached.key, workerId: 'new-worker', replaceInterrupted: true });
   await assert.rejects(beginPoll(f.store, old), { code: 'STALE' });
@@ -389,6 +416,58 @@ test('T-25 stale monitor workers, wrong run links and read failures retain obser
   assert.equal(link.link.status, 'unverified');
   await assert.rejects(attachMonitor(f.store, { identity: runIdentity,
     origin: 'user-reported', reportingReceiptId: 'receipt-other', schedulerAvailable: true, readAvailable: true }), { code: 'ID_CONFLICT' });
+});
+test('T-25 stored polling intervals preserve legacy cadence and reject invalid scheduling records', async t => {
+  for (const seconds of [60, 120, 300]) {
+    const f = await fixture(t, { initialize: false });
+    const runIdentity = identity(`stored-interval-${seconds}`);
+    const input = { identity: runIdentity, origin: 'framework',
+      schedulerAvailable: true, readAvailable: true };
+    const attached = await attachMonitor(f.store, input);
+    const file = path.join(f.store.runtime, 'pipeline-monitors', `${attached.key}.json`);
+    const retained = JSON.parse(await fs.readFile(file, 'utf8'));
+    retained.pollIntervalSeconds = seconds;
+    await fs.writeFile(file, JSON.stringify(retained));
+    const reused = await attachMonitor(f.store, input);
+    assert.equal(reused.key, attached.key);
+    assert.deepEqual(reused.identity, runIdentity);
+    assert.equal(reused.pollIntervalSeconds, seconds);
+    const claim = await claimMonitor(f.store, { runKey: attached.key, workerId: 'interval-worker' });
+    const worker = { runKey: attached.key, workerId: 'interval-worker',
+      claimGeneration: claim.claimGeneration };
+    const startedAt = f.clock.now();
+    const intervalMs = seconds * 1000;
+    const poll = await beginPoll(f.store, worker);
+    f.clock.advance(intervalMs * 2.5);
+    const observed = await observeMonitor(f.store, { ...worker,
+      pollGeneration: poll.pollGeneration, identity: runIdentity,
+      status: 'running', evidenceRef: 'fixture:slow-read' });
+    assert.equal(Date.parse(observed.nextPollAt), startedAt + intervalMs * 3);
+    assert.equal(observed.gapCount, 2);
+    assert.match((await monitorNotice(f.store, { runKey: attached.key })).message,
+      new RegExp(`Polling every ${seconds} seconds\\.`));
+    await assert.rejects(beginPoll(f.store, worker), { code: 'NOT_DUE' });
+    f.clock.advance(intervalMs / 2 - 1);
+    assert.deepEqual(await dueMonitors(f.store), []);
+    f.clock.advance(1);
+    assert.equal((await dueMonitors(f.store))[0].gapDetected, false);
+    f.clock.advance(intervalMs - 1);
+    assert.equal((await dueMonitors(f.store))[0].gapDetected, false);
+    f.clock.advance(1);
+    assert.equal((await dueMonitors(f.store))[0].gapDetected, true);
+    for (const invalid of [0, -1, 1.5, '300', null, Number.MAX_SAFE_INTEGER]) {
+      const corrupted = { ...observed, pollIntervalSeconds: invalid };
+      const before = JSON.stringify(corrupted);
+      await fs.writeFile(file, before);
+      await assert.rejects(beginPoll(f.store, worker), { code: 'SCHEMA' });
+      await assert.rejects(dueMonitors(f.store), { code: 'SCHEMA' });
+      await assert.rejects(monitorNotice(f.store, { runKey: attached.key }), { code: 'SCHEMA' });
+      assert.equal(await fs.readFile(file, 'utf8'), before);
+    }
+    await fs.writeFile(file, JSON.stringify(observed));
+    await beginPoll(f.store, worker);
+    assert.equal((await readMonitor(f.store, attached.key)).gapCount, 3);
+  }
 });
 test('T-25 blocked monitor capabilities recover only through explicit refresh evidence', async t => {
   const f = await fixture(t, { initialize: false });
@@ -547,7 +626,7 @@ test('T-110 observe verifies provider versions only with the trusted Store callb
     { verified: true, identity: 'provider-version' });
   assert.equal(calls, 1);
   delete f.store.verifyProviderVersion;
-  f.clock.advance(60000);
+  f.clock.advance(verified.pollIntervalSeconds * 1000);
   const nextPoll = await beginPoll(f.store, worker);
   const unverified = await observeMonitor(f.store, {
     ...worker, pollGeneration: nextPoll.pollGeneration, identity: runIdentity,

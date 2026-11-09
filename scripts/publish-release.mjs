@@ -109,21 +109,11 @@ export async function preflightRelease({ sourceCommit, version, repository, rele
   const prefix = `/repos/${environment.GITHUB_REPOSITORY}`;
   const source = await requireValue(api, prefix);
   const destination = repository === environment.GITHUB_REPOSITORY ? source : await requireValue(api, `/repos/${repository}`);
-  if (source.private !== false || destination.private !== false) throw new Error('Publication requires explicitly selected public source and destination repositories');
-  const permission = await requireValue(api, `${prefix}/collaborators/${encodeURIComponent(environment.GITHUB_ACTOR)}/permission`);
-  if (!['admin', 'maintain'].includes(permission.permission)) throw new Error('Only an authorized maintainer may start this release intent');
+  if (source?.private !== false || destination?.private !== false) throw new Error('Publication requires explicitly selected public source and destination repositories');
+  // GitHub enforces dispatch permissions and branch policy; release binds the
+  // selected protected-main source without independently auditing that policy.
   const main = await requireValue(api, `${prefix}/branches/main`);
-  if (main.protected !== true || main.commit?.sha !== sourceCommit) throw new Error('Source must be the current accepted protected-main candidate');
-  const protection = await requireValue(api, `${prefix}/branches/main/protection`);
-  const contexts = protection.required_status_checks?.contexts ??
-    protection.required_status_checks?.checks?.map(check => check.context) ?? [];
-  if (protection.required_status_checks?.strict !== true ||
-      !['framework/validation', 'framework/approval', 'framework/coverage'].every(context => contexts.includes(context)) ||
-      !protection.required_pull_request_reviews || protection.required_conversation_resolution?.enabled !== true ||
-      protection.enforce_admins?.enabled !== true || protection.allow_force_pushes?.enabled !== false ||
-      protection.allow_deletions?.enabled !== false) {
-    throw new Error('Effective protected-main merge/review/check/conversation/bypass settings do not match the adopted release policy');
-  }
+  if (main?.protected !== true || main.commit?.sha !== sourceCommit) throw new Error('Source must be the current accepted protected-main candidate');
   const statuses = await requireValue(api, `${prefix}/commits/${sourceCommit}/status`);
   const requiredContexts = ['framework/validation', 'framework/approval', 'framework/coverage'];
   let sourceAcceptance = { kind: 'exact-source-statuses', revision: sourceCommit };
@@ -175,7 +165,7 @@ export async function preflightRelease({ sourceCommit, version, repository, rele
     throw new Error('Existing immutable publication requires its original saved bundle or frozen candidate artifact ID; reconcile instead of repacking');
   }
   const result = { schemaVersion: 1, status: 'Passed', releaseIntentId, sourceCommit, version, repository,
-    actorPermission: permission.permission, sourceAcceptance, previous, trustedPublisherConfiguration: 'ExplicitlyConfigured',
+    sourceAcceptance, previous, trustedPublisherConfiguration: 'ExplicitlyConfigured',
     trustedPublisherAuthentication: 'NotRun', run: { id: environment.GITHUB_RUN_ID, attempt: environment.GITHUB_RUN_ATTEMPT },
     validationMode: environment.SAVED_BUNDLE_ARTIFACT_ID ? 'reuse-r-pre' :
       environment.SAVED_CANDIDATE_ARTIFACT_ID ? 'fresh-saved-candidate' : 'fresh-new-candidate',

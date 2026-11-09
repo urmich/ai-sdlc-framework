@@ -193,9 +193,10 @@ copied. The observer preserves this allowlisted context in its failure payload;
 its public error code/message and truthful `NotRun` outcome remain unchanged.
 
 Triggered/reported run monitoring uses actual authorized reads and the host
-scheduler at 60-second intervals, with separate page-access proof. Report
-interruption, missing capabilities and terminal outcomes. The offline ledger
-cannot poll while its host is stopped.
+scheduler at each monitor's recorded interval, with separate page-access proof.
+New monitors default to 300 seconds; existing monitors retain their intervals.
+Report interruption, missing capabilities and terminal outcomes. The offline
+ledger cannot poll while its host is stopped.
 
 ## Current acceptance and delivery boundary
 
