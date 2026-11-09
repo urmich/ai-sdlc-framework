@@ -120,6 +120,46 @@ Timing deferral never supplies a passing result or waives correctness,
 cleanup, provenance or credential protection. Community-guardrail acceptance
 remains deferred and NotRun.
 
+**Current Mac admission deadline determinism cycle:** SDK-main run
+`42606641576`, attempt 1, job `129124952854` failed T-PRD014-MA at assertion
+`2b173c3209f0e45fe028b5aa183b8dbe990fd28df8f129eafba7b91b1f3a9630`
+(`0 !== 1`). Preserve its original log SHA-256
+`f463979c4f66d9cd017d1b732d1eb131f8ceb7eb6ae367e186fb0c88d9d60f13`.
+The inherited root `T-MACADM010 cancellation and the overall deadline interrupt in-flight synthetic HTTP without admission`
+overrode the adapter's virtual clock with real elapsed time, so scheduler delay
+could correctly expire the deadline before the first synthetic request.
+An owned isolated fixture reproduced that failure with a controlled 11 ms
+pre-request clock advance. Remove only the root's real-clock override:
+the existing virtual clock holds pre-request checks at zero, while production's
+owned real timer still aborts the entered pending request. Preserve both modes,
+the exact cancellation/timeout codes, null observation, one-request assertion
+and original deadlines; production admission behavior is unchanged.
+
+This existing network-free root remains PR-only on all four native platforms,
+owned by the Mac admission controls, with one process slot, no prerequisites
+and no shared external resources. It is not promoted into critical27.
+Preserve both authentic historical source reconstruction paths and all immutable
+capsules, digests and qualification assertions. The first early historical
+selection retained 13 failures out of 18: removing this line also changed the
+archived admission-test reconstruction and its complete inventory. Restore that
+one line only in both in-memory historical inputs before their unchanged
+splices, and remove the added restoration text from reconstructed self-source.
+Do not restore the real-clock override in the live test or change any archived
+Git bytes, capsule, count, digest or assertion. Preserve the failed originals.
+Freeze a new commit/tree,
+all 352 raw tracked inputs, native definition inputs and owned Node 24.20.0.
+Run critical27 (canonical16 once, then risk11), static checks, the existing
+combined transport/native/observer/privacy closure, exact actual-CI root and
+source-safety selection, plus this exact affected root once, within the existing
+aggregate five-slot process-isolated budget. Retain first-execution originals,
+complete reporters/journals, source identities and verified cleanup.
+The prior `e295ff7e3e967facdefa1d806652a1efc82cec1f` local checkpoint and Review
+stay historical; changed source requires fresh local validation and separate
+whole-candidate built-in Review. All 99 canonical current statuses, primary
+native/trusted validation, community acceptance and release acceptance remain
+NotRun. Recovery remains BINDING/no token and unmanaged; no provider action,
+publication permission or new requirement is supplied by this test repair.
+
 ## 1. Scope and execution status
 
 This is the one living Test Plan for `wi-public-readiness`, artifact

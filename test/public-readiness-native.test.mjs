@@ -4044,6 +4044,9 @@ async function qualifiedIntelSourceFiles() {
   const files = await Promise.all(frozen.paths.map(async file => {
     let contents = (await fs.readFile(path.join(repositoryRoot, ...file.split('/')), 'utf8'))
       .replace(/\r\n/gu, '\n');
+    if (file === 'test/macos-runner-admission.unit.test.mjs')
+      contents = contents.replace('    pending.options.signal = controller.signal;\n',
+        '    pending.options.signal = controller.signal;\n    pending.options.now = () => performance.now();\n');
     if (file === 'test/monitors.test.mjs') contents = historicalMonitorSource(contents);
     if (file === 'test/github-retained-identity-acceptance.test.mjs') {
       contents = contents.replace(
@@ -4126,6 +4129,9 @@ async function qualifiedIntelSourceFixture(protocol) {
   assert.equal(actual.complete, true, JSON.stringify(actual.unresolved));
   const files = await Promise.all(snapshot.paths.map(async file => {
     let contents = (await fs.readFile(path.join(repositoryRoot, ...file.split('/')), 'utf8')).replace(/\r\n/gu, '\n');
+    if (file === 'test/macos-runner-admission.unit.test.mjs')
+      contents = contents.replace('    pending.options.signal = controller.signal;\n',
+        '    pending.options.signal = controller.signal;\n    pending.options.now = () => performance.now();\n');
     if (file === 'test/monitors.test.mjs') contents = historicalMonitorSource(contents);
     if (file === 'test/github-retained-identity-acceptance.test.mjs') {
       contents = contents.replace(
@@ -4172,6 +4178,9 @@ async function qualifiedIntelSourceFixture(protocol) {
     }
     if (file === 'test/public-readiness-native.test.mjs') {
       contents = contents.replaceAll("    if (file === 'test/monitors.test.mjs') contents = historicalMonitorSource(contents);\n", '')
+        .replaceAll("    if (file === 'test/macos-runner-admission.unit.test.mjs')\n" +
+          "      contents = contents.replace('    pending.options.signal = controller.signal;\\n',\n" +
+          "        '    pending.options.signal = controller.signal;\\n    pending.options.now = () => performance.now();\\n');\n", '')
         .replace('  const retained = f.files.find(source => source.file === f.retainedFile);\n' +
           '  retained.contents = historical.files.find(source => source.file === f.retainedFile).contents;\n', '')
         .replace("      contents = contents.replace(\n" +
