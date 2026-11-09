@@ -4052,6 +4052,7 @@ async function qualifiedIntelSourceFiles() {
       contents = contents.replace(
         "    Object.defineProperty(error, 'code', { get() { getters++; return 'ECONNRESET'; } });\n", '');
     }
+    if (file === 'test/public-readiness-ci.test.mjs') contents = historicalReadinessCiSource(contents);
     if (file === 'test/github-transport.unit.test.mjs') {
       const recovery = contents.indexOf('    "names": [\n      "T-PRD037 classified transient REST');
       const separator = '  }, {\n';
@@ -4137,6 +4138,7 @@ async function qualifiedIntelSourceFixture(protocol) {
       contents = contents.replace(
         "    Object.defineProperty(error, 'code', { get() { getters++; return 'ECONNRESET'; } });\n", '');
     }
+    if (file === 'test/public-readiness-ci.test.mjs') contents = historicalReadinessCiSource(contents);
     if (file === 'test/github-transport.unit.test.mjs') {
       const recovery = contents.indexOf('    "names": [\n      "T-PRD037 classified transient REST');
       const separator = '  }, {\n';
@@ -4227,6 +4229,32 @@ async function qualifiedIntelSourceFixture(protocol) {
       'Authentic v12 transfers every descendant of the original six complete components');
   }
   return { inventory, plan, assignment, protocol, revision: snapshot.revision };
+}
+
+function historicalReadinessCiSource(contents) {
+  // Restore genuine Git blob b0e7c7ca1ae76c4795fbe79d1f3494f8a4e59b19 before
+  // the unchanged capsules' line splices; current readback tests remain current-only.
+  const lines = contents.split(/(?<=\n)/u);
+  const splices = [
+    [0, 11],
+    '    {"root": "T-PRD085 idle observer reconciliation completes without granting validation credit", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}\n',
+    [16, 13],
+    [40, 31],
+    "import { digest } from '../src/core.mjs';\n",
+    [72, 40],
+    [114, 1],
+    "    detailsUrl: 'https://github.com/fixture/repo/actions/runs/1/attempts/1' };\n",
+    [118, 14],
+    '  return { host, policy, key, snapshot, items, writes };\n',
+    [134, 1115],
+    [1441, 1677],
+  ];
+  const restored = splices.map(part => typeof part === 'string' ? part :
+    lines.slice(part[0], part[0] + part[1]).join('')).join('');
+  assert.equal(createHash('sha256').update(restored).digest('hex'),
+    'ec2b02ff9745d70fc702010653a0d994b2c926f46f430fec43051dace76ca6ef',
+    'Replay must restore the exact CI source preceding the readback fixture additions');
+  return restored;
 }
 
 function historicalMonitorSource(contents) {
