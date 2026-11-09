@@ -79,7 +79,9 @@ policy, not mandatory configuration installed into your project.
 
 Pipeline monitoring needs an actual host recurring scheduler, authorized
 provider-read tools and a running host. When those are available, the agent
-attaches polling every **60 seconds**, verifies the actual run page and reports
-terminal results. The standalone offline CLI has no background timer or provider
+observes the run immediately, then polls at the monitor's recorded interval:
+**300 seconds (five minutes)** for new monitors. Existing monitors retain their
+recorded intervals. The agent verifies the actual run page and reports terminal
+results. The standalone offline CLI has no background timer or provider
 client. Missing capabilities and host interruptions must be reported; observing
 a run never authorizes a deployment or stage transition.

@@ -58,8 +58,9 @@ and the [release log](CHANGELOG.md) for availability in a selected release.
 
 Provider integrations have different adapter scopes, described in
 [integration support](docs/integrations/README.md). Monitoring needs a running
-host, a recurring scheduler and authorized provider-read tools for 60-second
-polling; the offline CLI does not start a timer or contact providers.
+host, a recurring scheduler and authorized provider-read tools. New monitors
+default to five-minute polling; existing monitors retain their recorded
+intervals. The offline CLI does not start a timer or contact providers.
 Host-agent session/chat recovery belongs to Copilot, not this framework.
 Framework orientation records do not prove that the model read or understood
 the documents, and instructions/hooks do not guarantee model compliance.

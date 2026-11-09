@@ -745,7 +745,9 @@ Capability values must be literal JSON booleans; truthy strings are rejected.
 - `claim`: `{runKey,workerId,replaceInterrupted?}` → claimGeneration.
 - `begin-poll`: `{runKey,workerId,claimGeneration}`. Immediate first poll, at most
   one in flight. A real non-null claimed worker and available scheduler/read
-  capabilities are required. Subsequent due times are anchored 60 seconds apart.
+  capabilities are required. Subsequent due times are anchored to the record's
+  `pollIntervalSeconds`: 300 seconds for new monitors, unchanged for existing
+  records. Slow reads advance to the first future slot without catch-up bursts.
 - `observe`: claim fields plus the complete execution identity and
   status/evidenceRef or error.
   Status: queued/running/waiting-approval/succeeded/failed/cancelled.
