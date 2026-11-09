@@ -390,13 +390,18 @@ Required tests must be real merge prerequisites, not advisory green decorations.
   global review toggle enforces an author-specific rule it cannot express.
   Include this repository's required coverage-metadata check from FR-214;
   installing the framework elsewhere must not impose that repository policy.
+  For the release candidate, retain the owner-selected strict `Native producer
+  completeness` branch check from GitHub Actions App `15368`. Restore the three
+  framework branch-protection guards after RC; deferring those settings does not
+  waive independent successful release-source validation/approval/coverage proof.
 - AC-205.2: Direct pushes, force pushes, deletion and administrative bypasses
   follow the explicitly approved policy. Do not silently exempt maintainers.
-  The owner retains a deliberate PR-only administrator override without changing
-  the rules for each merge. Normal required validations apply equally to owner
-  and contributor PRs. Configuring that capability does not authorize an agent
-  to exercise it; a particular PR requires explicit owner direction. An override
-  does not turn missing or failing checks into passing release evidence.
+  The current owner policy permits zero bypass actors, including no PR-only
+  administrator exception. GitHub enforces permissions, approvals and branch
+  protections; the release helper does not independently audit that policy or
+  hidden actor lists. Normal required validations apply equally to owner and
+  contributor PRs. Provider enforcement does not turn missing or failing checks
+  into passing release evidence.
 - AC-205.3: Verify that a failing, missing, stale or skipped required result
   prevents merge. Source configuration alone does not prove provider enforcement.
 - AC-205.4: Document unavailable account-tier controls and owner actions
@@ -435,6 +440,14 @@ approved release sequence without manual glue or repeated per-job intervention.
 - AC-206.1: Validate the source/version/tag, destination, toolchains, required
   settings, authority and channel prerequisites before irreversible publication.
   Missing `RELEASE_REPOSITORY` or equivalent configuration fails early and clearly.
+  GitHub workflow/environment permissions authorize entry; release does not
+  duplicate collaborator-permission, classic-protection or ruleset-schema audits.
+  It still binds the exact dispatch/ref/workflow SHA to current protected `main`
+  and requires successful `framework/validation`, `framework/approval` and
+  `framework/coverage` statuses on that source or its one accepted merged-PR head.
+  A Native check alone is not source-validation credit. No inferred empty bypass
+  list, policy snapshot, extra privileged credential or independent policy-pass
+  claim is permitted. Actual hosted release acceptance remains NotRun.
 - AC-206.2: Complete required candidate checks, deterministic packaging and native
   gates before publication. Publish one immutable, source-bound package/bundle
   to the approved npm and GitHub destinations without rebuilding between channels.

@@ -2764,19 +2764,18 @@ Tests must report actual observed enforcement at that assurance level.
 
 ### 6.4 Branch policy and threat boundary
 
-Proposed `main` protection: PR-only changes, required current
-validation/approval/coverage contexts, up-to-date branch and resolved
-conversations; force push/deletion disabled; no silent CI exemption for
-administrators. Do not enable auto-merge or
-use admin merge flags as a substitute for policy.
+The owner-selected RC `main` protection retains PR-only changes, the strict
+`Native producer completeness` check from GitHub Actions App `15368`, up-to-date
+branch and resolved conversations; force push/deletion disabled. Restore the
+three framework branch-protection guards after RC. Those deferred settings do
+not remove independent required successful source/accepted-PR framework statuses.
 
-The owner-selected exception is a deliberate administrator bypass **for pull
-requests only**, not an always-allow bypass. Normal checks and conversation
-resolution still apply to every PR, including the owner's. The capability is
-actor-based, not an exemption based on PR authorship; configuring it neither
-authorizes an agent to use it nor makes failed validation admissible for release.
-Its exercise needs explicit direction for the particular PR. Do not add a
-direct-push, force-push or branch-deletion exception.
+The current policy permits zero bypass actors, including no PR-only administrator
+exception. GitHub enforces permissions, approvals and branch policy. The release
+helper does not reconstruct or independently certify those controls or inspect
+hidden bypass lists. Normal checks and conversation resolution still apply to
+every PR, including the owner's. Do not enable auto-merge, use admin merge flags
+or add a direct-push, force-push or branch-deletion exception.
 
 Apply only after explicit owner consent and an actual successful observed status
 from the intended source; then verify positive/negative controlled PR/ref cases
@@ -3006,20 +3005,27 @@ Require explicit exact source SHA, version, destination and release intent.
 Source must be the accepted protected-main candidate selected by that invocation;
 workflow SHA and package version must agree.
 
-Before building or writing tags/assets, verify actor/permissions, source/ref/
-version consistency, required policy/checks, destination, tool pins, artifact
+Before building or writing tags/assets, verify source/ref/version consistency,
+required source checks, destination, tool pins, artifact
 retention, registry trust and necessary environment capabilities. Missing
 `RELEASE_REPOSITORY` or an inconsistent input gets an early actionable failure.
 No implicit version bump or existing-version replacement occurs.
 
-Release policy verification supports classic protection or an equivalent active
-ruleset actually applying to `main`; the ruleset name alone is not proof.
-The ruleset path must establish required current validation/approval/coverage
-contexts, strict up-to-date checks, PRs with resolved conversations and force-push/
-deletion restrictions. It admits no bypass or only the explicitly selected
-PR-only administrator capability, never an always-allow or unknown exemption.
-Unavailable or incomplete policy facts fail preflight. This compatibility does
-not replace the separate successful source/accepted-PR validation requirements.
+GitHub workflow/environment permissions authorize the release start and GitHub
+enforces current approvals and branch protections. Preflight does not query
+collaborator permissions, classic protection, effective rules or full rulesets,
+and does not emit an independently verified actor-permission or policy verdict.
+It requires the selected branch response to say `protected: true` and identify
+the exact dispatch source SHA. Missing, denied, malformed or drifted source
+facts fail. No hidden actor inference, policy snapshot or extra credential exists.
+
+Source validation remains independent: returned required non-success statuses
+on the selected SHA reject; all three successful framework contexts admit it.
+If contexts are absent, complete associated-PR pagination must identify exactly
+one merged PR into `main` whose merge SHA equals that source; its exact head
+must have successful validation/approval/coverage statuses. Native green alone
+cannot satisfy either path. Accepted-PR proof retains fresh release R-PRE as
+NotRun, and actual hosted release acceptance remains NotRun.
 
 A single authorized release start covers the declared jobs; configure their
 normal environment policy accordingly. Do not programmatically approve or

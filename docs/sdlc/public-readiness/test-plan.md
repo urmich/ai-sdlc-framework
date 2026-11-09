@@ -1786,7 +1786,7 @@ capability, shared resource or critical assertion is introduced.
 
 | ID | Environment | Level | Checkpoint | Mode | Owner | Location | Requirements | Observe or assert | Implementation | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| T-PRD028 | local | unit | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.1 | F: missing/wrong destination, version/tag/source, toolchain, required setting or trust authority fails preflight with exact reason before any fake irreversible call is made. Preserve classic protection and accept equivalent effective active rulesets; reject missing/unknown enforcement and unsafe bypasses without relaxing successful source validation. These regressions are PR-only, not critical promotion. | test/release-ci.test.mjs#T-PRD028 | NotRun | |
+| T-PRD028 | local | unit | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.1 | F: wrong destination/version/source/ref/caller/trust fails before publication. A normal read-only fake API forbids collaborator, classic-protection and ruleset audit endpoints; successful preflight fabricates no actor-permission fact. Missing/denied/malformed/private/drifted source or protected-main facts reject. Native alone cannot replace three successful framework source statuses or one exact accepted merged-PR head; missing/failing/ambiguous/foreign merge proof rejects and fresh R-PRE remains required. GitHub owns permissions/approvals/branch enforcement. Four independent complete roots remain PR-only, one slot each with no shared resources or prerequisite roots, Node >=22 on all four native platforms; critical27 unchanged. | test/release-ci.test.mjs#T-PRD028 | NotRun | |
 | T-PRD029 | local | integration | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.2 | F: build independent comparison artifacts, seal only after all exact native gates, and pass the same digest-bound bytes to both publisher fixtures; changed/repacked/swapped data is rejected. | test/release-ci.test.mjs#T-PRD029; four-native-profile, original NDJSON data-only transport and acyclic sealed-handoff assertions all required | NotRun | |
 | T-PRD030 | local | integration | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.3 | F: drive orchestration with fixture provider outcomes; successful publication schedules exact saved-ID acceptance automatically; missing public assets/acceptance handle yields incomplete release, not success or a manual-only hidden step. | test/release-ci.test.mjs#T-PRD030 | NotRun | |
 | T-PRD031 | local | unit | post-review | automated | provider | github-pr-matrix | FR-206; AC-206.4 | F: reject PR events, wrong caller/environment/source, missing OIDC and token fallback; approved token-free exact caller gets only its declared publishing permissions. | test/npm-oidc.test.mjs#T-PRD031 | NotRun | |
@@ -2876,16 +2876,21 @@ PR; it does not exempt CI or conversation resolution. A resolved thread is not
 an approval, and an approval is not evidence that all threads are resolved.
 This defines test expectations, not authority to apply provider settings.
 
-The owner's deliberate PR-only administrator capability is distinct from normal
-merge eligibility. Verify its actual scope without exercising a bypass or
-changing production settings as a test. It is not an author-based exemption,
-does not permit direct/force pushes or deletion, and does not satisfy release
-validation when checks are missing or failing.
+The current owner policy permits zero bypass actors, including no PR-only
+administrator exception. GitHub enforces normal merge permissions, approvals
+and protections; release preflight does not independently audit actor lists or
+reconstruct protection schemas. For RC, retain the strict Native producer check
+from App `15368`; restore the three framework branch-protection guards after RC.
+Neither that deferral nor provider enforcement replaces successful independent
+release-source validation/approval/coverage or fresh native release evidence.
 
 Read actual applicable branch/ruleset/review/check settings, including inherited
-rules and bypass actors. Establish repository identity and exact required check
-contexts. Do not apply or probe writes until the user authorizes the proposed
-settings and exact disposable PR/ref consequences.
+rules, for these separately authorized provider procedures, not as an additional
+release CI audit. Establish repository identity and exact required check contexts.
+Unavailable hidden fields are not inferred empty or called independently verified.
+Do not apply or probe writes until the user authorizes the proposed settings
+and exact disposable PR/ref consequences. Actual provider/release acceptance
+remains NotRun until the corresponding procedures execute.
 
 On approved non-production fixtures, independently exercise failing, missing,
 cancelled, skipped and stale checks, external missing/stale review, and owner

@@ -25,14 +25,23 @@ The approved source repository/actual caller is
 `urmich/ai-sdlc-framework/.github/workflows/release.yml@refs/heads/main`.
 An invalid source/ref dispatch fails before checkout; it cannot appear green
 merely because every later job was skipped.
-Preflight verifies the actual actor's maintainer permission, public source and
-destination, effective protected-main policy and current source checks.
-The source policy requires strict `framework/validation`, `framework/approval`
-and `framework/coverage` results, review/conversation handling, enforced
-administrative policy and no force-push/deletion allowance. Source declarations
-alone do not prove any of these controls are enabled or correctly enforced.
-Solo-maintainer/provider policy must be reconciled explicitly, not bypassed
-by claiming the owner's own PR has an impossible self-approval.
+GitHub workflow/environment permissions authorize the start; GitHub enforces
+approvals and current branch protections. Preflight does not repeat collaborator,
+classic-protection or ruleset audits, require hidden bypass lists, or claim those
+policies independently verified. No policy snapshot or extra privileged token is
+required. The owner policy permits zero bypass actors. The RC retains the strict
+`Native producer completeness` branch check from GitHub Actions App `15368`;
+restoring the three framework branch-protection guards is deferred until after RC.
+This source change neither modifies nor proves effective provider settings.
+
+Preflight still verifies public source/destination and the exact dispatch/ref/
+workflow SHA against current protected `main`. It independently requires successful
+`framework/validation`, `framework/approval` and `framework/coverage` statuses
+on that source, or on its one accepted merged-PR head when source contexts are
+absent. A returned non-success required source status rejects even if a merged
+PR is green. Main-push Native alone does not satisfy these source checks or
+fresh release-native gates. Missing, denied or inconsistent source facts fail.
+No impossible self-approval or fabricated successful status is introduced.
 
 One authorized start owns the remaining approved sequence. There are no
 `publish_draft` / `publish_npm` opt-in flags and no separate manual acceptance
