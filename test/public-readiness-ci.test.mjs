@@ -9,7 +9,11 @@ export const validationDeclarations = {
     {"root": "T-PRD020 actual CI schedules twenty-five producer parts behind both Intel unit jobs and distinguishes edited base retargets", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD022 actual workflow graph applies semantic YAML, effective permissions and immutable action policy", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD020 required source safety scans complete committed definitions before native bootstrap", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
-    {"root": "T-PRD085 idle observer reconciliation completes without granting validation credit", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}
+    {"root": "T-PRD085 idle observer reconciliation completes without granting validation credit", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD085 status publication readback recovers visibility without replaying writes", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD085 status publication readback rejects ambiguous effects and preserves source invalidation", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD085 status publication readback respects denial rate timing deadlines cancellation and privacy", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD085 status history acquisition carries cancellation across every SDK page", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}
   ],
   "applicability": [{
     "names": ["T-PRD018 tool processes retain failures, sanitized partial output and cancellation without surviving children"],
@@ -23,6 +27,17 @@ export const validationDeclarations = {
     "owner": "pr-status-coordinator",
     "reason": "PR-only complete-empty membership regression distinguishes successful idle operation from validation evidence; incomplete acquisition, errors and blocked current PRs remain non-passing.",
     "prerequisites": ["Node; in-process owned status fixtures without credentials, network or shared resources"]
+  }, {
+    "names": [
+      "T-PRD085 status publication readback recovers visibility without replaying writes",
+      "T-PRD085 status publication readback rejects ambiguous effects and preserves source invalidation",
+      "T-PRD085 status publication readback respects denial rate timing deadlines cancellation and privacy",
+      "T-PRD085 status history acquisition carries cancellation across every SDK page"
+    ],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "pr-status-coordinator",
+    "reason": "PR-only deterministic semantic readback, single-dispatch, source/current-row safety, privacy and actual SDK pagination cancellation; independent in-process fixtures, no shared timer patches or critical promotion.",
+    "prerequisites": ["Node; owned in-memory provider fixtures and injected clock/wait; no network, credentials, native tools or shared resources"]
   }]
 };
 import test from 'node:test';
@@ -54,7 +69,7 @@ import { nativePrParts, nativeLegacyPrParts, nativePartJobKey, nativeFrameworkSh
 import { compileValidationInventory } from '../scripts/validation-inventory.mjs';
 import { runValidationReadyPool } from '../scripts/test-scheduling.mjs';
 import { expectedBodySdkRequirements } from './native-sdk-expectations.mjs';
-import { digest } from '../src/core.mjs';
+import { digest, SdlcError } from '../src/core.mjs';
 import { evaluateApproval, evaluateConversations, sharedStatusKeys, planStatusUpdate, reconcileStatusKey,
   reconcilePrReadiness, statusContexts, normalStatusLimit, disposableStatusLimits,
   runDisposablePolicyProbe } from '../scripts/pr-readiness.mjs';
@@ -95,8 +110,12 @@ function statusFixture(context = 'framework/coverage', count = 0) {
     id: index + 1, context, state: 'success', description: 'old green result', creatorId: 42,
   }));
   const writes = [];
+  let elapsed = 0;
+  const waits = [];
   const policy = { repositoryId: 17, writerId: 42,
-    detailsUrl: 'https://github.com/fixture/repo/actions/runs/1/attempts/1' };
+    detailsUrl: 'https://github.com/fixture/repo/actions/runs/1/attempts/1',
+    readback: { timeoutMs: 1000, now: () => elapsed, wallNow: () => now + elapsed,
+      wait: async (ms, { signal }) => { signal.throwIfAborted(); waits.push(ms); elapsed += ms; } } };
   const key = { repositoryId: 17, sha: sourceA, context };
   const host = {
     snapshot: async () => structuredClone(snapshot),
@@ -111,7 +130,8 @@ function statusFixture(context = 'framework/coverage', count = 0) {
       return structuredClone(record);
     },
   };
-  return { host, policy, key, snapshot, items, writes };
+  return { host, policy, key, snapshot, items, writes, waits,
+    advance: ms => { elapsed += ms; } };
 }
 
 async function fixture(t) {
@@ -1225,6 +1245,198 @@ test('T-PRD085 all shared status contexts reserve non-passing capacity and recon
       assert.match(result.reason, /not a blind retry/u);
     }
   }
+});
+
+test('T-PRD085 status publication readback recovers visibility without replaying writes', async () => {
+  for (const context of statusContexts) for (const lostReply of [false, true]) {
+    const f = statusFixture(context);
+    const statuses = f.host.statuses;
+    const publish = f.host.publish;
+    const hidden = new Set();
+    const acquisitions = [];
+    f.host.publish = async (...args) => {
+      const posted = await publish(...args);
+      if (lostReply && posted.state === 'pending') {
+        throw new SdlcError('TIMEOUT', 'controlled lost response');
+      }
+      return posted;
+    };
+    f.host.statuses = async (key, options) => {
+      const observed = await statuses(key);
+      if (options) acquisitions.push(options);
+      const latest = observed.items.at(-1);
+      if (f.writes.length && latest && !hidden.has(latest.id)) {
+        hidden.add(latest.id);
+        observed.items.pop();
+      }
+      return observed;
+    };
+    const result = await reconcileStatusKey(f.host, f.key, f.policy);
+    assert.equal(result.status, 'Passed');
+    assert.equal(result.readback.predicate, 'observed');
+    assert.equal(result.readback.expectedId, 2);
+    assert.equal(result.readback.readCount, 2);
+    assert.deepEqual(f.writes.map(write => write.value.state), ['pending', 'success']);
+    assert.deepEqual(f.waits, [250, 250]);
+    assert.equal(acquisitions.length, 4);
+    assert.ok(acquisitions.every(item => item.signal instanceof AbortSignal &&
+      item.timeoutMs > 0 && item.timeoutMs <= 1000));
+  }
+});
+
+test('T-PRD085 status publication readback rejects ambiguous effects and preserves source invalidation', async () => {
+  for (const [variant, predicate] of [
+    ['absent', 'deadline'], ['duplicate', 'ambiguous'], ['wrong-id', 'post-id-mismatch'],
+    ['invalid-id', 'invalid-post-id'], ['foreign', 'foreign-latest'], ['target', 'target-mismatch'],
+    ['incomplete', 'incomplete'],
+  ]) {
+    const f = statusFixture();
+    const publish = f.host.publish;
+    const statuses = f.host.statuses;
+    f.host.publish = async (...args) => {
+      const posted = await publish(...args);
+      if (variant === 'duplicate' || variant === 'foreign') {
+        f.items.push({ ...posted, id: posted.id + 1,
+          creatorId: variant === 'foreign' ? 99 : posted.creatorId });
+      }
+      if (variant === 'target') {
+        posted.target_url = 'https://fixture.invalid/?sig=private-sentinel';
+        f.items.at(-1).target_url = posted.target_url;
+      }
+      return { ...posted, id: variant === 'wrong-id' ? posted.id + 99 :
+        variant === 'invalid-id' ? 0 : posted.id };
+    };
+    f.host.statuses = async (key, options) => {
+      const result = await statuses(key);
+      if (options && variant === 'absent') result.items = [];
+      if (options && variant === 'incomplete') result.complete = false;
+      return result;
+    };
+    const result = await reconcileStatusKey(f.host, f.key, f.policy);
+    assert.equal(result.status, 'NotRun', variant);
+    assert.equal(result.readback.predicate, predicate, variant);
+    assert.equal(f.writes.length, 1, variant);
+    assert.doesNotMatch(JSON.stringify(result), /private-sentinel/u);
+    if (variant === 'duplicate') {
+      assert.equal(result.readback.matchingCount, 2);
+      assert.deepEqual(result.readback.matchingIds, [1, 2]);
+      assert.equal(result.readback.expectedId, 1);
+    }
+    if (variant === 'wrong-id') assert.equal(result.readback.expectedId, 100);
+    if (variant === 'foreign') assert.equal(result.readback.latestCreatorId, 99);
+  }
+  const changed = statusFixture();
+  const statuses = changed.host.statuses;
+  let hidden = false;
+  changed.host.statuses = async (key, options) => {
+    const result = await statuses(key);
+    if (options && changed.writes.at(-1)?.value.state === 'success' && !hidden) {
+      hidden = true;
+      result.items.pop();
+    }
+    return result;
+  };
+  const wait = changed.policy.readback.wait;
+  changed.policy.readback.wait = async (...args) => {
+    await wait(...args);
+    changed.snapshot.prs[0].verdicts[changed.key.context] = {
+      status: 'NotRun', inputDigest: digest('metadata changed during readback'), blockers: ['Stale metadata'],
+    };
+  };
+  assert.equal((await reconcileStatusKey(changed.host, changed.key, changed.policy)).status, 'NotRun');
+  assert.deepEqual(changed.writes.map(write => write.value.state), ['pending', 'success', 'failure']);
+});
+
+test('T-PRD085 status publication readback respects denial rate timing deadlines cancellation and privacy', async () => {
+  for (const headers of [
+    { 'retry-after': '1' },
+    { 'retry-after': new Date(now + 1000).toUTCString() },
+    { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(now / 1000 + 1) },
+  ]) {
+    const f = statusFixture();
+    f.policy.readback.timeoutMs = 4000;
+    const statuses = f.host.statuses;
+    let limited = false;
+    f.host.statuses = async (key, options) => {
+      if (options && !limited) {
+        limited = true;
+        throw new SdlcError('RATE_LIMIT', 'private-sentinel', { headers });
+      }
+      return statuses(key);
+    };
+    assert.equal((await reconcileStatusKey(f.host, f.key, f.policy)).status, 'Passed');
+    assert.deepEqual(f.waits, [1000]);
+    assert.deepEqual(f.writes.map(write => write.value.state), ['pending', 'success']);
+  }
+  for (const [variant, predicate] of [
+    ['PERMISSION', 'acquisition-error'], ['AUTH', 'acquisition-error'],
+    ['RATE_LIMIT', 'rate-limit-deadline'], ['cancel', 'cancelled'],
+    ['late', 'deadline'], ['private', 'acquisition-error'], ['wait', 'wait-error'],
+  ]) {
+    const f = statusFixture();
+    const controller = new AbortController();
+    f.policy.readback.signal = controller.signal;
+    const statuses = f.host.statuses;
+    let getters = 0;
+    f.host.statuses = async (key, options) => {
+      if (!options) return statuses(key);
+      if (variant === 'cancel') {
+        controller.abort();
+        throw new SdlcError('CANCELLED', 'private-sentinel');
+      }
+      if (variant === 'late') { f.advance(1000); return statuses(key); }
+      if (variant === 'wait') return { complete: true, items: [] };
+      if (variant === 'private') throw Object.defineProperty({}, 'code', {
+        get() { getters++; throw Error('private-sentinel'); },
+      });
+      throw new SdlcError(variant, 'private-sentinel', {
+        headers: { 'retry-after': '60', authorization: 'private-sentinel' },
+      });
+    };
+    if (variant === 'wait') f.policy.readback.wait = async () => { throw Error('private-sentinel'); };
+    const result = await reconcileStatusKey(f.host, f.key, f.policy);
+    assert.equal(result.status, 'NotRun', variant);
+    assert.equal(result.readback.predicate, predicate, variant);
+    assert.equal(f.writes.length, 1);
+    assert.equal(getters, 0);
+    assert.doesNotMatch(JSON.stringify(result), /private-sentinel|authorization|headers/u);
+    if (variant === 'RATE_LIMIT') assert.equal(result.readback.retryAfterMs, 60000);
+  }
+  const cancelled = statusFixture();
+  const controller = new AbortController();
+  controller.abort();
+  cancelled.policy.readback.signal = controller.signal;
+  const result = await reconcileStatusKey(cancelled.host, cancelled.key, cancelled.policy);
+  assert.equal(result.status, 'NotRun');
+  assert.equal(result.readback.predicate, 'cancelled');
+  assert.equal(cancelled.writes.length, 0);
+  const expired = statusFixture();
+  expired.policy.readback.deadlineMs = 0;
+  assert.equal((await reconcileStatusKey(expired.host, expired.key, expired.policy)).readback.predicate, 'deadline');
+  assert.equal(expired.writes.length, 0);
+});
+
+test('T-PRD085 status history acquisition carries cancellation across every SDK page', async () => {
+  const controller = new AbortController();
+  const calls = [];
+  const client = createReadinessGitHubClient({
+    repository: 'urmich/ai-sdlc-framework', repositoryId: 17, writerId: 42,
+    token: 'fixture-ephemeral-token', generation: 'readback-pages',
+    fetch: async (url, options) => {
+      calls.push({ url, method: options.method });
+      assert.equal(options.signal.aborted, false);
+      if (calls.length === 1) return new Response('[]', { headers: {
+        'content-type': 'application/json',
+        link: `<https://api.github.com/repos/urmich/ai-sdlc-framework/commits/${sourceA}/statuses?per_page=100&page=2>; rel="next"`,
+      } });
+      controller.abort();
+      throw Error('controlled cancelled page');
+    },
+  });
+  await assert.rejects(client.list(`/commits/${sourceA}/statuses?per_page=100`, undefined,
+    { signal: controller.signal, timeoutMs: 1000 }), { code: 'CANCELLED' });
+  assert.equal(calls.length, 2);
+  assert.ok(calls.every(call => call.method === 'GET'));
 });
 
 test('T-PRD085 shared membership, metadata changes, pagination and stale events cannot overwrite another PR verdict', async () => {

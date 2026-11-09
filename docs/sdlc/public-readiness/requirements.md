@@ -331,6 +331,9 @@ merge, even when its author ran nothing locally.
   failure diagnostics and links to complete per-test reports/logs. Do not
   require a custom dashboard or silently hide outcomes because a summary is
   size-limited.
+  Status-publication uncertainty retains a small sanitized predicate, actual
+  safe provider IDs/counts and acquisition classification, not raw errors,
+  credentials, signed URLs or headers.
 - AC-203.7: Every automatable code test that requires capabilities unavailable on
   the normal contributor machine has an explicit required PR runner/group and
   reproducible pinned setup. This includes authentic signature-verification
@@ -790,6 +793,12 @@ the installed framework imposes on all consumer repositories.
   privileges.
   Explain shared-key blocking PRs and capacity blockers separately from the
   current PR's test failures.
+  Each status transition dispatches once. Recover temporarily absent readback
+  through deadline-bound read-only acquisition, never blind write retries or
+  an AI agent rerunning CI. Preserve current source/member, latest-row, writer,
+  context/state/marker/target and known positive POST-ID checks; ambiguous,
+  denied, cancelled or unresolved effects remain non-passing. Honor provider
+  rate timing and real execution deadlines without an aggregate API-call quota.
 - AC-214.4: Scope automatic enforcement to this repository. Deliver the reusable
   authoring/inspection capability under FR-213, but leave other projects' CI/CD
   policies unchanged unless their owners explicitly adopt an integration.

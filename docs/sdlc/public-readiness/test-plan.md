@@ -1886,6 +1886,21 @@ The additional `test/public-readiness-observer.test.mjs#T-PRD085` selector
 exercises same-head metadata deletion independently of complete matching native
 fixture evidence through the actual API-only observer boundary.
 
+The PR-only T-PRD085 roots `status publication readback recovers visibility
+without replaying writes`, `status publication readback rejects ambiguous effects
+and preserves source invalidation`, `status publication readback respects denial
+rate timing deadlines cancellation and privacy`, and `status history acquisition
+carries cancellation across every SDK page` in `public-readiness-ci.test.mjs`
+use independent in-memory providers and injected clocks/waits (no real network,
+sleeps or global timer patches). Cover accepted/lost replies with delayed
+visibility, permanent absence, duplicate/wrong IDs, foreign latest rows, wrong
+targets, source changes, incomplete histories, rate/reset timing, denial,
+deadline/cancellation and secret/getter-safe diagnostics. The last root exercises
+the actual SDK pagination cancellation boundary. These do not grow critical27;
+their complete hosted/candidate-bound checkpoint remains NotRun until executed
+for the final combined candidate. A controlled old-source failure and focused
+iteration pass do not establish the historical a2 cause or release acceptance.
+
 ### 5.9 Independent projects and sustained professional structure
 
 | ID | Environment | Level | Checkpoint | Mode | Owner | Location | Requirements | Observe or assert | Implementation | Status | Evidence |

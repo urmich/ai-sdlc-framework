@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+import { types } from 'node:util';
 import { canonical, digest, requireThat, SdlcError } from '../src/core.mjs';
 import { normalizeExecutionReport, evaluateReadiness, validationInventoryDigest,
   validateExecutionContext, createEvidenceBundle, sanitizeExecutionPayload } from 'ai-sdlc-framework/evidence';
@@ -191,28 +192,154 @@ export function planStatusUpdate(group, history, { writerId, writerControl }) {
     capacity: false, count: statuses.length };
 }
 
+const publicationErrorCodes = new Set([
+  'TIMEOUT', 'CANCELLED', 'RATE_LIMIT', 'AUTH', 'PERMISSION', 'INACCESSIBLE',
+  'TRANSPORT', 'PROVIDER', 'CONTRACT', 'PROOF_GAP', 'CACHE_GAP', 'INPUT',
+  'RESPONSE_LIMIT', 'REDIRECT', 'EVIDENCE', 'CLEANUP',
+]);
+const ownValue = (value, key) => value && typeof value === 'object' && !types.isProxy(value) ?
+  Object.getOwnPropertyDescriptor(value, key)?.value : undefined;
+const publicationErrorCode = error => {
+  const code = ownValue(error, 'code');
+  return publicationErrorCodes.has(code) ? code : 'UNKNOWN';
+};
+const positiveId = value => Number.isSafeInteger(value) && value > 0;
+
+function rateWait(error, wallNow) {
+  const headers = ownValue(ownValue(error, 'details'), 'headers');
+  const retry = ownValue(headers, 'retry-after');
+  if (typeof retry === 'string' && retry.length <= 128) {
+    if (/^\d+$/u.test(retry)) return Number(retry) * 1000;
+    const date = Date.parse(retry);
+    if (Number.isFinite(date)) return Math.max(0, date - wallNow());
+  }
+  const reset = ownValue(headers, 'x-ratelimit-reset');
+  if (ownValue(headers, 'x-ratelimit-remaining') === '0' &&
+      typeof reset === 'string' && /^\d{1,13}$/u.test(reset)) {
+    return Math.max(0, Number(reset) * 1000 - wallNow());
+  }
+  return undefined;
+}
+
+function inspectPublication(observed, key, update, policy, history, posted) {
+  const expectedId = positiveId(posted?.id) ? posted.id : null;
+  const detail = { complete: observed?.complete === true, expectedId, matchingCount: 0,
+    matchingIds: [], latestId: null, latestCreatorId: null };
+  if (!detail.complete || !Array.isArray(observed.items)) return { ...detail, predicate: 'incomplete' };
+  const items = observed.items.filter(item => item.context === key.context);
+  if (items.some(item => !positiveId(item.id)) || new Set(items.map(item => item.id)).size !== items.length) {
+    return { ...detail, predicate: 'invalid-history' };
+  }
+  const previous = new Set(history.items.map(item => item.id));
+  const matching = items.filter(item => !previous.has(item.id) && item.creatorId === policy.writerId &&
+    item.state === update.state && item.description === update.description &&
+    item.target_url === policy.detailsUrl && (item.sha === undefined || item.sha === key.sha));
+  const latest = [...items].sort((left, right) => right.id - left.id)[0];
+  Object.assign(detail, { matchingCount: matching.length,
+    matchingIds: matching.map(item => item.id).sort((a, b) => a - b).slice(0, 2),
+    latestId: latest?.id ?? null,
+    latestCreatorId: positiveId(latest?.creatorId) ? latest.creatorId : null });
+  let predicate;
+  if (posted !== undefined && expectedId === null) predicate = 'invalid-post-id';
+  else if (matching.length > 1) predicate = 'ambiguous';
+  else if (matching.length === 1 && expectedId !== null && matching[0].id !== expectedId) {
+    predicate = 'post-id-mismatch';
+  } else if (latest && !previous.has(latest.id) && latest.creatorId !== policy.writerId) {
+    predicate = 'foreign-latest';
+  } else if (matching.length === 1 && latest?.id === matching[0].id) predicate = 'observed';
+  else if (latest && !previous.has(latest.id)) {
+    predicate = latest.sha !== undefined && latest.sha !== key.sha ? 'source-mismatch' :
+      latest.state !== update.state ? 'state-mismatch' :
+        latest.description !== update.description ? 'marker-mismatch' :
+          latest.target_url !== policy.detailsUrl ? 'target-mismatch' : 'superseded';
+  } else predicate = 'missing';
+  return { ...detail, predicate };
+}
+
 async function publishObserved(host, key, update, policy, history) {
+  const options = policy.readback ?? {};
+  const now = options.now ?? (() => performance.now());
+  const wallNow = options.wallNow ?? Date.now;
+  const wait = options.wait ?? ((ms, { signal }) => delay(ms, undefined, { signal }));
+  const timeoutMs = options.timeoutMs ?? 15000;
+  requireThat(typeof now === 'function' && typeof wallNow === 'function' && typeof wait === 'function' &&
+    Number.isSafeInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= 30000 &&
+    (options.deadlineMs === undefined || Number.isFinite(options.deadlineMs)) &&
+    (options.signal === undefined || options.signal instanceof AbortSignal),
+  'INPUT', 'Status readback requires a bounded clock, wait and cancellation policy');
   let posted;
   let uncertainty;
+  let diagnostic = { predicate: 'not-dispatched', readCount: 0, expectedId: null,
+    matchingCount: 0, matchingIds: [] };
+  const failed = predicate => ({ status: 'NotRun',
+    reason: predicate === 'post-denied' ?
+      'Status POST was denied; inspect the retained diagnostic, not a blind retry' : uncertainty ?
+      'Status POST outcome is uncertain; retained history requires reconciliation, not a blind retry' :
+      `Status publication could not be independently reconciled (${predicate})`,
+    uncertainty: uncertainty ?? null, readback: { ...diagnostic, predicate } });
+  if (options.signal?.aborted) return failed('cancelled');
+  if (now() >= (options.deadlineMs ?? Infinity)) return failed('deadline');
   try {
     posted = await host.publish(key, {
       state: update.state, description: update.description, target_url: policy.detailsUrl,
     });
   } catch (error) {
-    uncertainty = error.code ?? 'UNKNOWN';
+    const code = publicationErrorCode(error);
+    diagnostic.errorCode = code;
+    if (['AUTH', 'PERMISSION', 'INACCESSIBLE', 'RATE_LIMIT'].includes(code)) {
+      const retryAfterMs = code === 'RATE_LIMIT' ? rateWait(error, wallNow) : undefined;
+      if (Number.isFinite(retryAfterMs)) diagnostic.retryAfterMs = retryAfterMs;
+      return failed('post-denied');
+    }
+    uncertainty = code;
+    if (['CONTRACT', 'EVIDENCE'].includes(code)) return failed('post-response-invalid');
   }
-  const observed = await host.statuses(key);
-  const matching = observed.complete && observed.items.filter(status => status.context === key.context &&
-    status.creatorId === policy.writerId && status.state === update.state &&
-    status.description === update.description &&
-    !history.items.some(previous => previous.id === status.id));
-  if (!matching || matching.length !== 1 || posted && matching[0].id !== posted.id) {
-    return { status: 'NotRun', reason: uncertainty ?
-      'Status POST outcome is uncertain; retained history requires reconciliation, not a blind retry' :
-      'Status publication could not be independently reconciled',
-    uncertainty: uncertainty ?? null };
+  diagnostic.expectedId = positiveId(posted?.id) ? posted.id : null;
+  const started = now();
+  const deadline = Math.min(started + timeoutMs, options.deadlineMs ?? Infinity);
+  const controller = new AbortController();
+  const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+  const timer = setTimeout(() => controller.abort(), Math.max(0, deadline - started));
+  timer.unref();
+  const stopped = () => options.signal?.aborted ? 'cancelled' :
+    controller.signal.aborted || now() >= deadline ? 'deadline' : undefined;
+  let backoff = 250;
+  try {
+    while (!stopped()) {
+      let pause;
+      try {
+        diagnostic.readCount++;
+        const observed = await host.statuses(key, {
+          signal, timeoutMs: Math.max(1, Math.floor(deadline - now())),
+        });
+        if (stopped()) return failed(stopped());
+        diagnostic = { ...diagnostic, ...inspectPublication(observed, key, update, policy, history, posted) };
+        if (diagnostic.predicate === 'observed') return { observed: true, readback: diagnostic };
+        if (diagnostic.predicate !== 'missing') return failed(diagnostic.predicate);
+        pause = Math.min(backoff, deadline - now());
+        backoff = Math.min(backoff * 2, 2000);
+      } catch (error) {
+        diagnostic.errorCode = publicationErrorCode(error);
+        if (stopped()) return failed(stopped());
+        if (diagnostic.errorCode !== 'RATE_LIMIT') return failed('acquisition-error');
+        pause = rateWait(error, wallNow);
+        if (!Number.isFinite(pause) || pause < 0) return failed('rate-limit-timing-unavailable');
+        diagnostic.retryAfterMs = pause;
+        pause = Math.max(backoff, pause);
+        backoff = Math.min(backoff * 2, 2000);
+        if (pause >= deadline - now()) return failed('rate-limit-deadline');
+      }
+      try { await wait(Math.max(1, pause), { signal }); }
+      catch (error) {
+        diagnostic.errorCode = publicationErrorCode(error);
+        return failed(stopped() ?? 'wait-error');
+      }
+    }
+    return failed(stopped());
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
   }
-  return { observed: true };
 }
 
 async function invalidateChangedKey(host, key, policy, group) {
@@ -237,6 +364,7 @@ export async function reconcileStatusKey(host, key, policy) {
     'The status key must belong to the independently selected repository');
   let latestMembers = [];
   for (let pass = 0; pass < 3; pass++) {
+    let readback;
     const snapshot = await host.snapshot();
     const group = sharedStatusKeys(snapshot).find(group => group.repositoryId === key.repositoryId &&
       group.sha === key.sha && group.context === key.context);
@@ -250,6 +378,7 @@ export async function reconcileStatusKey(host, key, policy) {
     if (update.action === 'write') {
       const effect = await publishObserved(host, key, update, policy, history);
       if (!effect.observed) return { key, ...effect, members: group.members };
+      readback = effect.readback;
     }
     const refreshed = sharedStatusKeys(await host.snapshot()).find(group =>
       group.repositoryId === key.repositoryId && group.sha === key.sha && group.context === key.context);
@@ -263,7 +392,8 @@ export async function reconcileStatusKey(host, key, policy) {
     }
     if (refreshed?.description === group.description && update.state !== 'pending') {
       return { key, status: update.state === 'success' ? 'Passed' :
-        group.status === 'Failed' ? 'Failed' : 'NotRun', state: update.state, members: group.members };
+        group.status === 'Failed' ? 'Failed' : 'NotRun', state: update.state, members: group.members,
+      ...(readback ? { readback } : {}) };
     }
   }
   return { key, status: 'NotRun', members: latestMembers,

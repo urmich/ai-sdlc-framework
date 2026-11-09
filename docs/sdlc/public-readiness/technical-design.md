@@ -2870,6 +2870,30 @@ sections, AC/test identities and source mismatches. Keep declared coverage and
 ordinary pass/fail test reports visibly separate. No LLM or bot service is
 needed, and no extra consumer coverage files are produced.
 
+`publishObserved` in `scripts/pr-readiness.mjs` dispatches each planned
+transition once, then reconciles complete status history under a 15-second
+monotonic readback deadline (optional caller deadline/cancellation can shorten
+it; the bounded override cannot exceed 30 seconds). Inject clock/wall-clock/wait
+for deterministic tests. Only a missing new effect permits semantic readback
+recovery, with 250/500/1000/2000-ms capped backoff. Preserve distinct positive
+IDs, the exact new/current row, writer/context/state/marker/target URL and a
+known returned POST ID. Multiple matches, contradictory IDs, foreign latest
+rows and incomplete proof stop non-passing. A lost POST reply may be reconciled
+only by one independently attributable new effect, never by repeating POST.
+Keep the existing fresh-snapshot source check and non-passing invalidation.
+Explicit denials stop; rate-limited reads respect safe Retry-After/reset timing
+only within the remaining deadline. Unknown timing or exhausted time is NotRun.
+The host `statuses(key, options)` forwards signal/remaining timeout through
+`api.list(relative, field, options)` to the existing SDK pagination contract:
+one abort deadline spans every page, rather than resetting per page. Clear
+owned timers on every exit. Retain only bounded predicate/count/positive IDs,
+allowlisted error code and safe retry timing; never raw provider error objects.
+This is normal Node CI, not an AI service or whole-workflow retry mechanism.
+The privileged workflow continues executing protected default-main helpers
+until the reviewed change lands there; PR source must never replace that checkout.
+Historical a2's underlying mismatch remains unknown, even if controlled
+visibility-lag tests and a later actual workflow pass.
+
 Bootstrap the reviewed checker on the trusted branch, observe a real successful
 context/source, then obtain the separately scoped rule-change/probe authority
 before making it required. T-PRD085 covers controlled checker/event negatives;

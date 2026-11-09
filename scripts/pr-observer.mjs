@@ -1438,8 +1438,8 @@ export function createPrReadinessHost({
       });
       return { repositoryId: api.repositoryId, complete: true, prs };
     },
-    async statuses(key) {
-      const items = await api.list(`/commits/${key.sha}/statuses?per_page=100`);
+    async statuses(key, options = {}) {
+      const items = await api.list(`/commits/${key.sha}/statuses?per_page=100`, undefined, options);
       return { complete: true, items: items.map(item => ({ ...item, creatorId: item.creator?.id })) };
     },
     publish: (key, value) => api.publish(key, value),
