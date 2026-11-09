@@ -91,6 +91,22 @@ silently forcing bottles or substituting system runtimes. Current versions and
 execution projections belong to the living Test Plan; prior approvals and
 failed executions remain unchanged.
 
+**SDK16 source-integration preparation:** Merge exact SDK source
+`a129d4b0399517b2c2f44c690ee17fd342f83eaa`, tree
+`13ddb9677b4fd06dad422a560e020b8e1c75a9d6`, into frozen primary
+`e9dddc2332604a4d9a24126be5f50cea6772eeda`. This is owner-directed,
+unmanaged source preparation; prior branch-bound Coding authority, local
+results, Review and native qualification do not transfer. Current retained
+scope is F01/F02/F03/F05/F06/F13 plus separately owner-authorized F04;
+F07-F12 remain excluded. No provider operation is part of this preparation.
+Preserve all primary historical qualification capsules, authentic 105/315-blob
+archives and original cost/placement/resource vectors. Restore only later
+transport, observer and private-getter additions in historical replay inputs;
+live regressions remain intact. Final protected-main ancestry reconciliation,
+the required unit-first local checkpoint, built-in Review and native validation
+remain pending. Deferred community-guardrail acceptance remains NotRun;
+correctness, credentials and provenance are not deferred.
+
 ## Outcome
 
 Make this repository professional and safe for public contributors: fast,
@@ -440,6 +456,10 @@ misreporting success or duplicating irreversible effects.
   treating a green workflow summary as proof of complete coverage.
 - AC-207.5: Preserve and explain historical failures. Provide actionable final
   diagnostics and execution links without credentials, raw tokens or signed URLs.
+  Native read-transport diagnosis retains only fixed known codes and safe actual
+  origin/protocol/method context. Classified transient request acquisition may
+  retry twice within its original deadline and binding, never a mutation,
+  unknown error, denied/limited HTTP response, cancellation or proof gap.
 
 ### FR-208: Verify published installation on supported platforms
 

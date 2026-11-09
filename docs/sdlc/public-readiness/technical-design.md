@@ -105,6 +105,25 @@ triple-capsule helper as before. Preserve all exact inventory-digest and origina
 planner-qualification assertions; never substitute the single-source fixture
 for primary's three independently authenticated sources.
 
+**SDK16 preparation design:** Normally merge SDK
+`a129d4b0399517b2c2f44c690ee17fd342f83eaa` into primary
+`e9dddc2332604a4d9a24126be5f50cea6772eeda`, retaining the pending merge
+without publication. Preserve primary's source and all SDK corrections.
+The single-v15 historical helper and independent v11/v12/v15 helper both
+remove only later transport/observer/private-getter additions from their
+in-memory historical inputs. Historical isolation receives archived retained-
+identity source; self-source normalization removes the added isolation lines
+and their reconstruction text before immutable splices. No archive, capsule,
+hash assertion, cost vector, destination capacity or live regression is replaced.
+Keep current native15/15/15/7 and Mac7/Intel4 execution/planning with Node
+24.20.0; the owner-deferred Intel target remains strictly under 25 minutes.
+No operational API quota or new feature is added. Retained scope includes the
+separately owner-authorized F04, not excluded F07-F12; this source checkpoint
+performs no provider administration. Reconcile eventual legitimate protected-
+main ancestry without discarding prepared source before final candidate-bound
+local validation, Review and native checks. This preparation and historical
+SDK/primary evidence grant no passing credit or transferred stage authority.
+
 ## 1. Design summary and boundaries
 
 Implement [FR-200 through FR-215](requirements.md) against the
@@ -149,6 +168,16 @@ live provider probes, npm trust changes or a release. The installed 0.4.0 home
 and published 0.4.0 assets/tags are never implementation or test mutation targets.
 Tests of product review/approval behavior remain in the Test Plan; performing
 our development reviews remains outside its test inventory.
+
+The existing SDK/observer transport correction follows the
+[classified read recovery design](../github-integration/technical-design.md#classified-read-transport-recovery).
+Only verified native read-acquisition codes may use two short backoffs within
+one original controller/deadline. Writes, HTTP denials/limits, unknown errors,
+stream failure and cancellation never replay. The observer retains only the
+allowlisted native-code/origin/protocol/method/retry projection through its
+existing sanitizer; no adapter, dependency, request-count quota or new evidence
+system is introduced. Historical failures, producer identities and deferred
+community-PR acceptance remain unchanged and never gain passing credit.
 
 ## 2. Grounded starting interfaces
 

@@ -76,6 +76,26 @@ capsules, digests, qualifiers and critical membership remain unchanged. A new
 commit resets current local projections to NotRun and receives the full
 unit-first protected-host sequence, not a flaky retry or borrowed pass.
 
+**SDK16 preparation checkpoint:** Exact SDK source
+`a129d4b0399517b2c2f44c690ee17fd342f83eaa` is integrated into frozen primary
+`e9dddc2332604a4d9a24126be5f50cea6772eeda` as a pending local merge only.
+This checkpoint performs bounded source/hash, diff and syntax inspection,
+not test execution or candidate qualification. Preserve primary's five
+additional registered tests together with every SDK correction and PR-only
+regression; derive the eventual required inventory from the final source,
+never from the old 7,761-tuple denominator. Both historical reconstruction
+paths restore only the new transport/observer/private-getter additions before
+their unchanged archived splices and exact source/inventory assertions.
+After actual protected-main ancestry is reconciled, freeze the final candidate
+and run the required protected-host unit-first local checkpoint, then separate
+built-in Review and applicable native/PR validation. All are currently NotRun
+for this prepared source; previous exact-source results remain historical.
+Retain Windows15/15/15/7, current Mac7/Intel4 execution/planning, pinned Node
+24.20.0 and the owner-deferred under-25-minute Intel timing target.
+Timing deferral never supplies a passing result or waives correctness,
+cleanup, provenance or credential protection. Community-guardrail acceptance
+remains deferred and NotRun.
+
 ## 1. Scope and execution status
 
 This is the one living Test Plan for `wi-public-readiness`, artifact
@@ -1711,7 +1731,7 @@ capability, shared resource or critical assertion is introduced.
 | T-PRD034 | local | integration | post-review | automated | provider | github-pr-matrix | FR-207; AC-207.2 | F: resume identical package/tag/assets after lost response in the same logical release intent; reconcile handles/digests and unchanged R-PRE inputs/freshness before consuming original evidence without relabeling its physical attempt. Other intents, proof older than 24 hours, changed inputs or conflicting bytes/tag/source cannot reuse credit, overwrite assets or move tags. | test/release-ci.test.mjs#T-PRD034; test/public-readiness-release-history.test.mjs#T-PRD034 independent run chronology, physical reruns, original preflight/source/artifact identity and bounded data reader assertions | NotRun | |
 | T-PRD035 | local | unit | post-review | automated | provider | github-pr-matrix | FR-207; AC-207.3 | F: exercise npm-only success, GitHub-only success, failed acceptance and absent handle; retain each channel state and recovery action, never synthesize rollback or overall success. | test/release-ci.test.mjs#T-PRD035 | NotRun | |
 | T-PRD036 | local | unit | post-review | automated | provider | github-pr-matrix | FR-207; AC-207.4 | E: ready-before-publish is distinct from completed-after-publish; missing/failed/skipped/stale required evidence blocks the appropriate verdict and the configured publisher fixture. | test/public-readiness-evidence.test.mjs#T-PRD036 a configured publisher dispatches only complete current prepublication evidence and retains separate consumer completion | NotRun | |
-| T-PRD037 | local | integration | post-review | automated | provider | github-pr-matrix | FR-207; AC-207.5 | F/E: later successful recovery preserves initial failure/attempt and sanitized links; planted credentials/JWT/query secrets are removed/rejected without changing asserted case results. | test/public-readiness-evidence.test.mjs#T-PRD037; test/release-ci.test.mjs#T-PRD037; test/public-readiness-release-history.test.mjs#T-PRD037; test/public-readiness-release-report.test.mjs#T-PRD037; test/public-readiness-release-consumer.test.mjs#T-PRD037 declared same-integration T-PRD054 retention alias | NotRun | |
+| T-PRD037 | local | integration | post-review | automated | provider | github-pr-matrix | FR-207; AC-207.5 | F/E: later successful recovery preserves initial failure/attempt and sanitized links; planted credentials/JWT/query secrets are removed/rejected without changing asserted case results. Classified native read acquisition recovers actual bodies within one deadline/binding; exhausted failures retain fixed safe context without causes/getters/proxies. Writes, unknown errors, HTTP failures, streams and abort never replay. | test/public-readiness-evidence.test.mjs#T-PRD037; test/release-ci.test.mjs#T-PRD037; test/public-readiness-release-history.test.mjs#T-PRD037; test/public-readiness-release-report.test.mjs#T-PRD037; test/public-readiness-release-consumer.test.mjs#T-PRD037 declared same-integration T-PRD054 retention alias; test/github-transport.unit.test.mjs#T-PRD037; test/public-readiness-observer.test.mjs#T-PRD037 observer failure payload | NotRun | |
 | T-PRD038-WX | local | acceptance | post-review | automated | provider | github-windows-x64 | FR-208; AC-208.1; AC-208.2 | P/N: anonymous public Windows archive/descriptor/checksums match the frozen source before execution; full PowerShell and cmd lifecycle preserves user content/runtime, including prior-version upgrade and installed hooks. | procedure: section-9-consumers | NotRun | |
 | T-PRD038-MA | local | acceptance | post-review | automated | provider | github-macos-arm64 | FR-208; AC-208.1; AC-208.2 | P/N: anonymous shared Mac archive matches frozen pins; native Apple Silicon standalone lifecycle, prior-version upgrade, hooks and preservation succeed without translation or origin cache. | procedure: section-9-consumers | NotRun | |
 | T-PRD038-MI | local | acceptance | post-review | automated | provider | github-macos-x64 | FR-208; AC-208.1; AC-208.2 | P/N: anonymously fetch the identical shared Mac digest; native Intel standalone lifecycle, upgrade, hooks and preservation succeed independently of Apple Silicon results. | procedure: section-9-consumers | NotRun | |

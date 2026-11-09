@@ -257,6 +257,11 @@ inventory is source fact, not execution acceptance or a coverage denominator.
 - AC-151.3: Reconcile timeout/lost-response/interruption against exact persisted
   operation and supported provider evidence read-only. Preserve uncertainty,
   revocation, stale context and history; never blindly repeat a mutation.
+  Classified native read-acquisition failures alone may receive two brief
+  retries within their original deadline/controller and credential binding.
+  Unknown errors, HTTP denials/provider limits, cancellation, timeouts, stream
+  failures, unsafe redirects and proof gaps never authorize replay.
+  Keep fixed safe native-code/origin/method diagnostics without private causes.
 - AC-151.4: Observe triggered and reported runs with exact attempt and source,
   independent accessible-page proof, real scheduler/read capability and
   immediate observation followed by the monitor's stored polling interval
