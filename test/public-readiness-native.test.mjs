@@ -4053,6 +4053,7 @@ async function qualifiedIntelSourceFiles() {
         "    Object.defineProperty(error, 'code', { get() { getters++; return 'ECONNRESET'; } });\n", '');
     }
     if (file === 'test/public-readiness-ci.test.mjs') contents = historicalReadinessCiSource(contents);
+    if (file === 'test/release-ci.test.mjs') contents = historicalReleaseCiSource(contents);
     if (file === 'test/github-transport.unit.test.mjs') {
       const recovery = contents.indexOf('    "names": [\n      "T-PRD037 classified transient REST');
       const separator = '  }, {\n';
@@ -4139,6 +4140,7 @@ async function qualifiedIntelSourceFixture(protocol) {
         "    Object.defineProperty(error, 'code', { get() { getters++; return 'ECONNRESET'; } });\n", '');
     }
     if (file === 'test/public-readiness-ci.test.mjs') contents = historicalReadinessCiSource(contents);
+    if (file === 'test/release-ci.test.mjs') contents = historicalReleaseCiSource(contents);
     if (file === 'test/github-transport.unit.test.mjs') {
       const recovery = contents.indexOf('    "names": [\n      "T-PRD037 classified transient REST');
       const separator = '  }, {\n';
@@ -4229,6 +4231,60 @@ async function qualifiedIntelSourceFixture(protocol) {
       'Authentic v12 transfers every descendant of the original six complete components');
   }
   return { inventory, plan, assignment, protocol, revision: snapshot.revision };
+}
+
+function historicalReleaseCiSource(contents) {
+  // Restore genuine Git blob b97af9ed61c68d8dc5e7ff168e5e384538296023 before
+  // the unchanged capsules' splices; obsolete release audits remain historical-only.
+  const lines = contents.split(/(?<=\n)/u);
+  const splices = [
+    [0, 17],
+    "      \"T-PRD028 preflight accepts complete effective repository rulesets without classic protection\",\n      \"T-PRD028 preflight rejects incomplete unknown or unsafe effective ruleset policy\",\n      \"T-PRD028 PR-only admin override cannot substitute for successful release source checks\"\n",
+    [20, 1],
+    "      \"reason\": \"PR-only release-preflight policy and source-evidence regressions; independent root processes use complete fake GitHub policy and read-only source configuration, never packaging, provider writes or critical-profile promotion.\",\n",
+    [22, 1740],
+    "  const environment = {\n    GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/main',\n    GITHUB_REPOSITORY: repository, GITHUB_SHA: sourceCommit, GITHUB_ACTOR: 'fixture-maintainer',\n    GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', RELEASE_REPOSITORY: repository,\n    GITHUB_WORKFLOW_REF: `${repository}/.github/workflows/release.yml@refs/heads/main`,\n    NPM_TRUSTED_PUBLISHER_REPOSITORY: repository, NPM_TRUSTED_PUBLISHER_CALLER: 'release.yml',\n    NPM_TRUSTED_PUBLISHER_ENVIRONMENT: 'npm', SUPPORTED_PREVIOUS_VERSION: '0.3.0',\n    SUPPORTED_PREVIOUS_DESCRIPTOR_SHA256: 'b'.repeat(64), SUPPORTED_PREVIOUS_CHECKSUMS_SHA256: 'c'.repeat(64),\n  };\n  const contexts = ['framework/validation', 'framework/approval', 'framework/coverage'];\n  let wrongProtection = false;\n  const calls = [];\n  const api = async (route, options = {}) => {\n    calls.push({ route, ...options });\n    if (route.endsWith('/permission')) return { status: 200, value: { permission: 'maintain' } };\n    if (route.endsWith('/branches/main/protection')) return { status: 200, value: {\n      required_status_checks: { strict: !wrongProtection, contexts }, required_pull_request_reviews: {},\n      required_conversation_resolution: { enabled: true }, enforce_admins: { enabled: true },\n      allow_force_pushes: { enabled: false }, allow_deletions: { enabled: false } } };\n    if (route.endsWith('/branches/main')) return { status: 200, value: { protected: true, commit: { sha: sourceCommit } } };\n    if (route.endsWith('/status')) return { status: 200, value: { statuses: contexts.map(context => ({ context, state: 'success' })) } };\n    if (route.endsWith('/environments/npm')) return { status: 200, value: { protection_rules: [] } };\n    if (route.includes('/actions/artifacts?')) return { status: 200, value: { artifacts: [], total_count: 0 } };\n    if (route.includes('/git/ref/')) return { status: 404 };\n    return { status: 200, value: { private: false } };\n  };\n  const input = { sourceCommit, version: packageVersion, repository, releaseIntentId, environment };\n",
+    [1764, 3],
+    [1769, 2],
+    "  ]) await assert.rejects(preflightRelease({ ...input, ...invalid }, api, async () => null));\n  wrongProtection = true;\n  await assert.rejects(preflightRelease(input, api, async () => null), /Effective protected-main/u);\n  wrongProtection = false;\n  assert.equal((await preflightRelease(input, api, async () => null)).status, 'Passed');\n  assert.ok(calls.every(call => !call.method), 'Preflight must never dispatch an irreversible effect');\n",
+    [1775, 2],
+    "function rulesetPreflightFixture() {\n",
+    [1778, 1],
+    "  const ruleset = { id: 26728403, name: 'not-an-applicability-proof', target: 'branch',\n    source_type: 'Repository', source: repository, enforcement: 'active', bypass_actors: [],\n    conditions: { ref_name: { include: ['~DEFAULT_BRANCH'], exclude: [] } },\n    rules: [\n      { type: 'deletion' }, { type: 'non_fast_forward' },\n      { type: 'pull_request', parameters: { required_approving_review_count: 0,\n        dismiss_stale_reviews_on_push: false, require_code_owner_review: false,\n        require_last_push_approval: false, required_review_thread_resolution: true } },\n      { type: 'required_status_checks', parameters: { strict_required_status_checks_policy: true,\n        do_not_enforce_on_create: false, required_status_checks: contexts.map(context => ({ context })) } },\n    ] };\n  const state = { rulesets: [ruleset], protection: { status: 404 },\n",
+    [1780, 4],
+    "  const effective = () => state.rulesets.flatMap(item => item.rules.map(rule => ({\n    ...structuredClone(rule), ruleset_id: item.id, ruleset_source_type: 'Repository', ruleset_source: repository,\n  })));\n",
+    [1784, 11],
+    "    assert.equal(options.method, undefined, 'Policy inspection must never invoke a mutation or bypass');\n    const prefix = `/repos/${repository}`;\n    if (route === prefix) return { status: 200, value: { private: false, default_branch: 'main' } };\n    if (route.endsWith('/permission')) return { status: 200, value: { permission: 'admin' } };\n    if (route === `${prefix}/branches/main/protection`) {\n      if (state.protection instanceof Error) throw state.protection;\n      return state.protection;\n",
+    [1802, 1],
+    [1805, 1],
+    "    if (route.startsWith(`${prefix}/rules/branches/main?`)) {\n      const query = new URLSearchParams(route.split('?')[1]);\n      assert.equal(query.get('per_page'), '100');\n      const start = (Number(query.get('page')) - 1) * 100;\n      return state.effectiveResponse ?? { status: 200, value: (state.effective ?? effective()).slice(start, start + 100) };\n    }\n    if (route.startsWith(`${prefix}/rulesets/`)) {\n      return state.detailResponse ?? { status: 200, value: state.rulesets.find(item =>\n        item.id === Number(route.slice(route.lastIndexOf('/') + 1))) };\n    }\n",
+    [1806, 8],
+    "  return { state, ruleset, calls, effective,\n    run: () => preflightRelease({ sourceCommit, version: packageVersion, repository, releaseIntentId, environment },\n",
+    [1817, 3],
+    "test('T-PRD028 preflight accepts complete effective repository rulesets without classic protection', async () => {\n  const f = rulesetPreflightFixture();\n  assert.equal((await f.run()).status, 'Passed');\n  f.ruleset.bypass_actors = [{ actor_type: 'RepositoryRole', actor_id: 5, bypass_mode: 'pull_request' }];\n  assert.equal((await f.run()).status, 'Passed', 'An explicit admin PR-only capability is not an always-on exemption');\n  const checks = f.ruleset.rules.pop();\n  const second = { ...structuredClone(f.ruleset), id: f.ruleset.id + 1,\n    conditions: { ref_name: { include: ['refs/heads/main'], exclude: [] } }, rules: [checks] };\n  f.state.rulesets.push(second);\n  assert.equal((await f.run()).status, 'Passed', 'Independently effective safe sources can supply a complete policy');\n  f.state.rulesets = Array.from({ length: 25 }, (_, index) => ({\n    ...structuredClone(f.ruleset), id: f.ruleset.id + index, rules: [...structuredClone(f.ruleset.rules), structuredClone(checks)],\n  }));\n  f.state.rulesets.push({ ...second, id: f.ruleset.id + 25 });\n  assert.equal((await f.run()).status, 'Passed');\n  assert.ok(f.calls.some(call => call.route.endsWith('/rules/branches/main?per_page=100&page=2')),\n    'A full first page is not the complete effective policy');\n  f.state.rulesets.at(-1).bypass_actors = [{ actor_type: 'RepositoryRole', actor_id: 5, bypass_mode: 'always' }];\n  await assert.rejects(f.run(), /ruleset.*bypass/iu, 'Unsafe later-page policy cannot be hidden behind a complete first page');\n",
+    [1829, 2],
+    "test('T-PRD028 preflight rejects incomplete unknown or unsafe effective ruleset policy', async () => {\n",
+    [1832, 1],
+    "    ['missing checks', f => { f.ruleset.rules.pop(); }],\n    ['missing context', f => { f.ruleset.rules.at(-1).parameters.required_status_checks.pop(); }],\n    ['loose checks', f => { f.ruleset.rules.at(-1).parameters.strict_required_status_checks_policy = false; }],\n    ['unknown strict policy', f => { delete f.ruleset.rules.at(-1).parameters.strict_required_status_checks_policy; }],\n    ['unresolved conversations', f => { f.ruleset.rules[2].parameters.required_review_thread_resolution = false; }],\n    ['unknown conversations', f => { delete f.ruleset.rules[2].parameters.required_review_thread_resolution; }],\n    ['missing PR rule', f => { f.ruleset.rules.splice(2, 1); }],\n    ['missing force-push block', f => { f.ruleset.rules.splice(1, 1); }],\n    ['missing deletion block', f => { f.ruleset.rules.shift(); }],\n    ['inactive', f => { f.ruleset.enforcement = 'evaluate'; }],\n    ['not effective', f => { f.state.effective = []; }],\n    ['wrong target', f => { f.ruleset.target = 'tag'; }],\n    ['unapplied main name', f => { f.ruleset.name = 'main'; f.ruleset.conditions.ref_name.include = ['refs/heads/other']; }],\n    ['excluded main', f => { f.ruleset.conditions.ref_name.exclude = ['refs/heads/main']; }],\n    ['unknown bypass actors', f => { delete f.ruleset.bypass_actors; }],\n    ['unknown conditions', f => { delete f.ruleset.conditions; }],\n    ['unknown rule', f => { f.ruleset.rules.push({ type: 'future_policy' }); }],\n    ['unproven effective origin', f => { f.state.effective = f.effective(); delete f.state.effective[0].ruleset_source_type; }],\n    ['unsupported origin', f => { f.state.effective = f.effective(); f.state.effective[0].ruleset_source_type = 'Organization'; }],\n    ['mismatched detail', f => { f.state.effective = f.effective(); f.ruleset.rules.at(-1).parameters.strict_required_status_checks_policy = false; }],\n    ['malformed effective response', f => { f.state.effectiveResponse = { status: 200, value: {} }; }],\n    ['unavailable detail', f => { f.state.detailResponse = { status: 403, value: f.ruleset }; }],\n",
+    [1846, 1],
+    "    const f = rulesetPreflightFixture();\n",
+    [1848, 1],
+    "    await assert.rejects(f.run(), /ruleset/iu, name);\n  }\n  for (const actor of [\n    { actor_type: 'RepositoryRole', actor_id: 5, bypass_mode: 'always' },\n    { actor_type: 'RepositoryRole', actor_id: 4, bypass_mode: 'pull_request' },\n    { actor_type: 'RepositoryRole', actor_id: 2, bypass_mode: 'pull_request' },\n    { actor_type: 'RepositoryRole', actor_id: 999, bypass_mode: 'pull_request' },\n    { actor_type: 'Integration', actor_id: 5, bypass_mode: 'pull_request' },\n    { actor_type: 'User', actor_id: 5, bypass_mode: 'pull_request' },\n    { actor_type: 'RepositoryRole', actor_id: 5 },\n  ]) {\n    const f = rulesetPreflightFixture();\n    f.ruleset.bypass_actors = [actor];\n    await assert.rejects(f.run(), /ruleset.*bypass/iu, JSON.stringify(actor));\n  }\n  for (const protection of [{ status: 403 }, { status: 500 }, { status: 200 },\n    new Error('Fake network failure')]) {\n    const f = rulesetPreflightFixture();\n    f.state.protection = protection;\n    await assert.rejects(f.run());\n    assert.ok(!f.calls.some(call => call.route.includes('/rules/')), 'Only an explicit classic 404 permits fallback');\n",
+    [1853, 3],
+    "test('T-PRD028 PR-only admin override cannot substitute for successful release source checks', async () => {\n  const f = rulesetPreflightFixture();\n  f.ruleset.bypass_actors = [{ actor_type: 'RepositoryRole', actor_id: 5, bypass_mode: 'pull_request' }];\n",
+    [1858, 2],
+    "  f.state.statuses = [];\n",
+    [1861, 1],
+    "  f.state.pulls = [{ number: 123, merged_at: '2026-11-06T00:00:00Z', base: { ref: 'main' },\n    merge_commit_sha: sourceCommit, head: { sha: 'b'.repeat(40) } }];\n",
+    [1865, 8],
+    [1887, 449],
+  ];
+  const restored = splices.map(part => typeof part === 'string' ? part :
+    lines.slice(part[0], part[0] + part[1]).join('')).join('');
+  assert.equal(createHash('sha256').update(restored).digest('hex'),
+    '8da1180f87fa58d35a9b3e6254e0d8555fa6d9d29e6f16e3f9de07df99f01382',
+    'Replay must restore the exact release CI source preceding provider-enforcement changes');
+  return restored;
 }
 
 function historicalReadinessCiSource(contents) {
