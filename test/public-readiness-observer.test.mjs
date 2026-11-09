@@ -31,6 +31,12 @@ export const validationDeclarations = {
     "reason": "PR-only AC-205.1/AC-205.4 SDK acquisition regressions for T-PRD027: controlled provider responses, no network or privileged credentials. Independent process-isolated roots use one slot and owned fixture cleanup; no critical promotion.",
     "prerequisites": ["Node and repository-local owned fixtures"]
   }, {
+    "names": ["T-PRD037 observer failure payload retains only allowlisted native transport context"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "github-transport",
+    "reason": "PR-only AC-207.5 diagnostic projection regression; deterministic data-only sanitizer through the actual CLI helper, private getters/proxies are not inspected. Independent process-isolated one-slot root, no credentials, network, dependencies or shared resources; no critical promotion.",
+    "prerequisites": ["Node"]
+  }, {
     "names": ["T-PRD021 protocol row pool drains failed children stops dispatch and respects one-slot fallback"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "runner-resource-contract",
@@ -44,12 +50,13 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { digest } from '../src/core.mjs';
+import { digest, SdlcError } from '../src/core.mjs';
 import { canonical } from '../src/core.mjs';
 import { observerApiFixture, nativeReplayFixture } from './readiness-observer-fixture.mjs';
 import { reconcilePrReadiness } from '../scripts/pr-readiness.mjs';
 import { readTrustedMinimumNodeJob, renderObserverSummary, retainObserverResult,
-  nativeLaneTimings, verifyNativeCleanup, verifyOriginalNativeRows, inspectWorkflowTrust } from '../scripts/pr-observer.mjs';
+  nativeLaneTimings, verifyNativeCleanup, verifyOriginalNativeRows, inspectWorkflowTrust,
+  observerErrorDiagnostic } from '../scripts/pr-observer.mjs';
 import { nativeStageSelections, nativeConfigurationDigest, replayNativeEvidence,
   validateNativePreviousLifecycle, nativeWorkflowContract, nativeSpecification,
   verifyNativeShardUnitOrder, nativeFrameworkShardProtocol,
@@ -64,6 +71,37 @@ import { compileValidationSourceInventory } from '../scripts/validation-inventor
 import { nativeBootstrapProtocol, nativeBodyBootstrapProtocol, nativeUnitBootstrapProtocol } from '../scripts/toolchain-baseline.mjs';
 import { runProtocolPool, reconcileProtocolRows, validateProtocolExecution } from './readiness-protocol-pool.mjs';
 import { protocolPairs } from './readiness-protocol-row.mjs';
+
+test('T-PRD037 observer failure payload retains only allowlisted native transport context', () => {
+  let getters = 0, traps = 0;
+  const nativeFailure = {
+    code: 'ECONNRESET', origin: 'https://api.github.com', originKind: 'api',
+    protocol: 'rest', method: 'GET', retries: 2, privateUri: 'private-sentinel?sig=private-sentinel',
+  };
+  Object.defineProperty(nativeFailure, 'privateDetails', {
+    get() { getters++; throw Error('private-sentinel'); },
+  });
+  const error = new SdlcError('TRANSPORT', 'GitHub injected request failed', { nativeFailure,
+    token: 'private-sentinel', stack: 'private-sentinel' });
+  const diagnostic = observerErrorDiagnostic(error);
+  assert.deepEqual(diagnostic, {
+    code: error.code, message: error.message,
+    nativeFailure: { code: 'ECONNRESET', origin: 'https://api.github.com', originKind: 'api',
+      protocol: 'rest', method: 'GET', retries: 2 },
+  });
+  assert.doesNotMatch(JSON.stringify(diagnostic), /private-sentinel|privateUri|privateDetails/u);
+  for (const invalid of [
+    { ...nativeFailure, code: 'UNKNOWN' },
+    { ...nativeFailure, origin: 'https://api.github.com/private?sig=private-sentinel' },
+    Object.defineProperty({}, 'code', { get() { getters++; return 'ECONNRESET'; } }),
+    new Proxy(nativeFailure, { getOwnPropertyDescriptor() { traps++; throw Error('private-sentinel'); } }),
+  ]) {
+    assert.deepEqual(observerErrorDiagnostic(new SdlcError('TRANSPORT', error.message,
+      { nativeFailure: invalid })), { code: error.code, message: error.message });
+  }
+  assert.equal(getters, 0);
+  assert.equal(traps, 0);
+});
 
 test('T-PRD021 source-bound role bootstrap preserves all producer origins and thirteen independent Mac cleanups', async t => {
   for (const protocol of ['native-bootstrap-role-capabilities-v3', nativeUnitBootstrapProtocol,

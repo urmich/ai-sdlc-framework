@@ -160,6 +160,26 @@ authorized physical effect only after a successful claim, propagates the
 exact call binding and retains uncertainty. No host method automatically
 dispatches or retries a provider mutation.
 
+### Classified read transport recovery
+
+At the existing SDK run/call boundary, only own data-property native codes
+`ECONNRESET`, `EAI_AGAIN`, `ETIMEDOUT`, `UND_ERR_CONNECT_TIMEOUT` and
+`UND_ERR_SOCKET`, directly or in one own cause, identify transient acquisition.
+Reject proxy inspection with Node's built-in `types.isProxy`; never invoke
+getters, traverse deeper/private causes, or interpret messages. REST GET/HEAD
+and GraphQL query requests may retry twice after 100/200 ms. All attempts and
+redirects share the original controller/deadline, immutable prepared request,
+resolved credential and conservative cache epochs. No operational call quota
+or whole-observer replay is added.
+
+Keep the catch scoped to the actual injected call. Mutations, HTTP responses,
+abort/deadline, response-stream failure, unsafe redirects and proof gaps cannot
+trigger acquisition replay. Known exhausted/stream codes produce a fixed
+`nativeFailure` projection containing only code, actual origin, API/storage kind,
+protocol, method and performed retries; the public code/message remain stable,
+without a retained raw cause. The observer revalidates only those safe scalars
+before its existing payload sanitizer; failure remains `NotRun`.
+
 ## Evidence identities and currentness
 
 | Context | Required independent facts / prohibited shortcut |

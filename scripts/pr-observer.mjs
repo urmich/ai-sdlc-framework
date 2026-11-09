@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { types } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { digest, requireThat, SdlcError } from '../src/core.mjs';
@@ -29,6 +30,38 @@ export const statusConcurrencyGroup = 'framework-readiness-status-writer';
 export const coverageArtifacts = Object.freeze([{
   artifactId: 'public-readiness', directory: 'docs/sdlc/public-readiness',
 }]);
+
+export function observerErrorDiagnostic(error) {
+  const ownValue = (value, key) => value !== null && typeof value === 'object' && !types.isProxy(value) ?
+    Object.getOwnPropertyDescriptor(value, key)?.value : undefined;
+  const isFrameworkError = !types.isProxy(error) && error instanceof SdlcError;
+  const diagnostic = {
+    code: isFrameworkError ? ownValue(error, 'code') : 'OBSERVER_CONFIGURATION',
+    message: isFrameworkError ? ownValue(error, 'message') :
+      'Observer acquisition requires valid configuration and the selected installed tools',
+  };
+  const native = diagnostic.code === 'TRANSPORT' ?
+    ownValue(ownValue(error, 'details'), 'nativeFailure') : undefined;
+  const fields = ['code', 'origin', 'originKind', 'protocol', 'method', 'retries'];
+  const values = Object.fromEntries(fields.map(field => [field, ownValue(native, field)]));
+  let safeOrigin = false;
+  if (typeof values.origin === 'string') {
+    try {
+      const url = new URL(values.origin);
+      safeOrigin = url.protocol === 'https:' && url.origin === values.origin &&
+        url.username === '' && url.password === '';
+    } catch { /* Unsafe native context is omitted, never copied as fallback. */ }
+  }
+  if (['ECONNRESET', 'EAI_AGAIN', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET'].includes(values.code) &&
+      safeOrigin && ['api', 'storage'].includes(values.originKind) &&
+      ['rest', 'graphql'].includes(values.protocol) &&
+      ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(values.method) &&
+      Number.isInteger(values.retries) && values.retries >= 0 && values.retries <= 2) {
+    diagnostic.nativeFailure = values;
+  }
+  return sanitizeExecutionPayload(Buffer.from(JSON.stringify(diagnostic)));
+}
+
 const writerPaths = ['.github/workflows/pr-readiness.yml', '.github/workflows/coverage-metadata.yml'];
 const reporterPaths = [
   '.github/workflows/ci.yml', 'scripts/native-validation.mjs', 'scripts/native-toolchain.mjs',
@@ -1602,12 +1635,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     componentEvidence = host.componentEvidence();
   } catch (error) {
     if (!(error instanceof SdlcError) && !(error instanceof SyntaxError) && error.code !== 'ENOENT') throw error;
-    const diagnostic = {
-      code: error instanceof SdlcError ? error.code : 'OBSERVER_CONFIGURATION',
-      message: error instanceof SdlcError ? error.message :
-        'Observer acquisition requires valid configuration and the selected installed tools',
-    };
-    const safeDiagnostic = sanitizeExecutionPayload(Buffer.from(JSON.stringify(diagnostic)));
+    const safeDiagnostic = observerErrorDiagnostic(error);
     console.error(`[pr-observer:error] ${safeDiagnostic.code}: ${safeDiagnostic.message}`);
     result = { status: 'NotRun', results: [], diagnostic: {
       ...safeDiagnostic,

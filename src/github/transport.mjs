@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { types } from 'node:util';
 import { canonical, choice, digest, requireThat as coreRequireThat, SdlcError } from '../core.mjs';
 import {
   githubOptions, githubSafeName, githubUrl, requireGitHubConnection,
@@ -14,6 +15,10 @@ const selectedHeaders = [
   'retry-after', 'x-poll-interval',
 ];
 const redirects = new Set([301, 302, 303, 307, 308]);
+const transientNativeCodes = new Set([
+  'ECONNRESET', 'EAI_AGAIN', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET',
+]);
+const readRetryDelays = [100, 200];
 const mediaTypePattern = /^application\/[A-Za-z0-9!#$&^_.+-]+(?:;\s*[A-Za-z0-9_-]+=[A-Za-z0-9_.+-]+)*$/u;
 const transportErrors = new WeakSet();
 const transportConnections = new WeakMap();
@@ -70,6 +75,17 @@ function transportError(code, message, details) {
   const error = new SdlcError(code, message, details);
   transportErrors.add(error);
   return error;
+}
+
+function nativeFailureCode(error) {
+  // Native fetch wraps its code in one own cause. Never inspect getters or proxies.
+  const own = (value, key) => value !== null && typeof value === 'object' && !types.isProxy(value) ?
+    Object.getOwnPropertyDescriptor(value, key) : undefined;
+  const code = own(error, 'code');
+  if (code !== undefined) return transientNativeCodes.has(code.value) ? code.value : undefined;
+  const cause = own(error, 'cause');
+  const causeCode = cause && Object.hasOwn(cause, 'value') ? own(cause.value, 'code') : undefined;
+  return transientNativeCodes.has(causeCode?.value) ? causeCode.value : undefined;
 }
 
 function requireThat(...args) {
@@ -256,6 +272,9 @@ function nextRestUrl(link, current, connection, pageParameter, scope) {
  * facts, NOT normalized domain outcomes, action approval or passing proof.
  * Writes need the outer {operationId,authorityRef,dispatchClaimId} indication;
  * only the host/Store can verify/consume that authority. Never retry writes.
+ * Only classified native acquisition failures of reads get up to two brief
+ * retries, sharing the original cancellation/controller/deadline and binding.
+ * HTTP denials, arbitrary errors and response-stream failures are not retried.
  * body and archive bodyStream are non-enumerable acquisition-only values; callers
  * must protect/normalize them before persistence. Errors never include raw bodies.
  * createCacheEntry(capture,{observationVersion}) retains exact-context ETag facts
@@ -544,30 +563,62 @@ export function createGitHubTransport(options) {
         ...(cached === undefined ? {} : { 'if-none-match': cached.etag }),
       };
       let response;
+      let readRetries = 0;
+      const nativeContext = error => {
+        const code = nativeFailureCode(error);
+        return code === undefined ? undefined : Object.freeze({
+          code, origin: new URL(url).origin,
+          originKind: new URL(url).origin === connection.apiOrigin ? 'api' : 'storage',
+          protocol: request.requestIdentity.protocol, method: request.requestIdentity.method,
+          retries: readRetries,
+        });
+      };
+      async function backoff(delay) {
+        let pendingTimer;
+        try {
+          await bounded(() => new Promise(resolve => { pendingTimer = setTimeout(resolve, delay); }));
+        } finally {
+          clearTimeout(pendingTimer);
+        }
+      }
       const visited = new Set();
       for (let redirectCount = 0; ; redirectCount++) {
         requireThat(!visited.has(url), 'REDIRECT', 'GitHub archive redirect cycle');
         visited.add(url);
         response = await bounded(async () => {
-          dispatched = true;
-          // A dispatched/uncertain write invalidates old mutable observations conservatively.
-          if (internal.writes) cacheEpoch++;
-          try {
-            const acquired = await call(url, {
-              method: request.requestIdentity.method, headers: { ...headers },
-              ...(internal.payload === undefined ? {} : { body: internal.payload }),
-              redirect: 'manual', signal,
-            });
-            activeResponse = acquired;
-            if (signal.aborted) {
-              await cancelBody(acquired);
-              activeResponse = undefined;
-              throw interrupted();
+          let acquired;
+          for (;;) {
+            if (signal.aborted) throw interrupted();
+            dispatched = true;
+            // A dispatched/uncertain write invalidates old mutable observations conservatively.
+            if (internal.writes) cacheEpoch++;
+            try {
+              acquired = await call(url, {
+                method: request.requestIdentity.method, headers: { ...headers },
+                ...(internal.payload === undefined ? {} : { body: internal.payload }),
+                redirect: 'manual', signal,
+              });
+              break;
+            } catch (error) {
+              if (signal.aborted) throw interrupted();
+              const nativeFailure = nativeContext(error);
+              if (!internal.writes && nativeFailure !== undefined && readRetries < readRetryDelays.length) {
+                await backoff(readRetryDelays[readRetries]);
+                readRetries++;
+                continue;
+              }
+              throw transportError('TRANSPORT', 'GitHub injected request failed', {
+                ...context(), ...(nativeFailure === undefined ? {} : { nativeFailure }),
+              });
             }
-            return acquired;
-          } catch {
-            throw transportError('TRANSPORT', 'GitHub injected request failed', context());
           }
+          activeResponse = acquired;
+          if (signal.aborted) {
+            await cancelBody(acquired);
+            activeResponse = undefined;
+            throw interrupted();
+          }
+          return acquired;
         });
         activeResponse = response;
         requireThat(response && Number.isInteger(response.status) &&
@@ -649,7 +700,12 @@ export function createGitHubTransport(options) {
         for (;;) {
           const part = await bounded(async () => {
             try { return await reader.read(); }
-            catch { throw transportError('TRANSPORT', 'GitHub response stream failed', context()); }
+            catch (error) {
+              const nativeFailure = nativeContext(error);
+              throw transportError('TRANSPORT', 'GitHub response stream failed', {
+                ...context(), ...(nativeFailure === undefined ? {} : { nativeFailure }),
+              });
+            }
           });
           if (part.done) break;
           requireThat(part.value instanceof Uint8Array, 'CONTRACT',

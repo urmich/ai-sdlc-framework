@@ -755,6 +755,7 @@ test('T-GHB22 private transport causes getters and opaque result handles never e
       rawProviderResponse: privateText, privatePath, signedUrl: `${web}?sig=${privateText}`,
     } });
     Object.defineProperty(error, 'privateDetails', { get() { getters++; throw new Error(privateText); } });
+    Object.defineProperty(error, 'code', { get() { getters++; return 'ECONNRESET'; } });
     throw error;
   } });
   const before = await durableBytes(f);

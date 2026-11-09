@@ -178,6 +178,20 @@ diagnostics. Use bounded safe identity and sanitized evidence references, with
 sensitive acquisition values host-owned. Private reference loss needs supported
 recovery/reacquisition, not copied JSON claiming trust.
 
+The SDK retries only native request-acquisition failures carrying an own data
+code `ECONNRESET`, `EAI_AGAIN`, `ETIMEDOUT`, `UND_ERR_CONNECT_TIMEOUT` or
+`UND_ERR_SOCKET` (directly or in one own cause). REST GET/HEAD and GraphQL queries
+may retry twice, after 100/200 ms, within the original controller/deadline and
+credential/request binding. Mutations, unknown errors, HTTP responses,
+cancellation, deadline expiry and response-stream failures never trigger replay.
+Redirected archive reads retain the same two-retry allowance and exact approved
+origin; credential stripping, acquisition caps and cache guards are unchanged.
+Failed native acquisition/streams retain only `details.nativeFailure`'s known
+code, actual origin, API/storage kind, protocol, method and performed retry count.
+Private causes, getters/proxies, messages, stacks, headers and signed URLs are not
+copied. The observer preserves this allowlisted context in its failure payload;
+its public error code/message and truthful `NotRun` outcome remain unchanged.
+
 Triggered/reported run monitoring uses actual authorized reads and the host
 scheduler at 60-second intervals, with separate page-access proof. Report
 interruption, missing capabilities and terminal outcomes. The offline ledger

@@ -387,6 +387,10 @@ misreporting success or duplicating irreversible effects.
   treating a green workflow summary as proof of complete coverage.
 - AC-207.5: Preserve and explain historical failures. Provide actionable final
   diagnostics and execution links without credentials, raw tokens or signed URLs.
+  Native read-transport diagnosis retains only fixed known codes and safe actual
+  origin/protocol/method context. Classified transient request acquisition may
+  retry twice within its original deadline and binding, never a mutation,
+  unknown error, denied/limited HTTP response, cancellation or proof gap.
 
 ### FR-208: Verify published installation on supported platforms
 
