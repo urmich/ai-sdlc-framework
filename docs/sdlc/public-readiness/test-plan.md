@@ -25,7 +25,7 @@ API read returned `enabled: true`. The earlier disabled observation remains
 historical. No report was submitted; setting readback alone does not complete
 the newcomer walkthrough or change T-PRD050 from NotRun.
 
-**Primary PR #21 integration status:** The candidate integrating actual SDK main
+**Historical primary PR #21 integration status:** The candidate integrating actual SDK main
 `09499701af20b05ff2415be616e296b016303199` into primary
 `470e1d8acf69258660c2423f32b83fab1f7c11f0` is new and unvalidated. All 99
 canonical case projections remain NotRun with no borrowed SDK/main execution
@@ -76,20 +76,44 @@ capsules, digests, qualifiers and critical membership remain unchanged. A new
 commit resets current local projections to NotRun and receives the full
 unit-first protected-host sequence, not a flaky retry or borrowed pass.
 
-**SDK16 preparation checkpoint:** Exact SDK source
-`a129d4b0399517b2c2f44c690ee17fd342f83eaa` is integrated into frozen primary
-`e9dddc2332604a4d9a24126be5f50cea6772eeda` as a pending local merge only.
-This checkpoint performs bounded source/hash, diff and syntax inspection,
-not test execution or candidate qualification. Preserve primary's five
+**Current SDK16 actual-main checkpoint:** Prepared normal merge
+`30b97e6ccf513865ab1fd67a3b956da505780d82`, tree
+`988555338c1aab9035c857669c2299afe15fdc4d`, integrated exact SDK source
+`a129d4b0399517b2c2f44c690ee17fd342f83eaa` with frozen primary
+`e9dddc2332604a4d9a24126be5f50cea6772eeda`. Actual accepted protected main is
+`d3305ef97e1a9d3f36895620f8aa8a3452026b90`, tree
+`13ddb9677b4fd06dad422a560e020b8e1c75a9d6`, with ordered parents
+`a1f5654b78d1e40c5e4e22e9f7a3e396905ca850` and
+`a129d4b0399517b2c2f44c690ee17fd342f83eaa`. Its normal ancestry-only merge
+preserves the prepared source; only the three canonical public-readiness
+documents change for the new context. Preserve primary's five
 additional registered tests together with every SDK correction and PR-only
 regression; derive the eventual required inventory from the final source,
 never from the old 7,761-tuple denominator. Both historical reconstruction
 paths restore only the new transport/observer/private-getter additions before
 their unchanged archived splices and exact source/inventory assertions.
-After actual protected-main ancestry is reconciled, freeze the final candidate
-and run the required protected-host unit-first local checkpoint, then separate
-built-in Review and applicable native/PR validation. All are currently NotRun
-for this prepared source; previous exact-source results remain historical.
+
+The prepared source's early critical27, static check, historical18,
+transport/privacy168, observer1 and source-safety34 results remain immutable
+early-only history: 248 assertions, not a final main-bound pass. Recovery
+returned BINDING/no token; no ACK, approval or managed credit is invented.
+All 99 canonical current acceptance projections remain NotRun.
+Freeze the final commit/tree, every tracked raw input and owned Node 24.20.0.
+Run critical27 first (canonical16 once, then 11 risks), then the Node-only
+static check. Use one combined five-worker, process-isolated targeted selection
+of the existing transport, native and observer files plus
+`github-acquisition-binding.unit.test.mjs` and
+`github-retained-identity-acceptance.test.mjs` for the complete coupled privacy
+closure. Then run the existing exact actual-CI and source-safety selections.
+Honor existing dependencies, minimum slots and exclusive resources within one
+aggregate five-slot test budget; do not multiply runner budgets or enable
+blanket callback concurrency. Retain complete original reporters, journals,
+streams, exits, final source/toolchain hashes and verified owned cleanup.
+No npm operation or protected-host workaround is part of this local checkpoint.
+Stop on an actual failure and preserve its first execution for the coordinator.
+Built-in whole-candidate Review and applicable primary native/trusted PR checks
+remain separate and NotRun until their own actual evidence exists; accepted
+SDK main and its runs supply no primary credit or publication authority.
 Retain Windows15/15/15/7, current Mac7/Intel4 execution/planning, pinned Node
 24.20.0 and the owner-deferred under-25-minute Intel timing target.
 Timing deferral never supplies a passing result or waives correctness,

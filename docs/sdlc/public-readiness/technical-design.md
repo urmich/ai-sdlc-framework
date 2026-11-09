@@ -13,7 +13,7 @@ Current execution credit comes from the declared checkpoints and retained
 native/public/provider proof, not this header. Maintenance updates references
 without rewriting approved snapshots.
 
-**Primary PR #21 integration boundary:** Integrate actual SDK main
+**Historical primary PR #21 integration boundary:** Integrate actual SDK main
 `09499701af20b05ff2415be616e296b016303199`, tree
 `58e8ffbecea35265e7598034f0eafb2f886480d4`, with primary
 `470e1d8acf69258660c2423f32b83fab1f7c11f0`. The SDK merge has ordered parents
@@ -105,10 +105,19 @@ triple-capsule helper as before. Preserve all exact inventory-digest and origina
 planner-qualification assertions; never substitute the single-source fixture
 for primary's three independently authenticated sources.
 
-**SDK16 preparation design:** Normally merge SDK
-`a129d4b0399517b2c2f44c690ee17fd342f83eaa` into primary
-`e9dddc2332604a4d9a24126be5f50cea6772eeda`, retaining the pending merge
-without publication. Preserve primary's source and all SDK corrections.
+**Current SDK16 actual-main design:** Prepared normal merge
+`30b97e6ccf513865ab1fd67a3b956da505780d82`, tree
+`988555338c1aab9035c857669c2299afe15fdc4d`, integrates SDK
+`a129d4b0399517b2c2f44c690ee17fd342f83eaa` with primary
+`e9dddc2332604a4d9a24126be5f50cea6772eeda`. Actual accepted protected main is
+`d3305ef97e1a9d3f36895620f8aa8a3452026b90`, tree
+`13ddb9677b4fd06dad422a560e020b8e1c75a9d6`, with ordered parents
+`a1f5654b78d1e40c5e4e22e9f7a3e396905ca850` and
+`a129d4b0399517b2c2f44c690ee17fd342f83eaa`. That tree is identical to the
+integrated SDK source. A normal ancestry-only merge preserves every prepared
+source byte before this update to the three public-readiness canonical
+documents; do not rewrite Git merge metadata or overwrite primary with the
+SDK tree. Verify the resulting candidate contains actual main in its ancestry.
 The single-v15 historical helper and independent v11/v12/v15 helper both
 remove only later transport/observer/private-getter additions from their
 in-memory historical inputs. Historical isolation receives archived retained-
@@ -119,10 +128,17 @@ Keep current native15/15/15/7 and Mac7/Intel4 execution/planning with Node
 24.20.0; the owner-deferred Intel target remains strictly under 25 minutes.
 No operational API quota or new feature is added. Retained scope includes the
 separately owner-authorized F04, not excluded F07-F12; this source checkpoint
-performs no provider administration. Reconcile eventual legitimate protected-
-main ancestry without discarding prepared source before final candidate-bound
-local validation, Review and native checks. This preparation and historical
-SDK/primary evidence grant no passing credit or transferred stage authority.
+performs no provider administration. Freeze final source and toolchain before
+the unit-first critical27/static checkpoint and the existing coupled
+transport/native/observer/privacy, actual-CI and source-safety controls.
+Use existing process-isolated groups and one aggregate five-worker test budget.
+The early 248 assertions remain historical; all 99 canonical current
+acceptance projections remain NotRun. Final local execution, the parent's
+separate whole-candidate built-in Review, primary native/trusted PR validation
+and release acceptance require their own exact identities and actual evidence.
+Accepted SDK main and SDK qualification supply no primary passing credit.
+Recovery's BINDING/no-token result remains unmanaged, without invented ACK,
+approval or transferred branch-bound authority.
 
 ## 1. Design summary and boundaries
 

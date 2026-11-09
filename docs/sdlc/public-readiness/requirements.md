@@ -20,7 +20,7 @@ Current execution projections belong to the living Test Plan and retained
 evidence, not this header. Source implementation or document maintenance alone
 does not grant passing execution credit.
 
-**Primary PR #21 SDK integration:** The authorized integration consumes actual
+**Historical primary PR #21 SDK integration:** The authorized integration consumes actual
 SDK main `09499701af20b05ff2415be616e296b016303199`, tree
 `58e8ffbecea35265e7598034f0eafb2f886480d4`, into primary source
 `470e1d8acf69258660c2423f32b83fab1f7c11f0`. The reconciled primary candidate is
@@ -91,20 +91,35 @@ silently forcing bottles or substituting system runtimes. Current versions and
 execution projections belong to the living Test Plan; prior approvals and
 failed executions remain unchanged.
 
-**SDK16 source-integration preparation:** Merge exact SDK source
+**Current SDK16 actual-main reconciliation:** Exact SDK source
 `a129d4b0399517b2c2f44c690ee17fd342f83eaa`, tree
-`13ddb9677b4fd06dad422a560e020b8e1c75a9d6`, into frozen primary
-`e9dddc2332604a4d9a24126be5f50cea6772eeda`. This is owner-directed,
-unmanaged source preparation; prior branch-bound Coding authority, local
-results, Review and native qualification do not transfer. Current retained
+`13ddb9677b4fd06dad422a560e020b8e1c75a9d6`, was normally integrated into primary
+`e9dddc2332604a4d9a24126be5f50cea6772eeda` by prepared merge
+`30b97e6ccf513865ab1fd67a3b956da505780d82`, tree
+`988555338c1aab9035c857669c2299afe15fdc4d`. Reconcile that preserved source
+through a normal merge of actual accepted protected SDK main
+`d3305ef97e1a9d3f36895620f8aa8a3452026b90`, whose tree is
+`13ddb9677b4fd06dad422a560e020b8e1c75a9d6` and ordered parents are
+`a1f5654b78d1e40c5e4e22e9f7a3e396905ca850` and
+`a129d4b0399517b2c2f44c690ee17fd342f83eaa`. Its content is identical to the
+SDK source; the ancestry-only merge does not replace primary-specific source.
+Only the three public-readiness canonical documents receive this context update.
+
+This remains owner-directed, unmanaged work: recovery returned BINDING without
+an ACK token. Prior branch-bound Coding authority, local results, Review and
+native qualification do not transfer. The 248 passing early assertions and
+static check remain immutable history for the prepared source, not the final
+main-bound checkpoint. All 99 current canonical acceptance projections remain
+NotRun. Freeze the final candidate before its required unit-first local
+checkpoint; whole-candidate Review, primary native/trusted PR validation and
+release acceptance remain separate. Accepted SDK main and its hosted runs do
+not validate the primary candidate or authorize publication. Current retained
 scope is F01/F02/F03/F05/F06/F13 plus separately owner-authorized F04;
-F07-F12 remain excluded. No provider operation is part of this preparation.
+F07-F12 remain excluded. No provider operation is part of this local work.
 Preserve all primary historical qualification capsules, authentic 105/315-blob
 archives and original cost/placement/resource vectors. Restore only later
 transport, observer and private-getter additions in historical replay inputs;
-live regressions remain intact. Final protected-main ancestry reconciliation,
-the required unit-first local checkpoint, built-in Review and native validation
-remain pending. Deferred community-guardrail acceptance remains NotRun;
+live regressions remain intact. Deferred community-guardrail acceptance remains NotRun;
 correctness, credentials and provenance are not deferred.
 
 ## Outcome
