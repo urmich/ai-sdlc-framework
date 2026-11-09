@@ -75,6 +75,27 @@ Record only safe source/spec/config/candidate identities, selected case IDs,
 actual command/exit/counts and sanitized evidence references. No raw response,
 logs, causes, private handle values or user-path copies belong in this plan.
 
+### Classified native read recovery regressions
+
+PR-only `T-PRD037` roots in `test/github-transport.unit.test.mjs` exercise actual
+REST GET/HEAD and GraphQL query body recovery with one credential/controller
+binding, two-retry exhaustion at API and approved storage origins, private
+getters/proxies, unknown errors, all mutating methods, stream failure and
+abort/original-deadline backoff. Existing `T-GHB22` in
+`test/github-retained-identity-acceptance.test.mjs` additionally rejects a private
+code getter without exposing causes or changing durable bytes. The
+`T-PRD037 observer failure payload` root in
+`test/public-readiness-observer.test.mjs` validates the actual CLI diagnostic
+projector through the existing sanitizer, including malformed/signed origins.
+
+Owner is `github-transport`; the new roots are deterministic injected-data,
+network/credential-free, process-isolated one-slot groups without prerequisite
+roots or external shared resources. The existing retained-identity parent keeps
+its four-slot declaration. Native Node >=22 PR lanes provide the capability.
+These regressions do not expand critical's 27-root/27-assertion budget or
+duplicate its 16 canonical units. Current canonical acceptance statuses remain
+unchanged; local regression evidence is not hosted or live acceptance.
+
 ## Core assertion selection
 
 The surface column identifies existing consumer ownership and intended test

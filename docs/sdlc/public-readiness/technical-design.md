@@ -58,6 +58,16 @@ and published 0.4.0 assets/tags are never implementation or test mutation target
 Tests of product review/approval behavior remain in the Test Plan; performing
 our development reviews remains outside its test inventory.
 
+The existing SDK/observer transport correction follows the
+[classified read recovery design](../github-integration/technical-design.md#classified-read-transport-recovery).
+Only verified native read-acquisition codes may use two short backoffs within
+one original controller/deadline. Writes, HTTP denials/limits, unknown errors,
+stream failure and cancellation never replay. The observer retains only the
+allowlisted native-code/origin/protocol/method/retry projection through its
+existing sanitizer; no adapter, dependency, request-count quota or new evidence
+system is introduced. Historical failures, producer identities and deferred
+community-PR acceptance remain unchanged and never gain passing credit.
+
 ## 2. Grounded starting interfaces
 
 | Existing boundary | Reuse and necessary extension |

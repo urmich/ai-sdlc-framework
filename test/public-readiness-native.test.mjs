@@ -4009,6 +4009,8 @@ async function nativeIsolationFixture(t, options = {}) {
   f.files.push({ file: surface, contents: await fs.readFile(path.join(repositoryRoot, ...surface.split('/')), 'utf8') });
   const observer = f.files.find(source => source.file === 'test/public-readiness-observer.test.mjs');
   const historical = await qualifiedIntelSourceFiles();
+  const retained = f.files.find(source => source.file === f.retainedFile);
+  retained.contents = historical.files.find(source => source.file === f.retainedFile).contents;
   observer.contents = historical.files.find(source => source.file === observer.file).contents;
   if (options.shardProtocol === 'native-framework-shards-v10-phased-intel-component-rebalance')
     observer.contents = authenticV10ObserverSource(observer.contents);
@@ -4029,9 +4031,21 @@ async function qualifiedIntelSourceFiles() {
   const files = await Promise.all(frozen.paths.map(async file => {
     let contents = (await fs.readFile(path.join(repositoryRoot, ...file.split('/')), 'utf8'))
       .replace(/\r\n/gu, '\n');
+    if (file === 'test/github-retained-identity-acceptance.test.mjs') {
+      contents = contents.replace(
+        "    Object.defineProperty(error, 'code', { get() { getters++; return 'ECONNRESET'; } });\n", '');
+    }
     if (file === 'test/github-transport.unit.test.mjs') {
-      const classification = contents.indexOf('    "names": ["T-PRD027 REST pagination follows only');
+      const recovery = contents.indexOf('    "names": [\n      "T-PRD037 classified transient REST');
       const separator = '  }, {\n';
+      const recoveryEnd = contents.indexOf(separator, recovery);
+      assert.ok(recovery >= 0 && recoveryEnd > recovery);
+      contents = contents.slice(0, recovery) + contents.slice(recoveryEnd + separator.length);
+      const recoveryRoot = contents.indexOf("test('T-PRD037 classified transient REST");
+      const recoveryRootEnd = contents.indexOf("test('constructor-bound transport page limit", recoveryRoot);
+      assert.ok(recoveryRoot >= 0 && recoveryRootEnd > recoveryRoot);
+      contents = contents.slice(0, recoveryRoot) + contents.slice(recoveryRootEnd);
+      const classification = contents.indexOf('    "names": ["T-PRD027 REST pagination follows only');
       const classificationEnd = contents.indexOf(separator, classification);
       assert.ok(classification >= 0 && classificationEnd > classification);
       contents = contents.slice(0, classification) + contents.slice(classificationEnd + separator.length);
@@ -4045,7 +4059,25 @@ async function qualifiedIntelSourceFiles() {
           "      { kind: 'repository', id: 18, owner: 'fixture-owner', name: 'other-repo' }] }), fetch:",
         'connection: connection(), fetch:');
     }
+    if (file === 'test/public-readiness-observer.test.mjs') {
+      const diagnostic = contents.indexOf('    "names": ["T-PRD037 observer failure payload');
+      const separator = '  }, {\n';
+      const diagnosticEnd = contents.indexOf(separator, diagnostic);
+      assert.ok(diagnostic >= 0 && diagnosticEnd > diagnostic);
+      contents = contents.slice(0, diagnostic) + contents.slice(diagnosticEnd + separator.length);
+      const diagnosticRoot = contents.indexOf("test('T-PRD037 observer failure payload");
+      const diagnosticRootEnd = contents.indexOf("test('T-PRD021 source-bound role bootstrap", diagnosticRoot);
+      assert.ok(diagnosticRoot >= 0 && diagnosticRootEnd > diagnosticRoot);
+      contents = (contents.slice(0, diagnosticRoot) + contents.slice(diagnosticRootEnd))
+        .replace("import { digest, SdlcError } from '../src/core.mjs';",
+          "import { digest } from '../src/core.mjs';")
+        .replace('nativeLaneTimings, verifyNativeCleanup, verifyOriginalNativeRows, inspectWorkflowTrust,\n' +
+          '  observerErrorDiagnostic }', 'nativeLaneTimings, verifyNativeCleanup, verifyOriginalNativeRows, inspectWorkflowTrust }');
+    }
     if (file === 'test/public-readiness-native.test.mjs') {
+      contents = contents.replace(
+        '  const retained = f.files.find(source => source.file === f.retainedFile);\n' +
+        '  retained.contents = historical.files.find(source => source.file === f.retainedFile).contents;\n', '');
       const start = contents.indexOf('async function qualifiedIntelSourceFiles(');
       const end = contents.indexOf("\ntest('T-PRD017 native v13 reserves", start);
       assert.ok(start >= 0 && end > start);

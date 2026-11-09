@@ -20,6 +20,17 @@ export const validationDeclarations = {
     "reason": "PR-only conditional-cache regression: HTTP If-None-Match weak comparison permits a changed validator strength for the same opaque tag, never a different tag or authorization context. Pure injected responses, no network, credentials, shared state or critical promotion.",
     "prerequisites": ["Node"]
   }, {
+    "names": [
+      "T-PRD037 classified transient REST and GraphQL reads recover the actual body within one binding",
+      "T-PRD037 exhausted native reads retain only safe code and actual API or storage context",
+      "T-PRD037 writes unknown errors and private accessors never trigger native recovery",
+      "T-PRD037 cancellation and the original deadline stop transient read backoff"
+    ],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "github-transport",
+    "reason": "PR-only AC-207.5/AC-145.3 read acquisition recovery and private-error regressions. Deterministic injected fetch, network/credential-free, independent process-isolated one-slot roots, no dependencies or shared external resources; no critical promotion.",
+    "prerequisites": ["Node"]
+  }, {
     "names": ["T-PRD037 GitHub transport redacts every token family in captured headers and injected errors"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "github-transport",
@@ -94,6 +105,150 @@ const graphql = (transport, changes = {}) => transport.buildGraphQLRequest({
   tokenClasses: ['anonymous'], validateData, ...changes,
 });
 const pageInfo = data => data.repository.issues.pageInfo;
+
+test('T-PRD037 classified transient REST and GraphQL reads recover the actual body within one binding', async () => {
+  for (const method of ['GET', 'HEAD', 'query']) {
+    let resolutions = 0;
+    const calls = [];
+    const transport = createGitHubTransport({
+      connection: graphqlConnection({ credentialResolver: () => {
+        resolutions++;
+        return { apiOrigin: api, tokenClass: 'anonymous', generation: 'read-generation',
+          actorVisibility: 'public' };
+      } }),
+      fetch(url, init) {
+        calls.push({ url, ...init });
+        if (calls.length === 1) throw new TypeError('private-native-message', {
+          cause: Object.assign(new Error('private-cause'), {
+            code: method === 'query' ? 'UND_ERR_CONNECT_TIMEOUT' :
+              method === 'HEAD' ? 'EAI_AGAIN' : 'ECONNRESET',
+          }),
+        });
+        return method === 'query' ? response(gqlBody()) : method === 'HEAD' ?
+          new Response(null, { status: 200 }) : response({ id: 73, recovered: true });
+      },
+    });
+    const request = method === 'query' ? graphql(transport) :
+      rest(transport, { method, responseType: method === 'HEAD' ? 'empty' : 'json' });
+    const capture = await transport.execute(request);
+    assert.deepEqual(capture.body, method === 'query' ? gqlBody() :
+      method === 'HEAD' ? null : { id: 73, recovered: true });
+    assert.equal(capture.source, 'response');
+    assert.equal(calls.length, 2);
+    assert.equal(resolutions, 1);
+    assert.deepEqual(calls[1], calls[0]);
+    assert.equal(calls[0].signal, calls[1].signal);
+  }
+});
+
+test('T-PRD037 exhausted native reads retain only safe code and actual API or storage context', async () => {
+  const storage = 'https://archives.fixture.invalid';
+  for (const archive of [false, true]) {
+    let calls = 0, getters = 0;
+    const transport = createGitHubTransport({
+      connection: connection({ archiveOrigins: [storage] }),
+      fetch(url) {
+        calls++;
+        if (archive && url.startsWith(api)) return new Response(null, {
+          status: 302, headers: { location: `${storage}/private.zip?sig=private-sentinel` },
+        });
+        const cause = Object.assign(new Error('private-sentinel'), { code: 'UND_ERR_SOCKET' });
+        Object.defineProperty(cause, 'privateDetails', { get() { getters++; throw Error('private-sentinel'); } });
+        const error = new TypeError('private-sentinel', { cause });
+        Object.defineProperty(error, 'privateDetails', { get() { getters++; throw Error('private-sentinel'); } });
+        throw error;
+      },
+    });
+    const request = rest(transport, archive ? { responseType: 'bytes' } : {});
+    await assert.rejects(archive ? transport.downloadArchive(request) : transport.execute(request), error => {
+      assert.equal(error.code, 'TRANSPORT');
+      assert.equal(error.message, 'GitHub injected request failed');
+      assert.deepEqual(error.details.nativeFailure, {
+        code: 'UND_ERR_SOCKET', origin: archive ? storage : api,
+        originKind: archive ? 'storage' : 'api', protocol: 'rest', method: 'GET', retries: 2,
+      });
+      assert.equal(error.cause, undefined);
+      assert.doesNotMatch(`${JSON.stringify(error)}\n${error.stack}`, /private-sentinel|private\.zip|sig=/u);
+      return true;
+    });
+    assert.equal(calls, archive ? 4 : 3);
+    assert.equal(getters, 0);
+  }
+});
+
+test('T-PRD037 writes unknown errors and private accessors never trigger native recovery', async () => {
+  let getters = 0, traps = 0;
+  const accessor = Object.defineProperty({}, 'code', {
+    get() { getters++; return 'ECONNRESET'; },
+  });
+  const causeAccessor = Object.defineProperty({}, 'cause', {
+    get() { getters++; return { code: 'ECONNRESET' }; },
+  });
+  const proxy = new Proxy({ code: 'ECONNRESET' }, {
+    getOwnPropertyDescriptor() { traps++; throw Error('private-proxy'); },
+    get() { traps++; throw Error('private-proxy'); },
+  });
+  for (const failure of [
+    new Error('ECONNRESET'), { code: 'UNKNOWN' }, accessor, causeAccessor, proxy,
+    { cause: proxy }, Object.create({ code: 'ECONNRESET' }),
+    new SdlcError('PERMISSION', 'private-denial', { code: 'ECONNRESET' }),
+  ]) {
+    let calls = 0;
+    const transport = createGitHubTransport({ connection: connection(), fetch() { calls++; throw failure; } });
+    await assert.rejects(transport.execute(rest(transport)), error =>
+      error.code === 'TRANSPORT' && error.details.nativeFailure === undefined);
+    assert.equal(calls, 1);
+  }
+  for (const method of ['POST', 'PATCH', 'PUT', 'DELETE', 'mutation']) {
+    let calls = 0;
+    const transport = createGitHubTransport({ connection: graphqlConnection(),
+      fetch() { calls++; throw { code: 'EAI_AGAIN' }; } });
+    const request = method === 'mutation' ? graphql(transport, {
+      document: 'mutation ChangeIssue { updateIssue(input: {id: "I_17"}) { issue { id } } }',
+      operationKind: 'mutation', operationName: 'ChangeIssue',
+    }) : rest(transport, { method });
+    await assert.rejects(transport.execute(request, { actionAuthority: authority }), error =>
+      error.code === 'TRANSPORT' && error.details.effect === 'uncertain-effect' &&
+      error.details.nativeFailure.retries === 0);
+    assert.equal(calls, 1);
+  }
+  assert.equal(getters, 0);
+  assert.equal(traps, 0);
+  let streamCalls = 0;
+  const streamTransport = createGitHubTransport({ connection: connection(), fetch() {
+    streamCalls++;
+    return new Response(new ReadableStream({
+      start(controller) { controller.error({ code: 'ECONNRESET', message: 'private-stream' }); },
+    }), { headers: { 'content-type': 'application/json' } });
+  } });
+  await assert.rejects(streamTransport.execute(rest(streamTransport)), error =>
+    error.code === 'TRANSPORT' && error.message === 'GitHub response stream failed' &&
+    error.details.nativeFailure.code === 'ECONNRESET' && error.details.nativeFailure.retries === 0);
+  assert.equal(streamCalls, 1);
+});
+
+test('T-PRD037 cancellation and the original deadline stop transient read backoff', async () => {
+  for (const mode of ['cancel', 'deadline']) {
+    const controller = new AbortController();
+    let calls = 0, originalSignal;
+    const transport = createGitHubTransport({ connection: connection(), fetch(_, init) {
+      calls++;
+      originalSignal = init.signal;
+      if (mode === 'cancel') setImmediate(() => controller.abort(Error('private-reason')));
+      throw { code: 'ETIMEDOUT' };
+    } });
+    await assert.rejects(transport.execute(rest(transport), {
+      signal: controller.signal, timeoutMs: mode === 'deadline' ? 10 : 1000,
+    }), error => {
+      assert.equal(error.code, mode === 'deadline' ? 'TIMEOUT' : 'CANCELLED');
+      assert.equal(error.details.effect, 'no-write-effect');
+      assert.doesNotMatch(JSON.stringify(error), /private-reason/u);
+      return true;
+    });
+    assert.equal(calls, 1);
+    assert.equal(originalSignal.aborted, true);
+  }
+});
 
 test('constructor-bound transport page limit is exact, immutable, branded and acquisition-free', () => {
   let calls = 0, resolutions = 0;
