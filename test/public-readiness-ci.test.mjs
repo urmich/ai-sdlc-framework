@@ -1300,7 +1300,7 @@ test('T-PRD085 status publication readback rejects ambiguous effects and preserv
           creatorId: variant === 'foreign' ? 99 : posted.creatorId });
       }
       if (variant === 'target') {
-        posted.target_url = 'https://fixture.invalid/?sig=private-sentinel';
+        posted.target_url = 'https://fixture.invalid/other-target';
         f.items.at(-1).target_url = posted.target_url;
       }
       return { ...posted, id: variant === 'wrong-id' ? posted.id + 99 :
@@ -1316,7 +1316,7 @@ test('T-PRD085 status publication readback rejects ambiguous effects and preserv
     assert.equal(result.status, 'NotRun', variant);
     assert.equal(result.readback.predicate, predicate, variant);
     assert.equal(f.writes.length, 1, variant);
-    assert.doesNotMatch(JSON.stringify(result), /private-sentinel/u);
+    assert.doesNotMatch(JSON.stringify(result), /fixture\.invalid/u);
     if (variant === 'duplicate') {
       assert.equal(result.readback.matchingCount, 2);
       assert.deepEqual(result.readback.matchingIds, [1, 2]);
