@@ -4429,7 +4429,7 @@ function historicalReleaseCiSource(contents) {
 
 function preGitHubNativeTrustReadinessCiSource(contents) {
   assert.equal(createHash('sha256').update(contents).digest('hex'),
-    '08a8ce00cc095e2c53bfa3b12b4306ef6824881c3a054f8a50bd5de3851c380f');
+    '8324a5c5a0b69a5fad8773c3e5f3c16ce72b7fad00b103a80f9cfddaaa9a6626');
   const lines = contents.split(/(?<=\n)/u);
   const parts = [
     [0, 1439], [1582, 1527], 'function observerFixture() {\n',

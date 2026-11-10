@@ -2366,7 +2366,10 @@ real readiness client with an injected fetch. Reject unselected API paths,
 hostile targets and improper redirect chains; verify that no API credential
 reaches storage and preserve finite byte/deadline bounds and immutable artifact
 digest rejection. It owns no real provider resource and does not expand the
-critical27 selection. Historical replay first restores authenticated 3d04 CI
+critical27 selection. Its dummy credentials must pass the unchanged exact-source
+safety scan; malformed credential-negative URLs are constructed only inside
+owned runtime fixtures, without weakening that scan.
+Historical replay first restores authenticated 3d04 CI
 source bytes before the existing unchanged splices and assertion fingerprints;
 the new root cannot become retrospective execution credit.
 
