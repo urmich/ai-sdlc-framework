@@ -1769,7 +1769,8 @@ test('T-PRD018 validation commands deliver exact stdin without retaining its pri
   assert.equal(rejected.cleanup.requested, false);
 });
 
-test('T-PRD018 Windows validation commands preserve explicitly quoted cmd arguments', async t => {
+test('T-PRD018 Windows validation commands preserve explicitly quoted cmd arguments',
+  { skip: process.platform !== 'win32' }, async t => {
   const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'command quoted arguments-'));
   const lifetime = { cleanupSafe: true };
   t.after(async () => {

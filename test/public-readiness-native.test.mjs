@@ -4281,14 +4281,14 @@ function preCommandInputQualificationSource(contents, file) {
       'Replay must restore genuine 506e60b2 CI Git blob 00c82c5a22428eb0d35367fb84b61556caa2eea9');
   }
   if (file !== 'test/public-readiness-inventory.test.mjs') return contents;
-  assert.equal(digest(contents), '10f32ae8e80585d166b37f7155e6d807c5a32881f9ee6946939bb5c4208a33c8',
+  assert.equal(digest(contents), '1bbb82e0291f12f889a6dc67f2c33c865e375e0cd415c4780ea3f39f8cf35f70',
     'Replay requires the exact stdin and Windows argument regression source');
   // Remove only a0c86d2's new command roots, declarations, import and surface before archived splices.
   const lines = contents.split(/(?<=\n)/u);
   const splices = [
     [0, 23], [29, 2], [43, 62],
     '  "surfaces": [{"coverage": "direct", "paths": ["src/coverage.mjs", "scripts/validation-inventory.mjs", "scripts/validation-tools.mjs"]}],\n',
-    [106, 47], [154, 1548], [1795, 1143],
+    [106, 47], [154, 1548], [1796, 1143],
   ];
   const restored = splices.map(part => typeof part === 'string' ? part :
     lines.slice(part[0], part[0] + part[1]).join('')).join('');
