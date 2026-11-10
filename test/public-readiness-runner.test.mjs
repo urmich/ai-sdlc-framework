@@ -2180,7 +2180,160 @@ async function controlledReadyClock(implementation, mode = 'ready') {
   return { ...result, clock, captured };
 }
 
-test('T-PRD011 sibling producers dynamically consume freed aggregate capacity without token multiplication', async t => {
+async function controlledSiblingPreparation(implementation, files, entered, mode) {
+  let clock = 1000;
+  const timers = [];
+  const contents = new Map();
+  const targets = new Map();
+  const monitors = new Map();
+  const queued = [];
+  const diagnostics = [];
+  const triggers = [];
+  const sources = new Map(await Promise.all(files.map(async file => [file,
+    (await fs.readFile(file, 'utf8')).replace(/\bimport [^;]+;/gu, '')])));
+  let nextPid = 100;
+  let active = 0;
+  const pause = milliseconds => new Promise(resolve => timers.push({ at: clock + milliseconds, resolve }));
+  const missing = () => Object.assign(new Error('not ready'), { code: 'ENOENT' });
+  const close = (monitor, code = 0) => {
+    if (monitor.settled) return;
+    monitor.settled = true;
+    monitor.resolve(runInContext(`({code:${code},signal:null})`, context));
+  };
+  const observeExit = target => {
+    const monitor = monitors.get(target.pid);
+    if (!monitor) return;
+    contents.set(monitor.exitPath, JSON.stringify({ ...monitor.identity, present: false,
+      exitTimeTicks: String(BigInt(target.exitedAt) * 10000n + 621355968000000000n) }));
+    if (!monitor.retained || monitor.released) close(monitor);
+  };
+  const watchExit = async monitor => {
+    if (monitor.watching) return;
+    monitor.watching = true;
+    await pause(15000);
+    if (!targets.get(monitor.identity.pid).exitedAt) close(monitor, 1);
+  };
+  const fakeFs = {
+    async readFile(file) { if (!contents.has(file)) throw missing(); return contents.get(file); },
+    async stat(file) { if (!contents.has(file)) throw missing(); return {}; },
+    async rename(from, to) {
+      if (!(mode === 'absent-peer' && to === path.join(entered, 'sibling ready root.ready'))) {
+        contents.set(to, contents.get(from));
+      }
+      contents.delete(from);
+    },
+    async writeFile(file, value) {
+      if (file === path.join(entered, 'sibling')) {
+        if (mode === 'missing-action') return;
+        if (mode === 'slow-peer') await pause(9000);
+      }
+      contents.set(file, value);
+      if (file.endsWith('.release') && !triggers.some(trigger => trigger.file === file)) {
+        triggers.push({ file, at: clock });
+        for (const monitor of monitors.values()) {
+          if (monitor.trigger === file) void watchExit(monitor);
+        }
+      }
+    },
+  };
+  const pump = () => {
+    while (active < 2 && queued.length) {
+      active++;
+      const task = queued.shift();
+      const pid = nextPid++;
+      const target = { pid, name: task.name, exitedAt: null };
+      targets.set(pid, target);
+      let action;
+      runInContext(sources.get(task.file), createContext({
+        test: (name, callback) => { if (name === task.name) action = callback; },
+        assert, path, fs: fakeFs, delay: pause, Date: { now: () => clock },
+        process: { pid, platform: 'win32' },
+      }));
+      Promise.resolve().then(action).then(() => ({ status: 'Passed' }),
+        error => ({ status: 'Failed', message: error.message })).then(outcome => {
+        target.exitedAt = clock;
+        observeExit(target);
+        active--;
+        task.resolve({ root: task.name, processIds: [pid], status: outcome.status,
+          startedAt: new Date(1000).toISOString(), finishedAt: new Date(clock).toISOString(),
+          message: outcome.message });
+        pump();
+      });
+    }
+  };
+  const context = createContext({
+    assert, path, entered, fs: fakeFs, delay: pause, Date: { now: () => clock }, AbortController,
+    process: { platform: 'win32' }, processDiagnostic, assertOwnedProcessExited,
+    budget: { environment: {} }, t: { diagnostic: value => diagnostics.push(JSON.parse(value)) },
+    independent: { parent: 'other-owned-producer', signal: { aborted: false },
+      async snapshot() { return { producers: 1 }; } },
+    async windowsProcessIdentity(pid, exitPath, options) {
+      const target = targets.get(pid);
+      if (target.name === 'sibling ready root' && mode === 'hung-observer') {
+        await pause(30000);
+        throw new Error('Owned process identity capture did not complete [observer phase=startup]');
+      }
+      await pause(target.name === 'sibling ready root' ? 12000 : 10);
+      assert.equal(target.exitedAt, null, 'Capture must pin the still-live original target');
+      const identity = { pid, present: true, image: 'ownedNode',
+        creationTime: String(621355968000000000n + BigInt(pid)),
+        observedAt: new Date(clock).toISOString() };
+      let resolve;
+      const closed = new Promise(done => { resolve = done; });
+      const monitor = { identity, exitPath, resolve, retained: options.retainUntilRelease,
+        trigger: options.exitObservationTrigger };
+      monitors.set(pid, monitor);
+      if (!monitor.retained) void watchExit(monitor);
+      return { identity, closed, release() {
+        monitor.released = true;
+        if (target.exitedAt) { observeExit(target); close(monitor); }
+        else close(monitor, 1);
+        return closed;
+      } };
+    },
+    f: { async invoke(args, environment) {
+      const file = args.at(-1);
+      const names = [];
+      runInContext(sources.get(file), createContext({ test: name => names.push(name) }));
+      const groups = await Promise.all(names.map(name => new Promise(resolve => {
+        queued.push({ file, name, resolve });
+        pump();
+      })));
+      await pause(1);
+      contents.set(environment.SDLC_TEST_REPORT_FILE,
+        JSON.stringify({ resources: { budget: { id: 'controlled', peakActiveWorkers: 2 } },
+          groupExecution: { groups } }));
+      return { exitCode: groups.every(group => group.status === 'Passed') ? 0 : 1,
+        stdout: groups.map(group => group.message ?? '').join('\n'), stderr: '', completedAtMs: clock };
+    } },
+  });
+  context.captureOwnedReady = runInContext(`(${captureOwnedReady.toString()})`, context);
+  const run = runInContext(`(${implementation.toString()})`, context);
+  let result;
+  const pending = run(files, files.map(file => `${file}.controlled.json`),
+    [['waiting root', 'short root'], ['sibling ready root']], { coordinatePeers: true })
+    .then(() => { result = { status: 'Passed' }; },
+      error => { result = { status: 'Failed', message: error.message }; });
+  for (let step = 0; !result && step < 12000; step++) {
+    for (let flush = 0; flush < 128; flush++) await Promise.resolve();
+    if (result) break;
+    assert.ok(timers.length, 'Controlled caller must yield to a bounded clock event');
+    clock = Math.min(...timers.map(timer => timer.at));
+    for (let index = timers.length - 1; index >= 0; index--) {
+      if (timers[index].at <= clock) timers.splice(index, 1)[0].resolve();
+    }
+  }
+  assert.ok(result, 'Controlled caller must settle its preparation, action and observers finitely');
+  await pending;
+  assert.ok([...targets.values()].every(target => target.exitedAt !== null));
+  assert.ok([...monitors.values()].every(monitor => monitor.settled));
+  assert.ok(diagnostics.filter(value => value.kind === 'owned-producer-completed')
+    .every(value => value.independentProducerActive));
+  return { ...result, elapsedMs: clock - 1000, triggers, diagnostics };
+}
+
+test('T-PRD011 sibling producers dynamically consume freed aggregate capacity without token multiplication',
+  { timeout: 300000 }, async t => {
   const f = await runnerFixture(t);
   const inheritedBudget = Boolean(process.env.SDLC_TEST_BUDGET);
   const budget = await enterTestBudget({ workers: 2, fileCount: 2, control: true });
@@ -2208,29 +2361,46 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
         catch(error){if(error.code!=='ENOENT')throw error;}
         await delay(10);}
     }`;
-  const runOwnedPhase = async (files, paths, labels, { exclusive = false } = {}) => {
+  const runOwnedPhase = async (files, paths, labels, { exclusive = false, coordinatePeers = false } = {}) => {
     const monitors = new Map();
     const readiness = new AbortController();
     const releases = labels.flat().map(label => path.join(entered, `${label}.release`));
     const releaseAll = () => Promise.all(releases.map(file => fs.writeFile(file, 'released')));
-    const capture = process.platform !== 'win32' ? Promise.resolve(null) :
-      captureOwnedReady(labels.flat(), entered, async (label, owned) => {
-        assert.ok(Number.isSafeInteger(owned.observedAtMs),
-          'The live worker ready observation must establish its creation bound');
-        const exitPath = path.join(entered, `${label}.exit.json`);
-        const monitor = await windowsProcessIdentity(owned.pid, exitPath, { createdBeforeMs: owned.observedAtMs });
-        monitors.set(label, { ...monitor, exitPath });
-        t.diagnostic(JSON.stringify({ kind: 'owned-worker-identity-captured',
-          owned: monitor.identity, capturedBeforeTrigger: true, label }));
-        await fs.writeFile(path.join(entered, `${label}.release`), 'captured');
-      }, { exclusive, signal: readiness.signal }).then(() => null, async error => {
+    const captureIdentity = async (label, owned) => {
+      assert.ok(Number.isSafeInteger(owned.observedAtMs),
+        'The live worker ready observation must establish its creation bound');
+      const exitPath = path.join(entered, `${label}.exit.json`);
+      const monitor = await windowsProcessIdentity(owned.pid, exitPath, {
+        createdBeforeMs: owned.observedAtMs, retainUntilRelease: true,
+        exitObservationTrigger: path.join(entered, `${label}.release`),
+      });
+      monitors.set(label, { ...monitor, exitPath });
+      t.diagnostic(JSON.stringify({ kind: 'owned-worker-identity-captured',
+        owned: monitor.identity, capturedBeforeTrigger: true, label }));
+    };
+    const trigger = label => fs.writeFile(path.join(entered, `${label}.release`), 'captured');
+    const capture = process.platform !== 'win32' ? Promise.resolve(null) : (async () => {
+      if (coordinatePeers) {
+        const [waiting, short] = labels[0];
+        const [peer] = labels[1];
+        await captureOwnedReady([waiting, short], entered, captureIdentity, { signal: readiness.signal });
+        await trigger(short);
+        await captureOwnedReady([peer], entered, captureIdentity, { signal: readiness.signal });
+        await Promise.all([waiting, peer].map(trigger));
+      } else {
+        await captureOwnedReady(labels.flat(), entered, async (label, owned) => {
+          await captureIdentity(label, owned);
+          await trigger(label);
+        }, { exclusive, signal: readiness.signal });
+      }
+    })().then(() => null, async error => {
         await releaseAll();
         return error;
       });
     const producers = files.map((file, index) =>
       f.invoke(['targeted', '--workers', '2', file],
         { ...budget.environment, SDLC_TEST_REPORT_FILE: paths[index] }).then(result => {
-        if (exclusive && result.exitCode !== 0) readiness.abort(new Error(result.stdout + result.stderr));
+        if (result.exitCode !== 0) readiness.abort(new Error(result.stdout + result.stderr));
         t.diagnostic(JSON.stringify({ kind: 'owned-producer-completed', index,
           completedAtMs: result.completedAtMs, completionClockPrecisionMs: 1,
           independentProducer: independent.parent, independentProducerActive: !independent.signal.aborted }));
@@ -2253,7 +2423,7 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
               const monitor = monitors.get(group.root);
               assert.ok(monitor, 'Every owned file process needs a pre-trigger creation identity');
               assert.equal(monitor.identity.pid, pid);
-              const outcome = await monitor.closed;
+              const outcome = await monitor.release();
               if (outcome.code !== 0 || outcome.signal !== null) {
                 const detail = await fs.readFile(`${monitor.exitPath}.error`, 'utf8').catch(error => {
                   if (error.code === 'ENOENT') return 'Held process observer retained no error record';
@@ -2283,7 +2453,7 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
       await capture;
       await releaseAll();
       await Promise.allSettled(producers);
-      await Promise.all([...monitors.values()].map(monitor => monitor.closed));
+      await Promise.all([...monitors.values()].map(monitor => monitor.release()));
     }
   };
   await fs.writeFile(slow, common +
@@ -2301,9 +2471,23 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
       await fs.writeFile(${JSON.stringify(path.join(entered, 'sibling'))},String(process.pid),{flag:'wx'});
       await delay(30);
     });`);
+  for (const mode of ['slow-peer', 'absent-peer', 'hung-observer', 'missing-action']) {
+    const result = await controlledSiblingPreparation(runOwnedPhase, [slow, sibling], entered, mode);
+    t.diagnostic(JSON.stringify({ kind: 'controlled-sibling-preparation', mode, ...result }));
+    if (mode === 'slow-peer') {
+      assert.equal(result.status, 'Passed',
+        'Permitted peer preparation must not consume the unchanged sibling action deadline');
+      assert.ok(result.elapsedMs > 20000,
+        'Pinned ownership must survive preparation plus a genuine action within its own allowance');
+    } else {
+      assert.equal(result.status, 'Failed', mode);
+      assert.match(result.message, mode === 'absent-peer' ? /identity barrier/u :
+        mode === 'hung-observer' ? /observer phase=startup/u : /could not borrow idle host capacity/u);
+    }
+  }
   const paths = [path.join(entered, 'first.json'), path.join(entered, 'second.json')];
   const { reports } = await runOwnedPhase([slow, sibling], paths,
-    [['waiting root', 'short root'], ['sibling ready root']]);
+    [['waiting root', 'short root'], ['sibling ready root']], { coordinatePeers: true });
   assert.ok(reports.every(report => report.resources.budget.id === budget.id &&
     report.resources.budget.peakActiveWorkers <= budget.capacity));
   const waiting = reports[0].groupExecution.groups.find(group => group.root === 'waiting root');

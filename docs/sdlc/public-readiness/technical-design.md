@@ -2413,8 +2413,26 @@ ten-second ready allowance. Do not spend that allowance while the previous
 holder is legitimately being captured and released. Nonexclusive ready capture
 remains concurrent; failed exclusive producers abort pending readiness.
 Keep native identity capture, stop budgets, resource bounds, exit proofs and
-overall watchdogs unchanged. This corrects controlled clock accounting, not
-the unproven cause of a historical hosted failure.
+actual action/exit allowances unchanged. For the nonexclusive capacity case,
+capture the waiting and short workers together before releasing only the short
+worker. Its completion makes the queued sibling eligible; begin that sibling's
+unchanged ready allowance then and capture it before triggering either capacity
+participant. Both native identities remain pinned while either observer prepares.
+Retained observers may use the exact owned worker-release path to start one
+nonrenewing fifteen-second exit clock; preparation does not consume that clock.
+Release every retained observer only after the producer boundary, or during
+affirmative failure cleanup; a cleanup kill cannot manufacture an earlier exit.
+The ten-second capacity action remains unchanged. Controlled execution of this
+actual caller and generated worker bodies covers twelve-second peer preparation,
+a subsequent permitted action, absent readiness, hung preparation and missing
+action, with all targets settled and the unrelated producer unchanged. Keep the
+regressions in the existing PR-only root and preserve resource/admission and
+critical budgets. A 300-second setup-inclusive outer watchdog accounts for four
+bounded preparation batches plus unchanged readiness/action/exit and cleanup.
+Restore authentic adopted D runner-test bytes before existing historical replay
+splices; no capsules, inventories or source guards change and CI needs no Git.
+This corrects controlled clock accounting, not the unproven cause of a historical
+hosted failure or a guarantee about arbitrary host latency.
 
 The Windows command-settlement fixture must also finish preparation before
 starting its cancellation clock. Writer provenance alone does not establish

@@ -4055,6 +4055,7 @@ async function qualifiedIntelSourceFiles() {
     if (file === 'test/public-readiness-ci.test.mjs') contents = historicalReadinessCiSource(contents);
     if (file === 'test/release-ci.test.mjs') contents = historicalReleaseCiSource(contents);
     if (file === 'test/test-runner.test.mjs') contents = historicalTestRunnerSource(contents);
+    if (file === 'test/public-readiness-runner.test.mjs') contents = historicalReadinessRunnerSource(contents);
     if (file === 'test/github-transport.unit.test.mjs') {
       const recovery = contents.indexOf('    "names": [\n      "T-PRD037 classified transient REST');
       const separator = '  }, {\n';
@@ -4143,6 +4144,7 @@ async function qualifiedIntelSourceFixture(protocol) {
     if (file === 'test/public-readiness-ci.test.mjs') contents = historicalReadinessCiSource(contents);
     if (file === 'test/release-ci.test.mjs') contents = historicalReleaseCiSource(contents);
     if (file === 'test/test-runner.test.mjs') contents = historicalTestRunnerSource(contents);
+    if (file === 'test/public-readiness-runner.test.mjs') contents = historicalReadinessRunnerSource(contents);
     if (file === 'test/github-transport.unit.test.mjs') {
       const recovery = contents.indexOf('    "names": [\n      "T-PRD037 classified transient REST');
       const separator = '  }, {\n';
@@ -4185,6 +4187,7 @@ async function qualifiedIntelSourceFixture(protocol) {
     if (file === 'test/public-readiness-native.test.mjs') {
       contents = contents.replaceAll("    if (file === 'test/monitors.test.mjs') contents = historicalMonitorSource(contents);\n", '')
         .replaceAll("    if (file === 'test/test-runner.test.mjs') contents = historicalTestRunnerSource(contents);\n", '')
+        .replaceAll("    if (file === 'test/public-readiness-runner.test.mjs') contents = historicalReadinessRunnerSource(contents);\n", '')
         .replaceAll("    if (file === 'test/macos-runner-admission.unit.test.mjs')\n" +
           "      contents = contents.replace('    pending.options.signal = controller.signal;\\n',\n" +
           "        '    pending.options.signal = controller.signal;\\n    pending.options.now = () => performance.now();\\n');\n", '')
@@ -4234,6 +4237,37 @@ async function qualifiedIntelSourceFixture(protocol) {
       'Authentic v12 transfers every descendant of the original six complete components');
   }
   return { inventory, plan, assignment, protocol, revision: snapshot.revision };
+}
+
+function historicalReadinessRunnerSource(contents) {
+  // Restore authentic unchanged D/N Git blob e9def1b5f2c78677ed639d5c48331b8e89107804.
+  assert.equal(createHash('sha256').update(contents).digest('hex'),
+    'aa201c0ba2be45562433a3eaeca5534f04a2d286379ff8be43b7fe61dd05c2e7',
+    'Replay requires the exact coordinated sibling fixture source');
+  const lines = contents.split(/(?<=\n)/u);
+  const splices = [
+    [0, 2182],
+    "test('T-PRD011 sibling producers dynamically consume freed aggregate capacity without token multiplication', async t => {\n",
+    [2336, 27],
+    "  const runOwnedPhase = async (files, paths, labels, { exclusive = false } = {}) => {\n",
+    [2364, 4],
+    "    const capture = process.platform !== 'win32' ? Promise.resolve(null) :\n      captureOwnedReady(labels.flat(), entered, async (label, owned) => {\n        assert.ok(Number.isSafeInteger(owned.observedAtMs),\n          'The live worker ready observation must establish its creation bound');\n        const exitPath = path.join(entered, `${label}.exit.json`);\n        const monitor = await windowsProcessIdentity(owned.pid, exitPath, { createdBeforeMs: owned.observedAtMs });\n        monitors.set(label, { ...monitor, exitPath });\n        t.diagnostic(JSON.stringify({ kind: 'owned-worker-identity-captured',\n          owned: monitor.identity, capturedBeforeTrigger: true, label }));\n        await fs.writeFile(path.join(entered, `${label}.release`), 'captured');\n      }, { exclusive, signal: readiness.signal }).then(() => null, async error => {\n",
+    [2396, 6],
+    "        if (exclusive && result.exitCode !== 0) readiness.abort(new Error(result.stdout + result.stderr));\n",
+    [2403, 22],
+    "              const outcome = await monitor.closed;\n",
+    [2426, 29],
+    "      await Promise.all([...monitors.values()].map(monitor => monitor.closed));\n",
+    [2456, 17], [2487, 2],
+    "    [['waiting root', 'short root'], ['sibling ready root']]);\n",
+    [2490, 719],
+  ];
+  const restored = splices.map(part => typeof part === 'string' ? part :
+    lines.slice(part[0], part[0] + part[1]).join('')).join('');
+  assert.equal(createHash('sha256').update(restored).digest('hex'),
+    '7a4f70a7e065d872757e770e20bcfe97310cb8d29b4aa8ec1764693aa6b0f6cd',
+    'Replay must restore the authentic adopted D/N sibling fixture source');
+  return restored;
 }
 
 function historicalTestRunnerSource(contents) {

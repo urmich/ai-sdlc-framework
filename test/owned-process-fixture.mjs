@@ -38,11 +38,15 @@ if (process.argv[2] === '--owned-pipe-fixture') {
   }
 }
 
-export async function windowsProcessIdentity(pid, exitPath, { createdBeforeMs, retainUntilRelease = false } = {}) {
+export async function windowsProcessIdentity(pid, exitPath,
+  { createdBeforeMs, retainUntilRelease = false, exitObservationTrigger } = {}) {
   assert.ok(Number.isSafeInteger(pid) && pid > 0);
   assert.ok(Number.isSafeInteger(createdBeforeMs) && createdBeforeMs >= 0,
     'A live ready observation must bound the original process creation');
   assert.equal(typeof retainUntilRelease, 'boolean');
+  assert.ok(exitObservationTrigger === undefined || (retainUntilRelease &&
+    typeof exitObservationTrigger === 'string' && path.isAbsolute(exitObservationTrigger)),
+    'A deferred exit observation requires retained ownership and an absolute owned trigger path');
   const releasePath = `${exitPath}.release`;
   const inspectionPath = `${exitPath}.inspection.json`;
   const creationGuard =
@@ -54,9 +58,15 @@ export async function windowsProcessIdentity(pid, exitPath, { createdBeforeMs, r
     `'","observedAt":"'+[DateTime]::UtcNow.ToString('o')+'"}';` +
     `[IO.File]::WriteAllText('${exitPath.replaceAll("'", "''")}.tmp',$record);` +
     `[IO.File]::Move('${exitPath.replaceAll("'", "''")}.tmp','${exitPath.replaceAll("'", "''")}');`;
+  const exitWatch = exitObservationTrigger === undefined ? '' :
+    `if($null -eq $observationClock -and [IO.File]::Exists('${exitObservationTrigger.replaceAll("'", "''")}'))` +
+    `{$observationClock=[Diagnostics.Stopwatch]::StartNew()};` +
+    `if(!$exited -and $null -ne $observationClock -and $observationClock.ElapsedMilliseconds -ge 15000)` +
+    `{throw 'Original owned worker did not exit within its observation budget'};`;
   const observation = retainUntilRelease
-    ? `$exited=$false;while(![IO.File]::Exists('${releasePath.replaceAll("'", "''")}') -and !$owner.HasExited){` +
+    ? `$exited=$false;$observationClock=$null;while(![IO.File]::Exists('${releasePath.replaceAll("'", "''")}') -and !$owner.HasExited){` +
       `if(!$exited -and $p.WaitForExit(10)){${exitRecord}$exited=$true};` +
+      exitWatch +
       `if([IO.File]::Exists('${exitPath.replaceAll("'", "''")}.inspect') -and ` +
       `![IO.File]::Exists('${inspectionPath.replaceAll("'", "''")}')){` +
       `$record='{"pid":${pid},"creationTime":"'+$creation+'","handleOpen":'+` +

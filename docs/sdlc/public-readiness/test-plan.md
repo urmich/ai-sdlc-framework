@@ -2303,6 +2303,26 @@ fails on the original source and passes on the correction, and execute both
 real Windows retained-handle branches. Keep the critical budget unchanged.
 The failed main execution remains failed; an unknown host startup cause is not
 established by a longer finite preparation allowance or a later passing run.
+The existing PR-only dynamic sibling root also controls the caller boundary:
+prepare both initially eligible observers concurrently, release only the short
+worker to make the queued peer eligible, then prepare that peer before triggering
+either timed capacity participant. Retain each original native handle throughout
+preparation and start its unchanged fifteen-second exit observation only at its
+own action trigger; release and affirmatively settle every observer on success
+or failure. The ten-second sibling action and ready allowances are unchanged,
+and queued readiness starts only after the short worker is released.
+Controlled actual caller/worker-source execution must fail on the original
+independent-release behavior and pass with twelve-second peer preparation plus
+an action within its own allowance. Absent peers, hung observer preparation and
+missing actions still fail finitely; all owned targets settle and the independent
+producer stays active. Keep these cases inside the existing root, without new
+descendants, critical growth, retries or resource/admission changes. Its finite
+300-second outer watchdog includes two dynamic preparation waves and the two
+sequential exclusive captures (four thirty-plus-five-second batches), readiness,
+unchanged action/exit budgets and cleanup; it is not a timing-performance goal.
+Changes to adopted runner-test text must restore authenticated D source bytes
+before the unchanged historical splices/capsules, preserving existing identities
+and inventories without adding runtime Git access.
 The measured GitHub process-partition preservation test must keep the original
 143-assertion count, root vector and callback fingerprint unchanged. Validate
 the one new byte-snapshot regression by its exact ID, file, name and empty parent
