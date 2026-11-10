@@ -2806,6 +2806,14 @@ head/base/test-merge identity and actual execution; approval cannot replace
 native acceptance. Both trusted workflows stop consuming
 `READINESS_PRODUCER_REVISION`. The coverage floor remains the protected-main
 canonical specification, not an independently selected mutable revision.
+For log/archive acquisition, use the redirect returned by the authenticated
+exact selected GitHub download endpoint as a per-download capability. Add only
+that response's HTTPS storage origin to the existing SDK connection for that
+download; retain credential stripping, redirect/byte/deadline limits and
+immutable archive verification. A legacy configured storage origin is not
+authority to bless an unrelated API route or arbitrary redirect, and no new
+backend account requires a standing repository variable change. The generic
+framework transport contract remains unchanged.
 
 The retained 2026-11-08 owner read found active effective ruleset `26728403`
 with deletion/non-fast-forward restrictions, PRs and zero required approvals,

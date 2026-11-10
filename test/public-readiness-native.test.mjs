@@ -4427,7 +4427,30 @@ function historicalReleaseCiSource(contents) {
   return restored;
 }
 
+function preGitHubNativeTrustReadinessCiSource(contents) {
+  assert.equal(createHash('sha256').update(contents).digest('hex'),
+    '08a8ce00cc095e2c53bfa3b12b4306ef6824881c3a054f8a50bd5de3851c380f');
+  const lines = contents.split(/(?<=\n)/u);
+  const parts = [
+    [0, 1439], [1582, 1527], 'function observerFixture() {\n',
+    [3110, 22], [3138, 9], [3156, 8], [3165, 29],
+    "      if (route === '/pulls/1/reviews') return json([\n" +
+      "        { id: 1, user: { id: 11 }, state: 'APPROVED', commit_id: pr.head.sha },\n" +
+      '      ]);\n',
+    [3195, 3], '        sha: route.split(\'/\').at(-1), tree: { sha: treeSha },\n',
+    [3200, 3], [3206, 12], '  return { client, host, policy, pr, input, calls,\n',
+    [3219, 28], [3271, 32],
+  ];
+  const restored = parts.map(part => typeof part === 'string' ? part :
+    lines.slice(part[0], part[0] + part[1]).join('')).join('');
+  assert.equal(createHash('sha256').update(restored).digest('hex'),
+    'b4e10ea68213d8ab96eaa4dc9fd47168a01b6e7c11fcfeab76853a26de8da2bb',
+    'Preserve the authentic 3d04 CI fixture before unchanged historical replay');
+  return restored;
+}
+
 function historicalReadinessCiSource(contents) {
+  contents = preGitHubNativeTrustReadinessCiSource(contents);
   // Restore genuine Git blob b0e7c7ca1ae76c4795fbe79d1f3494f8a4e59b19 before
   // the unchanged capsules' line splices; current readback tests remain current-only.
   const lines = contents.split(/(?<=\n)/u);

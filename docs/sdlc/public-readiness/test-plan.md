@@ -2360,6 +2360,15 @@ These cases use injected GitHub responses and owned source data in one isolated
 root, with no external capability, new descendants or critical-budget growth.
 Current-candidate local, Review and hosted statuses require their own completed
 results; this procedure does not transfer historical acceptance.
+The PR-only T-PRD021 GitHub-issued download-origin regression additionally
+exercises a previously unconfigured valid GitHub storage account through the
+real readiness client with an injected fetch. Reject unselected API paths,
+hostile targets and improper redirect chains; verify that no API credential
+reaches storage and preserve finite byte/deadline bounds and immutable artifact
+digest rejection. It owns no real provider resource and does not expand the
+critical27 selection. Historical replay first restores authenticated 3d04 CI
+source bytes before the existing unchanged splices and assertion fingerprints;
+the new root cannot become retrospective execution credit.
 
 ## 7. PR matrix procedure
 

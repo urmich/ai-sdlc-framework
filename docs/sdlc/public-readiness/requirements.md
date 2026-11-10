@@ -433,6 +433,11 @@ proposal needs no impossible self-approval. Unreviewed external changes must not
 self-adopt. Keep the privileged observer on protected-main code, read candidate
 definitions only as immutable data, and require complete exact-source native
 execution, archive integrity and provenance independently of approval.
+Authenticated selected GitHub job-log and immutable artifact download responses
+must authorize their own finite credential-free HTTPS storage hop, without
+recurring per-account repository-variable updates. Do not treat log storage as
+an artifact digest proof, follow arbitrary caller-supplied origins, forward
+credentials, disable TLS, or remove immutable ZIP digest and extraction checks.
 
 ### FR-206: Provide one automated, authorized release flow
 
