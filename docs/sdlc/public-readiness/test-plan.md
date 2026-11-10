@@ -3261,6 +3261,12 @@ authority. Preflight rejects missing prerequisites before irreversible calls.
    Go/regression and comparison-package work; Windows and both Macs complete
    their full native regressions/lifecycles. Both Mac lanes consume one identical
    archive digest. Comparison builds cannot replace frozen candidate bytes.
+   The release jobs declare one bounded aggregate worker allocation shared by
+   bootstrap and execution. T-PRD032 derives every selected execution group's
+   minimum slots and verifies that the complete inventories fit each release
+   allocation, including hosts with three or four physical CPU slots. Do not
+   omit roots, weaken reservations or enable shared-state callback concurrency
+   to fit the default CPU-based allocation.
 3. Before publication, a candidate-only loopback fixture may serve the verified
    frozen Mac bytes to the test-only Homebrew formula. Assert that both native
    lifecycle consumers use those exact bytes and declared Node dependencies.

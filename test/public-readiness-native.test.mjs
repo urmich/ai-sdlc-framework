@@ -4300,6 +4300,23 @@ function historicalReadinessRunnerSource(contents) {
 }
 
 function historicalTestRunnerSource(contents) {
+  const startupRoot = contents.indexOf("test('T-PRD018 worker startup budget failures retain safe diagnostics");
+  const nextRoot = contents.indexOf("test('T-PRD018 coded failures preserve safe command output", startupRoot);
+  assert.ok(startupRoot >= 0 && nextRoot > startupRoot);
+  contents = contents.slice(0, startupRoot) + contents.slice(nextRoot);
+  const startupGroup = contents.indexOf('  }, {\n    "root": "T-PRD018 worker startup budget failures');
+  const nextGroup = contents.indexOf('  }, {\n', startupGroup + 1);
+  assert.ok(startupGroup >= 0 && nextGroup > startupGroup);
+  contents = contents.slice(0, startupGroup) + contents.slice(nextGroup);
+  const startupClassification = contents.indexOf('    "names": ["T-PRD018 worker startup budget failures');
+  const separator = '  }, {\n';
+  const nextClassification = contents.indexOf(separator, startupClassification);
+  assert.ok(startupClassification >= 0 && nextClassification > startupClassification);
+  contents = (contents.slice(0, startupClassification) +
+    contents.slice(nextClassification + separator.length))
+    .replace('      {"name": "T-PRD018 worker startup budget failures retain safe diagnostics without forcing command cleanup", "parents": []},\n', '')
+    .replace('declarationTokens, discoverDeclarations,\n  reconcileNodeExecution }',
+      'declarationTokens, discoverDeclarations }');
   // Restore genuine N blob 9e0e365e2b7b0ec54d88cd507ae1cf373cb26c3e
   // before the unchanged N-to-K restoration and archival capsule splices.
   assert.equal(createHash('sha256').update(contents).digest('hex'),
@@ -4490,6 +4507,20 @@ function preGitHubNativeTrustReadinessCiSource(contents) {
 }
 
 function historicalReadinessCiSource(contents) {
+  const allocationRoot = contents.indexOf("test('T-PRD032 complete native release inventories");
+  const nextRoot = contents.indexOf('// PR-only: native-validation maintainer;', allocationRoot);
+  assert.ok(allocationRoot >= 0 && nextRoot > allocationRoot);
+  contents = contents.slice(0, allocationRoot) + contents.slice(nextRoot);
+  const allocationClassification = contents.indexOf('    "names": ["T-PRD032 complete native release inventories');
+  const separator = '  }, {\n';
+  const nextClassification = contents.indexOf(separator, allocationClassification);
+  assert.ok(allocationClassification >= 0 && nextClassification > allocationClassification);
+  contents = (contents.slice(0, allocationClassification) +
+    contents.slice(nextClassification + separator.length))
+    .replace(', "scripts/native-validation.mjs"]}', ']}')
+    .replace('    {"root": "T-PRD032 complete native release inventories fit each declared aggregate host allocation", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},\n', '')
+    .replace('nativeFrameworkUnitShardNames, nativeStageSelections', 'nativeFrameworkUnitShardNames')
+    .replace('runValidationReadyPool, validationExecutionGroups', 'runValidationReadyPool');
   contents = preGitHubNativeTrustReadinessCiSource(contents);
   // Restore genuine Git blob b0e7c7ca1ae76c4795fbe79d1f3494f8a4e59b19 before
   // the unchanged capsules' line splices; current readback tests remain current-only.

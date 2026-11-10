@@ -6,6 +6,10 @@ export const validationDeclarations = {
     "minimumSlots": 1,
     "exclusiveResources": []
   }, {
+    "root": "T-PRD018 worker startup budget failures retain safe diagnostics without forcing command cleanup",
+    "minimumSlots": 1,
+    "exclusiveResources": []
+  }, {
     "root": "T-PRD018 rejected failure diagnostics retain only closed error and owned phase facts",
     "minimumSlots": 1,
     "exclusiveResources": []
@@ -36,6 +40,12 @@ export const validationDeclarations = {
     "owner": "runner-resource-contract",
     "reason": "PR-only source-derived native-plan and owning-job admission control; isolated ready-pool doubles prove contention exclusion and rejection without dispatch, not native execution.",
     "prerequisites": ["Node; one aggregate worker slot; current canonical Test Plan and native CI job allocations"]
+  }, {
+    "names": ["T-PRD018 worker startup budget failures retain safe diagnostics without forcing command cleanup"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "PR-only public-runner startup rejection with real command capture; inherits the aggregate budget and dispatches no fixture assertion. One slot covers the owning root; runner control processes and unique repository-local fixtures have no shared mutable resources or prerequisite roots.",
+    "prerequisites": ["Node; one aggregate worker slot; owned repository-local test and evidence directories"]
   }, {
     "names": ["T-PRD018 rejected failure diagnostics retain only closed error and owned phase facts"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
@@ -95,6 +105,7 @@ export const validationDeclarations = {
       {"name": "T-130 SIGTERM cancels active file workers before the public runner returns", "parents": []}
     ]},
     {"id": "T-PRD018", "selectors": [
+      {"name": "T-PRD018 worker startup budget failures retain safe diagnostics without forcing command cleanup", "parents": []},
       {"name": "T-PRD018 rejected failure diagnostics retain only closed error and owned phase facts", "parents": []},
       {"name": "T-PRD018 command cancellation settles the owned group before return and fails closed on unknown survivors", "parents": []},
       {"name": "T-PRD018 owned worker exit assertions distinguish reused identities from surviving workers", "parents": []},
@@ -119,7 +130,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createPlan, parseOptions, repositoryRoot, unitFiles, validationSelectionDescriptor,
   validationSelectionProtocol, writeValidationSelection } from '../scripts/test-runner.mjs';
-import { compileValidationInventory, declarationTokens, discoverDeclarations } from '../scripts/validation-inventory.mjs';
+import { compileValidationInventory, declarationTokens, discoverDeclarations,
+  reconcileNodeExecution } from '../scripts/validation-inventory.mjs';
 import { nativeFrameworkShardPlan, nativeStageSelections, validateNativeGroupReport } from '../scripts/native-validation.mjs';
 import { runValidationReadyPool, validationExecutionGroups } from '../scripts/test-scheduling.mjs';
 import { readTestBudget } from '../scripts/test-budget.mjs';
@@ -969,6 +981,78 @@ test('T-130 public runner preserves a real failing child and still executes the 
   assert.equal(await fs.readFile(marker, 'utf8'), 'passed');
   assert.equal(summary(result.stdout, 'end').exitCode, 1);
 });
+
+test('T-PRD018 worker startup budget failures retain safe diagnostics without forcing command cleanup',
+  { timeout: 60000 }, async t => {
+    const directory = await scratch(t);
+    const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'runner-startup-budget-'));
+    t.after(() => fs.rm(evidence, { recursive: true, force: true }));
+    const file = path.join(directory, 'startup-budget.test.mjs');
+    const relative = path.relative(repositoryRoot, file).split(path.sep).join('/');
+    const marker = path.join(directory, 'unexpected-execution');
+    const allocation = process.env.SDLC_TEST_BUDGET ? await readTestBudget() : { capacity: 1 };
+    const root = 'owned startup assertion must not execute';
+    const source = `export const validationDeclarations = ${JSON.stringify({
+      schemaVersion: 1, groups: [{ root, minimumSlots: Math.min(32, allocation.capacity + 1) }],
+    })};
+import test from 'node:test';
+import {writeFile} from 'node:fs/promises';
+test(${JSON.stringify(root)},()=>writeFile(${JSON.stringify(marker)},'unexpected'));
+`;
+    await fs.writeFile(file, source);
+    const reportPath = path.join(evidence, 'runner.json');
+    const environment = { ...process.env, SDLC_TEST_WORKERS: '1', NO_COLOR: '1',
+      SDLC_TEST_REPORT_FILE: reportPath };
+    delete environment.FORCE_COLOR;
+    const result = await executeValidationCommand({
+      name: 'startup-budget', command: process.execPath,
+      args: ['scripts/test-runner.mjs', 'targeted', '--workers', '1', file],
+      cwd: repositoryRoot, outputDir: evidence, signal: t.signal, environment,
+    });
+    assert.equal(result.complete, true, result.diagnostic);
+    assert.equal(result.exitCode, 1, 'An ordinarily exited startup failure must remain non-passing');
+    assert.equal(result.signal, null);
+    assert.deepEqual(result.causes, []);
+    assert.equal(result.cleanup.requested, false);
+    assert.equal(result.cleanup.outcome, 'not-requested');
+    const prefix = '[test-worker:error] ';
+    const diagnostics = result.stderr.split(/\r?\n/u).filter(line => line.startsWith(prefix))
+      .map(line => JSON.parse(line.slice(prefix.length)));
+    assert.equal(diagnostics.length, 1);
+    assert.equal(diagnostics[0].code, 'BUDGET');
+    assert.match(diagnostics[0].message, /minimum slots|bounded host concurrency/u);
+    assert.equal(summary(result.stdout, 'end').exitCode, 1);
+    await assert.rejects(fs.stat(marker), { code: 'ENOENT' });
+    let report;
+    try { report = JSON.parse(await fs.readFile(reportPath, 'utf8')); }
+    catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      report = { kind: 'missing-partial-report', complete: false, executions: [] };
+    }
+    if (allocation.capacity < 32) {
+      assert.equal(report.kind, 'missing-partial-report', 'Host preflight fails before claiming a report');
+      await assert.rejects(fs.stat(`${reportPath}.journal.ndjson`), { code: 'ENOENT' });
+    } else {
+      assert.equal(report.complete, false);
+      assert.equal(report.summary, null);
+      assert.deepEqual(report.executions, []);
+      assert.ok(report.groupExecution.groups.every(group => group.status === 'NotRun'));
+    }
+    const declared = discoverDeclarations(source, relative);
+    const reconciliation = reconcileNodeExecution({
+      files: [{ file: relative }], cases: declared.cases, unresolved: declared.unresolved,
+    }, report, {
+      platform: `${{ win32: 'windows', darwin: 'macos', linux: 'linux' }[process.platform]}-${process.arch}`,
+    });
+    assert.equal(reconciliation.status, 'NotRun');
+    assert.deepEqual(reconciliation.counts, { required: 1, passed: 0, failed: 0, notRun: 1 });
+    assert.ok(reconciliation.blockers.some(row => row.code === 'INCOMPLETE_PRODUCER'));
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(evidence, 'startup-budget.json'), 'utf8')), result);
+    const journal = (await fs.readFile(path.join(evidence, 'startup-budget.journal.ndjson'), 'utf8'))
+      .trim().split('\n').map(JSON.parse);
+    assert.ok(!journal.some(row =>
+      ['output-rejected', 'command-stop-request', 'cleanup-uncertain'].includes(row.kind)));
+  });
 
 test('T-PRD018 coded failures preserve safe command output and do not interrupt sibling roots', async t => {
   const directory = await scratch(t);
