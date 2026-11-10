@@ -1315,20 +1315,25 @@ guard keeps the original permission error; no wait or retry allowance grows.
 The unsafe-diagnostic worker-exit fixture reserves four existing aggregate
 worker slots before its timed callback: the orchestrator, nested runner, held
 worker and Windows process observer need admission together. This does not
-increase a host budget or extend the thirty-second case deadline. Keep the real held process handle, creation-time
-bound, release barrier and independently observed exit.
+increase a host budget. Account for separately bounded observer preparation in
+caller watchdogs without extending target observation or termination deadlines.
+Keep the real held process handle, creation-time bound, release barrier and
+independently observed exit.
 Use the same held .NET process object directly and write closed scalar JSON
 records to the observer's stdout and owned exit file. Validate the image's
 existing ASCII identifier contract before encoding it. Avoid `Get-Process` and
 `ConvertTo-Json` module autoload in each observer. The test-only observer bounds
-startup to five seconds; its exact first startup marker starts one fresh
+startup to thirty seconds; its exact first startup marker starts one fresh
 five-second identity window, so startup cannot consume the identity allowance.
 Missing or duplicate markers, invalid records and either expired phase fail
 without deadline renewal. Failed capture releases retained ownership where
 applicable, stops only its exact spawned observer when needed and requires
 bounded affirmative close; unconfirmed cleanup remains a failure. Deterministic
 clock/child-event regression and real Windows negative-creation and retained-
-handle probes cover this fixture contract. Production Windows five-second and
+handle probes cover this fixture contract, including controlled startup after
+the former five-second boundary and separate expiry of each phase. A finite
+cold-start allowance is not a diagnosis of host scheduling or a retry policy.
+Production Windows five-second and
 POSIX one-second settlement deadlines remain unchanged. Keep
 creation and exit ticks, immediate identity output, the fifteen-second exit
 wait, guarded termination and disposal unchanged.
@@ -2394,12 +2399,13 @@ This changes diagnostics only, not prerequisite selection, prefix ownership,
 cleanup authority, execution outcome or the unproven cause of a hosted failure.
 
 Windows owned-process capture emits a closed startup marker before opening the
-native process identity. Its unchanged five-second first-record deadline retains
-only the observed marker phase, exit/code/allowlisted signal and capped stdout
-and stderr byte counts. Never include raw output, error-file contents or spawn
-arguments. An exit event records state but does not discard an identity still
-draining from stdout. These facts distinguish observations, not the unproven
-cause of an earlier hosted timeout.
+native process identity. Its thirty-second startup deadline is separate from
+the unchanged five-second identity deadline. Diagnostics retain only the observed
+marker phase, exit/code/allowlisted signal and capped stdout and stderr byte
+counts. Never include raw output, error-file contents or spawn arguments. An exit
+event records state but does not discard an identity still draining from stdout.
+These facts distinguish observations, not the unproven cause of an earlier
+hosted timeout.
 
 The Windows sibling-producer test captures and releases whichever exclusive
 holder becomes ready first, then starts the remaining contender's unchanged

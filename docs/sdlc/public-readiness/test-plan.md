@@ -2284,15 +2284,25 @@ permission failure. The focused regression remains PR-only.
 Before the unsafe-failure diagnostic callback starts, require four slots from
 the existing aggregate budget for its orchestration and held-worker observer
 processes. Exercise the actual Windows identity-ready/release/exit protocol
-without increasing the five-second capture or thirty-second case deadline,
-borrowing an identity or replacing the OS observation.
+with cold-shell preparation bounded separately from the unchanged five-second
+identity capture. Account for preparation in caller watchdogs without extending
+the target observation or termination deadlines, borrowing an identity or
+replacing the OS observation.
 The observer uses the same held .NET process handle directly, without loading
 PowerShell command modules for process lookup or JSON formatting. Verify real
 identity and exit records, the ASCII image contract and exact creation/exit
 ticks through both the unsafe-diagnostic and dynamic sibling-producer cases.
 The existing unexpected-creation negative must still reject without terminating
-the unrelated process. Keep observer startup inside the unchanged five-second
-capture budget and retain the fifteen-second exit and thirty-second case bounds.
+the unrelated process. Allow at most thirty seconds for the first exact startup
+marker, then one fresh five-second identity window; neither duplicate markers
+nor later output renew either deadline. Retain the fifteen-second exit bound
+and affirmative owned-observer cleanup. Extend the existing PR-only diagnostic
+root with controlled startup after the former five-second boundary, startup
+expiry and identity expiry without sleeps or retries. Verify the regression
+fails on the original source and passes on the correction, and execute both
+real Windows retained-handle branches. Keep the critical budget unchanged.
+The failed main execution remains failed; an unknown host startup cause is not
+established by a longer finite preparation allowance or a later passing run.
 The measured GitHub process-partition preservation test must keep the original
 143-assertion count, root vector and callback fingerprint unchanged. Validate
 the one new byte-snapshot regression by its exact ID, file, name and empty parent

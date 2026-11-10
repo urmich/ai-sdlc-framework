@@ -136,10 +136,10 @@ export async function windowsProcessIdentity(pid, exitPath, { createdBeforeMs, r
       if (error) reject(error);
       else resolve(value);
     };
-    const arm = () => {
-      timer = setTimeout(() => finish(captureFailure('Owned process identity capture did not complete')), 5000);
+    const arm = milliseconds => {
+      timer = setTimeout(() => finish(captureFailure('Owned process identity capture did not complete')), milliseconds);
     };
-    arm();
+    arm(30000);
     child.once('error', () => finish(captureFailure('Owned process observer spawn failed')));
     child.once('close', () => finish(captureFailure('process-identity-unavailable')));
     child.stdout.on('data', bytes => {
@@ -156,7 +156,7 @@ export async function windowsProcessIdentity(pid, exitPath, { createdBeforeMs, r
         if (!startup && line === startupMarker) {
           startup = true;
           clearTimeout(timer);
-          arm();
+          arm(5000);
           continue;
         }
         if (!startup) {
