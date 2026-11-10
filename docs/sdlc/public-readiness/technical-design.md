@@ -3134,6 +3134,16 @@ Public-download consumers are exclusively R-POST. Acceptance observers/reports
 T-PRD055/056/074 assess completed flows afterwards; their own results are never
 inputs to the flow they observe.
 
+The Windows supported-previous lifecycle adapter preserves the caller's stdin
+and explicit `windowsVerbatimArguments` through the real command capture.
+Installed hooks receive their complete JSON payload followed by EOF, and cmd
+keeps the already-quoted launcher and space-containing arguments unchanged.
+Retain only the input byte count and SHA-256, never private input contents.
+Await input-stream settlement; a rejected write makes the command incomplete
+and uses the existing owned cancellation and survivor-verification contract.
+No new readiness clock, timeout increase or historical hook-probe exemption is
+introduced.
+
 No package rebuild occurs between channels. If a comparison build differs,
 stop rather than replace the frozen bytes. Keep action/callee permissions
 explicit and pin external actions to reviewed full commits. Relative reviewed

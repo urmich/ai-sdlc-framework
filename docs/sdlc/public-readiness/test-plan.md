@@ -3295,6 +3295,20 @@ authority. Preflight rejects missing prerequisites before irreversible calls.
    A same-version reinstall/formula revision or missing previous input blocks
    this obligation. Public mode later executes the exact saved published
    previous/current formulas and URLs, without regeneration.
+   The PR-only T-PRD018 roots
+   `validation commands deliver exact stdin without retaining its private contents`
+   and `Windows validation commands preserve explicitly quoted cmd arguments`
+   exercise the actual supported-previous command adapter with owned Node/cmd
+   fixtures. The first runs on all four native platforms and reserves three
+   aggregate slots; it covers string/Buffer/empty input, EOF, invalid input and
+   private input identities without content capture. A restored process-local
+   failed-stream fixture covers write-error settlement without an OS child.
+   The Windows-only root reserves four slots and verifies real cmd argument
+   boundaries through a space-containing path. Their causal steps are sequential
+   inside independent process-isolated roots with no shared resource, installer,
+   package manager or external access. They do not enter the critical profile
+   or supply genuine R-PRE/public-consumer credit; the strict eight-hook probe
+   remains required for both authentic previous and current installations.
 4. Reconcile the R-PRE required cases, native platform subcases and tool/image
    identities into retained readiness evidence. The prerequisite graph is
    source checks -> frozen candidate -> native candidate checks -> sealed
