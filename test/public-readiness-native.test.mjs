@@ -4055,7 +4055,7 @@ async function qualifiedIntelSourceFiles() {
     if (file === 'test/public-readiness-ci.test.mjs') contents = historicalReadinessCiSource(contents);
     if (file === 'test/release-ci.test.mjs') contents = historicalReleaseCiSource(contents);
     if (file === 'test/test-runner.test.mjs') contents = historicalTestRunnerSource(contents);
-    if (file === 'test/public-readiness-runner.test.mjs') contents = historicalReadinessRunnerSource(preAdmissionReadinessRunnerSource(contents));
+    if (file === 'test/public-readiness-runner.test.mjs') contents = historicalReadinessRunnerSource(preAdmissionReadinessRunnerSource(preCaptureFailureReadinessRunnerSource(contents)));
     if (file === 'test/github-transport.unit.test.mjs') {
       const recovery = contents.indexOf('    "names": [\n      "T-PRD037 classified transient REST');
       const separator = '  }, {\n';
@@ -4144,7 +4144,7 @@ async function qualifiedIntelSourceFixture(protocol) {
     if (file === 'test/public-readiness-ci.test.mjs') contents = historicalReadinessCiSource(contents);
     if (file === 'test/release-ci.test.mjs') contents = historicalReleaseCiSource(contents);
     if (file === 'test/test-runner.test.mjs') contents = historicalTestRunnerSource(contents);
-    if (file === 'test/public-readiness-runner.test.mjs') contents = historicalReadinessRunnerSource(preAdmissionReadinessRunnerSource(contents));
+    if (file === 'test/public-readiness-runner.test.mjs') contents = historicalReadinessRunnerSource(preAdmissionReadinessRunnerSource(preCaptureFailureReadinessRunnerSource(contents)));
     if (file === 'test/github-transport.unit.test.mjs') {
       const recovery = contents.indexOf('    "names": [\n      "T-PRD037 classified transient REST');
       const separator = '  }, {\n';
@@ -4187,7 +4187,7 @@ async function qualifiedIntelSourceFixture(protocol) {
     if (file === 'test/public-readiness-native.test.mjs') {
       contents = contents.replaceAll("    if (file === 'test/monitors.test.mjs') contents = historicalMonitorSource(contents);\n", '')
         .replaceAll("    if (file === 'test/test-runner.test.mjs') contents = historicalTestRunnerSource(contents);\n", '')
-        .replaceAll("    if (file === 'test/public-readiness-runner.test.mjs') contents = historicalReadinessRunnerSource(preAdmissionReadinessRunnerSource(contents));\n", '')
+        .replaceAll("    if (file === 'test/public-readiness-runner.test.mjs') contents = historicalReadinessRunnerSource(preAdmissionReadinessRunnerSource(preCaptureFailureReadinessRunnerSource(contents)));\n", '')
         .replaceAll("    if (file === 'test/macos-runner-admission.unit.test.mjs')\n" +
           "      contents = contents.replace('    pending.options.signal = controller.signal;\\n',\n" +
           "        '    pending.options.signal = controller.signal;\\n    pending.options.now = () => performance.now();\\n');\n", '')
@@ -4237,6 +4237,19 @@ async function qualifiedIntelSourceFixture(protocol) {
       'Authentic v12 transfers every descendant of the original six complete components');
   }
   return { inventory, plan, assignment, protocol, revision: snapshot.revision };
+}
+
+function preCaptureFailureReadinessRunnerSource(contents) {
+  // Restore authentic 0b3d Git blob 1ec2a0da7ff42ba2ac898d2aaa1a79077205be65 before unchanged admission replay.
+  assert.equal(createHash('sha256').update(contents).digest('hex'),
+    'df04cf1b55c7263f79329fbb74ade9dbdb802a745ab36e4c798c627bba18e8e4', 'Replay requires the exact capture-failure fixture source');
+  const lines = contents.split(/(?<=\n)/u);
+  const splices = [[0,2194],[2201,27],"    async stat(file) { if (!contents.has(file)) throw missing(); return {}; },\n",[2235,15],[2251,2],[2256,43],"    assert, path, entered, fs: fakeFs, delay: pause, Date: { now: () => clock }, AbortController,\n",[2308,14],"      await pause(target.name === 'sibling ready root' ? 12000 : 10);\n",[2324,9],[2348,8],"    f: { async invoke(args, environment) {\n",[2357,3],"      if (mode === 'initial-producer-failure' && file === files[0]) {\n        throw new Error('Controlled first producer launch failed');\n      }\n      const names = [];\n      runInContext(sources.get(file), createContext({ test: name => names.push(name) }));\n      const groups = await Promise.all(names.map(name => new Promise(resolve => {\n        queued.push({ file, name, resolve });\n        schedulePump();\n      })));\n      await pause(1);\n      contents.set(environment.SDLC_TEST_REPORT_FILE,\n        JSON.stringify({ resources: { budget: { id: 'controlled', peakActiveWorkers: 2 } },\n          groupExecution: { groups } }));\n      return { exitCode: groups.every(group => group.status === 'Passed') ? 0 : 1,\n        stdout: groups.map(group => group.message ?? '').join('\\n'), stderr: '', completedAtMs: clock };\n",[2393,2],"  context.captureOwnedReady = runInContext(`(${captureOwnedReady.toString()})`, context);\n",[2410,17],[2429,4],"  return { ...result, elapsedMs: clock - 1000, launches, admissions, ready,\n",[2435,58],[2494,19],[2514,7],"        if (result.exitCode !== 0) readiness.abort(new Error(result.stdout + result.stderr));\n",[2526,6],[2533,68],"  for (const mode of ['sibling-first-waiting', 'sibling-first-short', 'slow-peer', 'absent-peer',\n",[2604,3],"    if (mode.startsWith('sibling-first') || mode === 'slow-peer') {\n",[2632,23],[2662,722]];
+  const restored = splices.map(part => typeof part === 'string' ? part :
+    lines.slice(part[0], part[0] + part[1]).join('')).join('');
+  assert.equal(createHash('sha256').update(restored).digest('hex'),
+    '9b3afd671e809b4d05df2b25628e53f23f4c4a3096b457e5b46171c7089ec0d1', 'Replay must restore the authentic adopted 0b3d fixture source');
+  return restored;
 }
 
 function preAdmissionReadinessRunnerSource(contents) {

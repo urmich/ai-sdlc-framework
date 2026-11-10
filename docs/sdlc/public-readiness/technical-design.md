@@ -2422,6 +2422,14 @@ launch can otherwise admit sibling-plus-waiting or sibling-plus-short and preven
 the initial barrier from completing. Initial producer/capture failure resolves
 the launch gate as failure, releases/settles started work and never launches the
 sibling. Preserve the original causal failure without inventing a producer result.
+Producer failure must fail the admission gate directly, not merely abort ready
+polling: valid identity records can complete from buffers after their producer
+has failed. Recheck cancellation after the initial capture and after the
+consumer's gate await, with no further await before launching the sibling.
+Controlled failures cover pending buffered capture and the gate-open/consume
+microtask interval using actual worker failures and original identity ownership.
+Neither path may admit the sibling or execute its marker; preserve the first
+failure and affirmatively settle all captures, retained observers and started work.
 Capture the waiting and short workers together before releasing only the short
 worker. Its completion makes the queued sibling eligible; begin that sibling's
 unchanged ready allowance then and capture it before triggering either capacity
@@ -2443,7 +2451,7 @@ Keep the
 regressions in the existing PR-only root and preserve resource/admission and
 critical budgets. A 300-second setup-inclusive outer watchdog accounts for four
 bounded preparation batches plus unchanged readiness/action/exit and cleanup.
-Restore authentic E runner-test bytes before unchanged E-to-D and historical replay
+Restore authentic 0b3d runner-test bytes before unchanged E, E-to-D and historical replay
 splices; no capsules, inventories or source guards change and CI needs no Git.
 This corrects controlled clock accounting, not the unproven cause of a historical
 hosted failure or a guarantee about arbitrary host latency.

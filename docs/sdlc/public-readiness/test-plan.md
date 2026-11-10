@@ -2325,14 +2325,22 @@ Those orderings must reproduce the authentic E admission-barrier failure;
 the corrected caller must prove both initial admissions and ready publications
 precede sibling launch, then actual concurrent reuse of the short worker's slot.
 Initial producer/observer failures must settle without launching the sibling.
+Also fail the first producer after both readiness records were consumed while
+valid pinned identity records remain buffered. Exercise failure delivery both
+during pending capture and between successful gate opening and its awaiting
+consumer. Preserve the original failure cause: no sibling process may be
+admitted or execute its marker action. Producer failure must directly fail the
+gate; check cancellation after capture and again after awaiting admission,
+without an intervening await before launch. Settle all buffered captures,
+retained observers and already started work on both paths.
 Never manufacture readiness before admission or serialize the complete experiment.
 Keep these cases inside the existing root, without new
 descendants, critical growth, retries or resource/admission changes. Its finite
 300-second outer watchdog includes two dynamic preparation waves and the two
 sequential exclusive captures (four thirty-plus-five-second batches), readiness,
 unchanged action/exit budgets and cleanup; it is not a timing-performance goal.
-Changes to adopted runner-test text must restore authenticated E source bytes
-before the unchanged E-to-D restoration and historical splices/capsules, preserving existing identities
+Changes to adopted runner-test text must restore authenticated 0b3d source bytes
+before the unchanged E and E-to-D restorations and historical splices/capsules, preserving existing identities
 and inventories without adding runtime Git access.
 The measured GitHub process-partition preservation test must keep the original
 143-assertion count, root vector and callback fingerprint unchanged. Validate
