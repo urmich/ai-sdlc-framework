@@ -423,12 +423,21 @@ This observation does not establish the required conversation or status-check
 enforcement, nor the workflow credential's access. The independent observer
 repair is read-only source compatibility, not F04 provider administration;
 remediating genuinely missing enforcement requires separate scoped authority.
-The trusted observer's imported native planner and workflow must also adopt
-the exact Windows body capacities before accepting a matching producer.
-Preserve adopted-revision checks for every non-test helper; a Metadata-read
-fallback alone does not align producer implementation. An optional
-`READINESS_PRODUCER_REVISION` pin remains separately authorized provider
-administration, not a source correction or evidence of enforcement.
+The trusted observer's imported native planner and workflow must understand
+the exact selected producer protocol and Windows body capacities. Under the
+2026-11-10 owner direction, normal reviewed PRs must not need a repository-wide
+`READINESS_PRODUCER_REVISION` update. Reuse unchanged protected-main producer
+definitions; adopt changed producer, non-test-helper, assertion and Go definitions
+through current-head maintainer approval recorded by GitHub. An owner-authored
+proposal needs no impossible self-approval. Unreviewed external changes must not
+self-adopt. Keep the privileged observer on protected-main code, read candidate
+definitions only as immutable data, and require complete exact-source native
+execution, archive integrity and provenance independently of approval.
+Authenticated selected GitHub job-log and immutable artifact download responses
+must authorize their own finite credential-free HTTPS storage hop, without
+recurring per-account repository-variable updates. Do not treat log storage as
+an artifact digest proof, follow arbitrary caller-supplied origins, forward
+credentials, disable TLS, or remove immutable ZIP digest and extraction checks.
 
 ### FR-206: Provide one automated, authorized release flow
 

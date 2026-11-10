@@ -981,12 +981,12 @@ async function observedVerdict(operation) {
 }
 
 export function createPrReadinessHost({
-  api, defaultRevision, adoptedRevision = defaultRevision, writerId,
+  api, defaultRevision, writerId,
   now = Date.now, detailsUrl,
 }) {
   requireReadinessGitHubClient(api);
   requireThat(api.repository === readinessRepository && api.writerId === writerId &&
-    revision.test(defaultRevision) && revision.test(adoptedRevision),
+    revision.test(defaultRevision),
   'SCOPE', 'Only this repository adopts these required PR guardrails');
   requireThat(/^https:\/\/github\.com\/urmich\/ai-sdlc-framework\/actions\/runs\/[1-9]\d*\/attempts\/[1-9]\d*$/u.test(detailsUrl),
     'INPUT', 'Status details must link to the actual observer run/attempt in this repository');
@@ -1016,34 +1016,34 @@ export function createPrReadinessHost({
     return writerPaths.every(file => workflows.some(workflow => workflow.file === file)) &&
       inspectWorkflowTrust(workflows).complete;
   }
-  async function producerAdopted(source) {
-    const adopted = await api.tree(adoptedRevision);
-    const paths = new Set([...reporterPaths, ...[...adopted.paths.keys()].filter(file =>
-      /^\.github\/actions\//u.test(file) ||
-      /^test\/.*\.(?:mjs|js|cjs)$/u.test(file) && !/\.test\.(?:mjs|js|cjs)$/u.test(file))]);
+  async function producerAdopted(source, approval) {
+    if (approval.status === 'Passed') return true;
+    const adopted = await selectedSource(defaultRevision);
+    const paths = new Set([...reporterPaths, ...[...adopted.tree.paths.keys(), ...source.tree.paths.keys()]
+      .filter(file => /^\.github\/actions\//u.test(file) ||
+        /^test\/.*\.(?:mjs|js|cjs)$/u.test(file) && !/\.test\.(?:mjs|js|cjs)$/u.test(file))]);
     if (source.bootstrapProtocol !== null) paths.add('scripts/native-bootstrap-capability.mjs');
     if (admissionPolicies.includes(source.resourcePolicy)) paths.add('scripts/macos-runner-admission.mjs');
-    return [...paths].every(file => adopted.paths.get(file)?.sha &&
-      source.tree.paths.get(file)?.sha === adopted.paths.get(file).sha);
+    return [...paths].every(file => adopted.tree.paths.get(file)?.sha &&
+      source.tree.paths.get(file)?.sha === adopted.tree.paths.get(file).sha) &&
+      compareValidationInventory(source.inventory, adopted.inventory).complete &&
+      digest(source.goSources) === digest(adopted.goSources);
   }
-  async function nativeVerdict(pr, source, { workflowId, runs }) {
+  async function nativeVerdict(pr, source, { workflowId, runs }, approval) {
     return native.withNativeDefinitionPass({
       inventory: source.inventory, plan: source.plan, goSources: source.goSources,
       frameworkShards: source.frameworkShards,
       shardProtocol: source.shardProtocol ?? native.nativeFrameworkShardProtocol,
     }, owned => nativeVerdictForPass(pr, {
       ...source, inventory: owned.inventory, plan: owned.plan, goSources: owned.goSources,
-    }, { workflowId, runs }));
+    }, { workflowId, runs }, approval));
   }
-  async function nativeVerdictForPass(pr, source, { workflowId, runs }) {
+  async function nativeVerdictForPass(pr, source, { workflowId, runs }, approval) {
     const frameworkShards = source.frameworkShards;
     const shardProtocol = source.shardProtocol ?? native.nativeFrameworkShardProtocol;
     const expectedParts = frameworkShards ? native.nativePrPartsForProtocol(shardProtocol) : native.nativeLegacyPrParts;
-    if (!(await producerAdopted(source))) return failedVerdict('Producer definitions have not been maintainer-adopted');
-    const adopted = await selectedSource(adoptedRevision);
-    if (!compareValidationInventory(source.inventory, adopted.inventory).complete ||
-        digest(source.goSources) !== digest(adopted.goSources)) {
-      return failedVerdict('Assertion definitions or required bindings have not been maintainer-adopted');
+    if (!(await producerAdopted(source, approval))) {
+      return failedVerdict('Changed producer definitions require current GitHub maintainer approval');
     }
     const candidates = runs.filter(run => run.event === 'pull_request' &&
       run.head_sha === pr.head.sha && run.head_repository?.id === pr.head.repo.id)
@@ -1338,7 +1338,7 @@ export function createPrReadinessHost({
           .map(test => `Required component ${test.testId}: ${test.status}`)],
         inputDigest: digest({ run: run.id, attempt: run.run_attempt,
           minimumNode,
-          source: pr.merge_commit_sha, artifacts: artifacts.map(artifact =>
+          source: pr.merge_commit_sha, producerApproval: approval.inputDigest, artifacts: artifacts.map(artifact =>
             ({ id: artifact.id, digest: artifact.digest, expired: artifact.expired })),
           cases: [...result.requiredCases, ...definition.requiredCaseIds],
           componentDefinition: definition.adapterDefinitionDigest, laneTimings,
@@ -1381,7 +1381,7 @@ export function createPrReadinessHost({
         verdicts['framework/coverage'] = await observedVerdict(async () => {
           const source = await selectedSource(pr.head.sha);
           const coverage = inspectCoverage({ ...source.coverage, body: pr.body ?? '' });
-          const { sourceRevision: baselineRevision, ...baselineInput } = (await selectedSource(adoptedRevision)).coverage;
+          const { sourceRevision: baselineRevision, ...baselineInput } = (await selectedSource(defaultRevision)).coverage;
           const { sourceRevision: currentRevision, ...currentInput } = source.coverage;
           const baseline = compileCoverage(baselineInput);
           const current = compileCoverage(currentInput);
@@ -1430,7 +1430,8 @@ export function createPrReadinessHost({
               merge.parents.some(parent => parent.sha === pr.head.sha) &&
               merge.parents.some(parent => parent.sha === pr.base.sha),
             'EVIDENCE', 'The current provider test-merge does not bind this head/base pair');
-            return nativeVerdict(pr, await selectedSource(base.mergeSha), await runs());
+            return nativeVerdict(pr, await selectedSource(base.mergeSha), await runs(),
+              verdicts['framework/approval']);
           }
           return failedVerdict('Current complete test-merge/source identity is unavailable');
         });
@@ -1637,7 +1638,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
       archiveOrigins: JSON.parse(env.READINESS_ARTIFACT_ORIGINS || '[]'),
     });
     const { host, policy } = createPrReadinessHost({
-      api: client, defaultRevision, adoptedRevision: env.READINESS_PRODUCER_REVISION || defaultRevision,
+      api: client, defaultRevision,
       writerId: Number(env.READINESS_STATUS_CREATOR_ID),
       detailsUrl: `https://github.com/${readinessRepository}/actions/runs/${env.GITHUB_RUN_ID}/attempts/${env.GITHUB_RUN_ATTEMPT}`,
     });

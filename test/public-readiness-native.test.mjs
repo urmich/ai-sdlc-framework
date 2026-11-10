@@ -4055,6 +4055,7 @@ async function qualifiedIntelSourceFiles() {
     if (file === 'test/public-readiness-ci.test.mjs') contents = historicalReadinessCiSource(contents);
     if (file === 'test/release-ci.test.mjs') contents = historicalReleaseCiSource(contents);
     if (file === 'test/test-runner.test.mjs') contents = historicalTestRunnerSource(contents);
+    if (file === 'test/public-readiness-runner.test.mjs') contents = historicalReadinessRunnerSource(preAdmissionReadinessRunnerSource(preCaptureFailureReadinessRunnerSource(contents)));
     if (file === 'test/github-transport.unit.test.mjs') {
       const recovery = contents.indexOf('    "names": [\n      "T-PRD037 classified transient REST');
       const separator = '  }, {\n';
@@ -4080,6 +4081,7 @@ async function qualifiedIntelSourceFiles() {
         'connection: connection(), fetch:');
     }
     if (file === 'test/public-readiness-observer.test.mjs') {
+      contents = preGitHubApprovalReadinessObserverSource(contents);
       const diagnostic = contents.indexOf('    "names": ["T-PRD037 observer failure payload');
       const separator = '  }, {\n';
       const diagnosticEnd = contents.indexOf(separator, diagnostic);
@@ -4143,6 +4145,7 @@ async function qualifiedIntelSourceFixture(protocol) {
     if (file === 'test/public-readiness-ci.test.mjs') contents = historicalReadinessCiSource(contents);
     if (file === 'test/release-ci.test.mjs') contents = historicalReleaseCiSource(contents);
     if (file === 'test/test-runner.test.mjs') contents = historicalTestRunnerSource(contents);
+    if (file === 'test/public-readiness-runner.test.mjs') contents = historicalReadinessRunnerSource(preAdmissionReadinessRunnerSource(preCaptureFailureReadinessRunnerSource(contents)));
     if (file === 'test/github-transport.unit.test.mjs') {
       const recovery = contents.indexOf('    "names": [\n      "T-PRD037 classified transient REST');
       const separator = '  }, {\n';
@@ -4168,6 +4171,7 @@ async function qualifiedIntelSourceFixture(protocol) {
         'connection: connection(), fetch:');
     }
     if (file === 'test/public-readiness-observer.test.mjs') {
+      contents = preGitHubApprovalReadinessObserverSource(contents);
       const diagnostic = contents.indexOf('    "names": ["T-PRD037 observer failure payload');
       const separator = '  }, {\n';
       const diagnosticEnd = contents.indexOf(separator, diagnostic);
@@ -4184,7 +4188,9 @@ async function qualifiedIntelSourceFixture(protocol) {
     }
     if (file === 'test/public-readiness-native.test.mjs') {
       contents = contents.replaceAll("    if (file === 'test/monitors.test.mjs') contents = historicalMonitorSource(contents);\n", '')
+        .replaceAll("      contents = preGitHubApprovalReadinessObserverSource(contents);\n", '')
         .replaceAll("    if (file === 'test/test-runner.test.mjs') contents = historicalTestRunnerSource(contents);\n", '')
+        .replaceAll("    if (file === 'test/public-readiness-runner.test.mjs') contents = historicalReadinessRunnerSource(preAdmissionReadinessRunnerSource(preCaptureFailureReadinessRunnerSource(contents)));\n", '')
         .replaceAll("    if (file === 'test/macos-runner-admission.unit.test.mjs')\n" +
           "      contents = contents.replace('    pending.options.signal = controller.signal;\\n',\n" +
           "        '    pending.options.signal = controller.signal;\\n    pending.options.now = () => performance.now();\\n');\n", '')
@@ -4236,7 +4242,85 @@ async function qualifiedIntelSourceFixture(protocol) {
   return { inventory, plan, assignment, protocol, revision: snapshot.revision };
 }
 
+function preCaptureFailureReadinessRunnerSource(contents) {
+  // Restore authentic 0b3d Git blob 1ec2a0da7ff42ba2ac898d2aaa1a79077205be65 before unchanged admission replay.
+  assert.equal(createHash('sha256').update(contents).digest('hex'),
+    'df04cf1b55c7263f79329fbb74ade9dbdb802a745ab36e4c798c627bba18e8e4', 'Replay requires the exact capture-failure fixture source');
+  const lines = contents.split(/(?<=\n)/u);
+  const splices = [[0,2194],[2201,27],"    async stat(file) { if (!contents.has(file)) throw missing(); return {}; },\n",[2235,15],[2251,2],[2256,43],"    assert, path, entered, fs: fakeFs, delay: pause, Date: { now: () => clock }, AbortController,\n",[2308,14],"      await pause(target.name === 'sibling ready root' ? 12000 : 10);\n",[2324,9],[2348,8],"    f: { async invoke(args, environment) {\n",[2357,3],"      if (mode === 'initial-producer-failure' && file === files[0]) {\n        throw new Error('Controlled first producer launch failed');\n      }\n      const names = [];\n      runInContext(sources.get(file), createContext({ test: name => names.push(name) }));\n      const groups = await Promise.all(names.map(name => new Promise(resolve => {\n        queued.push({ file, name, resolve });\n        schedulePump();\n      })));\n      await pause(1);\n      contents.set(environment.SDLC_TEST_REPORT_FILE,\n        JSON.stringify({ resources: { budget: { id: 'controlled', peakActiveWorkers: 2 } },\n          groupExecution: { groups } }));\n      return { exitCode: groups.every(group => group.status === 'Passed') ? 0 : 1,\n        stdout: groups.map(group => group.message ?? '').join('\\n'), stderr: '', completedAtMs: clock };\n",[2393,2],"  context.captureOwnedReady = runInContext(`(${captureOwnedReady.toString()})`, context);\n",[2410,17],[2429,4],"  return { ...result, elapsedMs: clock - 1000, launches, admissions, ready,\n",[2435,58],[2494,19],[2514,7],"        if (result.exitCode !== 0) readiness.abort(new Error(result.stdout + result.stderr));\n",[2526,6],[2533,68],"  for (const mode of ['sibling-first-waiting', 'sibling-first-short', 'slow-peer', 'absent-peer',\n",[2604,3],"    if (mode.startsWith('sibling-first') || mode === 'slow-peer') {\n",[2632,23],[2662,722]];
+  const restored = splices.map(part => typeof part === 'string' ? part :
+    lines.slice(part[0], part[0] + part[1]).join('')).join('');
+  assert.equal(createHash('sha256').update(restored).digest('hex'),
+    '9b3afd671e809b4d05df2b25628e53f23f4c4a3096b457e5b46171c7089ec0d1', 'Replay must restore the authentic adopted 0b3d fixture source');
+  return restored;
+}
+
+function preAdmissionReadinessRunnerSource(contents) {
+  // Restore authentic E Git blob 7e2e3fd847d63f33d1852839327ad6826f16ac22 before unchanged E-to-D replay.
+  assert.equal(createHash('sha256').update(contents).digest('hex'),
+    '9b3afd671e809b4d05df2b25628e53f23f4c4a3096b457e5b46171c7089ec0d1', 'Replay requires the exact initial-admission fixture source');
+  const lines = contents.split(/(?<=\n)/u);
+  const splices = [[0,2191],[2194,4],[2199,26],[2230,17],[2252,2],[2259,1],"      const task = queued.shift();\n",[2260,17],"        pump();\n",[2278,11],[2293,24],[2322,4],"        pump();\n",[2327,31],"  return { ...result, elapsedMs: clock - 1000, triggers, diagnostics };\n",[2360,34],[2397,20],[2418,10],[2429,3],"    const producers = files.map((file, index) =>\n      f.invoke(['targeted', '--workers', '2', file],\n",[2442,6],"      }));\n",[2453,65],"  for (const mode of ['slow-peer', 'absent-peer', 'hung-observer', 'missing-action']) {\n",[2520,2],"    if (mode === 'slow-peer') {\n",[2523,1],"        'Permitted peer preparation must not consume the unchanged sibling action deadline');\n      assert.ok(result.elapsedMs > 20000,\n",[2534,4],"        mode === 'hung-observer' ? /observer phase=startup/u : /could not borrow idle host capacity/u);\n",[2544,724]];
+  const restored = splices.map(part => typeof part === 'string' ? part :
+    lines.slice(part[0], part[0] + part[1]).join('')).join('');
+  assert.equal(createHash('sha256').update(restored).digest('hex'),
+    'aa201c0ba2be45562433a3eaeca5534f04a2d286379ff8be43b7fe61dd05c2e7', 'Replay must restore the authentic adopted E fixture source');
+  return restored;
+}
+
+function historicalReadinessRunnerSource(contents) {
+  // Restore authentic unchanged D/N Git blob e9def1b5f2c78677ed639d5c48331b8e89107804.
+  assert.equal(createHash('sha256').update(contents).digest('hex'),
+    'aa201c0ba2be45562433a3eaeca5534f04a2d286379ff8be43b7fe61dd05c2e7',
+    'Replay requires the exact coordinated sibling fixture source');
+  const lines = contents.split(/(?<=\n)/u);
+  const splices = [
+    [0, 2182],
+    "test('T-PRD011 sibling producers dynamically consume freed aggregate capacity without token multiplication', async t => {\n",
+    [2336, 27],
+    "  const runOwnedPhase = async (files, paths, labels, { exclusive = false } = {}) => {\n",
+    [2364, 4],
+    "    const capture = process.platform !== 'win32' ? Promise.resolve(null) :\n      captureOwnedReady(labels.flat(), entered, async (label, owned) => {\n        assert.ok(Number.isSafeInteger(owned.observedAtMs),\n          'The live worker ready observation must establish its creation bound');\n        const exitPath = path.join(entered, `${label}.exit.json`);\n        const monitor = await windowsProcessIdentity(owned.pid, exitPath, { createdBeforeMs: owned.observedAtMs });\n        monitors.set(label, { ...monitor, exitPath });\n        t.diagnostic(JSON.stringify({ kind: 'owned-worker-identity-captured',\n          owned: monitor.identity, capturedBeforeTrigger: true, label }));\n        await fs.writeFile(path.join(entered, `${label}.release`), 'captured');\n      }, { exclusive, signal: readiness.signal }).then(() => null, async error => {\n",
+    [2396, 6],
+    "        if (exclusive && result.exitCode !== 0) readiness.abort(new Error(result.stdout + result.stderr));\n",
+    [2403, 22],
+    "              const outcome = await monitor.closed;\n",
+    [2426, 29],
+    "      await Promise.all([...monitors.values()].map(monitor => monitor.closed));\n",
+    [2456, 17], [2487, 2],
+    "    [['waiting root', 'short root'], ['sibling ready root']]);\n",
+    [2490, 719],
+  ];
+  const restored = splices.map(part => typeof part === 'string' ? part :
+    lines.slice(part[0], part[0] + part[1]).join('')).join('');
+  assert.equal(createHash('sha256').update(restored).digest('hex'),
+    '7a4f70a7e065d872757e770e20bcfe97310cb8d29b4aa8ec1764693aa6b0f6cd',
+    'Replay must restore the authentic adopted D/N sibling fixture source');
+  return restored;
+}
+
 function historicalTestRunnerSource(contents) {
+  // Restore genuine N blob 9e0e365e2b7b0ec54d88cd507ae1cf373cb26c3e
+  // before the unchanged N-to-K restoration and archival capsule splices.
+  assert.equal(createHash('sha256').update(contents).digest('hex'),
+    '302c27cf6b704bc19d9b4232d715cfb71403bf8ceed5538e2a84ac5d3137ab54',
+    'Replay requires the exact cold-start Windows fixture test source');
+  contents = contents.replace(
+    "  for (const [startupMs, completion] of [\n" +
+    "    [29990, 'identity'], [4990, 'identity'], [4990, 'closed'], [29990, 'closed'],\n  ]) {\n",
+    "  for (const completion of ['identity', 'closed']) {\n")
+    .replace('    f.advance(startupMs);\n', '    f.advance(4990);\n')
+    .replace("        'Cold startup within its preparation window must not consume the actual identity observation window');\n",
+      "        'Startup must not consume the actual identity observation window');\n")
+    .replace('[[0, 30000], [startupMs, 5000]]', '[[0, 5000], [4990, 5000]]')
+    .replace("      f.advance(mode === 'startup-deadline' ? 30000 : 5000);\n", '      f.advance(5000);\n')
+    .replace('    assert.equal(f.windows[0].milliseconds, 30000);\n',
+      '    assert.equal(f.windows[0].milliseconds, 5000);\n')
+    .replace("    else f.advance(mode === 'not-started' ? 30000 : 5000);\n", '    else f.advance(5000);\n')
+    .replace("test('T-PRD018 unsafe failure diagnostics terminate without hanging or manufacturing complete evidence',\n" +
+      '  { timeout: 120000 }, async t => {\n',
+      "test('T-PRD018 unsafe failure diagnostics terminate without hanging or manufacturing complete evidence',\n" +
+      '  { timeout: 30000 }, async t => {\n');
   // Restore genuine K blob 3e285125ebbad226d75fe0228f0ef9c946ba40df before
   // the unchanged capsules' splices; current phase/closure regressions remain current-only.
   assert.equal(createHash('sha256').update(contents).digest('hex'),
@@ -4346,7 +4430,53 @@ function historicalReleaseCiSource(contents) {
   return restored;
 }
 
+function preGitHubApprovalReadinessObserverSource(contents) {
+  assert.equal(createHash('sha256').update(contents).digest('hex'),
+    '491c77bba5b53d0f3b882765189a1d4534a848332c808c3b0c038ffe3b25ced3');
+  const lines = contents.split(/(?<=\n)/u);
+  const parts = [
+    [0, 14], [25, 489], [515, 2],
+    "    assert.ok(rejected.blockers.includes('Producer definitions have not been maintainer-adopted'));\n",
+    [518, 495], [1017, 2],
+    "    assert.ok(result.blockers.some(message => message.includes('Producer definitions have not been maintainer-adopted')));\n",
+    [1020, 8], [1029, 2],
+    "  assert.ok(result.blockers.some(message => message.includes('Producer definitions have not been maintainer-adopted')));\n",
+    [1032, 6], [1039, 2],
+    "  assert.ok(result.blockers.some(message => message.includes('Assertion definitions or required bindings')));\n",
+    [1042, 540],
+  ];
+  const restored = parts.map(part => typeof part === 'string' ? part :
+    lines.slice(part[0], part[0] + part[1]).join('')).join('');
+  assert.equal(createHash('sha256').update(restored).digest('hex'),
+    '93e3fa856d2de4d6d1def65e927bafa4334583274e83b92adb41729b62e7d0be',
+    'Preserve authentic f594 observer bytes before unchanged historical replay');
+  return restored;
+}
+
+function preGitHubNativeTrustReadinessCiSource(contents) {
+  assert.equal(createHash('sha256').update(contents).digest('hex'),
+    '8324a5c5a0b69a5fad8773c3e5f3c16ce72b7fad00b103a80f9cfddaaa9a6626');
+  const lines = contents.split(/(?<=\n)/u);
+  const parts = [
+    [0, 1439], [1582, 1527], 'function observerFixture() {\n',
+    [3110, 22], [3138, 9], [3156, 8], [3165, 29],
+    "      if (route === '/pulls/1/reviews') return json([\n" +
+      "        { id: 1, user: { id: 11 }, state: 'APPROVED', commit_id: pr.head.sha },\n" +
+      '      ]);\n',
+    [3195, 3], '        sha: route.split(\'/\').at(-1), tree: { sha: treeSha },\n',
+    [3200, 3], [3206, 12], '  return { client, host, policy, pr, input, calls,\n',
+    [3219, 28], [3271, 32],
+  ];
+  const restored = parts.map(part => typeof part === 'string' ? part :
+    lines.slice(part[0], part[0] + part[1]).join('')).join('');
+  assert.equal(createHash('sha256').update(restored).digest('hex'),
+    'b4e10ea68213d8ab96eaa4dc9fd47168a01b6e7c11fcfeab76853a26de8da2bb',
+    'Preserve the authentic 3d04 CI fixture before unchanged historical replay');
+  return restored;
+}
+
 function historicalReadinessCiSource(contents) {
+  contents = preGitHubNativeTrustReadinessCiSource(contents);
   // Restore genuine Git blob b0e7c7ca1ae76c4795fbe79d1f3494f8a4e59b19 before
   // the unchanged capsules' line splices; current readback tests remain current-only.
   const lines = contents.split(/(?<=\n)/u);

@@ -2284,20 +2284,104 @@ permission failure. The focused regression remains PR-only.
 Before the unsafe-failure diagnostic callback starts, require four slots from
 the existing aggregate budget for its orchestration and held-worker observer
 processes. Exercise the actual Windows identity-ready/release/exit protocol
-without increasing the five-second capture or thirty-second case deadline,
-borrowing an identity or replacing the OS observation.
+with cold-shell preparation bounded separately from the unchanged five-second
+identity capture. Account for preparation in caller watchdogs without extending
+the target observation or termination deadlines, borrowing an identity or
+replacing the OS observation.
 The observer uses the same held .NET process handle directly, without loading
 PowerShell command modules for process lookup or JSON formatting. Verify real
 identity and exit records, the ASCII image contract and exact creation/exit
 ticks through both the unsafe-diagnostic and dynamic sibling-producer cases.
 The existing unexpected-creation negative must still reject without terminating
-the unrelated process. Keep observer startup inside the unchanged five-second
-capture budget and retain the fifteen-second exit and thirty-second case bounds.
+the unrelated process. Allow at most thirty seconds for the first exact startup
+marker, then one fresh five-second identity window; neither duplicate markers
+nor later output renew either deadline. Retain the fifteen-second exit bound
+and affirmative owned-observer cleanup. Extend the existing PR-only diagnostic
+root with controlled startup after the former five-second boundary, startup
+expiry and identity expiry without sleeps or retries. Verify the regression
+fails on the original source and passes on the correction, and execute both
+real Windows retained-handle branches. Keep the critical budget unchanged.
+The failed main execution remains failed; an unknown host startup cause is not
+established by a longer finite preparation allowance or a later passing run.
+The existing PR-only dynamic sibling root also controls the caller boundary:
+launch the first producer alone and establish both initial workers' actual
+admissions/readiness and pinned identities before launching the sibling producer.
+The shared two-slot budget guarantees no producer or root admission order.
+Prepare both initially eligible observers concurrently, release only the short
+worker to make the queued peer eligible, then prepare that peer before triggering
+either timed capacity participant. Retain each original native handle throughout
+preparation and start its unchanged fifteen-second exit observation only at its
+own action trigger; release and affirmatively settle every observer on success
+or failure. The ten-second sibling action and ready allowances are unchanged,
+and queued readiness starts only after the short worker is released.
+Controlled actual caller/worker-source execution must fail on the original
+independent-release behavior and pass with twelve-second peer preparation plus
+an action within its own allowance. Absent peers, hung observer preparation and
+missing actions still fail finitely; all owned targets settle and the independent
+producer stays active. The controlled scheduler must interleave runnable roots
+from competing producers and prefer the sibling when it is actually queued,
+covering both sibling-plus-waiting and sibling-plus-short initial allocations.
+Those orderings must reproduce the authentic E admission-barrier failure;
+the corrected caller must prove both initial admissions and ready publications
+precede sibling launch, then actual concurrent reuse of the short worker's slot.
+Initial producer/observer failures must settle without launching the sibling.
+Also fail the first producer after both readiness records were consumed while
+valid pinned identity records remain buffered. Exercise failure delivery both
+during pending capture and between successful gate opening and its awaiting
+consumer. Preserve the original failure cause: no sibling process may be
+admitted or execute its marker action. Producer failure must directly fail the
+gate; check cancellation after capture and again after awaiting admission,
+without an intervening await before launch. Settle all buffered captures,
+retained observers and already started work on both paths.
+Never manufacture readiness before admission or serialize the complete experiment.
+Keep these cases inside the existing root, without new
+descendants, critical growth, retries or resource/admission changes. Its finite
+300-second outer watchdog includes two dynamic preparation waves and the two
+sequential exclusive captures (four thirty-plus-five-second batches), readiness,
+unchanged action/exit budgets and cleanup; it is not a timing-performance goal.
+Changes to adopted runner-test text must restore authenticated 0b3d source bytes
+before the unchanged E and E-to-D restorations and historical splices/capsules, preserving existing identities
+and inventories without adding runtime Git access.
 The measured GitHub process-partition preservation test must keep the original
 143-assertion count, root vector and callback fingerprint unchanged. Validate
 the one new byte-snapshot regression by its exact ID, file, name and empty parent
 closure, and check all 144 current assertion IDs are unique before comparing
 the original subset. A new legitimate test must not erase preservation checks.
+
+The existing PR-only T-PRD085 API-source observer root covers automatic
+GitHub-review-bound producer adoption. Use distinct immutable protected-main
+and candidate helper blobs and assertion inventories; current-head maintainer
+approval must reach the exact-source native-run lookup without a separate SHA
+update. Stale or missing external approval must not adopt changed definitions.
+An owner-authored proposal needs no self-approval, but missing native execution
+must remain NotRun. Existing same-head coverage edits, immutable-blob tampering,
+read-only acquisition and candidate-code non-execution controls remain required.
+These cases use injected GitHub responses and owned source data in one isolated
+root, with no external capability, new descendants or critical-budget growth.
+Current-candidate local, Review and hosted statuses require their own completed
+results; this procedure does not transfer historical acceptance.
+The existing API-observer helper, reporter and assertion negative cases must
+explicitly remove the external proposal's maintainer approval: an already
+approved fixture cannot represent an unreviewed definition change. Preserve
+their no-artifact-acquisition rejection checks and exercise approved helper-only
+changes with complete exact-source native originals. These remain existing
+PR-only roots, with no critical-budget growth. Include the complete observer
+test file in the affected local checkpoint for this trust-boundary change.
+Restore authenticated f594 observer bytes before both immutable Intel replay
+paths and their unchanged archived splices, inventories and callback guards.
+The current approval-negative checks must not become historical execution credit.
+The PR-only T-PRD021 GitHub-issued download-origin regression additionally
+exercises a previously unconfigured valid GitHub storage account through the
+real readiness client with an injected fetch. Reject unselected API paths,
+hostile targets and improper redirect chains; verify that no API credential
+reaches storage and preserve finite byte/deadline bounds and immutable artifact
+digest rejection. It owns no real provider resource and does not expand the
+critical27 selection. Its dummy credentials must pass the unchanged exact-source
+safety scan; malformed credential-negative URLs are constructed only inside
+owned runtime fixtures, without weakening that scan.
+Historical replay first restores authenticated 3d04 CI
+source bytes before the existing unchanged splices and assertion fingerprints;
+the new root cannot become retrospective execution credit.
 
 ## 7. PR matrix procedure
 

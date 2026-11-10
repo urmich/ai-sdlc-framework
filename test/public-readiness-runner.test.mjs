@@ -2180,7 +2180,264 @@ async function controlledReadyClock(implementation, mode = 'ready') {
   return { ...result, clock, captured };
 }
 
-test('T-PRD011 sibling producers dynamically consume freed aggregate capacity without token multiplication', async t => {
+async function controlledSiblingPreparation(implementation, files, entered, mode) {
+  let clock = 1000;
+  const timers = [];
+  const contents = new Map();
+  const targets = new Map();
+  const monitors = new Map();
+  const queued = [];
+  const diagnostics = [];
+  const triggers = [];
+  const launches = [];
+  const admissions = [];
+  const ready = [];
+  const events = [];
+  const captureStates = new Map();
+  const producerOutcomes = [];
+  const injectedTasks = [];
+  const captureFailure = ['capture-inflight-failure', 'capture-consume-failure'].includes(mode);
+  let initialProducerFault = false;
+  let deliverInitialFailure;
+  const sources = new Map(await Promise.all(files.map(async file => [file,
+    (await fs.readFile(file, 'utf8')).replace(/\bimport [^;]+;/gu, '')])));
+  let nextPid = 100;
+  let active = 0;
+  let pumpPending = false;
+  const pause = milliseconds => new Promise(resolve => timers.push({ at: clock + milliseconds, resolve }));
+  const missing = () => Object.assign(new Error('not ready'), { code: 'ENOENT' });
+  const close = (monitor, code = 0) => {
+    if (monitor.settled) return;
+    monitor.settled = true;
+    monitor.resolve(runInContext(`({code:${code},signal:null})`, context));
+  };
+  const observeExit = target => {
+    const monitor = monitors.get(target.pid);
+    if (!monitor) return;
+    contents.set(monitor.exitPath, JSON.stringify({ ...monitor.identity, present: false,
+      exitTimeTicks: String(BigInt(target.exitedAt) * 10000n + 621355968000000000n) }));
+    if (!monitor.retained || monitor.released) close(monitor);
+  };
+  const watchExit = async monitor => {
+    if (monitor.watching) return;
+    monitor.watching = true;
+    await pause(15000);
+    if (!targets.get(monitor.identity.pid).exitedAt) close(monitor, 1);
+  };
+  const fakeFs = {
+    async readFile(file) { if (!contents.has(file)) throw missing(); return contents.get(file); },
+    async stat(file) {
+      if (initialProducerFault && file === path.join(entered, 'waiting root.release')) {
+        throw new Error('Controlled first producer failed during pending identity capture');
+      }
+      if (!contents.has(file)) throw missing();
+      return {};
+    },
+    async rename(from, to) {
+      if (!(mode === 'absent-peer' && to === path.join(entered, 'sibling ready root.ready'))) {
+        contents.set(to, contents.get(from));
+        if (to.endsWith('.ready')) {
+          const record = JSON.parse(contents.get(to));
+          assert.ok(targets.has(record.pid), 'Ready publication requires actual prior admission');
+          ready.push({ name: path.basename(to).slice(0, -6), pid: record.pid, at: clock });
+        }
+      }
+      contents.delete(from);
+    },
+    async writeFile(file, value) {
+      if (file === path.join(entered, 'sibling')) {
+        if (mode === 'missing-action') return;
+        if (mode === 'slow-peer') await pause(9000);
+        events.push({ kind: 'sibling-action', at: clock, pid: Number(value) });
+      }
+      contents.set(file, value);
+      if (file.endsWith('.release')) {
+        events.push({ kind: 'owned-release-write', label: path.basename(file), at: clock });
+      }
+      if (file.endsWith('.release') && !triggers.some(trigger => trigger.file === file)) {
+        triggers.push({ file, at: clock });
+        for (const monitor of monitors.values()) {
+          if (monitor.trigger === file) void watchExit(monitor);
+        }
+      }
+    },
+  };
+  const schedulePump = () => {
+    if (pumpPending) return;
+    pumpPending = true;
+    void pause(0).then(() => { pumpPending = false; pump(); });
+  };
+  const pump = () => {
+    while (active < 2 && queued.length) {
+      const preferred = mode === 'sibling-first-short' ? 'short root' : 'waiting root';
+      const rank = name => name === 'sibling ready root' ? 0 : name === preferred ? 1 : 2;
+      queued.sort((left, right) => rank(left.name) - rank(right.name));
+      const task = queued.shift();
+      admissions.push({ name: task.name, at: clock, activeBefore: active });
+      active++;
+      const pid = nextPid++;
+      const target = { pid, name: task.name, exitedAt: null };
+      targets.set(pid, target);
+      let action;
+      runInContext(sources.get(task.file), createContext({
+        test: (name, callback) => { if (name === task.name) action = callback; },
+        assert, path, fs: fakeFs, delay: pause, Date: { now: () => clock },
+        process: { pid, platform: 'win32' },
+      }));
+      Promise.resolve().then(action).then(() => ({ status: 'Passed' }),
+        error => ({ status: 'Failed', message: error.message })).then(outcome => {
+        target.exitedAt = clock;
+        observeExit(target);
+        active--;
+        task.resolve({ root: task.name, processIds: [pid], status: outcome.status,
+          startedAt: new Date(1000).toISOString(), finishedAt: new Date(clock).toISOString(),
+          message: outcome.message });
+        schedulePump();
+      });
+    }
+  };
+  const context = createContext({
+    assert, path, entered, fs: fakeFs, delay: pause, Date: { now: () => clock },
+    AbortController: class extends AbortController {
+      constructor() {
+        super();
+        this.signal.addEventListener('abort', () => events.push({
+          kind: 'readiness-aborted', at: clock, message: this.signal.reason.message,
+        }));
+      }
+    },
+    process: { platform: 'win32' }, processDiagnostic, assertOwnedProcessExited,
+    budget: { environment: {} }, t: { diagnostic: value => diagnostics.push(JSON.parse(value)) },
+    independent: { parent: 'other-owned-producer', signal: { aborted: false },
+      async snapshot() { return { producers: 1 }; } },
+    async windowsProcessIdentity(pid, exitPath, options) {
+      const target = targets.get(pid);
+      if (mode === 'initial-observer-failure' && target.name === 'waiting root') {
+        await pause(10);
+        throw new Error('Controlled initial observer preparation failed');
+      }
+      if (target.name === 'sibling ready root' && mode === 'hung-observer') {
+        await pause(30000);
+        throw new Error('Owned process identity capture did not complete [observer phase=startup]');
+      }
+      const buffered = captureFailure && target.name !== 'sibling ready root';
+      if (!buffered) await pause(target.name === 'sibling ready root' ? 12000 : 10);
+      assert.equal(target.exitedAt, null, 'Capture must pin the still-live original target');
+      const identity = { pid, present: true, image: 'ownedNode',
+        creationTime: String(621355968000000000n + BigInt(pid)),
+        observedAt: new Date(clock).toISOString() };
+      let resolve;
+      const closed = new Promise(done => { resolve = done; });
+      const monitor = { identity, exitPath, resolve, retained: options.retainUntilRelease,
+        trigger: options.exitObservationTrigger };
+      monitors.set(pid, monitor);
+      const captureState = { pid, name: target.name, observedAt: clock, returnedAt: null };
+      captureStates.set(pid, captureState);
+      if (buffered) {
+        events.push({ kind: 'identity-buffered', at: clock, pid });
+        if (captureStates.size === 2) {
+          injectedTasks.push(pause(5).then(async () => {
+            initialProducerFault = true;
+            events.push({ kind: 'initial-worker-fault', at: clock });
+            await fakeFs.writeFile(path.join(entered, 'short root.release'), 'producer-failure-cleanup');
+          }));
+        }
+        await pause(12000);
+      }
+      captureState.returnedAt = clock;
+      events.push({ kind: 'identity-returned', at: clock, pid });
+      if (!monitor.retained) void watchExit(monitor);
+      return { identity, closed, release() {
+        monitor.released = true;
+        if (target.exitedAt) { observeExit(target); close(monitor); }
+        else close(monitor, 1);
+        return closed;
+      } };
+    },
+    f: { invoke(args, environment) {
+      const file = args.at(-1);
+      launches.push({ file, at: clock, admitted: [...targets.values()].map(target => target.name),
+        ready: ready.map(record => record.name) });
+      events.push({ kind: 'producer-launch', at: clock, file });
+      const produce = async () => {
+        if (mode === 'initial-producer-failure' && file === files[0]) {
+          throw new Error('Controlled first producer launch failed');
+        }
+        const names = [];
+        runInContext(sources.get(file), createContext({ test: name => names.push(name) }));
+        const groups = await Promise.all(names.map(name => new Promise(resolve => {
+          queued.push({ file, name, resolve });
+          schedulePump();
+        })));
+        await pause(1);
+        contents.set(environment.SDLC_TEST_REPORT_FILE,
+          JSON.stringify({ resources: { budget: { id: 'controlled', peakActiveWorkers: 2 } },
+            groupExecution: { groups } }));
+        const outcome = { exitCode: groups.every(group => group.status === 'Passed') ? 0 : 1,
+          stdout: groups.map(group => group.message ?? '').join('\n'), stderr: '', completedAtMs: clock };
+        return { outcome, pendingCaptures: [...captureStates.values()]
+          .filter(capture => capture.returnedAt === null).length };
+      };
+      return new Promise((resolve, reject) => {
+        produce().then(({ outcome, pendingCaptures }) => {
+          const deliver = () => {
+            producerOutcomes.push({ file, exitCode: outcome.exitCode, message: outcome.stdout + outcome.stderr,
+              preparedAt: outcome.completedAtMs, deliveredAt: clock, pendingCapturesWhenPrepared: pendingCaptures });
+            events.push({ kind: 'producer-result-delivered', file, at: clock, exitCode: outcome.exitCode });
+            resolve(outcome);
+          };
+          if (mode === 'capture-consume-failure' && file === files[0] && outcome.exitCode !== 0) {
+            deliverInitialFailure = deliver;
+          } else deliver();
+        }, reject);
+      });
+    } },
+  });
+  const captureReady = runInContext(`(${captureOwnedReady.toString()})`, context);
+  context.captureOwnedReady = (...args) => {
+    const captured = captureReady(...args);
+    if (captureFailure && args[0].includes('waiting root')) {
+      const observation = captured.then(() => {
+        events.push({ kind: 'initial-capture-barrier-complete', at: clock });
+        if (mode === 'capture-consume-failure') {
+          assert.equal(typeof deliverInitialFailure, 'function');
+          deliverInitialFailure();
+        }
+      });
+      injectedTasks.push(observation.then(() => null, error => error));
+    }
+    return captured;
+  };
+  const run = runInContext(`(${implementation.toString()})`, context);
+  let result;
+  const pending = run(files, files.map(file => `${file}.controlled.json`),
+    [['waiting root', 'short root'], ['sibling ready root']], { coordinatePeers: true })
+    .then(() => { result = { status: 'Passed' }; },
+      error => { result = { status: 'Failed', message: error.message }; });
+  for (let step = 0; !result && step < 12000; step++) {
+    for (let flush = 0; flush < 128; flush++) await Promise.resolve();
+    if (result) break;
+    assert.ok(timers.length, 'Controlled caller must yield to a bounded clock event');
+    clock = Math.min(...timers.map(timer => timer.at));
+    for (let index = timers.length - 1; index >= 0; index--) {
+      if (timers[index].at <= clock) timers.splice(index, 1)[0].resolve();
+    }
+  }
+  assert.ok(result, 'Controlled caller must settle its preparation, action and observers finitely');
+  await pending;
+  assert.ok((await Promise.all(injectedTasks)).every(error => error === undefined || error === null),
+    'Every injected failure/observation task must settle without an unhandled rejection');
+  assert.ok([...targets.values()].every(target => target.exitedAt !== null));
+  assert.ok([...monitors.values()].every(monitor => monitor.settled));
+  assert.ok(diagnostics.filter(value => value.kind === 'owned-producer-completed')
+    .every(value => value.independentProducerActive));
+  return { ...result, elapsedMs: clock - 1000, launches, admissions, ready, events, producerOutcomes,
+    captures: [...captureStates.values()], allInjectedTasksSettled: true,
+    exited: [...targets.values()], allObserversSettled: true, triggers, diagnostics };
+}
+
+test('T-PRD011 sibling producers dynamically consume freed aggregate capacity without token multiplication',
+  { timeout: 300000 }, async t => {
   const f = await runnerFixture(t);
   const inheritedBudget = Boolean(process.env.SDLC_TEST_BUDGET);
   const budget = await enterTestBudget({ workers: 2, fileCount: 2, control: true });
@@ -2208,34 +2465,75 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
         catch(error){if(error.code!=='ENOENT')throw error;}
         await delay(10);}
     }`;
-  const runOwnedPhase = async (files, paths, labels, { exclusive = false } = {}) => {
+  const runOwnedPhase = async (files, paths, labels, { exclusive = false, coordinatePeers = false } = {}) => {
     const monitors = new Map();
     const readiness = new AbortController();
+    let allowSibling;
+    const initialPair = new Promise(resolve => { allowSibling = resolve; });
+    const settleInitialPair = error => { allowSibling?.(error); allowSibling = null; };
     const releases = labels.flat().map(label => path.join(entered, `${label}.release`));
     const releaseAll = () => Promise.all(releases.map(file => fs.writeFile(file, 'released')));
-    const capture = process.platform !== 'win32' ? Promise.resolve(null) :
-      captureOwnedReady(labels.flat(), entered, async (label, owned) => {
-        assert.ok(Number.isSafeInteger(owned.observedAtMs),
-          'The live worker ready observation must establish its creation bound');
-        const exitPath = path.join(entered, `${label}.exit.json`);
-        const monitor = await windowsProcessIdentity(owned.pid, exitPath, { createdBeforeMs: owned.observedAtMs });
-        monitors.set(label, { ...monitor, exitPath });
-        t.diagnostic(JSON.stringify({ kind: 'owned-worker-identity-captured',
-          owned: monitor.identity, capturedBeforeTrigger: true, label }));
-        await fs.writeFile(path.join(entered, `${label}.release`), 'captured');
-      }, { exclusive, signal: readiness.signal }).then(() => null, async error => {
+    const captureIdentity = async (label, owned) => {
+      assert.ok(Number.isSafeInteger(owned.observedAtMs),
+        'The live worker ready observation must establish its creation bound');
+      const exitPath = path.join(entered, `${label}.exit.json`);
+      const monitor = await windowsProcessIdentity(owned.pid, exitPath, {
+        createdBeforeMs: owned.observedAtMs, retainUntilRelease: true,
+        exitObservationTrigger: path.join(entered, `${label}.release`),
+      });
+      monitors.set(label, { ...monitor, exitPath });
+      t.diagnostic(JSON.stringify({ kind: 'owned-worker-identity-captured',
+        owned: monitor.identity, capturedBeforeTrigger: true, label }));
+    };
+    const trigger = label => fs.writeFile(path.join(entered, `${label}.release`), 'captured');
+    const capture = process.platform !== 'win32' ? Promise.resolve(null) : (async () => {
+      if (coordinatePeers) {
+        const [waiting, short] = labels[0];
+        const [peer] = labels[1];
+        await captureOwnedReady([waiting, short], entered, captureIdentity, { signal: readiness.signal });
+        readiness.signal.throwIfAborted();
+        settleInitialPair(null);
+        await trigger(short);
+        await captureOwnedReady([peer], entered, captureIdentity, { signal: readiness.signal });
+        await Promise.all([waiting, peer].map(trigger));
+      } else {
+        await captureOwnedReady(labels.flat(), entered, async (label, owned) => {
+          await captureIdentity(label, owned);
+          await trigger(label);
+        }, { exclusive, signal: readiness.signal });
+      }
+    })().then(() => null, async error => {
+        settleInitialPair(error);
         await releaseAll();
         return error;
       });
-    const producers = files.map((file, index) =>
-      f.invoke(['targeted', '--workers', '2', file],
+    const producers = files.map((file, index) => (async () => {
+      if (coordinatePeers && process.platform === 'win32' && index > 0) {
+        const initialError = await initialPair;
+        if (initialError) throw initialError;
+        readiness.signal.throwIfAborted();
+        assert.ok(labels[0].every(label => monitors.has(label)),
+          'Both initial workers require pinned identities before sibling admission');
+        t.diagnostic(JSON.stringify({ kind: 'owned-sibling-admission-enabled', beforeSiblingLaunch: true,
+          initialWorkers: labels[0].map(label => ({ label, owned: monitors.get(label).identity })) }));
+      }
+      return f.invoke(['targeted', '--workers', '2', file],
         { ...budget.environment, SDLC_TEST_REPORT_FILE: paths[index] }).then(result => {
-        if (exclusive && result.exitCode !== 0) readiness.abort(new Error(result.stdout + result.stderr));
+        if (result.exitCode !== 0) {
+          const error = new Error(result.stdout + result.stderr);
+          readiness.abort(error);
+          settleInitialPair(error);
+        }
         t.diagnostic(JSON.stringify({ kind: 'owned-producer-completed', index,
           completedAtMs: result.completedAtMs, completionClockPrecisionMs: 1,
           independentProducer: independent.parent, independentProducerActive: !independent.signal.aborted }));
         return result;
-      }));
+      }, error => {
+        readiness.abort(error);
+        settleInitialPair(error);
+        throw error;
+      });
+    })());
     try {
       const results = await Promise.all(producers);
       const captureError = await capture;
@@ -2253,7 +2551,7 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
               const monitor = monitors.get(group.root);
               assert.ok(monitor, 'Every owned file process needs a pre-trigger creation identity');
               assert.equal(monitor.identity.pid, pid);
-              const outcome = await monitor.closed;
+              const outcome = await monitor.release();
               if (outcome.code !== 0 || outcome.signal !== null) {
                 const detail = await fs.readFile(`${monitor.exitPath}.error`, 'utf8').catch(error => {
                   if (error.code === 'ENOENT') return 'Held process observer retained no error record';
@@ -2283,7 +2581,7 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
       await capture;
       await releaseAll();
       await Promise.allSettled(producers);
-      await Promise.all([...monitors.values()].map(monitor => monitor.closed));
+      await Promise.all([...monitors.values()].map(monitor => monitor.release()));
     }
   };
   await fs.writeFile(slow, common +
@@ -2301,9 +2599,70 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
       await fs.writeFile(${JSON.stringify(path.join(entered, 'sibling'))},String(process.pid),{flag:'wx'});
       await delay(30);
     });`);
+  const captureFailures = [];
+  for (const mode of ['capture-inflight-failure', 'capture-consume-failure',
+    'sibling-first-waiting', 'sibling-first-short', 'slow-peer', 'absent-peer',
+    'hung-observer', 'missing-action', 'initial-producer-failure', 'initial-observer-failure']) {
+    const result = await controlledSiblingPreparation(runOwnedPhase, [slow, sibling], entered, mode);
+    t.diagnostic(JSON.stringify({ kind: 'controlled-sibling-preparation', mode, ...result }));
+    if (mode.startsWith('capture-')) {
+      assert.equal(result.status, 'Failed', mode);
+      const failure = result.producerOutcomes.find(outcome => outcome.file === slow);
+      assert.equal(failure.exitCode, 1);
+      assert.equal(failure.pendingCapturesWhenPrepared, 2);
+      assert.equal(result.message, failure.message, 'Retain the original failed producer cause');
+      assert.equal(result.captures.length, 2);
+      assert.ok(result.captures.every(capture =>
+        capture.observedAt < failure.preparedAt && capture.returnedAt > failure.preparedAt),
+        'The first producer must actually fail while both original identities remain buffered');
+      const barrier = result.events.findIndex(event => event.kind === 'initial-capture-barrier-complete');
+      const failed = result.events.findIndex(event =>
+        event.kind === 'producer-result-delivered' && event.exitCode === 1);
+      const aborted = result.events.findIndex(event => event.kind === 'readiness-aborted');
+      if (mode === 'capture-consume-failure') {
+        const gateOpened = result.events.findIndex((event, index) =>
+          index > barrier && event.kind === 'owned-release-write' && event.label === 'short root.release');
+        assert.ok(barrier < failed && failed < gateOpened && gateOpened < aborted,
+          'Failure delivery must race the already-open gate before its awaiting consumer resumes');
+      } else {
+        assert.ok(failed < aborted && aborted < barrier,
+          'Failure must reach cancellation while both valid identity deliveries are still pending');
+      }
+      captureFailures.push(result);
+    } else if (mode.startsWith('sibling-first') || mode === 'slow-peer') {
+      assert.equal(result.status, 'Passed',
+        'Supported sibling-first admission must not deadlock the initial identity barrier');
+      const siblingLaunch = result.launches.find(launch => launch.file === sibling);
+      assert.deepEqual(siblingLaunch.admitted.sort(), ['short root', 'waiting root']);
+      assert.deepEqual(siblingLaunch.ready.sort(), ['short root', 'waiting root']);
+      const peerAdmission = result.admissions.find(record => record.name === 'sibling ready root');
+      const shortExit = result.exited.find(record => record.name === 'short root').exitedAt;
+      const waitingExit = result.exited.find(record => record.name === 'waiting root').exitedAt;
+      assert.ok(peerAdmission.at >= shortExit && peerAdmission.at < waitingExit,
+        'The queued peer must consume the freed slot while the waiting participant remains active');
+      if (mode === 'slow-peer') assert.ok(result.elapsedMs > 20000,
+        'Pinned ownership must survive preparation plus a genuine action within its own allowance');
+    } else {
+      assert.equal(result.status, 'Failed', mode);
+      assert.match(result.message, mode === 'absent-peer' ? /identity barrier/u :
+        mode === 'hung-observer' ? /observer phase=startup/u :
+          mode === 'initial-producer-failure' ? /Controlled first producer launch failed/u :
+            mode === 'initial-observer-failure' ? /Controlled initial observer preparation failed/u :
+              /could not borrow idle host capacity/u);
+      if (mode.startsWith('initial-')) assert.equal(result.launches.length, 1,
+        'A failed initial producer or observer must settle without launching the sibling');
+    }
+  }
+  for (const result of captureFailures) {
+    assert.ok(!result.admissions.some(admission => admission.name === 'sibling ready root'),
+      'In-flight producer failure must prevent actual sibling admission');
+    assert.ok(!result.events.some(event => event.kind === 'sibling-action'),
+      'The failed producer must not be followed by the generated sibling marker action');
+    assert.deepEqual(result.launches.map(launch => launch.file), [slow]);
+  }
   const paths = [path.join(entered, 'first.json'), path.join(entered, 'second.json')];
   const { reports } = await runOwnedPhase([slow, sibling], paths,
-    [['waiting root', 'short root'], ['sibling ready root']]);
+    [['waiting root', 'short root'], ['sibling ready root']], { coordinatePeers: true });
   assert.ok(reports.every(report => report.resources.budget.id === budget.id &&
     report.resources.budget.peakActiveWorkers <= budget.capacity));
   const waiting = reports[0].groupExecution.groups.find(group => group.root === 'waiting root');

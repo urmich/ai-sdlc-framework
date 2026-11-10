@@ -486,9 +486,11 @@ test('T-PRD018 Windows capture diagnostics distinguish startup and exited observ
     };
   };
   const marker = 'owned-process-observer-started-v1\n';
-  for (const completion of ['identity', 'closed']) {
+  for (const [startupMs, completion] of [
+    [29990, 'identity'], [4990, 'identity'], [4990, 'closed'], [29990, 'closed'],
+  ]) {
     const f = controlled();
-    f.advance(4990);
+    f.advance(startupMs);
     f.child.stdout.write(marker);
     f.advance(20);
     if (completion === 'identity') {
@@ -500,7 +502,7 @@ test('T-PRD018 Windows capture diagnostics distinguish startup and exited observ
     const result = await f.outcome;
     if (completion === 'identity') {
       assert.equal(result.message, undefined,
-        'Startup must not consume the actual identity observation window');
+        'Cold startup within its preparation window must not consume the actual identity observation window');
       assert.equal(result.value.identity.pid, process.pid);
       const closed = await result.value.closed;
       assert.equal(closed.code, 0);
@@ -509,7 +511,7 @@ test('T-PRD018 Windows capture diagnostics distinguish startup and exited observ
       assert.match(result.message, /process-identity-unavailable/u);
       assert.match(result.message, /phase=identity startup=true exitObserved=true exitCode=1/u);
     }
-    assert.deepEqual(f.windows.map(window => [window.start, window.milliseconds]), [[0, 5000], [4990, 5000]]);
+    assert.deepEqual(f.windows.map(window => [window.start, window.milliseconds]), [[0, 30000], [startupMs, 5000]]);
     assert.equal(f.kills(), 0);
     assert.equal(f.timers.size, 0);
   }
@@ -528,7 +530,7 @@ test('T-PRD018 Windows capture diagnostics distinguish startup and exited observ
     } else if (mode === 'aborted') {
       f.child.emit('error', Object.assign(new Error('private-abort-detail'), { name: 'AbortError' }));
     } else {
-      f.advance(5000);
+      f.advance(mode === 'startup-deadline' ? 30000 : 5000);
       if (mode === 'startup-deadline') f.child.stdout.write(marker);
     }
     if (mode === 'unknown-closure') {
@@ -584,7 +586,7 @@ test('T-PRD018 Windows capture diagnostics distinguish startup and exited observ
     'signaled', 'negative-exit', 'unknown-signal', 'spawn-error', 'oversized', 'invalid-record', 'missing-startup']) {
     const f = controlled();
     const { child, outcome } = f;
-    assert.equal(f.windows[0].milliseconds, 5000);
+    assert.equal(f.windows[0].milliseconds, 30000);
     const secret = 'private-observer-output-not-for-annotations';
     child.stderr.write(secret);
     if (!['not-started', 'spawn-error', 'missing-startup'].includes(mode)) {
@@ -615,7 +617,7 @@ test('T-PRD018 Windows capture diagnostics distinguish startup and exited observ
     else if (mode === 'missing-startup') child.stdout.write(JSON.stringify({
       pid: process.pid, present: true, creationTime: '100', image: 'node', observedAt: new Date().toISOString(),
     }) + '\n');
-    else f.advance(5000);
+    else f.advance(mode === 'not-started' ? 30000 : 5000);
     if (['exited', 'signaled', 'negative-exit', 'unknown-signal'].includes(mode)) {
       f.close(child.exitCode, child.signalCode);
     }
@@ -1129,7 +1131,7 @@ test('T-PRD018 rejected failure diagnostics retain only closed error and owned p
 });
 
 test('T-PRD018 unsafe failure diagnostics terminate without hanging or manufacturing complete evidence',
-  { timeout: 30000 }, async t => {
+  { timeout: 120000 }, async t => {
     const directory = await scratch(t);
     const evidence = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'runner-rejected-'));
     t.after(() => fs.rm(evidence, { recursive: true, force: true }));

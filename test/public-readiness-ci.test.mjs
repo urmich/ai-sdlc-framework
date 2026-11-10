@@ -1439,6 +1439,149 @@ test('T-PRD085 status history acquisition carries cancellation across every SDK 
   assert.ok(calls.every(call => call.method === 'GET'));
 });
 
+test('T-PRD021 GitHub-issued job logs and artifacts bind download trust to the selected API source', async () => {
+  const api = 'https://api.github.com/repos/urmich/ai-sdlc-framework';
+  const log = 'https://productionresultssa9.blob.core.windows.net/logs/job.txt?sig=fixture-value';
+  const zip = 'https://productionresultssa17.blob.core.windows.net/artifacts/results.zip?sig=fixture-value';
+  const archive = Buffer.from('controlled-immutable-artifact');
+  const metadata = { id: 19, expired: false, digest: `sha256:${digest(archive)}`,
+    size_in_bytes: archive.length };
+  const calls = [];
+  let readerCalls = 0;
+  const client = createReadinessGitHubClient({
+    repository: 'urmich/ai-sdlc-framework', repositoryId: 17, writerId: 42,
+    token: 'fixture-ephemeral-token', generation: 'issued-download',
+    runArtifactReader: async () => { readerCalls++; throw Error('Digest rejection must precede ZIP reading'); },
+    fetch: async (url, options) => {
+      calls.push(url);
+      assert.equal(options.redirect, 'manual');
+      assert.equal(options.signal.aborted, false);
+      if (new URL(url).origin === 'https://api.github.com') {
+        assert.equal(new Headers(options.headers).get('authorization'), 'Bearer fixture-ephemeral-token');
+        if (url === `${api}/actions/runs/101/artifacts?per_page=100`) {
+          return new Response(JSON.stringify({ artifacts: [metadata] }),
+            { headers: { 'content-type': 'application/json' } });
+        }
+        assert.ok([`${api}/actions/jobs/101/logs`, `${api}/actions/artifacts/19/zip`].includes(url));
+        return new Response(null, { status: 302, headers: {
+          location: url.endsWith('/logs') ? log : zip,
+        } });
+      }
+      assert.deepEqual([...new Headers(options.headers)], [['accept', 'application/octet-stream']]);
+      if (url === log) return new Response('exact selected job logs');
+      assert.equal(url, zip);
+      return new Response(Buffer.from('tampered-artifact'));
+    },
+  });
+  assert.equal((await client.bytes('/actions/jobs/101/logs')).toString(), 'exact selected job logs');
+  const [acquired] = await client.list('/actions/runs/101/artifacts?per_page=100', 'artifacts');
+  await assert.rejects(client.artifact(acquired), { code: 'DIGEST' });
+  assert.equal(readerCalls, 0);
+  assert.ok(calls.includes(log) && calls.includes(zip), 'Different issued storage accounts need no configuration');
+
+  for (const relative of [
+    '/actions/jobs/../101/logs', '/actions/jobs/101/logs?url=https://evil.example',
+    '/actions/jobs/101/logs/extra', '/actions/jobs/0/logs', '/actions/artifacts/19',
+    '//api.github.com/repos/foreign/repository/actions/jobs/101/logs',
+    '/../../foreign/repository/actions/jobs/101/logs',
+  ]) {
+    const before = calls.length;
+    await assert.rejects(client.bytes(relative), { code: 'SCOPE' });
+    assert.equal(calls.length, before, 'Unselected source dispatches nothing');
+  }
+  for (const target of [
+    'https://evil.example/download', 'https://productionresultssa9.blob.core.windows.net.evil.example/a',
+    'http://productionresultssa9.blob.core.windows.net/a',
+    'https://user:password@productionresultssa9.blob.core.windows.net/a',
+    'https://productionresultssa9.blob.core.windows.net:444/a',
+    'https://productionresultssa9.blob.core.windows.net/a#fragment',
+    'https://productionresultssa9.blob.core.windows.net/%2e%2e/a',
+    'https://productionresultssa9.blob.core.windows.net/' + '%' + 'zz',
+    'https://productionresultssa9.blob.core.windows.net/a?sig=fixture-value',
+    `${api}/actions/jobs/102/logs`, 'https://api.github.com/repos/foreign/repository/actions/jobs/101/logs',
+  ]) {
+    let fetched = 0;
+    const hostile = createReadinessGitHubClient({
+      repository: 'urmich/ai-sdlc-framework', repositoryId: 17, writerId: 42,
+      token: 'fixture-value', generation: 'hostile-download',
+      archiveOrigins: ['https://evil.example'],
+      fetch: async () => { fetched++; return new Response(null, { status: 302, headers: { location: target } }); },
+    });
+    await assert.rejects(hostile.bytes('/actions/jobs/101/logs'), { code: 'REDIRECT' }, target);
+    assert.equal(fetched, 1, 'Hostile target must never be fetched');
+  }
+  for (const [variant, code, expectedCalls] of [
+    ['foreign-source', 'REDIRECT', 1], ['automatic-redirect', 'REDIRECT', 1],
+    ['storage-origin-change', 'REDIRECT', 2], ['redirect-limit', 'REDIRECT', 6],
+    ['byte-limit', 'RESPONSE_LIMIT', 2],
+  ]) {
+    let fetched = 0;
+    const bounded = createReadinessGitHubClient({
+      repository: 'urmich/ai-sdlc-framework', repositoryId: 17, writerId: 42,
+      token: 'fixture-ephemeral-token', generation: `bounded-${variant}`,
+      fetch: async (url, options) => {
+        fetched++;
+        if (fetched === 1) {
+          const response = new Response(null, { status: 302, headers: { location: log } });
+          if (variant === 'foreign-source') Object.defineProperty(response, 'url', {
+            value: 'https://api.github.com/repos/foreign/repository/actions/jobs/101/logs',
+          });
+          if (variant === 'automatic-redirect') Object.defineProperty(response, 'redirected', { value: true });
+          return response;
+        }
+        assert.deepEqual([...new Headers(options.headers)], [['accept', 'application/octet-stream']]);
+        if (variant === 'byte-limit') return new Response('oversized', {
+          headers: { 'content-length': String(128 * 1024 * 1024 + 1) },
+        });
+        return new Response(null, { status: 302, headers: {
+          location: variant === 'storage-origin-change' ? zip : new URL(`/hop/${fetched}`, log).href,
+        } });
+      },
+    });
+    await assert.rejects(bounded.bytes('/actions/jobs/101/logs'), { code }, variant);
+    assert.equal(fetched, expectedCalls, variant);
+  }
+  let retries = 0;
+  const recovered = createReadinessGitHubClient({
+    repository: 'urmich/ai-sdlc-framework', repositoryId: 17, writerId: 42,
+    token: 'fixture-ephemeral-token', generation: 'source-retry',
+    fetch: async () => {
+      if (++retries < 3) throw Object.assign(Error('controlled source connection reset'), { code: 'ECONNRESET' });
+      return new Response('recovered exact source');
+    },
+  });
+  assert.equal((await recovered.bytes('/actions/jobs/101/logs')).toString(), 'recovered exact source');
+  assert.equal(retries, 3, 'Retain bounded transient API read recovery');
+  for (const [failure, expectedCalls] of [['exhausted', 3], ['unknown', 1], ['private', 1]]) {
+    let fetched = 0;
+    let getters = 0;
+    const unavailable = createReadinessGitHubClient({
+      repository: 'urmich/ai-sdlc-framework', repositoryId: 17, writerId: 42,
+      token: 'fixture-ephemeral-token', generation: failure,
+      fetch: async () => {
+        fetched++;
+        if (failure === 'private') throw Object.defineProperty({}, 'code', {
+          get() { getters++; throw Error('private-sentinel'); },
+        });
+        throw Object.assign(Error('private-sentinel'), {
+          code: failure === 'exhausted' ? 'ECONNRESET' : 'UNKNOWN',
+        });
+      },
+    });
+    await assert.rejects(unavailable.bytes('/actions/jobs/101/logs'), error => {
+      assert.equal(error.code, 'TRANSPORT');
+      assert.doesNotMatch(JSON.stringify(error), /private-sentinel|fixture-ephemeral-token/u);
+      if (failure === 'exhausted') assert.deepEqual(error.details.nativeFailure, {
+        code: 'ECONNRESET', origin: 'https://api.github.com', originKind: 'api',
+        protocol: 'rest', method: 'GET', retries: 2,
+      });
+      return true;
+    });
+    assert.equal(fetched, expectedCalls);
+    assert.equal(getters, 0);
+  }
+});
+
 test('T-PRD085 shared membership, metadata changes, pagination and stale events cannot overwrite another PR verdict', async () => {
   const f = statusFixture();
   f.snapshot.prs[1].verdicts['framework/coverage'] = {
@@ -2964,7 +3107,7 @@ with zipfile.ZipFile(sys.argv[2],"w",compression=zipfile.ZIP_DEFLATED) as bundle
   }
 });
 
-function observerFixture() {
+function observerFixture({ changedProducer = false } = {}) {
   const revisions = { head: sourceA, base: 'b'.repeat(40), merge: 'c'.repeat(40), trusted: 'd'.repeat(40) };
   const requirements = '# Requirements\n\n### FR-200: Preserve records\n\n**Definition of Done**\n\n- AC-200.1: Preserve original state.\n';
   const plan = JSON.stringify({ tests: [{
@@ -2987,6 +3130,12 @@ function observerFixture() {
     ['.github/workflows/ci.yml', ciDefinition],
     ['.github/workflows/pr-readiness.yml', writerDefinition()],
     ['.github/workflows/coverage-metadata.yml', writerDefinition()],
+    ...(changedProducer ? [
+      ['test/orders-helper.mjs', "throw new Error('candidate helper must never execute');\n"],
+      ['test/orders-extra.test.mjs', 'export const validationDeclarations=' + JSON.stringify({
+        schemaVersion: 1, surfaces: [{ coverage: 'fixture-only', paths: ['test/orders-helper.mjs'] }],
+      }) + ";\nimport test from 'node:test';test('orders use the changed helper',()=>{});\n"],
+    ] : []),
   ]);
   const blobs = new Map();
   const tree = [...files].map(([file, contents]) => {
@@ -2996,6 +3145,15 @@ function observerFixture() {
     return { path: file, type: 'blob', mode: '100644', sha, size: bytes.length };
   });
   const treeSha = createHash('sha1').update(JSON.stringify(tree)).digest('hex');
+  const baselineTree = changedProducer ? tree.filter(entry => entry.path !== 'test/orders-extra.test.mjs')
+    .map(entry => {
+      if (entry.path !== 'test/orders-helper.mjs') return entry;
+      const bytes = Buffer.from("throw new Error('previous helper must never execute');\n");
+      const sha = createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+      blobs.set(sha, { sha, size: bytes.length, encoding: 'base64', content: bytes.toString('base64') });
+      return { ...entry, sha, size: bytes.length };
+    }) : tree;
+  const baselineTreeSha = createHash('sha1').update(JSON.stringify(baselineTree)).digest('hex');
   const input = { repositoryId: 'primary', sourceRevision: revisions.head,
     requirements: [{ artifactId: 'public-readiness', path: 'docs/sdlc/public-readiness/requirements.md', contents: requirements }],
     testPlans: [{ artifactId: 'public-readiness', path: 'docs/sdlc/public-readiness/test-plan.md', contents: plan }] };
@@ -3004,6 +3162,7 @@ function observerFixture() {
     head: { sha: revisions.head, repo: { id: 29 } },
     base: { sha: revisions.base, ref: 'main', repo: { id: 17 } } };
   const calls = [];
+  const reviews = [{ id: 1, user: { id: 11 }, state: 'APPROVED', commit_id: pr.head.sha }];
   const json = body => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
   let incompleteMembership = false;
   let tamperedBlob = false;
@@ -3033,16 +3192,18 @@ function observerFixture() {
         return json([pr]);
       }
       if (route === '/pulls/1') return json(pr);
-      if (route === '/pulls/1/reviews') return json([
-        { id: 1, user: { id: 11 }, state: 'APPROVED', commit_id: pr.head.sha },
-      ]);
+      if (route === '/pulls/1/reviews') return json(reviews);
       if (route === '/actions/workflows/ci.yml') return json({ id: 99, path: '.github/workflows/ci.yml' });
       if (route === '/actions/workflows/99/runs') return json({ workflow_runs: [] });
       if (route.startsWith('/git/commits/')) return json({
-        sha: route.split('/').at(-1), tree: { sha: treeSha },
+        sha: route.split('/').at(-1),
+        tree: { sha: route.split('/').at(-1) === revisions.trusted ? baselineTreeSha : treeSha },
         parents: [{ sha: revisions.head }, { sha: revisions.base }],
       });
       if (route === `/git/trees/${treeSha}`) return json({ sha: treeSha, truncated: false, tree });
+      if (route === `/git/trees/${baselineTreeSha}`) return json({
+        sha: baselineTreeSha, truncated: false, tree: baselineTree,
+      });
       if (route.startsWith('/git/blobs/')) {
         const data = blobs.get(route.split('/').at(-1));
         assert.ok(data, 'Unexpected immutable source blob');
@@ -3055,7 +3216,7 @@ function observerFixture() {
     api: client, defaultRevision: revisions.trusted, writerId: 42,
     now: () => now, detailsUrl: 'https://github.com/urmich/ai-sdlc-framework/actions/runs/101/attempts/1',
   });
-  return { client, host, policy, pr, input, calls,
+  return { client, host, policy, pr, input, calls, reviews,
     incomplete: () => { incompleteMembership = true; },
     tamper: () => { tamperedBlob = true; } };
 }
@@ -3084,6 +3245,30 @@ test('T-PRD085 actual API-source coverage inspection rejects same-head edits and
   f.pr.body = renderCoverageSection(prepareCoverage(f.input));
   assert.equal((await f.host.snapshot()).prs[0].verdicts['framework/coverage'].status, 'Passed');
   assert.equal(await f.host.verifyWriterControl(), true);
+  const changed = observerFixture({ changedProducer: true });
+  const current = (await changed.host.snapshot()).prs[0];
+  assert.equal(current.verdicts['framework/coverage'].status, 'Passed');
+  assert.equal(current.verdicts['framework/approval'].status, 'Passed');
+  assert.equal(current.verdicts['framework/validation'].status, 'NotRun');
+  assert.deepEqual(current.verdicts['framework/validation'].blockers,
+    ['No current PR producer execution exists for this exact source'],
+    'Changed helper/assertion definitions require exact current native execution, not a separate adopted SHA');
+  assert.ok(changed.calls.some(call => call.url.includes('/actions/workflows/99/runs')),
+    'Legitimate definition changes reach the exact-source producer lookup');
+  for (const commit of ['b'.repeat(40), null]) {
+    if (commit) changed.reviews[0].commit_id = commit;
+    else changed.reviews.length = 0;
+    const unapproved = (await changed.host.snapshot()).prs[0];
+    assert.equal(unapproved.verdicts['framework/approval'].status, 'NotRun');
+    assert.deepEqual(unapproved.verdicts['framework/validation'].blockers,
+      ['Changed producer definitions require current GitHub maintainer approval']);
+  }
+  changed.pr.user.id = 11;
+  const owner = (await changed.host.snapshot()).prs[0];
+  assert.equal(owner.verdicts['framework/approval'].status, 'Passed');
+  assert.deepEqual(owner.verdicts['framework/validation'].blockers,
+    ['No current PR producer execution exists for this exact source'],
+    'An owner-authored proposal needs actual native evidence, not impossible self-approval');
   assert.ok(f.calls.every(call => ['GET', 'POST'].includes(call.method)));
   assert.ok(f.calls.filter(call => call.method === 'POST').every(call => call.url.endsWith('/graphql')),
     'Metadata evaluation dispatches no provider mutation');

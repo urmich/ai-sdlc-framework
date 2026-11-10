@@ -2,9 +2,12 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { promisify, types } from 'node:util';
+import { setTimeout as wait } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { createGitHubConnection, createGitHubTransport, requireGitHubCapture } from 'ai-sdlc-framework/github';
+import { createGitHubConnection, createGitHubTransport, requireGitHubCapture,
+  resolveGitHubCredential } from 'ai-sdlc-framework/github';
+import { githubUrl } from '../src/github/connection.mjs';
 import { digest, requireThat, SdlcError } from '../src/core.mjs';
 import { validateDisposableProbeRequest, planDisposableStatusUpdate } from './pr-readiness.mjs';
 
@@ -42,25 +45,22 @@ export function createReadinessGitHubClient({
   'INPUT', 'Bind the observer to independently selected repository and writer identities');
   const [owner, name] = repository.split('/');
   const proofScope = `repository:${repositoryId}`;
-  const connection = createGitHubConnection({
+  const connect = origins => createGitHubConnection({
     id: 'repository-readiness', apiOrigin: 'https://api.github.com', webOrigin: 'https://github.com',
     scopes: [{ kind: 'repository', id: repositoryId, owner, name }],
     profiles: [
       { id: '2022-11-28', kind: 'rest', apiVersion: '2022-11-28' },
       { id: 'readiness-threads-v1', kind: 'graphql', schemaVersion: 'review-threads-v1' },
     ],
-    archiveOrigins,
+    archiveOrigins: origins,
     credentialResolver: () => ({
       apiOrigin: 'https://api.github.com', tokenClass: 'app-installation', token,
       generation, actorVisibility: `readiness-writer-${writerId}`, permissions,
     }),
   });
+  const connection = connect(archiveOrigins);
   const transport = createGitHubTransport({
     connection, fetch, maxResponseBytes: 8 * 1024 * 1024,
-    maxPages: 100, timeoutMs: 30000,
-  });
-  const archiveTransport = createGitHubTransport({
-    connection, fetch, maxResponseBytes: 128 * 1024 * 1024,
     maxPages: 100, timeoutMs: 30000,
   });
   const prefix = `/repos/${owner}/${name}`;
@@ -229,14 +229,98 @@ export function createReadinessGitHubClient({
       capability: 'Available' };
   }
   async function bytes(relative) {
-    const selected = archiveTransport.buildRestRequest({
-      method: 'GET', path: `${prefix}${relative}`, profile: '2022-11-28',
-      mediaType: 'application/vnd.github+json', expectedStatuses: [200],
-      proofScope, tokenClasses: ['app-installation'], responseType: 'bytes',
+    requireThat(typeof relative === 'string' &&
+      /^\/actions\/(?:jobs\/[1-9]\d*\/logs|artifacts\/[1-9]\d*\/zip)$/u.test(relative),
+    'SCOPE', 'Download only an exact selected repository job log or artifact ZIP');
+    const source = `${connection.apiOrigin}${prefix}${relative}`;
+    const controller = new AbortController();
+    let timer;
+    let response;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new SdlcError('TIMEOUT', 'GitHub download deadline expired'));
+      }, 30000);
     });
-    const capture = await archiveTransport.downloadArchive(selected);
-    requireGitHubCapture(capture, connection);
-    return Buffer.from(capture.body);
+    try {
+      const credential = await resolveGitHubCredential(connection, {
+        proofScope, tokenClasses: ['app-installation'], permissions: [],
+      }, controller.signal);
+      const acquire = async () => {
+        for (let retries = 0; ; retries++) {
+          try {
+            return await fetch(source, {
+              method: 'GET', headers: { accept: 'application/vnd.github+json',
+                authorization: `Bearer ${credential.token}`, 'x-github-api-version': '2022-11-28' },
+              redirect: 'manual', signal: controller.signal,
+            });
+          } catch (error) {
+            const own = (value, key) => value && typeof value === 'object' && !types.isProxy(value) ?
+              Object.getOwnPropertyDescriptor(value, key)?.value : undefined;
+            const code = own(error, 'code') ?? own(own(error, 'cause'), 'code');
+            const transient = ['ECONNRESET', 'EAI_AGAIN', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT',
+              'UND_ERR_SOCKET'].includes(code);
+            if (controller.signal.aborted) throw new SdlcError('TIMEOUT', 'GitHub download deadline expired');
+            if (!transient || retries === 2) throw new SdlcError('TRANSPORT', 'GitHub download acquisition failed',
+              transient ? { nativeFailure: { code, origin: connection.apiOrigin, originKind: 'api',
+                protocol: 'rest', method: 'GET', retries } } : undefined);
+            await wait(100 * (retries + 1), undefined, { signal: controller.signal });
+          }
+        }
+      };
+      response = await Promise.race([acquire().then(async acquired => {
+        if (controller.signal.aborted) {
+          await acquired.body?.cancel();
+          throw new SdlcError('TIMEOUT', 'GitHub download deadline expired');
+        }
+        return acquired;
+      }), timeout]);
+      requireThat(response && response.redirected !== true && (!response.url || response.url === source),
+        'REDIRECT', 'GitHub download must originate at the selected authenticated API endpoint');
+      const origins = [];
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        let target;
+        try { target = githubUrl(response.headers.get('location'), { allowSignedQuery: true }); }
+        catch { throw new SdlcError('REDIRECT', 'GitHub issued an unsafe download target'); }
+        requireThat(!target.href.includes(credential.token) &&
+          (target.origin === connection.apiOrigin ? target.href === source :
+            !target.port && (/^[a-z0-9]{3,24}\.blob\.core\.windows\.net$/u.test(target.hostname) ||
+              /^(?:[a-z0-9-]+\.)?actions\.githubusercontent\.com$/u.test(target.hostname))),
+        'REDIRECT', 'GitHub download target is outside its supported storage services');
+        if (target.origin !== connection.apiOrigin) origins.push(target.origin);
+      }
+      // GitHub's authenticated endpoint issues the exact storage capability. Admit
+      // it only for this download, then retain the SDK's redirect/body safeguards.
+      const downloadConnection = connect(origins);
+      const archiveTransport = createGitHubTransport({
+        connection: downloadConnection, maxResponseBytes: 128 * 1024 * 1024,
+        maxRedirects: 5, timeoutMs: 30000,
+        fetch: (url, options) => {
+          if (response !== undefined) {
+            requireThat(url === source, 'SCOPE', 'Bind the issued response to its exact API request');
+            const acquired = response;
+            response = undefined;
+            return acquired;
+          }
+          return fetch(url, options);
+        },
+      });
+      const selected = archiveTransport.buildRestRequest({
+        method: 'GET', path: `${prefix}${relative}`, profile: '2022-11-28',
+        mediaType: 'application/vnd.github+json', expectedStatuses: [200],
+        proofScope, tokenClasses: ['app-installation'], responseType: 'bytes',
+      });
+      const capture = await archiveTransport.downloadArchive(selected, { signal: controller.signal });
+      requireGitHubCapture(capture, downloadConnection);
+      return Buffer.from(capture.body);
+    } catch (error) {
+      if (controller.signal.aborted) throw new SdlcError('TIMEOUT', 'GitHub download deadline expired');
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      controller.abort();
+      try { await response?.body?.cancel(); } catch { /* The download is already aborted. */ }
+    }
   }
   async function artifact(metadata, options = {}) {
     requireThat(options && Object.getPrototypeOf(options) === Object.prototype &&
