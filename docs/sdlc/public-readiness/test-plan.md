@@ -1792,6 +1792,11 @@ and digest checks. Preserve qualification capsules, timings and original source
 identity; replay never supplies current-candidate execution credit. No new
 capability, shared resource or critical assertion is introduced.
 
+The existing PR-only T-PRD017 Intel replay roots also authenticate and restore
+the exact 95fd release-CI fixture before unchanged historical transformations.
+Current-only pagination regressions remain active in normal release-CI tests;
+historical hashes, source inventories and callback guards stay unchanged.
+
 ### 5.3 Release orchestration and published consumers
 
 | ID | Environment | Level | Checkpoint | Mode | Owner | Location | Requirements | Observe or assert | Implementation | Status | Evidence |
