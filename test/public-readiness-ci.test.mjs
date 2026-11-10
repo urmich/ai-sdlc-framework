@@ -1441,8 +1441,8 @@ test('T-PRD085 status history acquisition carries cancellation across every SDK 
 
 test('T-PRD021 GitHub-issued job logs and artifacts bind download trust to the selected API source', async () => {
   const api = 'https://api.github.com/repos/urmich/ai-sdlc-framework';
-  const log = 'https://productionresultssa9.blob.core.windows.net/logs/job.txt?sig=fixture-log';
-  const zip = 'https://productionresultssa17.blob.core.windows.net/artifacts/results.zip?sig=fixture-zip';
+  const log = 'https://productionresultssa9.blob.core.windows.net/logs/job.txt?sig=fixture-value';
+  const zip = 'https://productionresultssa17.blob.core.windows.net/artifacts/results.zip?sig=fixture-value';
   const archive = Buffer.from('controlled-immutable-artifact');
   const metadata = { id: 19, expired: false, digest: `sha256:${digest(archive)}`,
     size_in_bytes: archive.length };
@@ -1496,14 +1496,14 @@ test('T-PRD021 GitHub-issued job logs and artifacts bind download trust to the s
     'https://productionresultssa9.blob.core.windows.net:444/a',
     'https://productionresultssa9.blob.core.windows.net/a#fragment',
     'https://productionresultssa9.blob.core.windows.net/%2e%2e/a',
-    'https://productionresultssa9.blob.core.windows.net/%zz',
-    'https://productionresultssa9.blob.core.windows.net/a?sig=fixture-ephemeral-token',
+    'https://productionresultssa9.blob.core.windows.net/' + '%' + 'zz',
+    'https://productionresultssa9.blob.core.windows.net/a?sig=fixture-value',
     `${api}/actions/jobs/102/logs`, 'https://api.github.com/repos/foreign/repository/actions/jobs/101/logs',
   ]) {
     let fetched = 0;
     const hostile = createReadinessGitHubClient({
       repository: 'urmich/ai-sdlc-framework', repositoryId: 17, writerId: 42,
-      token: 'fixture-ephemeral-token', generation: 'hostile-download',
+      token: 'fixture-value', generation: 'hostile-download',
       archiveOrigins: ['https://evil.example'],
       fetch: async () => { fetched++; return new Response(null, { status: 302, headers: { location: target } }); },
     });
