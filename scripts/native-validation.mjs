@@ -3261,6 +3261,18 @@ export async function verifyNativeEvidence({ target, profile, candidateDir, evid
     artifacts: context.artifacts, diagnostics, sourceCommit: expectedSourceCommit };
 }
 
+export function createSupportedPreviousCommandRunner(runTool, environment) {
+  let commandSequence = 0;
+  return async (command, args, options = {}) => {
+    const result = await runTool({ name: `previous-current-${++commandSequence}`, command, args,
+      cwd: options.cwd, environment: options.env ?? environment,
+      input: options.input, windowsVerbatimArguments: options.windowsVerbatimArguments });
+    requireThat(result.complete && result.exitCode === 0, 'VALIDATION',
+      'Actual supported-previous lifecycle command did not complete successfully');
+    return result;
+  };
+}
+
 export async function runNativeValidation(options, { lifetime = { cleanupSafe: true, unsettledCommands: [] } } = {}) {
   const request = validateNativeRequest(options);
   const { target, profile, candidateDir, evidenceDir, buildCandidate, phase, component, shard } = request;
@@ -3534,17 +3546,10 @@ export async function runNativeValidation(options, { lifetime = { cleanupSafe: t
         directory: path.join(scratch, 'previous-release') });
       const lifecycleRoot = path.join(scratch, 'previous-current-lifecycle');
       await fs.mkdir(lifecycleRoot);
-      let commandSequence = 0;
       const lifecycle = await verifySupportedPreviousLifecycle({
         bundle: { context: candidate.context, identity: candidate.context.identity, descriptor: candidate.descriptor },
         downloaded: path.join(candidateDir, 'assets'), previous, root: lifecycleRoot,
-        environment, run: async (command, args, options = {}) => {
-          const result = await runTool({ name: `previous-current-${++commandSequence}`, command, args,
-            cwd: options.cwd, environment: options.env ?? environment });
-          requireThat(result.complete && result.exitCode === 0, 'VALIDATION',
-            'Actual supported-previous lifecycle command did not complete successfully');
-          return result;
-        },
+        environment, run: createSupportedPreviousCommandRunner(runTool, environment),
       });
       await writeJson(path.join(directory, 'native-previous-current.json'), {
         ...lifecycle, previousMetadata: { descriptor: previous.descriptor,

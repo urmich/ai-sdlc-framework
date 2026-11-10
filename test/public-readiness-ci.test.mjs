@@ -2387,8 +2387,10 @@ test('T-PRD020 actual CI schedules twenty-five producer parts behind both Intel 
       groups.filter(group => group.minimumSlots > capacity).map(group =>
         ({ root: group.name, minimumSlots: group.minimumSlots })))}`);
   let dispatched = 0;
+  const undersizedCapacity = Math.max(...groups.map(group => group.minimumSlots)) - 1;
   await assert.rejects(runValidationReadyPool(groups, {
-    concurrency: 5, capacity: 5, execute: async () => { dispatched++; return 'Passed'; },
+    concurrency: undersizedCapacity, capacity: undersizedCapacity,
+    execute: async () => { dispatched++; return 'Passed'; },
   }), { code: 'BUDGET' });
   assert.equal(dispatched, 0, 'An undersized whole-shard budget rejects before any group dispatch');
   const admitted = await runValidationReadyPool(groups, {

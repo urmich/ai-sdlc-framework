@@ -21,8 +21,26 @@ export const validationDeclarations = {
   }, {
     "root": "T-PRD018 validation output keeps opaque malformed and over-budget streams explicitly incomplete",
     "minimumSlots": 3
+  }, {
+    "root": "T-PRD018 validation commands deliver exact stdin without retaining its private contents",
+    "minimumSlots": 3
+  }, {
+    "root": "T-PRD018 Windows validation commands preserve explicitly quoted cmd arguments",
+    "minimumSlots": 4
   }],
   "applicability": [{
+    "names": ["T-PRD018 validation commands deliver exact stdin without retaining its private contents"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "native-release-command-contract",
+    "reason": "PR-only real owned Node child verifies string, Buffer and empty stdin, EOF, invalid input rejection and original input identity without recording private payloads; a process-local failed-stream fixture verifies input-error settlement without an OS child. Instrumentation is restored. Three reserved aggregate slots; independent root with no external or shared resources. No critical promotion.",
+    "prerequisites": ["Node and owned repository-local command/report fixtures"]
+  }, {
+    "names": ["T-PRD018 Windows validation commands preserve explicitly quoted cmd arguments"],
+    "platforms": ["windows-x64"],
+    "owner": "native-release-command-contract",
+    "reason": "PR-only real cmd/Node child verifies Windows verbatim argument forwarding through a path containing spaces. Worker, shell, child and possible owned termination controller share four slots. No installer, package manager, external or shared resource and no critical promotion.",
+    "prerequisites": ["Node, Windows cmd.exe and owned repository-local command/report fixtures"]
+  }, {
     "names": ["T-PRD013 measured GitHub process partitions preserve every original assertion and callback definition"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "native-regression-contract",
@@ -85,7 +103,7 @@ export const validationDeclarations = {
     "reason": "Capture peers must account for their own process trees: worker plus writer (two), real Node test coordinator plus isolated test child (three), or writer plus Windows termination controller (three).",
     "prerequisites": ["Node and the declared aggregate worker slots; owned repository-local process fixtures"]
   }],
-  "surfaces": [{"coverage": "direct", "paths": ["src/coverage.mjs", "scripts/validation-inventory.mjs", "scripts/validation-tools.mjs"]}],
+  "surfaces": [{"coverage": "direct", "paths": ["src/coverage.mjs", "scripts/validation-inventory.mjs", "scripts/validation-tools.mjs", "scripts/native-validation.mjs"]}],
   "projects": [{
     "root": "test/calculator",
     "files": ["test/calculator/test/calculator.test.js", "test/calculator/test/static-contract.test.js"],
@@ -133,6 +151,7 @@ import { createContext, runInContext } from 'node:vm';
 import { atomicWrite } from '../src/files.mjs';
 import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
 import { executeValidationCommand } from '../scripts/validation-tools.mjs';
+import { createSupportedPreviousCommandRunner } from '../scripts/native-validation.mjs';
 import { createPlan, parseOptions } from '../scripts/test-runner.mjs';
 import { runValidationReadyPool } from '../scripts/test-scheduling.mjs';
 import { enterTestBudget, stopTestAdmission } from '../scripts/test-budget.mjs';
@@ -1680,6 +1699,100 @@ if(failure)throw failure;
       if (failure) throw failure;
     }
   });
+
+test('T-PRD018 validation commands deliver exact stdin without retaining its private contents', async t => {
+  const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'command-input-'));
+  const lifetime = { cleanupSafe: true };
+  t.after(async () => {
+    assert.equal(lifetime.cleanupSafe, true, 'An unsettled child must retain its owned workspace');
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+  const source = path.join(directory, 'input.mjs');
+  await fs.writeFile(source, "import {createHash} from 'node:crypto';" +
+    "const chunks=[];for await(const chunk of process.stdin)chunks.push(chunk);" +
+    "const bytes=Buffer.concat(chunks);console.log(JSON.stringify({" +
+    "bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')}));");
+  const environment = { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' };
+  delete environment.NODE_TEST_CONTEXT;
+  delete environment.SDLC_TEST_REPORT_CONTEXT;
+  const run = createSupportedPreviousCommandRunner(options => executeValidationCommand({
+    outputDir: directory, signal: t.signal, lifetime, ...options,
+  }), environment);
+  for (const [index, input] of ['owned private hook payload\n', Buffer.from('owned buffer payload\n'), '', undefined].entries()) {
+    const name = `previous-current-${index + 1}`;
+    const report = await run(process.execPath, [source], { input });
+    const bytes = Buffer.from(input ?? '');
+    const original = { bytes: bytes.length, sha256: digest(bytes) };
+    assert.equal(report.complete, true, report.diagnostic);
+    assert.equal(report.exitCode, 0);
+    assert.deepEqual(JSON.parse(report.stdout), original, 'The child must receive every input byte followed by EOF');
+    assert.deepEqual(report.originalInput, input === undefined ? undefined : original);
+    const retained = await fs.readFile(path.join(directory, `${name}.json`), 'utf8');
+    const journal = await fs.readFile(path.join(directory, `${name}.journal.ndjson`), 'utf8');
+    assert.deepEqual(JSON.parse(retained), report);
+    if (bytes.length) {
+      assert.ok(!retained.includes(bytes.toString().trim()));
+      assert.ok(!journal.includes(bytes.toString().trim()));
+    }
+  }
+  for (const input of [null, 1, {}]) {
+    await assert.rejects(executeValidationCommand({ name: 'invalid-input', command: process.execPath,
+      args: [source], input, outputDir: directory, environment, signal: t.signal, lifetime }));
+    await assert.rejects(fs.access(path.join(directory, 'invalid-input.json')), { code: 'ENOENT' });
+  }
+  const child = new EventEmitter();
+  Object.assign(child, { stdin: new PassThrough(), stdout: new PassThrough(),
+    stderr: new PassThrough(), exitCode: null, signalCode: null });
+  child.stdin._write = (_chunk, _encoding, callback) => {
+    callback(Object.assign(new Error('Injected owned input stream failure'), { code: 'EPIPE' }));
+    queueMicrotask(() => {
+      child.stdout.end();
+      child.stderr.end();
+      child.exitCode = 1;
+      child.emit('close', 1, null);
+    });
+  };
+  const originalSpawn = childProcess.spawn;
+  let rejected;
+  try {
+    childProcess.spawn = () => child;
+    syncBuiltinESMExports();
+    rejected = await executeValidationCommand({ name: 'closed-input', command: process.execPath,
+      args: [source], input: 'owned input', outputDir: directory, environment, signal: t.signal, lifetime });
+  } finally {
+    childProcess.spawn = originalSpawn;
+    syncBuiltinESMExports();
+  }
+  assert.equal(rejected.complete, false);
+  assert.ok(rejected.causes.some(cause => cause.type === 'input' && cause.code === 'EPIPE'));
+  assert.equal(rejected.pid, null, 'The failed-stream fixture must not claim an OS child or tree cleanup');
+  assert.equal(rejected.cleanup.requested, false);
+});
+
+test('T-PRD018 Windows validation commands preserve explicitly quoted cmd arguments',
+  { skip: process.platform !== 'win32' }, async t => {
+  const directory = await fs.mkdtemp(path.join(process.cwd(), '.test-data', 'command quoted arguments-'));
+  const lifetime = { cleanupSafe: true };
+  t.after(async () => {
+    assert.equal(lifetime.cleanupSafe, true, 'An unsettled child must retain its owned workspace');
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+  const source = path.join(directory, 'arguments.mjs');
+  await fs.writeFile(source, 'console.log(JSON.stringify(process.argv.slice(2)));');
+  const expected = ['owned argument with spaces', path.join(directory, 'uncreated target')];
+  const invocation = [process.execPath, source, ...expected].map(value => `"${value}"`).join(' ');
+  const environment = { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' };
+  delete environment.NODE_TEST_CONTEXT;
+  delete environment.SDLC_TEST_REPORT_CONTEXT;
+  const run = createSupportedPreviousCommandRunner(options => executeValidationCommand({
+    outputDir: directory, signal: t.signal, lifetime, ...options,
+  }), environment);
+  const report = await run('cmd.exe', ['/d', '/s', '/c', `"${invocation}"`],
+    { windowsVerbatimArguments: true });
+  assert.equal(report.complete, true, report.diagnostic);
+  assert.equal(report.exitCode, 0, report.stderr);
+  assert.deepEqual(JSON.parse(report.stdout), expected);
+});
 
 test('T-PRD018 command checkpoint capacity retains safe original streams without manufacturing completion',
   { timeout: 30000 }, async t => {

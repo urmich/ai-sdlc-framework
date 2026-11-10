@@ -560,11 +560,15 @@ export function createOwnedCommandRunner({ lifetime }) {
 
 export async function executeValidationCommand({
   name, command, args, cwd = root, environment = process.env, outputDir, signal, lifetime, requireSettlement = false,
+  input, windowsVerbatimArguments = false,
 }) {
   if (!/^[a-z][a-z0-9-]{0,79}$/u.test(name) || typeof command !== 'string' ||
-      !Array.isArray(args) || !args.every(value => typeof value === 'string')) {
+      !Array.isArray(args) || !args.every(value => typeof value === 'string') ||
+      input !== undefined && typeof input !== 'string' && !Buffer.isBuffer(input) ||
+      typeof windowsVerbatimArguments !== 'boolean') {
     throw new Error('A validation process needs an explicit name, executable and argument array.');
   }
+  const inputBytes = input === undefined ? null : Buffer.from(input);
   const evidenceRoot = await realpath(path.join(root, '.test-data'));
   const destination = await realpath(outputDir);
   const relative = path.relative(evidenceRoot, destination);
@@ -591,6 +595,8 @@ export async function executeValidationCommand({
     let persistenceError;
     let interrupted = signal?.aborted === true;
     let outputError;
+    let inputError;
+    let inputWritten = Promise.resolve();
     let cleanupError;
     let childClosed;
     let stopping;
@@ -619,7 +625,7 @@ export async function executeValidationCommand({
         ]));
         const causes = [
           ...(interrupted ? [{ type: 'cancellation', code: 'CANCELLED', message: 'Validation process was cancelled.' }] : []),
-          ...[[outputError, 'output'], [cleanupError, 'cleanup'], [persistenceError, 'persistence']]
+          ...[[outputError, 'output'], [inputError, 'input'], [cleanupError, 'cleanup'], [persistenceError, 'persistence']]
             .filter(([value]) => value).map(([value, type]) => ({ type, ...processDiagnostic(value) })),
         ];
         try {
@@ -633,6 +639,7 @@ export async function executeValidationCommand({
           childClosed.then(() => { clearTimeout(timer); resolve(); });
         });
       }).finally(() => {
+        child.stdin?.destroy();
         child.stdout.destroy();
         child.stderr.destroy();
         if (!cleanup.survivorsVerified) child.unref?.();
@@ -663,6 +670,8 @@ export async function executeValidationCommand({
       node: process.version, platform: process.platform, architecture: process.arch,
       context: environment.SDLC_TEST_REPORT_CONTEXT ?
         JSON.parse(environment.SDLC_TEST_REPORT_CONTEXT) : null,
+      ...(inputBytes === null ? {} : { originalInput: { sha256: digest(inputBytes), bytes: inputBytes.length } }),
+      ...(windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
       stdout: '', stderr: '', exitCode: null, signal: null, diagnostic: null,
       pid: null, cleanup, causes: [],
     };
@@ -732,7 +741,9 @@ export async function executeValidationCommand({
       }, 1000);
       progressTimer.unref();
     };
-    retain('command-start', { command: actualCommand, cwd, context: report.context });
+    retain('command-start', { command: actualCommand, cwd, context: report.context,
+      ...(report.originalInput ? { originalInput: report.originalInput } : {}),
+      ...(windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}) });
     const rejectOutput = (channel, error, original) => {
       const failure = processDiagnostic(error);
       outputError ??= Object.assign(new Error(`Validation ${channel} could not be safely retained (${failure.code}).`),
@@ -794,7 +805,8 @@ export async function executeValidationCommand({
       else {
         try {
           child = spawn(command, args, { cwd, env: environment, shell: false,
-            detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+            detached: process.platform !== 'win32', windowsVerbatimArguments,
+            stdio: [inputBytes === null ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
         } catch (error) { outcome = { code: null, signal: null, error }; }
         if (child) {
           report.pid = child.pid ?? null;
@@ -811,6 +823,16 @@ export async function executeValidationCommand({
             child[channel].on('data', bytes => consume(channel, bytes));
             child[channel].once('error', error => { outputError ??= error; stop(); });
           }
+          if (inputBytes !== null) {
+            const failedInput = error => {
+              inputError ??= error;
+              if (!childDidClose) stop();
+            };
+            child.stdin.on('error', failedInput);
+            inputWritten = finished(child.stdin, { readable: false, cleanup: true }).catch(failedInput);
+            try { child.stdin.end(inputBytes); }
+            catch (error) { failedInput(error); }
+          }
           try { retain('command-dispatched', { pid: report.pid }); }
           catch (error) { persistenceError ??= error; stop(); }
           await requestCheckpoint('running', { force: true });
@@ -822,6 +844,7 @@ export async function executeValidationCommand({
     }
     if (child && requireSettlement) stop();
     if (stopping) await stopping;
+    await inputWritten;
     for (const [channel, state] of streams) {
       try {
         let tail;
@@ -852,7 +875,8 @@ export async function executeValidationCommand({
       interrupted ||= signal?.aborted === true;
       report.causes = [
         ...(interrupted ? [{ type: 'cancellation', code: 'CANCELLED', message: 'Validation process was cancelled.' }] : []),
-        ...[[outputError, 'output'], [outcome.error, 'process'], [cleanupError, 'cleanup'], [persistenceError, 'persistence']]
+        ...[[outputError, 'output'], [inputError, 'input'], [outcome.error, 'process'],
+          [cleanupError, 'cleanup'], [persistenceError, 'persistence']]
           .filter(([error]) => error).map(([error, type]) => ({ type, ...processDiagnostic(error) })),
       ];
       if (!report.causes.length && outcome.code === null) report.causes.push({
