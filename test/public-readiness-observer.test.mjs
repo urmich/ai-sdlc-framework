@@ -13,6 +13,17 @@ export const validationDeclarations = {
   }],
   "applicability": [{
     "names": [
+      "T-PRD016 API-only twenty-five-part admission restores both Intel unit origins and thirteen guarded cleanups",
+      "T-PRD021 helper-only and core-pin-only producer changes require adoption before native evidence acquisition",
+      "T-PRD021 API-acquired reporter changes cannot self-adopt complete passing fixture evidence",
+      "T-PRD021 API-acquired required assertions cannot self-adopt complete passing fixture evidence"
+    ],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "maintainer",
+    "reason": "PR-only GitHub-current-head approval regressions for AC-205.4. Changed definitions without external maintainer approval cannot acquire passing native evidence; approved helper changes still require complete source-bound originals. Existing independent roots retain owned fixtures and process isolation, without new declared assertions or critical promotion.",
+    "prerequisites": ["Node and repository-local owned fixtures"]
+  }, {
+    "names": [
       "T-PRD020 RC66 CI01 platform timing limits preserve inclusive strict and invalid boundaries",
       "T-PRD020 RC66 CI01 current observer defers timing gates but still requires owned cleanup"
     ],
@@ -501,9 +512,10 @@ test('T-PRD016 API-only twenty-five-part admission restores both Intel unit orig
     const unadopted = await observerApiFixture(t, {
       frameworkShards: true, nodeArtifactReader: true, ambient: false, ...options,
     });
+    unadopted.members.get(1).reviews.length = 0;
     const rejected = verdict(await unadopted.connect().host.snapshot());
     assert.equal(rejected.status, 'NotRun', JSON.stringify(options));
-    assert.ok(rejected.blockers.includes('Producer definitions have not been maintainer-adopted'));
+    assert.ok(rejected.blockers.includes('Changed producer definitions require current GitHub maintainer approval'));
     assert.ok(!unadopted.calls.some(call =>
       /\/actions\/artifacts\/\d+\/zip$/u.test(new URL(call.url).pathname)));
     unadopted.assertReadOnly();
@@ -999,9 +1011,13 @@ test('T-PRD021 helper-only and core-pin-only producer changes require adoption b
     assert.deepEqual(f.changedFiles, [file], 'The counterexample changes only the selected producer dependency');
     assert.equal(f.source.inventory.digest, baseline.source.inventory.digest);
     assert.equal(nativeConfigurationDigest({ inventory: f.source.inventory, profile: 'pr' }), config);
+    assert.equal(verdict(await f.connect().host.snapshot()).status, 'Passed',
+      'Current-head maintainer approval permits a changed helper with complete exact-source native evidence');
+    f.calls.length = 0;
+    f.members.get(1).reviews.length = 0;
     const result = verdict(await f.connect().host.snapshot());
     assert.equal(result.status, 'NotRun', producerChange);
-    assert.ok(result.blockers.some(message => message.includes('Producer definitions have not been maintainer-adopted')));
+    assert.ok(result.blockers.includes('Changed producer definitions require current GitHub maintainer approval'));
     assert.ok(!f.calls.some(call => /\/actions\/artifacts\/\d+\/zip$/u.test(new URL(call.url).pathname)));
     f.assertReadOnly();
   }
@@ -1010,18 +1026,20 @@ test('T-PRD021 helper-only and core-pin-only producer changes require adoption b
 
 test('T-PRD021 API-acquired reporter changes cannot self-adopt complete passing fixture evidence', async t => {
   const f = await observerApiFixture(t, { unadoptedReporter: true });
+  f.members.get(1).reviews.length = 0;
   const result = verdict(await f.connect().host.snapshot());
   assert.equal(result.status, 'NotRun');
-  assert.ok(result.blockers.some(message => message.includes('Producer definitions have not been maintainer-adopted')));
+  assert.ok(result.blockers.includes('Changed producer definitions require current GitHub maintainer approval'));
   assert.ok(!f.calls.some(call => /\/actions\/artifacts\/\d+\/zip$/u.test(new URL(call.url).pathname)));
   f.assertReadOnly();
 });
 
 test('T-PRD021 API-acquired required assertions cannot self-adopt complete passing fixture evidence', async t => {
   const f = await observerApiFixture(t, { unadoptedAssertion: true });
+  f.members.get(1).reviews.length = 0;
   const result = verdict(await f.connect().host.snapshot());
   assert.equal(result.status, 'NotRun');
-  assert.ok(result.blockers.some(message => message.includes('Assertion definitions or required bindings')));
+  assert.ok(result.blockers.includes('Changed producer definitions require current GitHub maintainer approval'));
   assert.ok(!f.calls.some(call => /\/actions\/artifacts\/\d+\/zip$/u.test(new URL(call.url).pathname)));
   f.assertReadOnly();
 });

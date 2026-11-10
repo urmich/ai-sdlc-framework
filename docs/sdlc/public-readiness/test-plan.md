@@ -2360,6 +2360,13 @@ These cases use injected GitHub responses and owned source data in one isolated
 root, with no external capability, new descendants or critical-budget growth.
 Current-candidate local, Review and hosted statuses require their own completed
 results; this procedure does not transfer historical acceptance.
+The existing API-observer helper, reporter and assertion negative cases must
+explicitly remove the external proposal's maintainer approval: an already
+approved fixture cannot represent an unreviewed definition change. Preserve
+their no-artifact-acquisition rejection checks and exercise approved helper-only
+changes with complete exact-source native originals. These remain existing
+PR-only roots, with no critical-budget growth. Include the complete observer
+test file in the affected local checkpoint for this trust-boundary change.
 The PR-only T-PRD021 GitHub-issued download-origin regression additionally
 exercises a previously unconfigured valid GitHub storage account through the
 real readiness client with an injected fetch. Reject unselected API paths,
