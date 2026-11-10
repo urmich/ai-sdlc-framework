@@ -4242,12 +4242,12 @@ async function qualifiedIntelSourceFixture(protocol) {
   return { inventory, plan, assignment, protocol, revision: snapshot.revision };
 }
 
-function preWorkerAdmissionReadinessRunnerSource(contents) {
+function preScenarioReadinessRunnerSource(contents) {
   assert.equal(createHash('sha256').update(contents).digest('hex'),
-    'a06fdb127100b653f1cdcd44436ec94a46cbeb7c40b7ac44a994116b78b0410e',
-    'Replay requires the exact worker-admission fixture source');
+    'ab0d0b45b894e3fc219516dd2d2226162237d429524f238e4eec19f6e8870391',
+    'Replay requires the exact scenario-owned readiness fixture source');
   const lines = contents.split(/(?<=\n)/u);
-  const splices = [[0,2090],"async function captureOwnedReady(labels, entered, capture, { exclusive = false, signal } = {}) {\n",[2091,1],"    const deadline = Date.now() + 10000;\n",[2094,2],[2097,2],[2108,1],[2115,3],"      assert.ok(Date.now() < deadline, `Owned worker never reached its identity barrier: ${pending.join(', ')}`);\n",[2121,21],"  for (const mode of ['ready', 'never-ready', 'capture-error', 'producer-error']) {\n",[2144,1],"    if (mode === 'ready') {\n",[2146,2],"      assert.equal(result.clock, 13030);\n",[2159,17],[2177,2],"    const right = path.basename(file) === 'exclusive right.ready';\n    const ready = right ? clock >= 9000 :\n      releaseAt !== null && clock >= releaseAt + 30 && mode !== 'never-ready';\n",[2187,1],"    return JSON.stringify({ pid: right ? 2 : 1, observedAtMs: clock });\n",[2189,13],"  }, { exclusive: true, signal: controller.signal }).then(() => { result = { status: 'Passed' }; },\n",[2203,1],"  for (let step = 0; !result && step < 4000; step++) {\n",[2205,292],[2500,31],"        await captureOwnedReady([waiting, short], entered, captureIdentity, { signal: readiness.signal });\n",[2532,3],"        await captureOwnedReady([peer], entered, captureIdentity, { signal: readiness.signal });\n",[2536,5],"        }, { exclusive, signal: readiness.signal });\n",[2542,881]];
+  const splices = [[0,2092],"    const deadline = Date.now() + 10000;\n",[2092,1],"      signal?.throwIfAborted();\n",[2094,6],"      assert.ok(Date.now() < deadline, `Owned worker never reached its identity barrier: ${pending.join(', ')}`);\n",[2100,21],"  for (const mode of ['ready', 'never-ready', 'capture-error', 'producer-error']) {\n",[2123,1],"    if (mode === 'ready') {\n",[2125,2],"      assert.equal(result.clock, 13030);\n",[2133,2],"      assert.match(result.message, /identity barrier: exclusive left/u);\n      assert.equal(result.clock, 23000);\n",[2138,16],"    const ready = right ? clock >= 9000 :\n      releaseAt !== null && clock >= releaseAt + 30 && mode !== 'never-ready';\n",[2157,1],"    return JSON.stringify({ pid: right ? 2 : 1, observedAtMs: clock });\n",[2159,15],"  for (let step = 0; !result && step < 4000; step++) {\n",[2178,8],"  assert.ok(result, 'Controlled readiness must settle within its unchanged allowances');\n",[2187,20],[2208,45],[2256,66],"    budget: { environment: {} }, t: { diagnostic: value => diagnostics.push(JSON.parse(value)) },\n",[2324,121],[2447,42],[2495,107],"      await capture;\n      await releaseAll();\n      await Promise.allSettled(producers);\n      await Promise.all([...monitors.values()].map(monitor => monitor.release()));\n",[2610,62],[2674,738]];
   const restored = splices.map(part => typeof part === 'string' ? part :
     lines.slice(part[0], part[0] + part[1]).join('')).join('');
   assert.equal(createHash('sha256').update(restored).digest('hex'),
@@ -4257,7 +4257,7 @@ function preWorkerAdmissionReadinessRunnerSource(contents) {
 }
 
 function preCaptureFailureReadinessRunnerSource(contents) {
-  contents = preWorkerAdmissionReadinessRunnerSource(contents);
+  contents = preScenarioReadinessRunnerSource(contents);
   contents = contents.replace("    'test-local-evidence.mjs', 'validation-tools.mjs'].map(file =>",
     "    'test-local-evidence.mjs'].map(file =>");
   // Restore authentic 0b3d Git blob 1ec2a0da7ff42ba2ac898d2aaa1a79077205be65 before unchanged admission replay.
