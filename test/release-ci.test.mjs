@@ -19,7 +19,7 @@ export const validationDeclarations = {
       "T-PRD028 historical completion CLI accepts all SHA256 pin names without weakening independent input checks"
     ], "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer",
       "reason": "PR-only FR-206 shared release argument regressions; independent roots exercise the public parser and actual retention CLI, with missing owned paths or invalid pins stopping before verifier/provider access. No shared fixture, mutable environment, resource dependency or critical promotion.",
-      "prerequisites": ["Node >=22", "Owned absent repository-local paths; no npm, credentials, network or cryptographic verifier"]},
+      "prerequisites": ["Node >=22", "Owned absent repository-local paths; no external services or tool provisioning"]},
     {"names": [
       "T-PRD028 preflight rejects wrong source, destination, settings and trust before any publication mutation",
       "T-PRD028 preflight relies on GitHub authorization without administration policy reads",
