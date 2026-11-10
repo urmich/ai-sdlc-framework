@@ -4237,6 +4237,27 @@ async function qualifiedIntelSourceFixture(protocol) {
 }
 
 function historicalTestRunnerSource(contents) {
+  // Restore genuine N blob 9e0e365e2b7b0ec54d88cd507ae1cf373cb26c3e
+  // before the unchanged N-to-K restoration and archival capsule splices.
+  assert.equal(createHash('sha256').update(contents).digest('hex'),
+    '302c27cf6b704bc19d9b4232d715cfb71403bf8ceed5538e2a84ac5d3137ab54',
+    'Replay requires the exact cold-start Windows fixture test source');
+  contents = contents.replace(
+    "  for (const [startupMs, completion] of [\n" +
+    "    [29990, 'identity'], [4990, 'identity'], [4990, 'closed'], [29990, 'closed'],\n  ]) {\n",
+    "  for (const completion of ['identity', 'closed']) {\n")
+    .replace('    f.advance(startupMs);\n', '    f.advance(4990);\n')
+    .replace("        'Cold startup within its preparation window must not consume the actual identity observation window');\n",
+      "        'Startup must not consume the actual identity observation window');\n")
+    .replace('[[0, 30000], [startupMs, 5000]]', '[[0, 5000], [4990, 5000]]')
+    .replace("      f.advance(mode === 'startup-deadline' ? 30000 : 5000);\n", '      f.advance(5000);\n')
+    .replace('    assert.equal(f.windows[0].milliseconds, 30000);\n',
+      '    assert.equal(f.windows[0].milliseconds, 5000);\n')
+    .replace("    else f.advance(mode === 'not-started' ? 30000 : 5000);\n", '    else f.advance(5000);\n')
+    .replace("test('T-PRD018 unsafe failure diagnostics terminate without hanging or manufacturing complete evidence',\n" +
+      '  { timeout: 120000 }, async t => {\n',
+      "test('T-PRD018 unsafe failure diagnostics terminate without hanging or manufacturing complete evidence',\n" +
+      '  { timeout: 30000 }, async t => {\n');
   // Restore genuine K blob 3e285125ebbad226d75fe0228f0ef9c946ba40df before
   // the unchanged capsules' splices; current phase/closure regressions remain current-only.
   assert.equal(createHash('sha256').update(contents).digest('hex'),
