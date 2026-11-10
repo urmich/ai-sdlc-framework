@@ -140,8 +140,14 @@ packages. Protected repository configuration uses:
 | Variable | Prerequisite |
 | --- | --- |
 | `READINESS_STATUS_CREATOR_ID` | Actual independently verified expected status-writer identity, not a guessed account/App ID. |
-| `READINESS_PRODUCER_REVISION` | Optional explicit adopted producer SHA; otherwise the reviewed current default-branch source is selected. |
-| `READINESS_ARTIFACT_ORIGINS` | Explicitly approved exact HTTPS artifact/log service origins for SDK redirects; no wildcard or guessed-origin allowance is implied. |
+| `READINESS_ARTIFACT_ORIGINS` | Optional additional approved exact HTTPS origins; selected authenticated GitHub download responses authorize their own bounded, credential-free storage hop. No wildcard or guessed-origin allowance is implied. |
+
+The observer executes protected-main code and adopts changed producer
+definitions through the existing current-head GitHub maintainer approval or
+owner-authored policy, not recurring `READINESS_PRODUCER_REVISION` updates.
+Unapproved external changes cannot self-adopt; complete exact-source native
+results and immutable archive verification remain independently required.
+New GitHub download storage accounts need no standing origin-variable update.
 
 Missing capabilities fail explicitly. These are deployment prerequisites, not
 claims that variables, required status-source associations or merge enforcement
