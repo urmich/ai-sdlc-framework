@@ -286,6 +286,14 @@ Full streams retain only those identities. Revalidate bounded primary messages
 after truncation so a cut JSON value cannot invalidate the complete diagnostic;
 an unretainable message keeps its original identity and an explicit safe fallback.
 Diagnostic recovery cannot change cancellation, cleanup or passing conditions.
+Native v9/v10 phase fixtures likewise bind readiness to actual producer outcome
+and owning-scenario cancellation, without separate readiness/release clocks.
+Cleanup closes successor admission and cooperatively releases the exact owned
+child before checking unchanged exit/survivor predicates; original body errors
+and incomplete-cleanup diagnostics remain distinct. PR-only, process-isolated
+two-slot roots cover delayed readiness, premature completion/failure, cancellation
+and dual errors. Both historical paths restore genuine F993 source before their
+unchanged authentic capsules. The original hosted failing mode remains unknown.
 The cancelled-local-critical root records its exact owned leaf ChildProcess
 spawn/exit/close events and controller-close boundary in bounded scalar diagnostics.
 Retain these even when its unchanged immediate ESRCH assertion fails; observation
