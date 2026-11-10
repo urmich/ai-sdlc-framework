@@ -4054,6 +4054,7 @@ async function qualifiedIntelSourceFiles() {
     }
     if (file === 'test/public-readiness-ci.test.mjs') contents = historicalReadinessCiSource(contents);
     if (file === 'test/release-ci.test.mjs') contents = historicalReleaseCiSource(contents);
+    if (file === 'test/test-runner.test.mjs') contents = historicalTestRunnerSource(contents);
     if (file === 'test/github-transport.unit.test.mjs') {
       const recovery = contents.indexOf('    "names": [\n      "T-PRD037 classified transient REST');
       const separator = '  }, {\n';
@@ -4141,6 +4142,7 @@ async function qualifiedIntelSourceFixture(protocol) {
     }
     if (file === 'test/public-readiness-ci.test.mjs') contents = historicalReadinessCiSource(contents);
     if (file === 'test/release-ci.test.mjs') contents = historicalReleaseCiSource(contents);
+    if (file === 'test/test-runner.test.mjs') contents = historicalTestRunnerSource(contents);
     if (file === 'test/github-transport.unit.test.mjs') {
       const recovery = contents.indexOf('    "names": [\n      "T-PRD037 classified transient REST');
       const separator = '  }, {\n';
@@ -4182,6 +4184,7 @@ async function qualifiedIntelSourceFixture(protocol) {
     }
     if (file === 'test/public-readiness-native.test.mjs') {
       contents = contents.replaceAll("    if (file === 'test/monitors.test.mjs') contents = historicalMonitorSource(contents);\n", '')
+        .replaceAll("    if (file === 'test/test-runner.test.mjs') contents = historicalTestRunnerSource(contents);\n", '')
         .replaceAll("    if (file === 'test/macos-runner-admission.unit.test.mjs')\n" +
           "      contents = contents.replace('    pending.options.signal = controller.signal;\\n',\n" +
           "        '    pending.options.signal = controller.signal;\\n    pending.options.now = () => performance.now();\\n');\n", '')
@@ -4233,7 +4236,63 @@ async function qualifiedIntelSourceFixture(protocol) {
   return { inventory, plan, assignment, protocol, revision: snapshot.revision };
 }
 
+function historicalTestRunnerSource(contents) {
+  // Restore genuine K blob 3e285125ebbad226d75fe0228f0ef9c946ba40df before
+  // the unchanged capsules' splices; current phase/closure regressions remain current-only.
+  assert.equal(createHash('sha256').update(contents).digest('hex'),
+    '413bbf86bf9be7bb62e9c94cee91f0f336d7c676d4d3ac2e559da97544db2434',
+    'Replay requires the exact adopted Windows fixture test source');
+  const lines = contents.split(/(?<=\n)/u);
+  const splices = [
+    [0,48],
+    "    \"reason\": \"PR-only controlled observer-stream regression; process-isolated module context, no native child or shared mutable state.\",\n",
+    [49,363],
+    "  for (const mode of ['not-started', 'started', 'exited', 'buffered-identity', 'closed',\n    'signaled', 'negative-exit', 'unknown-signal', 'spawn-error', 'oversized', 'invalid-record']) {\n",
+    [413,1],
+    [415,2],
+    "    let expire;\n    let allowance;\n    let executable;\n    const context = createContext({ assert, path, fs,\n",
+    [452,1],
+    "      spawn: command => { executable = command; return child; },\n      setTimeout(callback, milliseconds) { expire = callback; allowance = milliseconds; return 1; },\n      clearTimeout() {} });\n",
+    [466,1],
+    "    const pending = capture(process.pid, 'owned-unused-exit', { createdBeforeMs: Date.now() });\n    const outcome = pending.then(value => ({ value }), error => ({ message: error.message }));\n    assert.equal(executable, path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'));\n    assert.equal(allowance, 5000);\n",
+    [587,2],
+    "    if (!['not-started', 'spawn-error'].includes(mode)) {\n",
+    [590,3],
+    "    if (['exited', 'buffered-identity', 'closed'].includes(mode)) child.emit('exit', 7, null);\n    if (mode === 'signaled') child.emit('exit', null, 'SIGTERM');\n    if (mode === 'negative-exit') child.emit('exit', -1073741510, null);\n    if (mode === 'unknown-signal') child.emit('exit', null, `SIG${secret}`);\n",
+    [597,3],
+    "      child.emit('close', 7, null);\n",
+    [601,5],
+    "    if (mode === 'closed') child.emit('close', 7, null);\n    else if (mode === 'spawn-error') child.emit('error', new Error(secret));\n",
+    [612,2],
+    "    else expire();\n",
+    [621,4],
+    "    assert.ok(message.includes(`startup=${!['not-started', 'spawn-error'].includes(mode)}`), mode);\n",
+    [626,7],
+    [634,1189],
+  ];
+  const restored = splices.map(part => typeof part === 'string' ? part :
+    lines.slice(part[0], part[0] + part[1]).join('')).join('');
+  assert.equal(createHash('sha256').update(restored).digest('hex'),
+    '75cda5b6df7188851988fa566ed1691875e3786f2f7d6416ef891d0aa319b275',
+    'Replay must restore the exact test runner source preceding the Windows fixture correction');
+  return restored;
+}
+
 function historicalReleaseCiSource(contents) {
+  const classification = contents.indexOf('    {"names": [\n' +
+    '      "T-PRD028 release CLI digest option names preserve pairing and duplicate rejection",\n');
+  const classificationEnd = contents.indexOf('    {"names": [\n' +
+    '      "T-PRD028 preflight rejects wrong source, destination, settings and trust before any publication mutation",\n',
+  classification);
+  assert.ok(classification >= 0 && classificationEnd > classification);
+  contents = contents.slice(0, classification) + contents.slice(classificationEnd);
+  const roots = contents.indexOf("test('T-PRD028 release CLI digest option names preserve pairing and duplicate rejection',");
+  const rootsEnd = contents.indexOf("test('release preparation cannot attribute candidate bytes to a different source commit',", roots);
+  assert.ok(roots > 0 && rootsEnd > roots);
+  contents = contents.slice(0, roots) + contents.slice(rootsEnd);
+  assert.equal(createHash('sha256').update(contents).digest('hex'),
+    'fc57591cfd218eb6eef727e7368dfda70d4415034dc908a01248a1375565e9a1',
+    'Restore genuine accepted-main release CI bytes before the current-only numeric CLI regressions');
   // Restore genuine Git blob b97af9ed61c68d8dc5e7ff168e5e384538296023 before
   // the unchanged capsules' splices; obsolete release audits remain historical-only.
   const lines = contents.split(/(?<=\n)/u);

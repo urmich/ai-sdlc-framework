@@ -1315,14 +1315,21 @@ guard keeps the original permission error; no wait or retry allowance grows.
 The unsafe-diagnostic worker-exit fixture reserves four existing aggregate
 worker slots before its timed callback: the orchestrator, nested runner, held
 worker and Windows process observer need admission together. This does not
-increase a host budget or extend the five-second identity capture or
-thirty-second case deadline. Keep the real held process handle, creation-time
+increase a host budget or extend the thirty-second case deadline. Keep the real held process handle, creation-time
 bound, release barrier and independently observed exit.
 Use the same held .NET process object directly and write closed scalar JSON
 records to the observer's stdout and owned exit file. Validate the image's
 existing ASCII identifier contract before encoding it. Avoid `Get-Process` and
-`ConvertTo-Json` module autoload in each observer; all process startup and
-identity capture still occur within the original five-second budget. Keep
+`ConvertTo-Json` module autoload in each observer. The test-only observer bounds
+startup to five seconds; its exact first startup marker starts one fresh
+five-second identity window, so startup cannot consume the identity allowance.
+Missing or duplicate markers, invalid records and either expired phase fail
+without deadline renewal. Failed capture releases retained ownership where
+applicable, stops only its exact spawned observer when needed and requires
+bounded affirmative close; unconfirmed cleanup remains a failure. Deterministic
+clock/child-event regression and real Windows negative-creation and retained-
+handle probes cover this fixture contract. Production Windows five-second and
+POSIX one-second settlement deadlines remain unchanged. Keep
 creation and exit ticks, immediate identity output, the fifteen-second exit
 wait, guarded termination and disposal unchanged.
 The measured GitHub partition guard retains its original 143-assertion
@@ -3004,6 +3011,12 @@ maintainer `workflow_dispatch`, not arbitrary PR/merge/tag auto-publication.
 Require explicit exact source SHA, version, destination and release intent.
 Source must be the accepted protected-main candidate selected by that invocation;
 workflow SHA and package version must agree.
+
+Shared release CLI names use lowercase kebab segments beginning with a letter
+and containing letters or digits, including the actual `sha256` pin names.
+Parsing still requires option/value pairs and rejects duplicate mapped names;
+command selection and independent source, digest and trust validation remain
+separate and unchanged.
 
 Before building or writing tags/assets, verify source/ref/version consistency,
 required source checks, destination, tool pins, artifact

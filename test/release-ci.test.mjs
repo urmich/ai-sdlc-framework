@@ -14,6 +14,13 @@ export const validationDeclarations = {
   ],
   "applicability": [
     {"names": [
+      "T-PRD028 release CLI digest option names preserve pairing and duplicate rejection",
+      "T-PRD028 retain-trust CLI accepts SHA256 pins and rejects malformed digest values before verification",
+      "T-PRD028 historical completion CLI accepts all SHA256 pin names without weakening independent input checks"
+    ], "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer",
+      "reason": "PR-only FR-206 shared release argument regressions; independent roots exercise the public parser and actual retention CLI, with missing owned paths or invalid pins stopping before verifier/provider access. No shared fixture, mutable environment, resource dependency or critical promotion.",
+      "prerequisites": ["Node >=22", "Owned absent repository-local paths; no external services or tool provisioning"]},
+    {"names": [
       "T-PRD028 preflight rejects wrong source, destination, settings and trust before any publication mutation",
       "T-PRD028 preflight relies on GitHub authorization without administration policy reads",
       "T-PRD028 preflight rejects unavailable protected-main and source facts without publication",
@@ -385,6 +392,79 @@ test('T-PRD057 two archive targets retain four mandatory native execution platfo
   assert.deepEqual(options(['--candidate-dir', 'with spaces', '--target', 'macos-arm64']),
     { candidateDir: 'with spaces', target: 'macos-arm64' });
   assert.throws(() => options(['--target', 'x', '--target', 'y']), /Duplicate/u);
+});
+
+test('T-PRD028 release CLI digest option names preserve pairing and duplicate rejection', () => {
+  const pin = 'a'.repeat(64);
+  assert.deepEqual(options([
+    '--expected-archive-sha256', pin, '--expected-prepublication-archive-sha256', pin,
+    '--expected-bundle-sha256', pin, '--expected-trusted-root-sha256', pin,
+    '--prepublication-evidence-sha256', pin,
+  ]), { expectedArchiveSha256: pin, expectedPrepublicationArchiveSha256: pin,
+    expectedBundleSha256: pin, expectedTrustedRootSha256: pin, prepublicationEvidenceSha256: pin });
+  for (const name of ['-archive', '--Archive', '--2archive', '--archive-256', '--archive--sha256', '--archive_sha256', '--archive-']) {
+    assert.throws(() => options([name, pin]), /--option value pairs/u, name);
+  }
+  for (const args of [['--expected-archive-sha256'], ['--expected-archive-sha256', ''],
+    ['--expected-archive-sha256', '--expected-bundle-sha256']]) {
+    assert.throws(() => options(args), /--option value pairs/u);
+  }
+  assert.throws(() => options(['--expected-archive-sha256', pin, '--expected-archive-sha256', pin]),
+    /Duplicate option: expectedArchiveSha256/u);
+});
+
+test('T-PRD028 retain-trust CLI accepts SHA256 pins and rejects malformed digest values before verification', async () => {
+  const directory = path.resolve('.test-data', `cli-retain-${randomUUID()}`);
+  const pin = 'a'.repeat(64);
+  for (const [value, reason] of [[pin, /ENOENT.*unavailable-attestation\.jsonl/u],
+    ['not-a-digest', /Retain exact signed subject and physical attempt/u]]) {
+    await assert.rejects(execute(process.execPath, [path.resolve('scripts/release-retention.mjs'), 'retain-trust',
+      '--archive', path.join(directory, `release-prepublication-cli-fixture-1-1-${pin}.tar.gz`),
+      '--attestation-bundle', path.join(directory, 'unavailable-attestation.jsonl'),
+      '--expected-archive-sha256', value, '--expected-source-commit', sourceCommit,
+      '--release-intent-id', 'cli-fixture', '--source-repository', repository,
+      '--run-id', '1', '--attempt', '1', '--output-dir', path.join(directory, 'output')], {
+      cwd: path.resolve('.'), timeout: 10_000,
+      env: { ...process.env, GITHUB_TOKEN: '', GH_TOKEN: '', GITHUB_OUTPUT: '' },
+    }), error => {
+      assert.equal(error.killed, false);
+      assert.equal(error.code, 1);
+      assert.match(error.stderr, reason);
+      return true;
+    });
+  }
+  await assert.rejects(fs.stat(directory), { code: 'ENOENT' });
+});
+
+test('T-PRD028 historical completion CLI accepts all SHA256 pin names without weakening independent input checks', async () => {
+  const directory = path.resolve('.test-data', `cli-completion-${randomUUID()}`);
+  const pin = 'a'.repeat(64);
+  const args = ['completion', '--archive', path.join(directory, 'unavailable-completion.tar.gz'),
+    '--attestation-bundle', path.join(directory, 'attestation.jsonl'), '--expected-archive-sha256', pin,
+    '--prepublication-archive', path.join(directory, 'prepublication.tar.gz'),
+    '--prepublication-attestation-bundle', path.join(directory, 'prepublication-attestation.jsonl'),
+    '--expected-prepublication-archive-sha256', pin, '--expected-bundle-sha256', pin,
+    '--expected-source-commit', sourceCommit, '--expected-release-intent-id', 'cli-fixture',
+    '--source-repository', repository, '--assets-directory', path.join(directory, 'assets'),
+    '--materialize-directory', path.join(directory, 'output'), '--as-of', '2026-11-10T00:00:00.000Z',
+    '--trusted-root', path.join(directory, 'trusted-root.json'), '--expected-trusted-root-sha256', pin];
+  for (const [flag, reason] of [[null, /ENOENT.*unavailable-completion\.tar\.gz/u],
+    ['--expected-archive-sha256', /Historical evidence requires independent archive and source pins/u],
+    ['--expected-prepublication-archive-sha256', /Completion replay needs independently pinned/u],
+    ['--expected-bundle-sha256', /Completion replay needs independently pinned/u]]) {
+    const invocation = [...args];
+    if (flag) invocation[invocation.indexOf(flag) + 1] = 'not-a-digest';
+    await assert.rejects(execute(process.execPath, [path.resolve('scripts/release-retention.mjs'), ...invocation], {
+      cwd: path.resolve('.'), timeout: 10_000,
+      env: { ...process.env, GITHUB_TOKEN: '', GH_TOKEN: '', GITHUB_OUTPUT: '' },
+    }), error => {
+      assert.equal(error.killed, false);
+      assert.equal(error.code, 1);
+      assert.match(error.stderr, reason);
+      return true;
+    });
+  }
+  await assert.rejects(fs.stat(directory), { code: 'ENOENT' });
 });
 
 test('release preparation cannot attribute candidate bytes to a different source commit', async t => {

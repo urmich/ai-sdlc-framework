@@ -728,7 +728,7 @@ export async function resumeCandidate({ candidateDir, artifactId, runId, identit
 export function options(argv) {
   const result = {};
   for (let index = 0; index < argv.length; index += 2) {
-    if (!/^--[a-z]+(?:-[a-z]+)*$/u.test(argv[index]) || !argv[index + 1] || argv[index + 1].startsWith('--')) {
+    if (!/^--[a-z][a-z0-9]*(?:-[a-z][a-z0-9]*)*$/u.test(argv[index]) || !argv[index + 1] || argv[index + 1].startsWith('--')) {
       throw new Error('Release commands require --option value pairs');
     }
     const name = argv[index].slice(2).replace(/-([a-z])/gu, (_, letter) => letter.toUpperCase());
