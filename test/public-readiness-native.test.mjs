@@ -32,7 +32,7 @@ export const validationDeclarations = {
     ],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "native-validation-maintainer",
-    "reason": "PR-only network-free native placement, source replay and owned child-process phase barriers using controlled provider reports. Current source-qualified ownership preserves the frozen C81 component destinations with every current service cost unmeasured; historical v8-v10 observer fixtures reuse the authenticated single-v15 capsule instead of today's edited observer source. Historical literals and complete SDK rows remain authentic. No native execution, performance credit, critical promotion, shared mutable resources or provider calls.",
+    "reason": "PR-only network-free native placement, source replay and owned child-process phase barriers using controlled provider reports. Phase rendezvous controls cover delayed readiness, premature producer failure, owning cancellation and preservation of original failures with strict cleanup; these phase roots remain process-isolated with their declared two-slot owned-child allocation. Current source-qualified ownership preserves the frozen C81 component destinations with every current service cost unmeasured; historical v8-v10 observer fixtures reuse the authenticated single-v15 capsule instead of today's edited observer source. Historical literals and complete SDK rows remain authentic. No native execution, performance credit, critical promotion, shared mutable resources or provider calls.",
     "prerequisites": ["Node and owned repository-local source/report fixtures; complete causal roots remain sequential"]
   }],
   "groups": [
@@ -196,7 +196,7 @@ import { validateBootstrapRequest, bootstrapNativeToolchain, nativeBootstrapEnvi
   nativeBootstrapExports, portableRubyBootstrapEnvironment, requireHomebrewBottlePlan,
   requireHomebrewBottleReceipts, homebrewSetupLimits, homebrewBottlePlanSource } from '../scripts/native-toolchain.mjs';
 import { cleanupNativeToolchain, nativeToolchainFailureAnnotation } from '../scripts/native-toolchain.mjs';
-import { reconcileGoExecution, executeValidationCommand, validationCommandArguments } from '../scripts/validation-tools.mjs';
+import { reconcileGoExecution, executeValidationCommand, validationCommandArguments, processDiagnostic } from '../scripts/validation-tools.mjs';
 import { repositoryRoot, createPlan, parseOptions, run as runTests, writeValidationSelection } from '../scripts/test-runner.mjs';
 import { discoverDeclarations, compileValidationInventory, compileValidationSourceInventory,
   validationSourcePaths, validationPlatforms, declarationTokens, reconcileNodeExecution } from '../scripts/validation-inventory.mjs';
@@ -4097,6 +4097,7 @@ async function qualifiedIntelSourceFiles() {
           '  observerErrorDiagnostic }', 'nativeLaneTimings, verifyNativeCleanup, verifyOriginalNativeRows, inspectWorkflowTrust }');
     }
     if (file === 'test/public-readiness-native.test.mjs') {
+      contents = originalNativePhaseFixtureSource(contents);
       contents = contents.replace(
         '  const retained = f.files.find(source => source.file === f.retainedFile);\n' +
         '  retained.contents = historical.files.find(source => source.file === f.retainedFile).contents;\n', '');
@@ -4187,6 +4188,7 @@ async function qualifiedIntelSourceFixture(protocol) {
           '  observerErrorDiagnostic }', 'nativeLaneTimings, verifyNativeCleanup, verifyOriginalNativeRows, inspectWorkflowTrust }');
     }
     if (file === 'test/public-readiness-native.test.mjs') {
+      contents = originalNativePhaseFixtureSource(contents);
       contents = contents.replaceAll("    if (file === 'test/monitors.test.mjs') contents = historicalMonitorSource(contents);\n", '')
         .replaceAll("      contents = preGitHubApprovalReadinessObserverSource(contents);\n", '')
         .replaceAll("    if (file === 'test/test-runner.test.mjs') contents = historicalTestRunnerSource(contents);\n", '')
@@ -4242,7 +4244,148 @@ async function qualifiedIntelSourceFixture(protocol) {
   return { inventory, plan, assignment, protocol, revision: snapshot.revision };
 }
 
+function originalNativePhaseFixtureSource(contents) {
+  const helper = contents.indexOf('\nfunction originalNativePhaseFixtureSource(') + 1;
+  const following = contents.indexOf('\nfunction preScenarioReadinessRunnerSource(', helper) + 1;
+  assert.ok(helper > 0 && following > helper);
+  contents = contents.slice(0, helper) + contents.slice(following);
+  contents = contents.replaceAll('      contents = originalNativePhaseFixtureSource(contents);\n', '')
+    .replace('  await nativePhaseSynchronizationControls(t);\n', '')
+    .replace('validationCommandArguments, processDiagnostic }', 'validationCommandArguments }')
+    .replace('Phase rendezvous controls cover delayed readiness, premature producer failure, owning cancellation and preservation of original failures with strict cleanup; these phase roots remain process-isolated with their declared two-slot owned-child allocation. ', '');
+  const start = contents.indexOf('async function nativePhaseSettlementBoundary(');
+  const end = contents.indexOf("\ntest('T-PRD017 native v8 isolates", start);
+  assert.ok(start > 0 && end > start);
+  const lines = contents.slice(start, end).split(/(?<=\n)/u);
+  const splices = [[0,30],"  const waitForFile = async file => {\n    const expires = Date.now() + 10000;\n    for (;;) {\n      try { await fs.stat(file); return; }\n      catch (error) { if (error.code !== 'ENOENT') throw error; }\n      assert.ok(Date.now() < expires, `Owned process did not reach ${path.basename(file)}`);\n      await new Promise(resolve => setTimeout(resolve, 10));\n    }\n  };\n  const modes = ['success', 'failed', 'unsafe', 'failed-unsafe', 'incomplete',\n",[31,3],[35,50],"  const expires = Date.now() + 10000;\n",[85,3],"    if (Date.now() >= expires) throw new Error('Owned catalog release was not observed');\n",[88,9],[98,14],[114,7],[124,1],"      await waitForFile(path.join(root, `ready-${first}`));\n",[127,4],[132,2],[135,36],[173,1],"      cancellation.abort();\n      await completed;\n      assert.equal(actualReports.length, calls.length, 'Retain the fixture if any actual command settlement is missing');\n      assert.ok(actualReports.every(report => report.cleanup.rootExitObserved &&\n        (!report.cleanup.requested || report.cleanup.survivorsVerified)), 'Drain the actual sole owned child before removal');\n      await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });\n      await assert.rejects(fs.stat(root), { code: 'ENOENT' });\n",[205,3]];
+  const restored = contents.slice(0, start) + splices.map(part => typeof part === 'string' ? part :
+    lines.slice(part[0], part[0] + part[1]).join('')).join('') + contents.slice(end);
+  assert.equal(digest(restored), '273fd079c026e3f66504c972e7363e02e869a9be9841ce5b75cca99e14977c38',
+    'Replay must restore the exact genuine 993fb011 phase fixture source before independent historical splices');
+  return restored;
+}
+
+function nativePhaseReadiness(completed, signal) {
+  const controller = new AbortController();
+  const cancel = () => controller.abort(signal.reason);
+  signal.addEventListener('abort', cancel, { once: true });
+  if (signal.aborted) cancel();
+  completed.then(result => controller.abort(result.error ??
+    new Error('Owned phase completed before the readiness observer finished')), error => controller.abort(error));
+  return { signal: controller.signal, dispose: () => signal.removeEventListener('abort', cancel) };
+}
+
+async function waitForNativePhaseFile(file, signal) {
+  for (;;) {
+    signal.throwIfAborted();
+    try { await fs.stat(file); signal.throwIfAborted(); return; }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+}
+
+async function settleNativePhaseFixture({ primary, cleanup, mode, reports, calls, t }) {
+  let failure;
+  try { await cleanup(); } catch (error) { failure = error; }
+  if (!primary && !failure) return;
+  t.diagnostic(JSON.stringify(sanitizeExecutionPayload(Buffer.from(JSON.stringify({
+    kind: 'owned-native-phase-fixture-failure', mode,
+    primary: primary ? processDiagnostic(primary) : null,
+    cleanupFailure: failure ? processDiagnostic(failure) : null,
+    commands: reports.map((report, index) => ({ name: calls[index], pid: report.pid ?? null,
+      complete: report.complete, exitCode: report.exitCode,
+      cleanup: { requested: report.cleanup.requested,
+        rootExitObserved: report.cleanup.rootExitObserved ?? null,
+        survivorsVerified: report.cleanup.survivorsVerified, outcome: report.cleanup.outcome,
+        error: report.cleanup.error ?? null } })),
+  })))));
+  if (primary && failure) throw new AggregateError([primary, failure], processDiagnostic(primary).message,
+    { cause: primary });
+  throw primary ?? failure;
+}
+
+async function nativePhaseSynchronizationControls(t) {
+  for (const mode of ['delayed-ready', 'producer-failed', 'producer-completed', 'owner-cancelled', 'owner-watchdog']) {
+    let clock = 0, result;
+    const timers = [];
+    const owner = new AbortController();
+    const producer = Promise.withResolvers();
+    const reason = new Error(`Controlled ${mode}`);
+    const readiness = nativePhaseReadiness(producer.promise, owner.signal);
+    const run = runInContext(`(${waitForNativePhaseFile.toString()})`, createContext({
+      Date: { now: () => clock },
+      setTimeout: resolve => timers.push(resolve),
+      fs: { async stat() {
+        if (mode === 'delayed-ready' && clock >= 90000) return {};
+        throw Object.assign(new Error('not ready'), { code: 'ENOENT' });
+      } },
+    }));
+    const pending = run('owned-ready', readiness.signal).then(
+      () => { result = { status: 'Passed' }; }, error => { result = { status: 'Failed', error }; });
+    for (const next of [20000, 90000, 300000]) {
+      for (let flush = 0; flush < 64; flush++) await Promise.resolve();
+      if (result) break;
+      clock = next;
+      if (mode === 'producer-failed') producer.resolve({ error: reason });
+      if (mode === 'producer-completed') producer.resolve({});
+      if (mode === 'owner-cancelled' || mode === 'owner-watchdog' && clock === 300000) owner.abort(reason);
+      timers.splice(0).forEach(resolve => resolve());
+    }
+    for (let flush = 0; flush < 64; flush++) await Promise.resolve();
+    assert.ok(result, 'Actual producer or owning cancellation must settle the controlled rendezvous');
+    await pending;
+    readiness.dispose();
+    if (mode === 'delayed-ready') {
+      assert.equal(result.status, 'Passed');
+      assert.equal(clock, 90000);
+    } else {
+      assert.equal(result.status, 'Failed');
+      if (mode === 'producer-completed') assert.match(result.error.message, /Owned phase completed before/u);
+      else assert.equal(result.error, reason);
+    }
+  }
+  for (const mode of ['primary', 'cleanup', 'both']) {
+    const primary = mode === 'cleanup' ? null : new Error('Controlled original try-body error');
+    const cleanupFailure = mode === 'primary' ? null : new Error('Controlled incomplete cleanup');
+    const diagnostics = [];
+    await assert.rejects(settleNativePhaseFixture({ primary, mode, reports: [{
+      pid: 123, complete: false, exitCode: null,
+      cleanup: { requested: true, rootExitObserved: false, survivorsVerified: false, outcome: 'uncertain' },
+    }], calls: ['controlled-command'], t: { diagnostic: value => diagnostics.push(JSON.parse(value)) },
+    cleanup: async () => { if (cleanupFailure) throw cleanupFailure; } }), error => {
+      if (mode !== 'both') return error === (primary ?? cleanupFailure);
+      assert.equal(error.cause, primary);
+      assert.deepEqual(error.errors, [primary, cleanupFailure]);
+      assert.equal(error.message, primary.message);
+      return true;
+    });
+    assert.equal(diagnostics.length, 1);
+    assert.equal(diagnostics[0].mode, mode);
+    assert.equal(diagnostics[0].commands[0].cleanup.survivorsVerified, false);
+    assert.equal(diagnostics[0].primary?.message ?? null, primary?.message ?? null);
+    assert.equal(diagnostics[0].cleanupFailure?.message ?? null, cleanupFailure?.message ?? null);
+  }
+  t.signal.throwIfAborted();
+}
+
+function preScenarioReadinessRunnerSource(contents) {
+  assert.equal(createHash('sha256').update(contents).digest('hex'),
+    'ab0d0b45b894e3fc219516dd2d2226162237d429524f238e4eec19f6e8870391',
+    'Replay requires the exact scenario-owned readiness fixture source');
+  const lines = contents.split(/(?<=\n)/u);
+  const splices = [[0,2092],"    const deadline = Date.now() + 10000;\n",[2092,1],"      signal?.throwIfAborted();\n",[2094,6],"      assert.ok(Date.now() < deadline, `Owned worker never reached its identity barrier: ${pending.join(', ')}`);\n",[2100,21],"  for (const mode of ['ready', 'never-ready', 'capture-error', 'producer-error']) {\n",[2123,1],"    if (mode === 'ready') {\n",[2125,2],"      assert.equal(result.clock, 13030);\n",[2133,2],"      assert.match(result.message, /identity barrier: exclusive left/u);\n      assert.equal(result.clock, 23000);\n",[2138,16],"    const ready = right ? clock >= 9000 :\n      releaseAt !== null && clock >= releaseAt + 30 && mode !== 'never-ready';\n",[2157,1],"    return JSON.stringify({ pid: right ? 2 : 1, observedAtMs: clock });\n",[2159,15],"  for (let step = 0; !result && step < 4000; step++) {\n",[2178,8],"  assert.ok(result, 'Controlled readiness must settle within its unchanged allowances');\n",[2187,20],[2208,45],[2256,66],"    budget: { environment: {} }, t: { diagnostic: value => diagnostics.push(JSON.parse(value)) },\n",[2324,121],[2447,42],[2495,107],"      await capture;\n      await releaseAll();\n      await Promise.allSettled(producers);\n      await Promise.all([...monitors.values()].map(monitor => monitor.release()));\n",[2610,62],[2674,738]];
+  const restored = splices.map(part => typeof part === 'string' ? part :
+    lines.slice(part[0], part[0] + part[1]).join('')).join('');
+  assert.equal(createHash('sha256').update(restored).digest('hex'),
+    '4f1c68365573bbfc38f1bc337bbe6f49f59e5fb21c3e3910334b50aa025b0186',
+    'Replay must restore reviewed 5c673c Git blob 21b5ae10f1fde822a34e875637e377d25cd18f1e');
+  return restored;
+}
+
 function preCaptureFailureReadinessRunnerSource(contents) {
+  contents = preScenarioReadinessRunnerSource(contents);
+  contents = contents.replace("    'test-local-evidence.mjs', 'validation-tools.mjs'].map(file =>",
+    "    'test-local-evidence.mjs'].map(file =>");
   // Restore authentic 0b3d Git blob 1ec2a0da7ff42ba2ac898d2aaa1a79077205be65 before unchanged admission replay.
   assert.equal(createHash('sha256').update(contents).digest('hex'),
     'df04cf1b55c7263f79329fbb74ade9dbdb802a745ab36e4c798c627bba18e8e4', 'Replay requires the exact capture-failure fixture source');
@@ -4300,6 +4443,23 @@ function historicalReadinessRunnerSource(contents) {
 }
 
 function historicalTestRunnerSource(contents) {
+  const startupRoot = contents.indexOf("test('T-PRD018 worker startup budget failures retain safe diagnostics");
+  const nextRoot = contents.indexOf("test('T-PRD018 coded failures preserve safe command output", startupRoot);
+  assert.ok(startupRoot >= 0 && nextRoot > startupRoot);
+  contents = contents.slice(0, startupRoot) + contents.slice(nextRoot);
+  const startupGroup = contents.indexOf('  }, {\n    "root": "T-PRD018 worker startup budget failures');
+  const nextGroup = contents.indexOf('  }, {\n', startupGroup + 1);
+  assert.ok(startupGroup >= 0 && nextGroup > startupGroup);
+  contents = contents.slice(0, startupGroup) + contents.slice(nextGroup);
+  const startupClassification = contents.indexOf('    "names": ["T-PRD018 worker startup budget failures');
+  const separator = '  }, {\n';
+  const nextClassification = contents.indexOf(separator, startupClassification);
+  assert.ok(startupClassification >= 0 && nextClassification > startupClassification);
+  contents = (contents.slice(0, startupClassification) +
+    contents.slice(nextClassification + separator.length))
+    .replace('      {"name": "T-PRD018 worker startup budget failures retain safe diagnostics without forcing command cleanup", "parents": []},\n', '')
+    .replace('declarationTokens, discoverDeclarations,\n  reconcileNodeExecution }',
+      'declarationTokens, discoverDeclarations }');
   // Restore genuine N blob 9e0e365e2b7b0ec54d88cd507ae1cf373cb26c3e
   // before the unchanged N-to-K restoration and archival capsule splices.
   assert.equal(createHash('sha256').update(contents).digest('hex'),
@@ -4490,6 +4650,20 @@ function preGitHubNativeTrustReadinessCiSource(contents) {
 }
 
 function historicalReadinessCiSource(contents) {
+  const allocationRoot = contents.indexOf("test('T-PRD032 complete native release inventories");
+  const nextRoot = contents.indexOf('// PR-only: native-validation maintainer;', allocationRoot);
+  assert.ok(allocationRoot >= 0 && nextRoot > allocationRoot);
+  contents = contents.slice(0, allocationRoot) + contents.slice(nextRoot);
+  const allocationClassification = contents.indexOf('    "names": ["T-PRD032 complete native release inventories');
+  const separator = '  }, {\n';
+  const nextClassification = contents.indexOf(separator, allocationClassification);
+  assert.ok(allocationClassification >= 0 && nextClassification > allocationClassification);
+  contents = (contents.slice(0, allocationClassification) +
+    contents.slice(nextClassification + separator.length))
+    .replace(', "scripts/native-validation.mjs"]}', ']}')
+    .replace('    {"root": "T-PRD032 complete native release inventories fit each declared aggregate host allocation", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},\n', '')
+    .replace('nativeFrameworkUnitShardNames, nativeStageSelections', 'nativeFrameworkUnitShardNames')
+    .replace('runValidationReadyPool, validationExecutionGroups', 'runValidationReadyPool');
   contents = preGitHubNativeTrustReadinessCiSource(contents);
   // Restore genuine Git blob b0e7c7ca1ae76c4795fbe79d1f3494f8a4e59b19 before
   // the unchanged capsules' line splices; current readback tests remain current-only.
@@ -5435,6 +5609,7 @@ test('T-PRD017 native v9 primary waits for owned process settlement and blocks f
 });
 
 test('T-PRD017 native v10 primary settles every owned phase and blocks failed observer successors', async t => {
+  await nativePhaseSynchronizationControls(t);
   await nativePhaseSettlementBoundary(t, nativePass.nativeComponentRebalanceFrameworkShardProtocol);
 });
 
@@ -5468,19 +5643,11 @@ async function nativePhaseSettlementBoundary(t, shardProtocol) {
     `${source.slice(stageStart, stageEnd)}\n${dispatch} })()`);
   const [first, second] = f.primary.stages.map(stage => stage.name);
   const names = f.primary.stages.map(stage => `${stage.name}-command`);
-  const waitForFile = async file => {
-    const expires = Date.now() + 10000;
-    for (;;) {
-      try { await fs.stat(file); return; }
-      catch (error) { if (error.code !== 'ENOENT') throw error; }
-      assert.ok(Date.now() < expires, `Owned process did not reach ${path.basename(file)}`);
-      await new Promise(resolve => setTimeout(resolve, 10));
-    }
-  };
-  const modes = ['success', 'failed', 'unsafe', 'failed-unsafe', 'incomplete',
+  const modes = ['success', 'ready-observer-error', 'failed', 'unsafe', 'failed-unsafe', 'incomplete',
     ...(f.primary.stages.length === 3 ?
       ['retained-failed', 'retained-unsafe', 'observer-failed', 'observer-unsafe'] : [])];
   for (const mode of modes) {
+    t.signal.throwIfAborted();
     const root = await fs.mkdtemp(path.join(repositoryRoot, '.test-data', 'native-phase-boundary-'));
     const directory = path.join(root, 'evidence');
     await fs.mkdir(directory);
@@ -5531,11 +5698,9 @@ await fs.writeFile(file, JSON.stringify(report), { flag: 'wx' });
 await fs.writeFile(file + '.journal.ndjson', events.map(JSON.stringify).join('\n') + '\n', { flag: 'wx' });
 await fs.writeFile('ready-' + name, String(process.pid), { flag: 'wx' });
 if (name === 'regression-catalog') {
-  const expires = Date.now() + 10000;
   for (;;) {
     try { await fs.stat('release-catalog'); break; }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
-    if (Date.now() >= expires) throw new Error('Owned catalog release was not observed');
     await setTimeout(10);
   }
 }
@@ -5545,6 +5710,7 @@ process.exitCode = failed ? 1 : 0;
     const cancellation = new AbortController();
     const calls = [];
     const actualReports = [];
+    let closing = false;
     const context = createContext({
       Buffer, path, fs, digest, requireThat, SdlcError, process, directory, lifetime, cancellation, prefixStage: null,
       environment: { ...process.env, SDLC_TEST_REPORT_CONTEXT: JSON.stringify(f.lane.context),
@@ -5559,6 +5725,8 @@ process.exitCode = failed ? 1 : 0;
       readOptional: async file => JSON.parse(await fs.readFile(file, 'utf8')),
       writeJson: async (file, value) => fs.writeFile(file, JSON.stringify(value), { flag: 'wx' }),
       executeValidationCommand: async options => {
+        t.signal.throwIfAborted();
+        requireThat(!closing, 'CANCELLED', 'Closing the owned fixture prevents successor admission');
         calls.push(options.name);
         const report = await executeValidationCommand({ ...options, cwd: root });
         actualReports.push(report);
@@ -5566,14 +5734,20 @@ process.exitCode = failed ? 1 : 0;
       },
     });
     const completed = script.runInContext(context).then(value => ({ value }), error => ({ error }));
+    const readiness = nativePhaseReadiness(completed, t.signal);
+    const observationFailure = mode === 'ready-observer-error' ? new Error('Controlled ready observer failure') : null;
+    let primary;
     try {
-      await waitForFile(path.join(root, `ready-${first}`));
+      await waitForNativePhaseFile(path.join(root, `ready-${first}`), readiness.signal);
+      t.signal.throwIfAborted();
       assert.deepEqual(calls, [`${first}-command`]);
       await assert.rejects(fs.stat(path.join(directory, `${second}-command.json`)), { code: 'ENOENT' });
       await assert.rejects(fs.stat(path.join(directory, `${first}-settlement.json`)), { code: 'ENOENT' },
         'A completed test report cannot certify its still-running producer');
+      if (observationFailure) throw observationFailure;
       await fs.writeFile(path.join(root, 'release-catalog'), 'owned release', { flag: 'wx' });
       const result = await completed;
+      t.signal.throwIfAborted();
       for (const stage of f.primary.stages.slice(0, calls.length)) {
         let selection;
         try { selection = await fs.readFile(path.join(root, ...stage.selection.path.split('/'))); }
@@ -5610,14 +5784,40 @@ process.exitCode = failed ? 1 : 0;
         }
         await assert.rejects(fs.stat(path.join(directory, `${failedStage}-settlement.json`)), { code: 'ENOENT' });
       }
+    } catch (error) {
+      primary = error;
     } finally {
-      cancellation.abort();
-      await completed;
-      assert.equal(actualReports.length, calls.length, 'Retain the fixture if any actual command settlement is missing');
-      assert.ok(actualReports.every(report => report.cleanup.rootExitObserved &&
-        (!report.cleanup.requested || report.cleanup.survivorsVerified)), 'Drain the actual sole owned child before removal');
-      await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-      await assert.rejects(fs.stat(root), { code: 'ENOENT' });
+      await settleNativePhaseFixture({ primary, mode, reports: actualReports, calls, t, cleanup: async () => {
+        closing = true;
+        try {
+          try {
+            await fs.writeFile(path.join(root, 'release-catalog'), 'owned release', { flag: 'wx' })
+              .catch(error => { if (error.code !== 'EEXIST') throw error; });
+          } catch (error) {
+            cancellation.abort(error);
+            throw error;
+          } finally {
+            await completed;
+            cancellation.abort();
+          }
+          assert.equal(actualReports.length, calls.length, 'Retain the fixture if any actual command settlement is missing');
+          assert.ok(actualReports.every(report => report.cleanup.rootExitObserved &&
+            (!report.cleanup.requested || report.cleanup.survivorsVerified)), 'Drain the actual sole owned child before removal');
+          await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+          await assert.rejects(fs.stat(root), { code: 'ENOENT' });
+        } finally {
+          readiness.dispose();
+        }
+      } }).catch(error => {
+        if (!observationFailure) throw error;
+        assert.equal(error, observationFailure, 'Cleanup must preserve the actual original observer failure');
+        assert.equal(calls.length, 1, 'Closing a failed observer must prevent a successful producer successor');
+        assert.equal(actualReports.length, 1);
+        assert.equal(actualReports[0].exitCode, 0);
+        assert.equal(actualReports[0].complete, true);
+        assert.equal(actualReports[0].cleanup.requested, false, 'Release the held child instead of forcing an unverifiable stop');
+        assert.equal(actualReports[0].cleanup.rootExitObserved, true);
+      });
     }
   }
 }

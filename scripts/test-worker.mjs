@@ -11,6 +11,7 @@ import { sanitizeExecutionPayload } from '../src/validation-evidence.mjs';
 import { digest, LIMITS, requireThat, SdlcError } from '../src/core.mjs';
 import { atomicWrite } from '../src/files.mjs';
 import { readTestBudget, readTestGroupProcesses } from './test-budget.mjs';
+import { processDiagnostic } from './validation-tools.mjs';
 import { discoverDeclarations, nodeStartDefinition, cancelledNodeStarts,
   reconcileNodeExecution } from './validation-inventory.mjs';
 import { validationExecutionGroups, validationGroupProtocol, validationSchedulingPolicyDigest,
@@ -591,6 +592,9 @@ try {
     durationMs: summaries.reduce((total, summary) => total + summary.durationMs, 0),
   };
   finished = true;
+} catch (error) {
+  process.exitCode ||= 1;
+  console.error(`[test-worker:error] ${JSON.stringify(processDiagnostic(error))}`);
 } finally {
   progressStopped = true;
   clearInterval(checkpointTimer);

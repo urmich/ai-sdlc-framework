@@ -2,11 +2,12 @@ export const validationDeclarations = {
   "schemaVersion": 1,
   "surfaces": [
     {"coverage": "process", "paths": ["scripts/validation-tools.mjs", "scripts/check.mjs", "scripts/validate-native-source.mjs", "scripts/validate-winget-schema.py", "scripts/read-validation-artifact.py", "cmd/sdlc-launcher/main_test.go", "cmd/sdlc-launcher/integrity_test.go"]},
-    {"coverage": "direct", "paths": ["scripts/pr-readiness.mjs", "scripts/github-readiness-host.mjs", "scripts/pr-observer.mjs", "scripts/workflow-policy.mjs", "scripts/native-toolchain.mjs", "scripts/native-homebrew-prefix.mjs"]}
+    {"coverage": "direct", "paths": ["scripts/pr-readiness.mjs", "scripts/github-readiness-host.mjs", "scripts/pr-observer.mjs", "scripts/workflow-policy.mjs", "scripts/native-toolchain.mjs", "scripts/native-homebrew-prefix.mjs", "scripts/native-validation.mjs"]}
   ],
   "groups": [
     {"root": "T-PRD018 tool processes retain failures, sanitized partial output and cancellation without surviving children", "dependsOn": [], "minimumSlots": 4, "exclusiveResources": []},
     {"root": "T-PRD020 actual CI schedules twenty-five producer parts behind both Intel unit jobs and distinguishes edited base retargets", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD032 complete native release inventories fit each declared aggregate host allocation", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD022 actual workflow graph applies semantic YAML, effective permissions and immutable action policy", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD020 required source safety scans complete committed definitions before native bootstrap", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD085 idle observer reconciliation completes without granting validation credit", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
@@ -21,6 +22,12 @@ export const validationDeclarations = {
     "owner": "runner-resource-contract",
     "reason": "PR-only cancellation coverage reserves the worker, command, descendant and native stop/query controller. Existing cancellation, sanitation, original journal, process absence and controlled stop-race assertions remain unchanged; no critical promotion.",
     "prerequisites": ["Node and four aggregate worker slots; owned repository-local process fixtures; stock taskkill on Windows or ps on POSIX"]
+  }, {
+    "names": ["T-PRD032 complete native release inventories fit each declared aggregate host allocation"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "release-workflow",
+    "reason": "PR-only source/planner regression derives the complete R-PRE execution groups and proves every root fits each release host's common aggregate allocation; no critical promotion, package-manager execution or provider effects.",
+    "prerequisites": ["Node and Git; owned source/planner fixtures; no network, credentials, package-manager execution or shared resources"]
   }, {
     "names": ["T-PRD085 idle observer reconciliation completes without granting validation credit"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
@@ -65,9 +72,9 @@ import { nativePrParts, nativeLegacyPrParts, nativePartJobKey, nativeFrameworkSh
   nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
   nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
   nativeServiceBalanceFrameworkShardProtocol, nativeCatalogReservationFrameworkShardProtocol, nativeCatalogServiceFrameworkShardProtocol,
-  nativeFrameworkUnitShardNames } from '../scripts/native-validation.mjs';
+  nativeFrameworkUnitShardNames, nativeStageSelections } from '../scripts/native-validation.mjs';
 import { compileValidationInventory } from '../scripts/validation-inventory.mjs';
-import { runValidationReadyPool } from '../scripts/test-scheduling.mjs';
+import { runValidationReadyPool, validationExecutionGroups } from '../scripts/test-scheduling.mjs';
 import { expectedBodySdkRequirements } from './native-sdk-expectations.mjs';
 import { digest, SdlcError } from '../src/core.mjs';
 import { evaluateApproval, evaluateConversations, sharedStatusKeys, planStatusUpdate, reconcileStatusKey,
@@ -2124,6 +2131,28 @@ test('T-PRD020 required source safety scans complete committed definitions befor
   const viewDiagnostic = unsafeView.stdout + unsafeView.stderr;
   assert.equal(viewDiagnostic.includes(usernameToken), false, 'Decoded query credentials must not leak into diagnostics');
   assert.equal(viewDiagnostic.includes(encodedUsername), false, 'Encoded query credentials must not leak into diagnostics');
+});
+
+test('T-PRD032 complete native release inventories fit each declared aggregate host allocation', async () => {
+  const workflows = await readWorkflowPolicySources(repositoryRoot);
+  const release = inspectWorkflowPolicy(workflows).workflows
+    .find(item => item.file === '.github/workflows/release.yml').document;
+  const releaseGate = release.jobs['release-gates'];
+  const inventory = await compileValidationInventory(repositoryRoot);
+  const plan = await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
+  const groups = nativeStageSelections(inventory, plan).flatMap(stage =>
+    validationExecutionGroups(inventory, { files: stage.files, pattern: stage.selectorName }));
+  for (const { target } of releaseGate.strategy.matrix.include) {
+    const resources = nativeResourceFacts({
+      availableParallelism: target === 'macos-arm64' ? 3 : 4,
+      totalMemoryBytes: 8 * 1024 ** 3,
+      configuredWorkers: releaseGate.env.SDLC_TEST_WORKERS ?? release.env?.SDLC_TEST_WORKERS ?? null,
+    });
+    assert.ok(groups.every(group => group.minimumSlots <= resources.workerCapacity),
+      `The complete ${target} R-PRE inventory must fit its aggregate host allocation`);
+  }
+  assert.ok(releaseGate.steps.every(step => step.env?.SDLC_TEST_WORKERS === undefined),
+    'Release bootstrap and execution must inherit the same aggregate allocation');
 });
 
 // PR-only: native-validation maintainer; owned Node/source fixtures, no new capability or critical membership.

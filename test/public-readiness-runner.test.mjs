@@ -545,7 +545,7 @@ async function runnerFixture(t, { riskBoundaries = false, timedUnit = false, blo
   }
   await Promise.all(['test-runner.mjs', 'test-worker.mjs', 'test-profiles.mjs', 'validation-inventory.mjs',
     'test-scheduling.mjs', 'test-budget.mjs', 'test-budget-worker.mjs', 'frozen-fixture-transport.mjs',
-    'test-local-evidence.mjs'].map(file =>
+    'test-local-evidence.mjs', 'validation-tools.mjs'].map(file =>
     fs.copyFile(path.join(repositoryRoot, 'scripts', file), path.join(root, 'scripts', file))));
   const planDirectory = path.join(root, 'docs', 'sdlc', 'public-readiness');
   await fs.mkdir(planDirectory, { recursive: true });
@@ -2090,16 +2090,14 @@ test('T-PRD010 same-file roots overlap in isolated processes while ordered child
 
 async function captureOwnedReady(labels, entered, capture, { exclusive = false, signal } = {}) {
   const wait = async pending => {
-    const deadline = Date.now() + 10000;
     while (true) {
-      signal?.throwIfAborted();
+      signal.throwIfAborted();
       for (const label of pending) {
         try {
           const owned = JSON.parse(await fs.readFile(path.join(entered, `${label}.ready`), 'utf8'));
           return { label, owned };
         } catch (error) { if (error.code !== 'ENOENT') throw error; }
       }
-      assert.ok(Date.now() < deadline, `Owned worker never reached its identity barrier: ${pending.join(', ')}`);
       await delay(10);
     }
   };
@@ -2121,16 +2119,23 @@ async function captureOwnedReady(labels, entered, capture, { exclusive = false, 
 }
 
 test('T-PRD011 exclusive ready clocks exclude the previous holder capture without hiding eligible failures', async () => {
-  for (const mode of ['ready', 'never-ready', 'capture-error', 'producer-error']) {
+  for (const mode of ['ready', 'delayed-ready', 'delayed-exclusive-ready',
+    'never-ready', 'capture-error', 'producer-error', 'scenario-cancelled']) {
     const result = await controlledReadyClock(captureOwnedReady, mode);
-    if (mode === 'ready') {
+    if (['ready', 'delayed-ready', 'delayed-exclusive-ready'].includes(mode)) {
       assert.equal(result.status, 'Passed');
       assert.deepEqual(result.captured, ['exclusive right', 'exclusive left']);
-      assert.equal(result.clock, 13030);
+      assert.equal(result.clock, mode === 'ready' ? 13030 : mode === 'delayed-ready' ? 94030 : 103000);
+    } else if (mode === 'scenario-cancelled') {
+      assert.equal(result.status, 'Failed');
+      assert.equal(result.message, 'original scenario-cancelled');
+      assert.equal(result.clock, 5000);
+      assert.deepEqual(result.captured, []);
     } else if (mode === 'never-ready') {
       assert.equal(result.status, 'Failed');
-      assert.match(result.message, /identity barrier: exclusive left/u);
-      assert.equal(result.clock, 23000);
+      assert.equal(result.message, 'original scenario-watchdog');
+      assert.equal(result.clock, 300000);
+      assert.deepEqual(result.captured, ['exclusive right']);
     } else {
       assert.equal(result.status, 'Failed');
       assert.equal(result.message, `original ${mode}`);
@@ -2147,10 +2152,11 @@ async function controlledReadyClock(implementation, mode = 'ready') {
   const pause = milliseconds => new Promise(resolve => timers.push({ at: clock + milliseconds, resolve }));
   const readFile = async file => {
     const right = path.basename(file) === 'exclusive right.ready';
-    const ready = right ? clock >= 9000 :
-      releaseAt !== null && clock >= releaseAt + 30 && mode !== 'never-ready';
+    const observedAtMs = right ? (mode === 'delayed-ready' ? 90000 : 9000) :
+      releaseAt === null ? null : releaseAt + (mode === 'delayed-exclusive-ready' ? 90000 : 30);
+    const ready = observedAtMs !== null && clock >= observedAtMs && (right || mode !== 'never-ready');
     if (!ready) throw Object.assign(new Error('not ready'), { code: 'ENOENT' });
-    return JSON.stringify({ pid: right ? 2 : 1, observedAtMs: clock });
+    return JSON.stringify({ pid: right ? 2 : 1, observedAtMs });
   };
   const context = createContext({ Date: { now: () => clock }, fs: { readFile, async writeFile() {} },
     path, assert, delay: pause });
@@ -2166,7 +2172,10 @@ async function controlledReadyClock(implementation, mode = 'ready') {
     }
   }, { exclusive: true, signal: controller.signal }).then(() => { result = { status: 'Passed' }; },
     error => { result = { status: 'Failed', message: error.message }; });
-  for (let step = 0; !result && step < 4000; step++) {
+  timers.push({ at: mode === 'scenario-cancelled' ? 5000 : 300000,
+    resolve: () => controller.abort(new Error(mode === 'scenario-cancelled' ?
+      'original scenario-cancelled' : 'original scenario-watchdog')) });
+  for (let step = 0; !result && step < 32000; step++) {
     for (let flush = 0; flush < 128; flush++) await Promise.resolve();
     if (result) break;
     assert.ok(timers.length, 'Controlled readiness must yield to an observable clock event');
@@ -2175,7 +2184,7 @@ async function controlledReadyClock(implementation, mode = 'ready') {
       if (timers[index].at <= clock) timers.splice(index, 1)[0].resolve();
     }
   }
-  assert.ok(result, 'Controlled readiness must settle within its unchanged allowances');
+  assert.ok(result, 'Controlled readiness must settle on readiness, failure or its owning scenario cancellation');
   await pending;
   return { ...result, clock, captured };
 }
@@ -2196,6 +2205,7 @@ async function controlledSiblingPreparation(implementation, files, entered, mode
   const captureStates = new Map();
   const producerOutcomes = [];
   const injectedTasks = [];
+  const scenario = new AbortController();
   const captureFailure = ['capture-inflight-failure', 'capture-consume-failure'].includes(mode);
   let initialProducerFault = false;
   let deliverInitialFailure;
@@ -2241,6 +2251,9 @@ async function controlledSiblingPreparation(implementation, files, entered, mode
           assert.ok(targets.has(record.pid), 'Ready publication requires actual prior admission');
           ready.push({ name: path.basename(to).slice(0, -6), pid: record.pid, at: clock });
         }
+      } else {
+        timers.push({ at: clock, resolve: () =>
+          scenario.abort(new Error('Controlled scenario cancellation before identity barrier')) });
       }
       contents.delete(from);
     },
@@ -2307,7 +2320,8 @@ async function controlledSiblingPreparation(implementation, files, entered, mode
       }
     },
     process: { platform: 'win32' }, processDiagnostic, assertOwnedProcessExited,
-    budget: { environment: {} }, t: { diagnostic: value => diagnostics.push(JSON.parse(value)) },
+    budget: { environment: {} }, t: { signal: scenario.signal,
+      diagnostic: value => diagnostics.push(JSON.parse(value)) },
     independent: { parent: 'other-owned-producer', signal: { aborted: false },
       async snapshot() { return { producers: 1 }; } },
     async windowsProcessIdentity(pid, exitPath, options) {
@@ -2429,6 +2443,8 @@ async function controlledSiblingPreparation(implementation, files, entered, mode
     'Every injected failure/observation task must settle without an unhandled rejection');
   assert.ok([...targets.values()].every(target => target.exitedAt !== null));
   assert.ok([...monitors.values()].every(monitor => monitor.settled));
+  assert.equal(getEventListeners(scenario.signal, 'abort').length, 0,
+    'Owned preparation must release its scenario cancellation listener');
   assert.ok(diagnostics.filter(value => value.kind === 'owned-producer-completed')
     .every(value => value.independentProducerActive));
   return { ...result, elapsedMs: clock - 1000, launches, admissions, ready, events, producerOutcomes,
@@ -2471,6 +2487,12 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
     let allowSibling;
     const initialPair = new Promise(resolve => { allowSibling = resolve; });
     const settleInitialPair = error => { allowSibling?.(error); allowSibling = null; };
+    const abortReadiness = () => {
+      readiness.abort(t.signal.reason);
+      settleInitialPair(t.signal.reason);
+    };
+    t.signal.addEventListener('abort', abortReadiness, { once: true });
+    if (t.signal.aborted) abortReadiness();
     const releases = labels.flat().map(label => path.join(entered, `${label}.release`));
     const releaseAll = () => Promise.all(releases.map(file => fs.writeFile(file, 'released')));
     const captureIdentity = async (label, owned) => {
@@ -2578,10 +2600,14 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
       }
       return { results, reports };
     } finally {
-      await capture;
-      await releaseAll();
-      await Promise.allSettled(producers);
-      await Promise.all([...monitors.values()].map(monitor => monitor.release()));
+      try {
+        await capture;
+        await releaseAll();
+        await Promise.allSettled(producers);
+        await Promise.all([...monitors.values()].map(monitor => monitor.release()));
+      } finally {
+        t.signal.removeEventListener('abort', abortReadiness);
+      }
     }
   };
   await fs.writeFile(slow, common +
@@ -2644,6 +2670,8 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
         'Pinned ownership must survive preparation plus a genuine action within its own allowance');
     } else {
       assert.equal(result.status, 'Failed', mode);
+      if (mode === 'absent-peer') assert.equal(result.message,
+        'Controlled scenario cancellation before identity barrier');
       assert.match(result.message, mode === 'absent-peer' ? /identity barrier/u :
         mode === 'hung-observer' ? /observer phase=startup/u :
           mode === 'initial-producer-failure' ? /Controlled first producer launch failed/u :
