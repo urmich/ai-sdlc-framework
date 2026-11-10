@@ -3309,6 +3309,8 @@ authority. Preflight rejects missing prerequisites before irreversible calls.
    package manager or external access. They do not enter the critical profile
    or supply genuine R-PRE/public-consumer credit; the strict eight-hook probe
    remains required for both authentic previous and current installations.
+   The existing whole-shard rejection check derives an insufficient allocation
+   from that shard's actual maximum reservation, not a presumed fixed placement.
 4. Reconcile the R-PRE required cases, native platform subcases and tool/image
    identities into retained readiness evidence. The prerequisite graph is
    source checks -> frozen candidate -> native candidate checks -> sealed

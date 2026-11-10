@@ -4044,6 +4044,7 @@ async function qualifiedIntelSourceFiles() {
   const files = await Promise.all(frozen.paths.map(async file => {
     let contents = (await fs.readFile(path.join(repositoryRoot, ...file.split('/')), 'utf8'))
       .replace(/\r\n/gu, '\n');
+    contents = preCommandInputQualificationSource(contents, file);
     if (file === 'test/macos-runner-admission.unit.test.mjs')
       contents = contents.replace('    pending.options.signal = controller.signal;\n',
         '    pending.options.signal = controller.signal;\n    pending.options.now = () => performance.now();\n');
@@ -4135,6 +4136,7 @@ async function qualifiedIntelSourceFixture(protocol) {
   assert.equal(actual.complete, true, JSON.stringify(actual.unresolved));
   const files = await Promise.all(snapshot.paths.map(async file => {
     let contents = (await fs.readFile(path.join(repositoryRoot, ...file.split('/')), 'utf8')).replace(/\r\n/gu, '\n');
+    contents = preCommandInputQualificationSource(contents, file);
     if (file === 'test/macos-runner-admission.unit.test.mjs')
       contents = contents.replace('    pending.options.signal = controller.signal;\n',
         '    pending.options.signal = controller.signal;\n    pending.options.now = () => performance.now();\n');
@@ -4249,7 +4251,8 @@ function originalNativePhaseFixtureSource(contents) {
   const following = contents.indexOf('\nfunction preScenarioReadinessRunnerSource(', helper) + 1;
   assert.ok(helper > 0 && following > helper);
   contents = contents.slice(0, helper) + contents.slice(following);
-  contents = contents.replaceAll('      contents = originalNativePhaseFixtureSource(contents);\n', '')
+  contents = contents.replaceAll('    contents = preCommandInputQualificationSource(contents, file);\n', '')
+    .replaceAll('      contents = originalNativePhaseFixtureSource(contents);\n', '')
     .replace('  await nativePhaseSynchronizationControls(t);\n', '')
     .replace('validationCommandArguments, processDiagnostic }', 'validationCommandArguments }')
     .replace('Phase rendezvous controls cover delayed readiness, premature producer failure, owning cancellation and preservation of original failures with strict cleanup; these phase roots remain process-isolated with their declared two-slot owned-child allocation. ', '');
@@ -4262,6 +4265,35 @@ function originalNativePhaseFixtureSource(contents) {
     lines.slice(part[0], part[0] + part[1]).join('')).join('') + contents.slice(end);
   assert.equal(digest(restored), '273fd079c026e3f66504c972e7363e02e869a9be9841ce5b75cca99e14977c38',
     'Replay must restore the exact genuine 993fb011 phase fixture source before independent historical splices');
+  return restored;
+}
+
+function preCommandInputQualificationSource(contents, file) {
+  if (file === 'test/public-readiness-ci.test.mjs') {
+    assert.equal(digest(contents), 'bda809dc5c1b3cb9b4bbef958044e59c71c46124d9acaf0fbb4faae9b528bb08',
+      'Replay requires the exact dynamic insufficient-allocation fixture source');
+    contents = contents
+      .replace('  const undersizedCapacity = Math.max(...groups.map(group => group.minimumSlots)) - 1;\n', '')
+      .replace('    concurrency: undersizedCapacity, capacity: undersizedCapacity,\n' +
+        "    execute: async () => { dispatched++; return 'Passed'; },\n",
+      "    concurrency: 5, capacity: 5, execute: async () => { dispatched++; return 'Passed'; },\n");
+    assert.equal(digest(contents), '35108e69f7c7c0da191d1ca2cc37dd2b847dfad448d8628c3ec70070df28794f',
+      'Replay must restore genuine 506e60b2 CI Git blob 00c82c5a22428eb0d35367fb84b61556caa2eea9');
+  }
+  if (file !== 'test/public-readiness-inventory.test.mjs') return contents;
+  assert.equal(digest(contents), '10f32ae8e80585d166b37f7155e6d807c5a32881f9ee6946939bb5c4208a33c8',
+    'Replay requires the exact stdin and Windows argument regression source');
+  // Remove only a0c86d2's new command roots, declarations, import and surface before archived splices.
+  const lines = contents.split(/(?<=\n)/u);
+  const splices = [
+    [0, 23], [29, 2], [43, 62],
+    '  "surfaces": [{"coverage": "direct", "paths": ["src/coverage.mjs", "scripts/validation-inventory.mjs", "scripts/validation-tools.mjs"]}],\n',
+    [106, 47], [154, 1548], [1795, 1143],
+  ];
+  const restored = splices.map(part => typeof part === 'string' ? part :
+    lines.slice(part[0], part[0] + part[1]).join('')).join('');
+  assert.equal(digest(restored), 'b6b593113324c24773a18f63d8cb8ccdaa589135f865eda41e3c14e094d115d9',
+    'Replay must restore genuine 506e60b2 inventory Git blob 01d441e1f1cfaf1472c04904eaf771b07efeebf3');
   return restored;
 }
 
