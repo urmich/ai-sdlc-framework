@@ -4055,7 +4055,7 @@ async function qualifiedIntelSourceFiles() {
     if (file === 'test/public-readiness-ci.test.mjs') contents = historicalReadinessCiSource(contents);
     if (file === 'test/release-ci.test.mjs') contents = historicalReleaseCiSource(contents);
     if (file === 'test/test-runner.test.mjs') contents = historicalTestRunnerSource(contents);
-    if (file === 'test/public-readiness-runner.test.mjs') contents = historicalReadinessRunnerSource(contents);
+    if (file === 'test/public-readiness-runner.test.mjs') contents = historicalReadinessRunnerSource(preAdmissionReadinessRunnerSource(contents));
     if (file === 'test/github-transport.unit.test.mjs') {
       const recovery = contents.indexOf('    "names": [\n      "T-PRD037 classified transient REST');
       const separator = '  }, {\n';
@@ -4144,7 +4144,7 @@ async function qualifiedIntelSourceFixture(protocol) {
     if (file === 'test/public-readiness-ci.test.mjs') contents = historicalReadinessCiSource(contents);
     if (file === 'test/release-ci.test.mjs') contents = historicalReleaseCiSource(contents);
     if (file === 'test/test-runner.test.mjs') contents = historicalTestRunnerSource(contents);
-    if (file === 'test/public-readiness-runner.test.mjs') contents = historicalReadinessRunnerSource(contents);
+    if (file === 'test/public-readiness-runner.test.mjs') contents = historicalReadinessRunnerSource(preAdmissionReadinessRunnerSource(contents));
     if (file === 'test/github-transport.unit.test.mjs') {
       const recovery = contents.indexOf('    "names": [\n      "T-PRD037 classified transient REST');
       const separator = '  }, {\n';
@@ -4187,7 +4187,7 @@ async function qualifiedIntelSourceFixture(protocol) {
     if (file === 'test/public-readiness-native.test.mjs') {
       contents = contents.replaceAll("    if (file === 'test/monitors.test.mjs') contents = historicalMonitorSource(contents);\n", '')
         .replaceAll("    if (file === 'test/test-runner.test.mjs') contents = historicalTestRunnerSource(contents);\n", '')
-        .replaceAll("    if (file === 'test/public-readiness-runner.test.mjs') contents = historicalReadinessRunnerSource(contents);\n", '')
+        .replaceAll("    if (file === 'test/public-readiness-runner.test.mjs') contents = historicalReadinessRunnerSource(preAdmissionReadinessRunnerSource(contents));\n", '')
         .replaceAll("    if (file === 'test/macos-runner-admission.unit.test.mjs')\n" +
           "      contents = contents.replace('    pending.options.signal = controller.signal;\\n',\n" +
           "        '    pending.options.signal = controller.signal;\\n    pending.options.now = () => performance.now();\\n');\n", '')
@@ -4237,6 +4237,19 @@ async function qualifiedIntelSourceFixture(protocol) {
       'Authentic v12 transfers every descendant of the original six complete components');
   }
   return { inventory, plan, assignment, protocol, revision: snapshot.revision };
+}
+
+function preAdmissionReadinessRunnerSource(contents) {
+  // Restore authentic E Git blob 7e2e3fd847d63f33d1852839327ad6826f16ac22 before unchanged E-to-D replay.
+  assert.equal(createHash('sha256').update(contents).digest('hex'),
+    '9b3afd671e809b4d05df2b25628e53f23f4c4a3096b457e5b46171c7089ec0d1', 'Replay requires the exact initial-admission fixture source');
+  const lines = contents.split(/(?<=\n)/u);
+  const splices = [[0,2191],[2194,4],[2199,26],[2230,17],[2252,2],[2259,1],"      const task = queued.shift();\n",[2260,17],"        pump();\n",[2278,11],[2293,24],[2322,4],"        pump();\n",[2327,31],"  return { ...result, elapsedMs: clock - 1000, triggers, diagnostics };\n",[2360,34],[2397,20],[2418,10],[2429,3],"    const producers = files.map((file, index) =>\n      f.invoke(['targeted', '--workers', '2', file],\n",[2442,6],"      }));\n",[2453,65],"  for (const mode of ['slow-peer', 'absent-peer', 'hung-observer', 'missing-action']) {\n",[2520,2],"    if (mode === 'slow-peer') {\n",[2523,1],"        'Permitted peer preparation must not consume the unchanged sibling action deadline');\n      assert.ok(result.elapsedMs > 20000,\n",[2534,4],"        mode === 'hung-observer' ? /observer phase=startup/u : /could not borrow idle host capacity/u);\n",[2544,724]];
+  const restored = splices.map(part => typeof part === 'string' ? part :
+    lines.slice(part[0], part[0] + part[1]).join('')).join('');
+  assert.equal(createHash('sha256').update(restored).digest('hex'),
+    'aa201c0ba2be45562433a3eaeca5534f04a2d286379ff8be43b7fe61dd05c2e7', 'Replay must restore the authentic adopted E fixture source');
+  return restored;
 }
 
 function historicalReadinessRunnerSource(contents) {

@@ -2304,7 +2304,10 @@ real Windows retained-handle branches. Keep the critical budget unchanged.
 The failed main execution remains failed; an unknown host startup cause is not
 established by a longer finite preparation allowance or a later passing run.
 The existing PR-only dynamic sibling root also controls the caller boundary:
-prepare both initially eligible observers concurrently, release only the short
+launch the first producer alone and establish both initial workers' actual
+admissions/readiness and pinned identities before launching the sibling producer.
+The shared two-slot budget guarantees no producer or root admission order.
+Prepare both initially eligible observers concurrently, release only the short
 worker to make the queued peer eligible, then prepare that peer before triggering
 either timed capacity participant. Retain each original native handle throughout
 preparation and start its unchanged fifteen-second exit observation only at its
@@ -2315,13 +2318,21 @@ Controlled actual caller/worker-source execution must fail on the original
 independent-release behavior and pass with twelve-second peer preparation plus
 an action within its own allowance. Absent peers, hung observer preparation and
 missing actions still fail finitely; all owned targets settle and the independent
-producer stays active. Keep these cases inside the existing root, without new
+producer stays active. The controlled scheduler must interleave runnable roots
+from competing producers and prefer the sibling when it is actually queued,
+covering both sibling-plus-waiting and sibling-plus-short initial allocations.
+Those orderings must reproduce the authentic E admission-barrier failure;
+the corrected caller must prove both initial admissions and ready publications
+precede sibling launch, then actual concurrent reuse of the short worker's slot.
+Initial producer/observer failures must settle without launching the sibling.
+Never manufacture readiness before admission or serialize the complete experiment.
+Keep these cases inside the existing root, without new
 descendants, critical growth, retries or resource/admission changes. Its finite
 300-second outer watchdog includes two dynamic preparation waves and the two
 sequential exclusive captures (four thirty-plus-five-second batches), readiness,
 unchanged action/exit budgets and cleanup; it is not a timing-performance goal.
-Changes to adopted runner-test text must restore authenticated D source bytes
-before the unchanged historical splices/capsules, preserving existing identities
+Changes to adopted runner-test text must restore authenticated E source bytes
+before the unchanged E-to-D restoration and historical splices/capsules, preserving existing identities
 and inventories without adding runtime Git access.
 The measured GitHub process-partition preservation test must keep the original
 143-assertion count, root vector and callback fingerprint unchanged. Validate

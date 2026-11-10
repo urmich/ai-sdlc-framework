@@ -2414,7 +2414,15 @@ holder is legitimately being captured and released. Nonexclusive ready capture
 remains concurrent; failed exclusive producers abort pending readiness.
 Keep native identity capture, stop budgets, resource bounds, exit proofs and
 actual action/exit allowances unchanged. For the nonexclusive capacity case,
-capture the waiting and short workers together before releasing only the short
+launch only the initial-pair producer until both waiting/short workers have
+actually been admitted, published readiness and acquired their pinned identities.
+Only then enable the sibling producer to compete for the same unchanged two-slot
+budget. Producer registration does not reserve root admission order; concurrent
+launch can otherwise admit sibling-plus-waiting or sibling-plus-short and prevent
+the initial barrier from completing. Initial producer/capture failure resolves
+the launch gate as failure, releases/settles started work and never launches the
+sibling. Preserve the original causal failure without inventing a producer result.
+Capture the waiting and short workers together before releasing only the short
 worker. Its completion makes the queued sibling eligible; begin that sibling's
 unchanged ready allowance then and capture it before triggering either capacity
 participant. Both native identities remain pinned while either observer prepares.
@@ -2425,11 +2433,17 @@ affirmative failure cleanup; a cleanup kill cannot manufacture an earlier exit.
 The ten-second capacity action remains unchanged. Controlled execution of this
 actual caller and generated worker bodies covers twelve-second peer preparation,
 a subsequent permitted action, absent readiness, hung preparation and missing
-action, with all targets settled and the unrelated producer unchanged. Keep the
+action, with all targets settled and the unrelated producer unchanged. Its
+controlled scheduler admits only actually runnable roots, interleaves competing
+producer queues and exercises both sibling-first initial allocations against
+authentic E behavior. Corrected launch/admission/ready observations must establish
+the initial gate and subsequent concurrent freed-slot reuse, including failure
+before sibling launch; no readiness is fabricated ahead of actual admission.
+Keep the
 regressions in the existing PR-only root and preserve resource/admission and
 critical budgets. A 300-second setup-inclusive outer watchdog accounts for four
 bounded preparation batches plus unchanged readiness/action/exit and cleanup.
-Restore authentic adopted D runner-test bytes before existing historical replay
+Restore authentic E runner-test bytes before unchanged E-to-D and historical replay
 splices; no capsules, inventories or source guards change and CI needs no Git.
 This corrects controlled clock accounting, not the unproven cause of a historical
 hosted failure or a guarantee about arbitrary host latency.
