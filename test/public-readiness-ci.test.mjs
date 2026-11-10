@@ -1439,6 +1439,149 @@ test('T-PRD085 status history acquisition carries cancellation across every SDK 
   assert.ok(calls.every(call => call.method === 'GET'));
 });
 
+test('T-PRD021 GitHub-issued job logs and artifacts bind download trust to the selected API source', async () => {
+  const api = 'https://api.github.com/repos/urmich/ai-sdlc-framework';
+  const log = 'https://productionresultssa9.blob.core.windows.net/logs/job.txt?sig=fixture-log';
+  const zip = 'https://productionresultssa17.blob.core.windows.net/artifacts/results.zip?sig=fixture-zip';
+  const archive = Buffer.from('controlled-immutable-artifact');
+  const metadata = { id: 19, expired: false, digest: `sha256:${digest(archive)}`,
+    size_in_bytes: archive.length };
+  const calls = [];
+  let readerCalls = 0;
+  const client = createReadinessGitHubClient({
+    repository: 'urmich/ai-sdlc-framework', repositoryId: 17, writerId: 42,
+    token: 'fixture-ephemeral-token', generation: 'issued-download',
+    runArtifactReader: async () => { readerCalls++; throw Error('Digest rejection must precede ZIP reading'); },
+    fetch: async (url, options) => {
+      calls.push(url);
+      assert.equal(options.redirect, 'manual');
+      assert.equal(options.signal.aborted, false);
+      if (new URL(url).origin === 'https://api.github.com') {
+        assert.equal(new Headers(options.headers).get('authorization'), 'Bearer fixture-ephemeral-token');
+        if (url === `${api}/actions/runs/101/artifacts?per_page=100`) {
+          return new Response(JSON.stringify({ artifacts: [metadata] }),
+            { headers: { 'content-type': 'application/json' } });
+        }
+        assert.ok([`${api}/actions/jobs/101/logs`, `${api}/actions/artifacts/19/zip`].includes(url));
+        return new Response(null, { status: 302, headers: {
+          location: url.endsWith('/logs') ? log : zip,
+        } });
+      }
+      assert.deepEqual([...new Headers(options.headers)], [['accept', 'application/octet-stream']]);
+      if (url === log) return new Response('exact selected job logs');
+      assert.equal(url, zip);
+      return new Response(Buffer.from('tampered-artifact'));
+    },
+  });
+  assert.equal((await client.bytes('/actions/jobs/101/logs')).toString(), 'exact selected job logs');
+  const [acquired] = await client.list('/actions/runs/101/artifacts?per_page=100', 'artifacts');
+  await assert.rejects(client.artifact(acquired), { code: 'DIGEST' });
+  assert.equal(readerCalls, 0);
+  assert.ok(calls.includes(log) && calls.includes(zip), 'Different issued storage accounts need no configuration');
+
+  for (const relative of [
+    '/actions/jobs/../101/logs', '/actions/jobs/101/logs?url=https://evil.example',
+    '/actions/jobs/101/logs/extra', '/actions/jobs/0/logs', '/actions/artifacts/19',
+    '//api.github.com/repos/foreign/repository/actions/jobs/101/logs',
+    '/../../foreign/repository/actions/jobs/101/logs',
+  ]) {
+    const before = calls.length;
+    await assert.rejects(client.bytes(relative), { code: 'SCOPE' });
+    assert.equal(calls.length, before, 'Unselected source dispatches nothing');
+  }
+  for (const target of [
+    'https://evil.example/download', 'https://productionresultssa9.blob.core.windows.net.evil.example/a',
+    'http://productionresultssa9.blob.core.windows.net/a',
+    'https://user:password@productionresultssa9.blob.core.windows.net/a',
+    'https://productionresultssa9.blob.core.windows.net:444/a',
+    'https://productionresultssa9.blob.core.windows.net/a#fragment',
+    'https://productionresultssa9.blob.core.windows.net/%2e%2e/a',
+    'https://productionresultssa9.blob.core.windows.net/%zz',
+    'https://productionresultssa9.blob.core.windows.net/a?sig=fixture-ephemeral-token',
+    `${api}/actions/jobs/102/logs`, 'https://api.github.com/repos/foreign/repository/actions/jobs/101/logs',
+  ]) {
+    let fetched = 0;
+    const hostile = createReadinessGitHubClient({
+      repository: 'urmich/ai-sdlc-framework', repositoryId: 17, writerId: 42,
+      token: 'fixture-ephemeral-token', generation: 'hostile-download',
+      archiveOrigins: ['https://evil.example'],
+      fetch: async () => { fetched++; return new Response(null, { status: 302, headers: { location: target } }); },
+    });
+    await assert.rejects(hostile.bytes('/actions/jobs/101/logs'), { code: 'REDIRECT' }, target);
+    assert.equal(fetched, 1, 'Hostile target must never be fetched');
+  }
+  for (const [variant, code, expectedCalls] of [
+    ['foreign-source', 'REDIRECT', 1], ['automatic-redirect', 'REDIRECT', 1],
+    ['storage-origin-change', 'REDIRECT', 2], ['redirect-limit', 'REDIRECT', 6],
+    ['byte-limit', 'RESPONSE_LIMIT', 2],
+  ]) {
+    let fetched = 0;
+    const bounded = createReadinessGitHubClient({
+      repository: 'urmich/ai-sdlc-framework', repositoryId: 17, writerId: 42,
+      token: 'fixture-ephemeral-token', generation: `bounded-${variant}`,
+      fetch: async (url, options) => {
+        fetched++;
+        if (fetched === 1) {
+          const response = new Response(null, { status: 302, headers: { location: log } });
+          if (variant === 'foreign-source') Object.defineProperty(response, 'url', {
+            value: 'https://api.github.com/repos/foreign/repository/actions/jobs/101/logs',
+          });
+          if (variant === 'automatic-redirect') Object.defineProperty(response, 'redirected', { value: true });
+          return response;
+        }
+        assert.deepEqual([...new Headers(options.headers)], [['accept', 'application/octet-stream']]);
+        if (variant === 'byte-limit') return new Response('oversized', {
+          headers: { 'content-length': String(128 * 1024 * 1024 + 1) },
+        });
+        return new Response(null, { status: 302, headers: {
+          location: variant === 'storage-origin-change' ? zip : new URL(`/hop/${fetched}`, log).href,
+        } });
+      },
+    });
+    await assert.rejects(bounded.bytes('/actions/jobs/101/logs'), { code }, variant);
+    assert.equal(fetched, expectedCalls, variant);
+  }
+  let retries = 0;
+  const recovered = createReadinessGitHubClient({
+    repository: 'urmich/ai-sdlc-framework', repositoryId: 17, writerId: 42,
+    token: 'fixture-ephemeral-token', generation: 'source-retry',
+    fetch: async () => {
+      if (++retries < 3) throw Object.assign(Error('controlled source connection reset'), { code: 'ECONNRESET' });
+      return new Response('recovered exact source');
+    },
+  });
+  assert.equal((await recovered.bytes('/actions/jobs/101/logs')).toString(), 'recovered exact source');
+  assert.equal(retries, 3, 'Retain bounded transient API read recovery');
+  for (const [failure, expectedCalls] of [['exhausted', 3], ['unknown', 1], ['private', 1]]) {
+    let fetched = 0;
+    let getters = 0;
+    const unavailable = createReadinessGitHubClient({
+      repository: 'urmich/ai-sdlc-framework', repositoryId: 17, writerId: 42,
+      token: 'fixture-ephemeral-token', generation: failure,
+      fetch: async () => {
+        fetched++;
+        if (failure === 'private') throw Object.defineProperty({}, 'code', {
+          get() { getters++; throw Error('private-sentinel'); },
+        });
+        throw Object.assign(Error('private-sentinel'), {
+          code: failure === 'exhausted' ? 'ECONNRESET' : 'UNKNOWN',
+        });
+      },
+    });
+    await assert.rejects(unavailable.bytes('/actions/jobs/101/logs'), error => {
+      assert.equal(error.code, 'TRANSPORT');
+      assert.doesNotMatch(JSON.stringify(error), /private-sentinel|fixture-ephemeral-token/u);
+      if (failure === 'exhausted') assert.deepEqual(error.details.nativeFailure, {
+        code: 'ECONNRESET', origin: 'https://api.github.com', originKind: 'api',
+        protocol: 'rest', method: 'GET', retries: 2,
+      });
+      return true;
+    });
+    assert.equal(fetched, expectedCalls);
+    assert.equal(getters, 0);
+  }
+});
+
 test('T-PRD085 shared membership, metadata changes, pagination and stale events cannot overwrite another PR verdict', async () => {
   const f = statusFixture();
   f.snapshot.prs[1].verdicts['framework/coverage'] = {
