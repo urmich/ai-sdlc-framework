@@ -4363,6 +4363,20 @@ function historicalTestRunnerSource(contents) {
 }
 
 function historicalReleaseCiSource(contents) {
+  assert.equal(createHash('sha256').update(contents).digest('hex'),
+    'ff1277e22c0185f3a5d7d71d237f0eb2a8d9d59e76d380218b7e08cfa1adb97c');
+  // Restore genuine 95fd Git blob 445649f0d5568f46dbefcd69855837c0372ae32f
+  // before the unchanged historical transformations and capsule checks.
+  const currentLines = contents.split(/(?<=\n)/u);
+  contents = [
+    ...currentLines.slice(0, 28),
+    '      "reason": "PR-only release-preflight identity, trust and source-evidence regressions; independent root processes forbid administration/permission policy reads and use read-only fake GitHub facts, never packaging, provider writes or critical-profile promotion.",\n',
+    ...currentLines.slice(29, 1908),
+    ...currentLines.slice(1931),
+  ].join('');
+  assert.equal(createHash('sha256').update(contents).digest('hex'),
+    '0e0e0f4c4511b381edcef5367f722aa3eb1dcd8ee8f35dba1f168276ce0ba911',
+    'Preserve authentic release CI bytes before the current-only pagination regressions');
   const classification = contents.indexOf('    {"names": [\n' +
     '      "T-PRD028 release CLI digest option names preserve pairing and duplicate rejection",\n');
   const classificationEnd = contents.indexOf('    {"names": [\n' +

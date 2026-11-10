@@ -26,7 +26,7 @@ export const validationDeclarations = {
       "T-PRD028 preflight rejects unavailable protected-main and source facts without publication",
       "T-PRD028 GitHub branch enforcement cannot substitute for successful release source checks"
     ], "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer",
-      "reason": "PR-only release-preflight identity, trust and source-evidence regressions; independent root processes forbid administration/permission policy reads and use read-only fake GitHub facts, never packaging, provider writes or critical-profile promotion.",
+      "reason": "PR-only release-preflight identity, trust, complete artifact-history pagination and source-evidence regressions; independent root processes forbid administration/permission policy reads and use read-only fake GitHub facts, never packaging, provider writes or critical-profile promotion.",
       "prerequisites": ["Node >=22", "Read-only source package/workflow configuration; no npm, credentials or network"]},
     {"options": "{skip:packagePrerelease?'Stable Homebrew publication metadata is not generated for prereleases':false}", "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Stable-channel formula negatives remain required; a prerelease source cannot silently waive this declared profile.", "prerequisites": ["Stable source version for the required Homebrew release profile"]},
     {"options": "{skip:packagePrerelease?'Stable Homebrew acceptance is not applicable to prereleases':false}", "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Controlled public-consumer adapter tests do not substitute for actual later native consumers.", "prerequisites": ["Stable source version for the required Homebrew release profile"]}
@@ -1906,6 +1906,29 @@ test('T-PRD028 preflight relies on GitHub authorization without administration p
   assert.equal(Object.hasOwn(result, 'actorPermission'), false, 'Do not fabricate an independently inspected actor permission');
   assert.equal(result.trustedPublisherAuthentication, 'NotRun');
   assert.equal(result.irreversibleEffects, 'NotRun');
+
+  const prefix = `/repos/${repository}`;
+  const total = 5001;
+  for (let page = 1; (page - 1) * 100 < total; page++) {
+    f.state.responses.set(`${prefix}/actions/artifacts?per_page=100&page=${page}`, {
+      status: 200, value: { total_count: total, artifacts: Array.from({
+        length: Math.min(100, total - (page - 1) * 100),
+      }, (_, index) => ({ id: (page - 1) * 100 + index + 1,
+        name: `unrelated-native-${(page - 1) * 100 + index + 1}`, expired: false })) },
+    });
+  }
+  assert.equal((await f.run()).status, 'Passed', 'Complete GitHub history must not impose an artifact-count quota');
+  const first = f.state.responses.get(`${prefix}/actions/artifacts?per_page=100&page=1`).value;
+  const lastRoute = `${prefix}/actions/artifacts?per_page=100&page=51`;
+  const last = f.state.responses.get(lastRoute).value;
+  first.artifacts[0] = { id: 1, name: 'release-candidate-999-1', expired: false };
+  last.artifacts[0] = { id: total, name: 'release-preflight-999-1', expired: false,
+    workflow_run: { id: 999, head_sha: sourceCommit } };
+  f.state.responses.set(`${prefix}/actions/runs/999`, new Error('Selected original release run is unavailable'));
+  await assert.rejects(f.run(), /Selected original release run is unavailable/u,
+    'An original candidate beyond five thousand artifacts must not be bypassed');
+  f.state.responses.set(lastRoute, { status: 200, value: { total_count: total, artifacts: [] } });
+  await assert.rejects(f.run(), /Release-artifact history is incomplete/u);
   assert.ok(f.calls.every(call => !call.method));
 });
 
