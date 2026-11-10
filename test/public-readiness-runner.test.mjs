@@ -2088,18 +2088,37 @@ test('T-PRD010 same-file roots overlap in isolated processes while ordered child
     'A failed prerequisite cannot create a passing or cancelled observation for an unstarted dependent');
 });
 
-async function captureOwnedReady(labels, entered, capture, { exclusive = false, signal } = {}) {
+async function captureOwnedReady(labels, entered, capture, { exclusive = false, signal, admission = false } = {}) {
   const wait = async pending => {
-    const deadline = Date.now() + 10000;
+    const setupDeadline = Date.now() + (admission ? 60000 : 10000);
+    const admitted = new Map();
     while (true) {
       signal?.throwIfAborted();
+      let deadline = Infinity;
       for (const label of pending) {
         try {
+          if (admission && !admitted.has(label)) {
+            const record = JSON.parse(await fs.readFile(path.join(entered, `${label}.admitted`), 'utf8'));
+            assert.ok(Number.isSafeInteger(record.observedAtMs) && record.observedAtMs >= 0 &&
+              record.observedAtMs <= Date.now() && record.observedAtMs <= setupDeadline,
+              `Owned worker never reached its admission barrier: ${label}`);
+            admitted.set(label, record);
+          }
+          const eligible = admitted.get(label);
+          if (eligible) deadline = Math.min(deadline, eligible.observedAtMs + 10000);
           const owned = JSON.parse(await fs.readFile(path.join(entered, `${label}.ready`), 'utf8'));
+          if (eligible) {
+            assert.equal(owned.pid, eligible.pid, 'Readiness must belong to the admitted worker');
+            assert.ok(Number.isSafeInteger(owned.observedAtMs) &&
+              owned.observedAtMs >= eligible.observedAtMs && owned.observedAtMs <= eligible.observedAtMs + 10000,
+            `Owned worker never reached its identity barrier: ${label}`);
+          }
           return { label, owned };
         } catch (error) { if (error.code !== 'ENOENT') throw error; }
       }
-      assert.ok(Date.now() < deadline, `Owned worker never reached its identity barrier: ${pending.join(', ')}`);
+      const barrier = admission && admitted.size === 0 ? 'admission' : 'identity';
+      if (deadline === Infinity) deadline = setupDeadline;
+      assert.ok(Date.now() < deadline, `Owned worker never reached its ${barrier} barrier: ${pending.join(', ')}`);
       await delay(10);
     }
   };
@@ -2121,12 +2140,23 @@ async function captureOwnedReady(labels, entered, capture, { exclusive = false, 
 }
 
 test('T-PRD011 exclusive ready clocks exclude the previous holder capture without hiding eligible failures', async () => {
-  for (const mode of ['ready', 'never-ready', 'capture-error', 'producer-error']) {
+  for (const mode of ['ready', 'never-ready', 'capture-error', 'producer-error',
+    'delayed-admission', 'near-setup-boundary', 'absent-admission', 'late-ready']) {
     const result = await controlledReadyClock(captureOwnedReady, mode);
-    if (mode === 'ready') {
+    if (['ready', 'delayed-admission', 'near-setup-boundary'].includes(mode)) {
       assert.equal(result.status, 'Passed');
       assert.deepEqual(result.captured, ['exclusive right', 'exclusive left']);
-      assert.equal(result.clock, 13030);
+      assert.equal(result.clock, mode === 'ready' ? 13030 : mode === 'delayed-admission' ? 17030 : 72030);
+    } else if (mode === 'absent-admission') {
+      assert.equal(result.status, 'Failed');
+      assert.match(result.message, /admission barrier/u);
+      assert.equal(result.clock, 60000);
+      assert.deepEqual(result.captured, []);
+    } else if (mode === 'late-ready') {
+      assert.equal(result.status, 'Failed');
+      assert.match(result.message, /identity barrier/u);
+      assert.equal(result.clock, 19000);
+      assert.deepEqual(result.captured, []);
     } else if (mode === 'never-ready') {
       assert.equal(result.status, 'Failed');
       assert.match(result.message, /identity barrier: exclusive left/u);
@@ -2144,13 +2174,19 @@ async function controlledReadyClock(implementation, mode = 'ready') {
   const timers = [];
   const captured = [];
   const controller = new AbortController();
+  const admission = ['delayed-admission', 'near-setup-boundary', 'absent-admission', 'late-ready'].includes(mode);
   const pause = milliseconds => new Promise(resolve => timers.push({ at: clock + milliseconds, resolve }));
   const readFile = async file => {
-    const right = path.basename(file) === 'exclusive right.ready';
-    const ready = right ? clock >= 9000 :
-      releaseAt !== null && clock >= releaseAt + 30 && mode !== 'never-ready';
+    const right = path.basename(file).startsWith('exclusive right.');
+    const admittedAt = right ? (mode === 'delayed-admission' ? 12000 : mode === 'near-setup-boundary' ? 59000 : 9000) : releaseAt;
+    const readyAt = right ? (mode === 'delayed-admission' ? 13000 : mode === 'near-setup-boundary' ? 68000 :
+      mode === 'late-ready' ? 20000 : 9000) :
+      releaseAt === null ? null : releaseAt + 30;
+    const observedAtMs = file.endsWith('.admitted') ? admittedAt : readyAt;
+    const ready = mode !== 'absent-admission' && observedAtMs !== null && clock >= observedAtMs &&
+      (file.endsWith('.admitted') || right || mode !== 'never-ready');
     if (!ready) throw Object.assign(new Error('not ready'), { code: 'ENOENT' });
-    return JSON.stringify({ pid: right ? 2 : 1, observedAtMs: clock });
+    return JSON.stringify({ pid: right ? 2 : 1, observedAtMs });
   };
   const context = createContext({ Date: { now: () => clock }, fs: { readFile, async writeFile() {} },
     path, assert, delay: pause });
@@ -2164,9 +2200,9 @@ async function controlledReadyClock(implementation, mode = 'ready') {
       releaseAt = clock;
       if (mode === 'producer-error') controller.abort(new Error('original producer-error'));
     }
-  }, { exclusive: true, signal: controller.signal }).then(() => { result = { status: 'Passed' }; },
+  }, { exclusive: true, signal: controller.signal, admission }).then(() => { result = { status: 'Passed' }; },
     error => { result = { status: 'Failed', message: error.message }; });
-  for (let step = 0; !result && step < 4000; step++) {
+  for (let step = 0; !result && step < 8000; step++) {
     for (let flush = 0; flush < 128; flush++) await Promise.resolve();
     if (result) break;
     assert.ok(timers.length, 'Controlled readiness must yield to an observable clock event');
@@ -2459,6 +2495,9 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
       if(process.platform!=='win32')return;
       const ready=path.join(${JSON.stringify(entered)},label+'.ready');
       const release=path.join(${JSON.stringify(entered)},label+'.release');
+      const admitted=path.join(${JSON.stringify(entered)},label+'.admitted');
+      await fs.writeFile(admitted+'.pending',JSON.stringify({pid:process.pid,observedAtMs:Date.now()}),{flag:'wx'});
+      await fs.rename(admitted+'.pending',admitted);
       await fs.writeFile(ready+'.pending',JSON.stringify({pid:process.pid,observedAtMs:Date.now()}),{flag:'wx'});
       await fs.rename(ready+'.pending',ready);
       while(true){try{await fs.stat(release);break;}
@@ -2490,17 +2529,17 @@ test('T-PRD011 sibling producers dynamically consume freed aggregate capacity wi
       if (coordinatePeers) {
         const [waiting, short] = labels[0];
         const [peer] = labels[1];
-        await captureOwnedReady([waiting, short], entered, captureIdentity, { signal: readiness.signal });
+        await captureOwnedReady([waiting, short], entered, captureIdentity, { signal: readiness.signal, admission: true });
         readiness.signal.throwIfAborted();
         settleInitialPair(null);
         await trigger(short);
-        await captureOwnedReady([peer], entered, captureIdentity, { signal: readiness.signal });
+        await captureOwnedReady([peer], entered, captureIdentity, { signal: readiness.signal, admission: true });
         await Promise.all([waiting, peer].map(trigger));
       } else {
         await captureOwnedReady(labels.flat(), entered, async (label, owned) => {
           await captureIdentity(label, owned);
           await trigger(label);
-        }, { exclusive, signal: readiness.signal });
+        }, { exclusive, signal: readiness.signal, admission: true });
       }
     })().then(() => null, async error => {
         settleInitialPair(error);

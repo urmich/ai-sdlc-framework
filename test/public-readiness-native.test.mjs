@@ -4242,7 +4242,22 @@ async function qualifiedIntelSourceFixture(protocol) {
   return { inventory, plan, assignment, protocol, revision: snapshot.revision };
 }
 
+function preWorkerAdmissionReadinessRunnerSource(contents) {
+  assert.equal(createHash('sha256').update(contents).digest('hex'),
+    'a06fdb127100b653f1cdcd44436ec94a46cbeb7c40b7ac44a994116b78b0410e',
+    'Replay requires the exact worker-admission fixture source');
+  const lines = contents.split(/(?<=\n)/u);
+  const splices = [[0,2090],"async function captureOwnedReady(labels, entered, capture, { exclusive = false, signal } = {}) {\n",[2091,1],"    const deadline = Date.now() + 10000;\n",[2094,2],[2097,2],[2108,1],[2115,3],"      assert.ok(Date.now() < deadline, `Owned worker never reached its identity barrier: ${pending.join(', ')}`);\n",[2121,21],"  for (const mode of ['ready', 'never-ready', 'capture-error', 'producer-error']) {\n",[2144,1],"    if (mode === 'ready') {\n",[2146,2],"      assert.equal(result.clock, 13030);\n",[2159,17],[2177,2],"    const right = path.basename(file) === 'exclusive right.ready';\n    const ready = right ? clock >= 9000 :\n      releaseAt !== null && clock >= releaseAt + 30 && mode !== 'never-ready';\n",[2187,1],"    return JSON.stringify({ pid: right ? 2 : 1, observedAtMs: clock });\n",[2189,13],"  }, { exclusive: true, signal: controller.signal }).then(() => { result = { status: 'Passed' }; },\n",[2203,1],"  for (let step = 0; !result && step < 4000; step++) {\n",[2205,292],[2500,31],"        await captureOwnedReady([waiting, short], entered, captureIdentity, { signal: readiness.signal });\n",[2532,3],"        await captureOwnedReady([peer], entered, captureIdentity, { signal: readiness.signal });\n",[2536,5],"        }, { exclusive, signal: readiness.signal });\n",[2542,881]];
+  const restored = splices.map(part => typeof part === 'string' ? part :
+    lines.slice(part[0], part[0] + part[1]).join('')).join('');
+  assert.equal(createHash('sha256').update(restored).digest('hex'),
+    '4f1c68365573bbfc38f1bc337bbe6f49f59e5fb21c3e3910334b50aa025b0186',
+    'Replay must restore reviewed 5c673c Git blob 21b5ae10f1fde822a34e875637e377d25cd18f1e');
+  return restored;
+}
+
 function preCaptureFailureReadinessRunnerSource(contents) {
+  contents = preWorkerAdmissionReadinessRunnerSource(contents);
   contents = contents.replace("    'test-local-evidence.mjs', 'validation-tools.mjs'].map(file =>",
     "    'test-local-evidence.mjs'].map(file =>");
   // Restore authentic 0b3d Git blob 1ec2a0da7ff42ba2ac898d2aaa1a79077205be65 before unchanged admission replay.

@@ -275,6 +275,11 @@ Runner-fixture assertion failures retain bounded structured diagnostics instead
 of embedding raw subprocess output or inline programs in assertion messages.
 Owned public-runner fixtures include the worker's diagnostic-helper dependency;
 T-PRD002 and T-PRD008 retain actual successful and failing child execution.
+Windows sibling-producer fixtures publish atomic same-PID admission records
+before their unchanged ten-second readiness clocks. Bound unadmitted startup
+separately to sixty seconds; retain identity capture, action, exit and cleanup
+deadlines. PR-only controlled-clock cases cover delayed and boundary admission,
+missing admission and late readiness without growing the critical profile.
 Preserve expected/observed exit codes or missing-summary identity, sanitized
 primary error lines and the exact original stdout/stderr hashes and byte counts.
 Full streams retain only those identities. Revalidate bounded primary messages
