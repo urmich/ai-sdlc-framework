@@ -273,6 +273,8 @@ assertion identity; importing parser helpers alone does not run the whole CLI.
 
 Runner-fixture assertion failures retain bounded structured diagnostics instead
 of embedding raw subprocess output or inline programs in assertion messages.
+Owned public-runner fixtures include the worker's diagnostic-helper dependency;
+T-PRD002 and T-PRD008 retain actual successful and failing child execution.
 Preserve expected/observed exit codes or missing-summary identity, sanitized
 primary error lines and the exact original stdout/stderr hashes and byte counts.
 Full streams retain only those identities. Revalidate bounded primary messages

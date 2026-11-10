@@ -4243,6 +4243,8 @@ async function qualifiedIntelSourceFixture(protocol) {
 }
 
 function preCaptureFailureReadinessRunnerSource(contents) {
+  contents = contents.replace("    'test-local-evidence.mjs', 'validation-tools.mjs'].map(file =>",
+    "    'test-local-evidence.mjs'].map(file =>");
   // Restore authentic 0b3d Git blob 1ec2a0da7ff42ba2ac898d2aaa1a79077205be65 before unchanged admission replay.
   assert.equal(createHash('sha256').update(contents).digest('hex'),
     'df04cf1b55c7263f79329fbb74ade9dbdb802a745ab36e4c798c627bba18e8e4', 'Replay requires the exact capture-failure fixture source');
