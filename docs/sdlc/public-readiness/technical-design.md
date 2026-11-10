@@ -2794,12 +2794,18 @@ Historical native replay removes only the new transport-test additions before
 applying its existing archived source splices and exact digest assertions.
 Keep the qualification capsule and cost/placement history unchanged; those
 historical callbacks cannot satisfy execution evidence for the new candidate.
-The trusted observer still pins `native-validation.mjs`, `ci.yml` and every
-non-test helper to its adopted revision and uses its imported native planner.
-Adopt the exact Windows15/15/15/7 implementation/workflow correction as well as
-this Metadata-read fallback; do not weaken adoption checks or transfer producer
-results. An optional `READINESS_PRODUCER_REVISION` setting remains a separate
-provider-admin operation. Source alignment alone grants no native acceptance.
+The trusted observer uses its protected-main imported native planner and the
+selected source's supported protocol. Producer adoption is per PR, not a mutable
+repository-wide SHA pin. Current-head maintainer GitHub approval, or an
+owner-authored proposal under the existing approval policy, adopts that PR's
+exact source. Without that approval, protected producer/action/non-test-helper
+blobs, assertion inventory and Go definitions must still match protected main.
+Compare helper/action paths from both trees so additions and deletions cannot
+escape this boundary. Bind the native verdict to its approval input digest,
+head/base/test-merge identity and actual execution; approval cannot replace
+native acceptance. Both trusted workflows stop consuming
+`READINESS_PRODUCER_REVISION`. The coverage floor remains the protected-main
+canonical specification, not an independently selected mutable revision.
 
 The retained 2026-11-08 owner read found active effective ruleset `26728403`
 with deletion/non-fast-forward restrictions, PRs and zero required approvals,
@@ -2876,7 +2882,10 @@ trust roots. A malicious actor already allowed to edit trusted workflows or mint
 equivalent write-token statuses is not defeated by naming a required check.
 Protect that administrative boundary, restrict workflows that write statuses,
 and expose unexpected status sources. Configuration-changing external proposals
-may run safely but cannot self-redefine the trusted gate before maintainer adoption.
+may run safely but cannot self-redefine the trusted gate before current-head
+maintainer approval recorded by GitHub. This is automatic per-PR adoption, not
+an out-of-band repository variable update. GitHub continues to enforce actual
+merge permissions and approvals; observer data does not grant those permissions.
 
 ### 6.5 Coverage guardrail for this repository only
 

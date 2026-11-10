@@ -2964,7 +2964,7 @@ with zipfile.ZipFile(sys.argv[2],"w",compression=zipfile.ZIP_DEFLATED) as bundle
   }
 });
 
-function observerFixture() {
+function observerFixture({ changedProducer = false } = {}) {
   const revisions = { head: sourceA, base: 'b'.repeat(40), merge: 'c'.repeat(40), trusted: 'd'.repeat(40) };
   const requirements = '# Requirements\n\n### FR-200: Preserve records\n\n**Definition of Done**\n\n- AC-200.1: Preserve original state.\n';
   const plan = JSON.stringify({ tests: [{
@@ -2987,6 +2987,12 @@ function observerFixture() {
     ['.github/workflows/ci.yml', ciDefinition],
     ['.github/workflows/pr-readiness.yml', writerDefinition()],
     ['.github/workflows/coverage-metadata.yml', writerDefinition()],
+    ...(changedProducer ? [
+      ['test/orders-helper.mjs', "throw new Error('candidate helper must never execute');\n"],
+      ['test/orders-extra.test.mjs', 'export const validationDeclarations=' + JSON.stringify({
+        schemaVersion: 1, surfaces: [{ coverage: 'fixture-only', paths: ['test/orders-helper.mjs'] }],
+      }) + ";\nimport test from 'node:test';test('orders use the changed helper',()=>{});\n"],
+    ] : []),
   ]);
   const blobs = new Map();
   const tree = [...files].map(([file, contents]) => {
@@ -2996,6 +3002,15 @@ function observerFixture() {
     return { path: file, type: 'blob', mode: '100644', sha, size: bytes.length };
   });
   const treeSha = createHash('sha1').update(JSON.stringify(tree)).digest('hex');
+  const baselineTree = changedProducer ? tree.filter(entry => entry.path !== 'test/orders-extra.test.mjs')
+    .map(entry => {
+      if (entry.path !== 'test/orders-helper.mjs') return entry;
+      const bytes = Buffer.from("throw new Error('previous helper must never execute');\n");
+      const sha = createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+      blobs.set(sha, { sha, size: bytes.length, encoding: 'base64', content: bytes.toString('base64') });
+      return { ...entry, sha, size: bytes.length };
+    }) : tree;
+  const baselineTreeSha = createHash('sha1').update(JSON.stringify(baselineTree)).digest('hex');
   const input = { repositoryId: 'primary', sourceRevision: revisions.head,
     requirements: [{ artifactId: 'public-readiness', path: 'docs/sdlc/public-readiness/requirements.md', contents: requirements }],
     testPlans: [{ artifactId: 'public-readiness', path: 'docs/sdlc/public-readiness/test-plan.md', contents: plan }] };
@@ -3004,6 +3019,7 @@ function observerFixture() {
     head: { sha: revisions.head, repo: { id: 29 } },
     base: { sha: revisions.base, ref: 'main', repo: { id: 17 } } };
   const calls = [];
+  const reviews = [{ id: 1, user: { id: 11 }, state: 'APPROVED', commit_id: pr.head.sha }];
   const json = body => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
   let incompleteMembership = false;
   let tamperedBlob = false;
@@ -3033,16 +3049,18 @@ function observerFixture() {
         return json([pr]);
       }
       if (route === '/pulls/1') return json(pr);
-      if (route === '/pulls/1/reviews') return json([
-        { id: 1, user: { id: 11 }, state: 'APPROVED', commit_id: pr.head.sha },
-      ]);
+      if (route === '/pulls/1/reviews') return json(reviews);
       if (route === '/actions/workflows/ci.yml') return json({ id: 99, path: '.github/workflows/ci.yml' });
       if (route === '/actions/workflows/99/runs') return json({ workflow_runs: [] });
       if (route.startsWith('/git/commits/')) return json({
-        sha: route.split('/').at(-1), tree: { sha: treeSha },
+        sha: route.split('/').at(-1),
+        tree: { sha: route.split('/').at(-1) === revisions.trusted ? baselineTreeSha : treeSha },
         parents: [{ sha: revisions.head }, { sha: revisions.base }],
       });
       if (route === `/git/trees/${treeSha}`) return json({ sha: treeSha, truncated: false, tree });
+      if (route === `/git/trees/${baselineTreeSha}`) return json({
+        sha: baselineTreeSha, truncated: false, tree: baselineTree,
+      });
       if (route.startsWith('/git/blobs/')) {
         const data = blobs.get(route.split('/').at(-1));
         assert.ok(data, 'Unexpected immutable source blob');
@@ -3055,7 +3073,7 @@ function observerFixture() {
     api: client, defaultRevision: revisions.trusted, writerId: 42,
     now: () => now, detailsUrl: 'https://github.com/urmich/ai-sdlc-framework/actions/runs/101/attempts/1',
   });
-  return { client, host, policy, pr, input, calls,
+  return { client, host, policy, pr, input, calls, reviews,
     incomplete: () => { incompleteMembership = true; },
     tamper: () => { tamperedBlob = true; } };
 }
@@ -3084,6 +3102,30 @@ test('T-PRD085 actual API-source coverage inspection rejects same-head edits and
   f.pr.body = renderCoverageSection(prepareCoverage(f.input));
   assert.equal((await f.host.snapshot()).prs[0].verdicts['framework/coverage'].status, 'Passed');
   assert.equal(await f.host.verifyWriterControl(), true);
+  const changed = observerFixture({ changedProducer: true });
+  const current = (await changed.host.snapshot()).prs[0];
+  assert.equal(current.verdicts['framework/coverage'].status, 'Passed');
+  assert.equal(current.verdicts['framework/approval'].status, 'Passed');
+  assert.equal(current.verdicts['framework/validation'].status, 'NotRun');
+  assert.deepEqual(current.verdicts['framework/validation'].blockers,
+    ['No current PR producer execution exists for this exact source'],
+    'Changed helper/assertion definitions require exact current native execution, not a separate adopted SHA');
+  assert.ok(changed.calls.some(call => call.url.includes('/actions/workflows/99/runs')),
+    'Legitimate definition changes reach the exact-source producer lookup');
+  for (const commit of ['b'.repeat(40), null]) {
+    if (commit) changed.reviews[0].commit_id = commit;
+    else changed.reviews.length = 0;
+    const unapproved = (await changed.host.snapshot()).prs[0];
+    assert.equal(unapproved.verdicts['framework/approval'].status, 'NotRun');
+    assert.deepEqual(unapproved.verdicts['framework/validation'].blockers,
+      ['Changed producer definitions require current GitHub maintainer approval']);
+  }
+  changed.pr.user.id = 11;
+  const owner = (await changed.host.snapshot()).prs[0];
+  assert.equal(owner.verdicts['framework/approval'].status, 'Passed');
+  assert.deepEqual(owner.verdicts['framework/validation'].blockers,
+    ['No current PR producer execution exists for this exact source'],
+    'An owner-authored proposal needs actual native evidence, not impossible self-approval');
   assert.ok(f.calls.every(call => ['GET', 'POST'].includes(call.method)));
   assert.ok(f.calls.filter(call => call.method === 'POST').every(call => call.url.endsWith('/graphql')),
     'Metadata evaluation dispatches no provider mutation');

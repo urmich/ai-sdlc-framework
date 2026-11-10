@@ -42,7 +42,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           READINESS_STATUS_CREATOR_ID: ${{ vars.READINESS_STATUS_CREATOR_ID }}
-          READINESS_PRODUCER_REVISION: ${{ vars.READINESS_PRODUCER_REVISION }}
           READINESS_ARTIFACT_ORIGINS: ${{ vars.READINESS_ARTIFACT_ORIGINS }}
         run: node scripts/pr-observer.mjs
       - name: Retain observer outcomes and explicit gaps

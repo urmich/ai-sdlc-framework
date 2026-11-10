@@ -2348,6 +2348,19 @@ the one new byte-snapshot regression by its exact ID, file, name and empty paren
 closure, and check all 144 current assertion IDs are unique before comparing
 the original subset. A new legitimate test must not erase preservation checks.
 
+The existing PR-only T-PRD085 API-source observer root covers automatic
+GitHub-review-bound producer adoption. Use distinct immutable protected-main
+and candidate helper blobs and assertion inventories; current-head maintainer
+approval must reach the exact-source native-run lookup without a separate SHA
+update. Stale or missing external approval must not adopt changed definitions.
+An owner-authored proposal needs no self-approval, but missing native execution
+must remain NotRun. Existing same-head coverage edits, immutable-blob tampering,
+read-only acquisition and candidate-code non-execution controls remain required.
+These cases use injected GitHub responses and owned source data in one isolated
+root, with no external capability, new descendants or critical-budget growth.
+Current-candidate local, Review and hosted statuses require their own completed
+results; this procedure does not transfer historical acceptance.
+
 ## 7. PR matrix procedure
 
 1. With scoped push/PR authority, use the exact candidate selected for validation and a clean
