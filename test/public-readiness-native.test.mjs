@@ -4081,6 +4081,7 @@ async function qualifiedIntelSourceFiles() {
         'connection: connection(), fetch:');
     }
     if (file === 'test/public-readiness-observer.test.mjs') {
+      contents = preGitHubApprovalReadinessObserverSource(contents);
       const diagnostic = contents.indexOf('    "names": ["T-PRD037 observer failure payload');
       const separator = '  }, {\n';
       const diagnosticEnd = contents.indexOf(separator, diagnostic);
@@ -4170,6 +4171,7 @@ async function qualifiedIntelSourceFixture(protocol) {
         'connection: connection(), fetch:');
     }
     if (file === 'test/public-readiness-observer.test.mjs') {
+      contents = preGitHubApprovalReadinessObserverSource(contents);
       const diagnostic = contents.indexOf('    "names": ["T-PRD037 observer failure payload');
       const separator = '  }, {\n';
       const diagnosticEnd = contents.indexOf(separator, diagnostic);
@@ -4186,6 +4188,7 @@ async function qualifiedIntelSourceFixture(protocol) {
     }
     if (file === 'test/public-readiness-native.test.mjs') {
       contents = contents.replaceAll("    if (file === 'test/monitors.test.mjs') contents = historicalMonitorSource(contents);\n", '')
+        .replaceAll("      contents = preGitHubApprovalReadinessObserverSource(contents);\n", '')
         .replaceAll("    if (file === 'test/test-runner.test.mjs') contents = historicalTestRunnerSource(contents);\n", '')
         .replaceAll("    if (file === 'test/public-readiness-runner.test.mjs') contents = historicalReadinessRunnerSource(preAdmissionReadinessRunnerSource(preCaptureFailureReadinessRunnerSource(contents)));\n", '')
         .replaceAll("    if (file === 'test/macos-runner-admission.unit.test.mjs')\n" +
@@ -4424,6 +4427,29 @@ function historicalReleaseCiSource(contents) {
   assert.equal(createHash('sha256').update(restored).digest('hex'),
     '8da1180f87fa58d35a9b3e6254e0d8555fa6d9d29e6f16e3f9de07df99f01382',
     'Replay must restore the exact release CI source preceding provider-enforcement changes');
+  return restored;
+}
+
+function preGitHubApprovalReadinessObserverSource(contents) {
+  assert.equal(createHash('sha256').update(contents).digest('hex'),
+    '491c77bba5b53d0f3b882765189a1d4534a848332c808c3b0c038ffe3b25ced3');
+  const lines = contents.split(/(?<=\n)/u);
+  const parts = [
+    [0, 14], [25, 489], [515, 2],
+    "    assert.ok(rejected.blockers.includes('Producer definitions have not been maintainer-adopted'));\n",
+    [518, 495], [1017, 2],
+    "    assert.ok(result.blockers.some(message => message.includes('Producer definitions have not been maintainer-adopted')));\n",
+    [1020, 8], [1029, 2],
+    "  assert.ok(result.blockers.some(message => message.includes('Producer definitions have not been maintainer-adopted')));\n",
+    [1032, 6], [1039, 2],
+    "  assert.ok(result.blockers.some(message => message.includes('Assertion definitions or required bindings')));\n",
+    [1042, 540],
+  ];
+  const restored = parts.map(part => typeof part === 'string' ? part :
+    lines.slice(part[0], part[0] + part[1]).join('')).join('');
+  assert.equal(createHash('sha256').update(restored).digest('hex'),
+    '93e3fa856d2de4d6d1def65e927bafa4334583274e83b92adb41729b62e7d0be',
+    'Preserve authentic f594 observer bytes before unchanged historical replay');
   return restored;
 }
 

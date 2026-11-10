@@ -2367,6 +2367,9 @@ their no-artifact-acquisition rejection checks and exercise approved helper-only
 changes with complete exact-source native originals. These remain existing
 PR-only roots, with no critical-budget growth. Include the complete observer
 test file in the affected local checkpoint for this trust-boundary change.
+Restore authenticated f594 observer bytes before both immutable Intel replay
+paths and their unchanged archived splices, inventories and callback guards.
+The current approval-negative checks must not become historical execution credit.
 The PR-only T-PRD021 GitHub-issued download-origin regression additionally
 exercises a previously unconfigured valid GitHub storage account through the
 real readiness client with an injected fetch. Reject unselected API paths,
