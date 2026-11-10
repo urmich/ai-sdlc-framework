@@ -95,7 +95,11 @@ export async function windowsProcessIdentity(pid, exitPath, { createdBeforeMs, r
   const child = spawn(path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
     ['-NoProfile', '-NonInteractive', '-Command', script],
     { shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
-  const closed = new Promise(resolve => child.once('close', (code, signal) => resolve({ code, signal })));
+  let observerClosed = false;
+  const closed = new Promise(resolve => child.once('close', (code, signal) => {
+    observerClosed = true;
+    resolve({ code, signal });
+  }));
   let released = false;
   const release = () => {
     if (retainUntilRelease && !released) {
@@ -123,27 +127,44 @@ export async function windowsProcessIdentity(pid, exitPath, { createdBeforeMs, r
     `startup=${startup} exitObserved=${exitObserved} exitCode=${exitCode ?? 'none'} ` +
     `signal=${exitSignal ?? 'none'} stdoutBytes=${stdoutBytes} stderrBytes=${stderrBytes} byteLimit=${byteLimit}]`);
   const captured = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(captureFailure('Owned process identity capture did not complete')), 5000);
-    child.once('error', () => { clearTimeout(timer); reject(captureFailure('Owned process observer spawn failed')); });
-    child.once('close', () => {
+    let timer;
+    let settled = false;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      reject(captureFailure('process-identity-unavailable'));
-    });
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const arm = () => {
+      timer = setTimeout(() => finish(captureFailure('Owned process identity capture did not complete')), 5000);
+    };
+    arm();
+    child.once('error', () => finish(captureFailure('Owned process observer spawn failed')));
+    child.once('close', () => finish(captureFailure('process-identity-unavailable')));
     child.stdout.on('data', bytes => {
+      if (settled) return;
       stdoutBytes = countBytes(stdoutBytes, bytes);
       if (stdoutBytes === byteLimit) {
-        clearTimeout(timer);
-        reject(captureFailure('Owned process identity output exceeded its capture limit'));
+        finish(captureFailure('Owned process identity output exceeded its capture limit'));
         return;
       }
       stdout += bytes;
       for (let newline; (newline = stdout.indexOf('\n')) >= 0;) {
         const line = stdout.slice(0, newline).trim();
         stdout = stdout.slice(newline + 1);
-        if (!startup && line === startupMarker) { startup = true; continue; }
-        clearTimeout(timer);
-        try { resolve(JSON.parse(line)); }
-        catch { reject(captureFailure('Owned process identity record was invalid')); }
+        if (!startup && line === startupMarker) {
+          startup = true;
+          clearTimeout(timer);
+          arm();
+          continue;
+        }
+        if (!startup) {
+          finish(captureFailure('Owned process identity record was invalid'));
+          return;
+        }
+        try { finish(null, JSON.parse(line)); }
+        catch { finish(captureFailure('Owned process identity record was invalid')); }
         return;
       }
     });
@@ -159,11 +180,33 @@ export async function windowsProcessIdentity(pid, exitPath, { createdBeforeMs, r
     }
     return { identity: value, closed, release };
   } catch (error) {
+    const cleanupErrors = [];
+    const waitClosed = async () => {
+      if (observerClosed) return;
+      let timer;
+      try {
+        await Promise.race([closed, new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('Owned process observer closure was not confirmed')), 5000);
+        })]);
+      } finally { clearTimeout(timer); }
+    };
     if (retainUntilRelease) {
-      try { await release(); }
-      catch (cleanupError) {
-        throw new AggregateError([error, cleanupError], 'Owned process identity capture and release failed');
+      try {
+        release();
+        await waitClosed();
       }
+      catch (cleanupError) {
+        if (!released) cleanupErrors.push(cleanupError);
+      }
+    }
+    if (!observerClosed) {
+      try {
+        if (!exitObserved && Number.isInteger(child.pid) && child.pid > 0) child.kill('SIGTERM');
+        await waitClosed();
+      } catch (cleanupError) { cleanupErrors.push(cleanupError); }
+    }
+    if (cleanupErrors.length) {
+      throw new AggregateError([error, ...cleanupErrors], 'Owned process identity capture and cleanup failed');
     }
     throw error;
   }

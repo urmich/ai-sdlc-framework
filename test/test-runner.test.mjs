@@ -46,7 +46,7 @@ export const validationDeclarations = {
     "names": ["T-PRD018 Windows capture diagnostics distinguish startup and exited observers without exposing output"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "runner-process-identity-contract",
-    "reason": "PR-only controlled observer-stream regression; process-isolated module context, no native child or shared mutable state.",
+    "reason": "PR-only controlled observer-stream, phase-deadline and owned-closure regression; process-isolated injected clock and child events, no native child or shared mutable state.",
     "prerequisites": ["Node; owned repository-local test evidence"]
   }, {
     "names": [
@@ -410,53 +410,220 @@ test('T-PRD018 owned worker exit assertions distinguish reused identities from s
 
 test('T-PRD018 Windows capture diagnostics distinguish startup and exited observers without exposing output', async () => {
   const systemRoot = path.join(repositoryRoot, '.test-data', 'synthetic-system-root');
-  for (const mode of ['not-started', 'started', 'exited', 'buffered-identity', 'closed',
-    'signaled', 'negative-exit', 'unknown-signal', 'spawn-error', 'oversized', 'invalid-record']) {
+  const controlled = ({ retained = false, releaseCloses = true, releaseError = false } = {}) => {
     const child = new EventEmitter();
+    child.pid = 12345;
     child.stdout = new PassThrough();
     child.stderr = new PassThrough();
-    let expire;
-    let allowance;
-    let executable;
-    const context = createContext({ assert, path, fs,
+    const timers = new Map();
+    const windows = [];
+    let clock = 0;
+    let sequence = 0;
+    let kills = 0;
+    let closes = 0;
+    let releases = 0;
+    const exit = (code, signal) => {
+      child.exitCode = code;
+      child.signalCode = signal;
+      child.emit('exit', code, signal);
+    };
+    const close = (code, signal) => {
+      closes++;
+      child.stdout.end();
+      child.stderr.end();
+      child.emit('close', code, signal);
+    };
+    child.kill = signal => {
+      assert.equal(signal, 'SIGTERM');
+      kills++;
+      exit(null, signal);
+      close(null, signal);
+      return true;
+    };
+    const context = createContext({ assert, path, fs: {
+      writeFileSync(file, contents, options) {
+        assert.equal(file, 'owned-unused-exit.release');
+        assert.equal(contents, 'release');
+        assert.equal(options.flag, 'wx');
+        releases++;
+        if (releaseError) throw new Error('private-release-detail');
+        if (releaseCloses) { exit(0, null); close(0, null); }
+      },
+    },
       process: { pid: process.pid, env: { SystemRoot: systemRoot } },
-      spawn: command => { executable = command; return child; },
-      setTimeout(callback, milliseconds) { expire = callback; allowance = milliseconds; return 1; },
-      clearTimeout() {} });
+      spawn: command => {
+        assert.equal(command, path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'));
+        return child;
+      },
+      setTimeout(callback, milliseconds) {
+        const id = ++sequence;
+        const deadline = clock + milliseconds;
+        timers.set(id, { callback, deadline });
+        windows.push({ start: clock, milliseconds, deadline });
+        return id;
+      },
+      clearTimeout(id) { timers.delete(id); },
+    });
     const capture = runInContext(`(${windowsProcessIdentity.toString()})`, context);
-    const pending = capture(process.pid, 'owned-unused-exit', { createdBeforeMs: Date.now() });
-    const outcome = pending.then(value => ({ value }), error => ({ message: error.message }));
-    assert.equal(executable, path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'));
-    assert.equal(allowance, 5000);
+    const pending = capture(process.pid, 'owned-unused-exit', {
+      createdBeforeMs: Date.now(), retainUntilRelease: retained,
+    });
+    const outcome = pending.then(value => ({ value }), error => ({ error, message: error.message }));
+    return {
+      child, exit, close, outcome, windows, timers,
+      kills: () => kills, closes: () => closes, releases: () => releases,
+      advance(milliseconds) {
+        const end = clock + milliseconds;
+        for (;;) {
+          const next = [...timers.entries()].sort((a, b) => a[1].deadline - b[1].deadline)[0];
+          if (!next || next[1].deadline > end) break;
+          timers.delete(next[0]);
+          clock = next[1].deadline;
+          next[1].callback();
+        }
+        clock = end;
+      },
+    };
+  };
+  const marker = 'owned-process-observer-started-v1\n';
+  for (const completion of ['identity', 'closed']) {
+    const f = controlled();
+    f.advance(4990);
+    f.child.stdout.write(marker);
+    f.advance(20);
+    if (completion === 'identity') {
+      f.child.stdout.write(JSON.stringify({ pid: process.pid, present: true,
+        creationTime: '100', image: 'node', observedAt: new Date().toISOString() }) + '\n');
+    }
+    f.exit(completion === 'identity' ? 0 : 1, null);
+    f.close(completion === 'identity' ? 0 : 1, null);
+    const result = await f.outcome;
+    if (completion === 'identity') {
+      assert.equal(result.message, undefined,
+        'Startup must not consume the actual identity observation window');
+      assert.equal(result.value.identity.pid, process.pid);
+      const closed = await result.value.closed;
+      assert.equal(closed.code, 0);
+      assert.equal(closed.signal, null);
+    } else {
+      assert.match(result.message, /process-identity-unavailable/u);
+      assert.match(result.message, /phase=identity startup=true exitObserved=true exitCode=1/u);
+    }
+    assert.deepEqual(f.windows.map(window => [window.start, window.milliseconds]), [[0, 5000], [4990, 5000]]);
+    assert.equal(f.kills(), 0);
+    assert.equal(f.timers.size, 0);
+  }
+  for (const mode of ['startup-deadline', 'identity-deadline', 'duplicate-startup', 'aborted', 'unknown-closure']) {
+    const f = controlled();
+    let unconfirmedStops = 0;
+    if (mode === 'unknown-closure') f.child.kill = () => { unconfirmedStops++; return false; };
+    if (mode !== 'startup-deadline') {
+      f.advance(4000);
+      f.child.stdout.write(marker);
+    }
+    if (mode === 'duplicate-startup') {
+      f.advance(4000);
+      f.child.stdout.write(marker);
+      f.advance(5000);
+    } else if (mode === 'aborted') {
+      f.child.emit('error', Object.assign(new Error('private-abort-detail'), { name: 'AbortError' }));
+    } else {
+      f.advance(5000);
+      if (mode === 'startup-deadline') f.child.stdout.write(marker);
+    }
+    if (mode === 'unknown-closure') {
+      await Promise.resolve();
+      f.advance(5000);
+    }
+    const result = await f.outcome;
+    assert.ok(result.error, mode);
+    assert.equal(result.value, undefined, mode);
+    if (mode === 'unknown-closure') {
+      assert.equal(result.error.name, 'AggregateError');
+      assert.match(result.error.errors[0].message, /phase=identity/u);
+      assert.match(result.error.errors[1].message, /observer closure was not confirmed/u);
+      assert.equal(unconfirmedStops, 1);
+      f.exit(null, 'SIGTERM');
+      f.close(null, 'SIGTERM');
+    } else {
+      assert.equal(f.kills(), 1, 'Only the exact spawned observer is stopped, and closure is awaited');
+      assert.equal(f.closes(), 1);
+      if (mode.endsWith('deadline')) assert.match(result.message, /capture did not complete/u);
+      if (mode === 'duplicate-startup') assert.match(result.message, /record was invalid/u);
+      if (mode === 'aborted') assert.match(result.message, /observer spawn failed/u);
+      assert.equal(result.message.includes('private-abort-detail'), false);
+    }
+    assert.equal(f.windows.filter(window => window.start === 8000).length, 0,
+      'A duplicate startup marker must not renew either observation deadline');
+    assert.equal(f.timers.size, 0);
+  }
+  for (const mode of ['released', 'release-failed', 'release-stalled']) {
+    const f = controlled({ retained: true, releaseCloses: mode === 'released',
+      releaseError: mode === 'release-failed' });
+    f.child.stdout.write(marker);
+    f.child.stdout.write('invalid-identity\n');
+    if (mode === 'release-stalled') {
+      await Promise.resolve();
+      f.advance(5000);
+    }
+    const result = await f.outcome;
+    assert.ok(result.error);
+    assert.equal(result.value, undefined);
+    if (mode === 'release-failed') {
+      assert.equal(result.error.name, 'AggregateError');
+      assert.match(result.error.errors[0].message, /record was invalid/u);
+      assert.equal(result.error.errors[1].message, 'private-release-detail');
+      assert.equal(result.message.includes('private-release-detail'), false);
+    } else assert.match(result.message, /record was invalid/u);
+    assert.equal(f.releases(), 1);
+    assert.equal(f.kills(), mode === 'released' ? 0 : 1);
+    assert.equal(f.closes(), 1);
+    assert.equal(f.timers.size, 0);
+  }
+  for (const mode of ['not-started', 'started', 'exited', 'buffered-identity', 'closed',
+    'signaled', 'negative-exit', 'unknown-signal', 'spawn-error', 'oversized', 'invalid-record', 'missing-startup']) {
+    const f = controlled();
+    const { child, outcome } = f;
+    assert.equal(f.windows[0].milliseconds, 5000);
     const secret = 'private-observer-output-not-for-annotations';
     child.stderr.write(secret);
-    if (!['not-started', 'spawn-error'].includes(mode)) {
+    if (!['not-started', 'spawn-error', 'missing-startup'].includes(mode)) {
       child.stdout.write('owned-process-observer-');
       child.stdout.write('started-v1\n');
     }
-    if (['exited', 'buffered-identity', 'closed'].includes(mode)) child.emit('exit', 7, null);
-    if (mode === 'signaled') child.emit('exit', null, 'SIGTERM');
-    if (mode === 'negative-exit') child.emit('exit', -1073741510, null);
-    if (mode === 'unknown-signal') child.emit('exit', null, `SIG${secret}`);
+    if (['exited', 'buffered-identity', 'closed'].includes(mode)) f.exit(7, null);
+    if (mode === 'signaled') f.exit(null, 'SIGTERM');
+    if (mode === 'negative-exit') f.exit(-1073741510, null);
+    if (mode === 'unknown-signal') f.exit(null, `SIG${secret}`);
     if (mode === 'buffered-identity') {
       child.stdout.write(JSON.stringify({ pid: process.pid, present: true,
         creationTime: '100', image: 'node', observedAt: new Date().toISOString() }) + '\n');
-      child.emit('close', 7, null);
+      f.close(7, null);
       const result = await outcome;
       assert.equal(result.value.identity.pid, process.pid,
         'An exit event must not discard an identity still draining from stdout');
       continue;
     }
-    if (mode === 'closed') child.emit('close', 7, null);
-    else if (mode === 'spawn-error') child.emit('error', new Error(secret));
+    if (mode === 'closed') f.close(7, null);
+    else if (mode === 'spawn-error') {
+      child.pid = undefined;
+      child.emit('error', new Error(secret));
+      f.close(null, null);
+    }
     else if (mode === 'oversized') child.stdout.write(secret.repeat(3000));
     else if (mode === 'invalid-record') child.stdout.write(`${secret}\n`);
-    else expire();
+    else if (mode === 'missing-startup') child.stdout.write(JSON.stringify({
+      pid: process.pid, present: true, creationTime: '100', image: 'node', observedAt: new Date().toISOString(),
+    }) + '\n');
+    else f.advance(5000);
+    if (['exited', 'signaled', 'negative-exit', 'unknown-signal'].includes(mode)) {
+      f.close(child.exitCode, child.signalCode);
+    }
     const { message } = await outcome;
     assert.ok(message, mode);
     assert.equal(message.includes(secret), false);
     assert.match(message, /observer phase=(?:startup|identity) startup=(?:true|false)/u);
-    assert.ok(message.includes(`startup=${!['not-started', 'spawn-error'].includes(mode)}`), mode);
+    assert.ok(message.includes(`startup=${!['not-started', 'spawn-error', 'missing-startup'].includes(mode)}`), mode);
     assert.ok(message.includes(`exitObserved=${['exited', 'closed', 'signaled', 'negative-exit', 'unknown-signal'].includes(mode)}`), mode);
     assert.ok(message.includes(`exitCode=${mode === 'negative-exit' ? -1073741510 :
       ['exited', 'closed'].includes(mode) ? 7 : 'none'}`), mode);
@@ -464,6 +631,7 @@ test('T-PRD018 Windows capture diagnostics distinguish startup and exited observ
     assert.ok(message.includes(`stderrBytes=${Buffer.byteLength(secret)}`), mode);
     if (mode === 'oversized') assert.match(message, /stdoutBytes=65536 /u);
     assert.equal(sanitizeExecutionPayload(Buffer.from(JSON.stringify({ message }))).message, message);
+    assert.equal(f.timers.size, 0);
   }
 });
 
