@@ -25,7 +25,7 @@ async function requireSavedFrozenIntent(api, prefix, { releaseIntentId, sourceCo
       if (!Array.isArray(response.artifacts)) throw new Error('Original release-artifact history is unavailable; do not guess that repacking is safe');
       artifacts.push(...response.artifacts);
       if (artifacts.length >= response.total_count) break;
-      if (!response.artifacts.length || artifacts.length >= 5000) throw new Error('Release-artifact history is incomplete; select an exact saved candidate instead');
+      if (!response.artifacts.length) throw new Error('Release-artifact history is incomplete; select an exact saved candidate instead');
     }
     for (const artifact of artifacts.filter(item => !item.expired &&
       /^release-preflight-[1-9]\d*-[1-9]\d*$/u.test(item.name) &&
