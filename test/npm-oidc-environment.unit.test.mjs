@@ -1,6 +1,6 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
-  "surfaces": [{"coverage": "direct", "paths": [".github/workflows/npm-publish.yml"]}],
+  "surfaces": [],
   "groups": [{
     "root": "T-PRD031 publisher environment retains both OIDC request fields without unrelated credentials",
     "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []
