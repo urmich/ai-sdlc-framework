@@ -3,7 +3,9 @@ export const validationDeclarations = {
   "surfaces": [{"coverage": "direct", "paths": ["scripts/release-retention.mjs"]}],
   "groups": [
     {"root": "T-PRD037 replay definitions deduplicate shared source without changing complete identities", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
-    {"root": "T-PRD037 replay definitions reject missing changed and ambiguous source data", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}
+    {"root": "T-PRD037 replay definitions reject missing changed and ambiguous source data", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD037 trust retention opens a caller-relative archive without changing signed bytes", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD037 archive verification opens caller-relative bundle and independently pinned root paths", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}
   ],
   "applicability": [{
     "names": [
@@ -14,10 +16,21 @@ export const validationDeclarations = {
     "owner": "maintainer",
     "reason": "PR-only FR-206/AC-206.2 functional regressions preserve complete replay identities while deduplicating identical source arrays, retain version-one compatibility and reject corrupted or ambiguous retained data. Independent process-isolated one-slot roots use owned filesystem and in-memory fixtures, with no external access, shared resources or critical-profile growth. Fixture results supply no native or release acceptance credit.",
     "prerequisites": ["Node >=22", "Owned repository-local filesystem and in-memory fixtures"]
+  }, {
+    "names": [
+      "T-PRD037 trust retention opens a caller-relative archive without changing signed bytes",
+      "T-PRD037 archive verification opens caller-relative bundle and independently pinned root paths"
+    ],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "maintainer",
+    "reason": "PR-only FR-206/AC-206.2 functional regressions exercise the shared gh file-open boundary and actual immutable trust retention. Injected transport reads real owned files using subprocess cwd/argv semantics, including spaces, relative inputs and absolute-path compatibility. Independent one-slot roots have no dependencies, global mutations, shared resources or critical-profile growth. Controlled verifier output is not cryptographic or release acceptance evidence.",
+    "prerequisites": ["Node >=22", "Owned repository-local filesystem fixtures; no gh, credentials, network or package manager"]
   }],
   "plannedCases": [{"id": "T-PRD037", "selectors": [
     {"name": "T-PRD037 replay definitions deduplicate shared source without changing complete identities", "parents": []},
-    {"name": "T-PRD037 replay definitions reject missing changed and ambiguous source data", "parents": []}
+    {"name": "T-PRD037 replay definitions reject missing changed and ambiguous source data", "parents": []},
+    {"name": "T-PRD037 trust retention opens a caller-relative archive without changing signed bytes", "parents": []},
+    {"name": "T-PRD037 archive verification opens caller-relative bundle and independently pinned root paths", "parents": []}
   ]}]
 };
 import test from 'node:test';
@@ -45,6 +58,98 @@ function sourceBlock(value) {
   const hash = sha256(bytes);
   return { bytes, reference: { filename: `replay/sources/${hash}.json`, sha256: hash, size: bytes.length } };
 }
+
+async function signedPathFixture(t) {
+  const directory = path.join(ROOT, '.test-data', `release trust paths ${randomUUID()}`);
+  await fs.mkdir(path.dirname(directory), { recursive: true });
+  await fs.mkdir(directory);
+  t.after(async () => {
+    await fs.rm(directory, { recursive: true, force: true });
+    await assert.rejects(fs.lstat(directory), { code: 'ENOENT' });
+  });
+  const archiveBytes = Buffer.from('Owned file-open fixture, not authentic release evidence\n');
+  const archiveSha256 = sha256(archiveBytes);
+  const archive = path.join(directory, `release-prepublication-path-fixture-123-1-${archiveSha256}.tar.gz`);
+  const signedBytes = Buffer.from(`${JSON.stringify({
+    verificationMaterial: { certificate: 'controlled-fixture-only' },
+    dsseEnvelope: { payload: Buffer.from('{}').toString('base64'), signatures: [{ sig: 'fixture-only' }] },
+  })}\n`);
+  const attestationBundle = path.join(directory, 'signed bundle.jsonl');
+  const rootBytes = Buffer.from('{"fixture":"independently selected root"}\n');
+  const trustedRoot = path.join(directory, 'trusted root.json');
+  const outputDir = path.join(directory, 'retained trust');
+  await fs.mkdir(outputDir);
+  await fs.writeFile(archive, archiveBytes, { flag: 'wx' });
+  await fs.writeFile(attestationBundle, signedBytes, { flag: 'wx' });
+  await fs.writeFile(trustedRoot, rootBytes, { flag: 'wx' });
+  const opened = [];
+  const run = async (command, args, options) => {
+    assert.equal(command, 'gh');
+    assert.equal(options.cwd, directory);
+    const readArgument = index => fs.readFile(path.resolve(options.cwd, args[index]));
+    assert.deepEqual(await readArgument(2), archiveBytes);
+    assert.deepEqual(await readArgument(args.indexOf('--bundle') + 1), signedBytes);
+    if (args.includes('--custom-trusted-root')) {
+      assert.deepEqual(await readArgument(args.indexOf('--custom-trusted-root') + 1), rootBytes);
+    }
+    assert.equal(args[args.indexOf('--repo') + 1], 'fixture/trust-paths');
+    assert.equal(args[args.indexOf('--signer-workflow') + 1], 'fixture/trust-paths/.github/workflows/release.yml');
+    assert.equal(args[args.indexOf('--signer-digest') + 1], sourceCommit);
+    assert.equal(args[args.indexOf('--source-digest') + 1], sourceCommit);
+    assert.equal(args[args.indexOf('--source-ref') + 1], 'refs/heads/main');
+    assert.ok(args.includes('--deny-self-hosted-runners'));
+    opened.push(args.includes('--custom-trusted-root') ? 'independently-pinned-root' : 'default-host-roots');
+    return { stdout: JSON.stringify([{ verificationResult: {
+      statement: { subject: [{ digest: { sha256: archiveSha256 } }] },
+      verifiedTimestamps: [{ type: 'Tlog' }],
+    } }]) };
+  };
+  return { archive, archiveBytes, archiveSha256, attestationBundle, signedBytes, trustedRoot, rootBytes,
+    outputDir, opened, request: { archive, attestationBundle, expectedArchiveSha256: archiveSha256,
+      expectedSourceCommit: sourceCommit, sourceRepository: 'fixture/trust-paths', run } };
+}
+
+test('T-PRD037 trust retention opens a caller-relative archive without changing signed bytes', async t => {
+  const f = await signedPathFixture(t);
+  const retained = await retention.retainAttestationMaterial({
+    ...f.request, archive: path.relative(process.cwd(), f.archive),
+    releaseIntentId: 'path-fixture', runId: '123', attempt: '1', outputDir: f.outputDir,
+  });
+  assert.deepEqual(f.opened, ['default-host-roots']);
+  assert.deepEqual(await fs.readFile(f.archive), f.archiveBytes);
+  assert.deepEqual(await fs.readFile(f.attestationBundle), f.signedBytes);
+  assert.deepEqual(await fs.readFile(path.join(f.outputDir, retained.attestationFilename)), f.signedBytes);
+  const trustBytes = await fs.readFile(path.join(f.outputDir, retained.trustFilename));
+  assert.equal(sha256(trustBytes), retained.trustSha256);
+  const trust = JSON.parse(trustBytes);
+  assert.deepEqual(trust.subject, { filename: path.basename(f.archive), sha256: f.archiveSha256 });
+  assert.deepEqual(trust.attestation, {
+    filename: retained.attestationFilename, sha256: sha256(f.signedBytes), size: f.signedBytes.length,
+  });
+  assert.deepEqual(trust.verification.mechanisms, {
+    signature: 'Passed', certificate: 'Passed', transparency: 'Passed',
+  });
+});
+
+test('T-PRD037 archive verification opens caller-relative bundle and independently pinned root paths', async t => {
+  const f = await signedPathFixture(t);
+  const request = { ...f.request, trustedRoot: f.trustedRoot, expectedTrustedRootSha256: sha256(f.rootBytes) };
+  const absolute = await retention.verifyArchiveWithGh(request);
+  const relative = await retention.verifyArchiveWithGh({
+    ...request, attestationBundle: path.relative(process.cwd(), f.attestationBundle),
+    trustedRoot: path.relative(process.cwd(), f.trustedRoot),
+  });
+  assert.deepEqual(relative, absolute);
+  assert.deepEqual(f.opened, ['independently-pinned-root', 'independently-pinned-root']);
+  await assert.rejects(retention.verifyArchiveWithGh({
+    ...request, trustedRoot: path.relative(process.cwd(), f.trustedRoot),
+    expectedTrustedRootSha256: '0'.repeat(64),
+  }), { code: 'RELEASE_REPLAY' });
+  assert.equal(f.opened.length, 2, 'An unpinned root must fail before invoking the verifier');
+  assert.deepEqual(await fs.readFile(f.archive), f.archiveBytes);
+  assert.deepEqual(await fs.readFile(f.attestationBundle), f.signedBytes);
+  assert.deepEqual(await fs.readFile(f.trustedRoot), f.rootBytes);
+});
 
 test('T-PRD037 replay definitions deduplicate shared source without changing complete identities', async t => {
   const directory = path.join(ROOT, '.test-data', `release-retention-unit-${randomUUID()}`);

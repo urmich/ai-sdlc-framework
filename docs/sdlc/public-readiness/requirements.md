@@ -480,6 +480,9 @@ approved release sequence without manual glue or repeated per-job intervention.
   Retained replay inputs store identical source snapshots once and reconstruct
   each complete native definition for verification. Preserve the archive size
   limits and every original native result.
+  Signed-material retention and historical verification must open the selected
+  archive, bundle and independently pinned optional trust root using the caller's
+  path context, even when the verifier subprocess uses another working directory.
 - AC-206.3: Automatically invoke required postpublication acceptance with the
   exact saved artifact IDs/digests and source. No separate manual workflow
   dispatch or unpublished-GitHub-assets surprise remains.
