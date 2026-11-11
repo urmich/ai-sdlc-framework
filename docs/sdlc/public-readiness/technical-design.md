@@ -3187,6 +3187,12 @@ Both names contain `TOKEN`; validating them only in the parent is insufficient.
 Continue excluding unrelated credential-bearing variables and inherited npm
 configuration.
 
+For npm provenance, the exact certificate identity is the reusable
+`npm-publish.yml@refs/heads/main` signer. Independently require the signed
+statement's workflow to identify the root `release.yml@refs/heads/main` caller,
+the exact repository, source commit and package bytes. These identities are
+distinct; neither may substitute for the other.
+
 Independent artifact verification confirms the handoff came from the expected
 source/run/verifier, not just that its JSON says ready. The sole tooling exception
 is the approved integrity-pinned npm CLI, with scripts disabled. OIDC and
@@ -3211,6 +3217,20 @@ handoff. Sealed-bundle verification explicitly propagates that phase allowance
 through native evidence replay to candidate validation; the allowance defaults
 to false everywhere else. It bypasses only the premature-handoff guard, never
 source, native evidence, bundle inventory or final generated-prompt validation.
+
+Completion's CLI top-level await must also remain acyclic during bundle
+verification. The default native verifier imports public `prCryptoFixture` pins
+from `pr-capabilities.mjs`; loading those pins must not statically import the
+still-evaluating `accept-release.mjs` CLI. Load `pinnedNpmTool` dynamically only
+inside `provisionPrCryptoFixture`, after its CI-only guard and before filesystem
+effects. Provisioning retains the same tool implementation, integrity pins,
+offline signature/certificate/transparency checks and environment contract.
+The isolated T-PRD035 child-CLI regression retains the real bundle checks and
+default native-verifier import, doubles only artifact verification/provider I/O,
+and must reach an explicit rejected read rather than exit 13 on an unsettled
+await. These controlled inputs provide no native, cryptographic or release
+acceptance proof; channel reporting and T-PRD037 historical retention are
+unchanged.
 
 Replay graph version 2 separates each captured native definition's `sourceFiles`
 into a content-addressed `replay/sources/<sha256>.json` entry. Identical snapshots
