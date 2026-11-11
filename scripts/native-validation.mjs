@@ -3210,11 +3210,11 @@ async function definitionInputs(target, profile, component = 'full', shard = nul
 export async function verifyNativeEvidence({ target, profile, candidateDir, evidenceDir,
   expectedSourceCommit, expectedRunId, expectedAttempt, releaseIntentId,
   expectedRepositoryId = process.env.GITHUB_REPOSITORY_ID, expectedWorkflowRef = process.env.GITHUB_WORKFLOW_REF,
-  component = 'full', shard = null, shardProtocol = nativeFrameworkShardProtocol }) {
+  component = 'full', shard = null, shardProtocol = nativeFrameworkShardProtocol, allowGeneratedPrompt = false }) {
   const actualSource = (await execute('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot })).stdout.trim();
   requireThat(actualSource === expectedSourceCommit, 'EVIDENCE', 'Replay must use the exact selected source definitions');
   await assertCommittedNativeInputs();
-  const candidate = await verifyCandidate(candidateDir, { sourceCommit: expectedSourceCommit });
+  const candidate = await verifyCandidate(candidateDir, { sourceCommit: expectedSourceCommit, allowGeneratedPrompt });
   const inputs = await definitionInputs(target, profile, component, shard, shardProtocol);
   const assignment = shard === null ? null : nativeFrameworkShardPlan({
     inventory: inputs.inventory, plan: inputs.plan, target, protocol: shardProtocol });
