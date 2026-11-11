@@ -52,6 +52,7 @@ export async function captureReleaseReplayInputs({ bundle, directory, captureDef
   captureDefinition ??= (await import('./native-validation.mjs')).captureNativeDefinitionInputs;
   const entries = [];
   const definitions = [];
+  const sourceSnapshots = new Set();
   const origins = bundle.producerVerification;
   const available = origins?.origins?.length === 4 && origins.contexts?.length === 4 &&
     origins.contexts.every(row => Number.isFinite(Date.parse(row.sourceTime)) &&
@@ -61,16 +62,26 @@ export async function captureReleaseReplayInputs({ bundle, directory, captureDef
     requireThat(definition.source?.revision === bundle.identity.sourceCommit &&
       definition.target === target && definition.profile === 'r-pre',
     'RELEASE_REPLAY', 'Retained definitions differ from the original adopted candidate');
+    const { sourceFiles, ...retainedDefinition } = definition;
+    requireThat(Array.isArray(sourceFiles), 'RELEASE_REPLAY', 'Retained definitions require their exact source files');
+    const sourceBytes = Buffer.from(canonical(sourceFiles));
+    const sourceSha256 = sha256(sourceBytes);
+    const sourceFilename = `replay/sources/${sourceSha256}.json`;
+    if (!sourceSnapshots.has(sourceFilename)) {
+      entries.push({ path: sourceFilename, data: sourceBytes, mode: 0o644 });
+      sourceSnapshots.add(sourceFilename);
+    }
     const filename = `replay/definitions/${target}.json`;
-    const bytes = Buffer.from(canonical(definition));
+    const bytes = Buffer.from(canonical(retainedDefinition));
     definitions.push({ target, filename, sha256: sha256(bytes), size: bytes.length,
-      definitionDigest: digest(definition) });
+      definitionDigest: digest(definition),
+      sourceFiles: { filename: sourceFilename, sha256: sourceSha256, size: sourceBytes.length } });
     entries.push({ path: filename, data: bytes, mode: 0o644 });
   }
   const template = await fs.readFile(path.join(ROOT, 'packaging', 'windows-tester', 'prompt.md.template'));
   entries.push({ path: 'replay/windows-tester-template.txt', data: template, mode: 0o644 });
   const bundleSha256 = sha256(await fs.readFile(path.join(directory, 'bundle.json')));
-  const graph = { schemaVersion: 1, kind: 'release-verification-graph',
+  const graph = { schemaVersion: 2, kind: 'release-verification-graph',
     bundleSha256, identity: bundle.identity, releaseRepository: bundle.releaseRepository,
     releaseIntentId: bundle.releaseIntentId, sourceRepository: sourceRepository ?? 'urmich/ai-sdlc-framework',
     observedAt, historicalReplay: available ? 'Available' : 'NotRun-origin-capability-unavailable',
@@ -119,6 +130,24 @@ function readEntry(files, filename, expected) {
   requireThat(bytes && (!expected || bytes.length === expected.size && sha256(bytes) === expected.sha256),
     'RELEASE_REPLAY', `Required retained verification input is missing or changed: ${filename}`);
   return bytes;
+}
+
+export function readReleaseReplayDefinition({ files, reference, schemaVersion }) {
+  requireThat([1, 2].includes(schemaVersion), 'RELEASE_REPLAY', 'Unsupported retained definition schema');
+  const archived = JSON.parse(readEntry(files, reference?.filename, reference));
+  requireThat(archived !== null && typeof archived === 'object' && !Array.isArray(archived),
+    'RELEASE_REPLAY', 'Retained native definition must be an object');
+  let definition = archived;
+  if (schemaVersion === 2) {
+    requireThat(!Object.hasOwn(archived, 'sourceFiles'), 'RELEASE_REPLAY',
+      'Retained native definition has ambiguous source data');
+    const sourceFiles = JSON.parse(readEntry(files, reference.sourceFiles?.filename, reference.sourceFiles));
+    requireThat(Array.isArray(sourceFiles), 'RELEASE_REPLAY', 'Retained native source files must be an array');
+    definition = { ...archived, sourceFiles };
+  }
+  requireThat(digest(definition) === reference.definitionDigest,
+    'RELEASE_REPLAY', 'Original adopted native definitions changed');
+  return definition;
 }
 
 export function releaseEvidenceName(name) {
@@ -205,7 +234,7 @@ export async function verifyHistoricalRelease({ archive, attestationBundle, expe
   const bundle = JSON.parse(manifestBytes);
   const graph = JSON.parse(readEntry(files, 'replay-inputs.json'));
   const readiness = JSON.parse(readEntry(files, 'readiness.json'));
-  requireThat(graph.schemaVersion === 1 && graph.kind === 'release-verification-graph' &&
+  requireThat([1, 2].includes(graph.schemaVersion) && graph.kind === 'release-verification-graph' &&
     graph.historicalReplay === 'Available' && graph.bundleSha256 === expectedBundleSha256 &&
     graph.identity?.sourceCommit === expectedSourceCommit && graph.releaseIntentId === expectedReleaseIntentId &&
     graph.sourceRepository === sourceRepository && graph.releaseIntentId === bundle.releaseIntentId &&
@@ -234,7 +263,8 @@ export async function verifyHistoricalRelease({ archive, attestationBundle, expe
     'RELEASE_REPLAY', 'Original native gate/readiness/physical execution references are not closed');
   }
   const allowed = new Set(['bundle.json', 'readiness.json', 'replay-inputs.json', graph.template.filename,
-    ...graph.definitions.map(file => file.filename),
+    ...graph.definitions.flatMap(file => graph.schemaVersion === 2 ?
+      [file.filename, file.sourceFiles?.filename] : [file.filename]),
     ...bundle.files.filter(file => !file.filename.startsWith('assets/')).map(file => file.filename)]);
   requireThat([...files.keys()].every(filename => allowed.has(filename)), 'RELEASE_REPLAY', 'Unlisted historical archive data');
   await emptyDirectory(materializeDirectory);
@@ -278,8 +308,8 @@ export async function verifyHistoricalRelease({ archive, attestationBundle, expe
   const historical = [];
   for (const target of RELEASE_GATE_TARGETS) {
     const definitionRef = graph.definitions.find(row => row.target === target);
-    const definition = JSON.parse(readEntry(files, definitionRef?.filename, definitionRef));
-    requireThat(digest(definition) === definitionRef.definitionDigest && definition.source.revision === expectedSourceCommit,
+    const definition = readReleaseReplayDefinition({ files, reference: definitionRef, schemaVersion: graph.schemaVersion });
+    requireThat(definition.source?.revision === expectedSourceCommit,
       'RELEASE_REPLAY', 'Original adopted native definitions changed');
     const prefix = `evidence/native/${target}/`;
     const texts = Object.fromEntries([...files].filter(([name]) => name.startsWith(prefix))
@@ -355,7 +385,8 @@ export async function verifyHistoricalCompletion({ archive, attestationBundle, e
     inputs.scope?.repository === sourceRepository &&
     String(inputs.source.repositoryId).replace(/^repository-/u, '') === String(inputs.scope.repositoryId) &&
     graph.definitions.every(ref => {
-      const definition = JSON.parse(readEntry(prepublicationFiles, ref.filename, ref));
+      const definition = readReleaseReplayDefinition({ files: prepublicationFiles, reference: ref,
+        schemaVersion: graph.schemaVersion });
       return definition.source.treeSha === inputs.source.tree &&
         definition.source.repositoryId === `repository-${String(inputs.scope.repositoryId)}` &&
         definition.plan === inputs.specification.text;
