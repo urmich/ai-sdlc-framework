@@ -26,7 +26,7 @@ export const validationDeclarations = {
     "names": ["T-PRD032 complete native release inventories fit each declared aggregate host allocation"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "release-workflow",
-    "reason": "PR-only source/planner regression derives the complete R-PRE execution groups and proves every root fits each release host's common aggregate allocation; no critical promotion, package-manager execution or provider effects.",
+    "reason": "PR-only source/planner regression derives the complete R-PRE execution groups and proves every root fits each release host's common aggregate allocation, with the same configuration identity at independent bundle verification and reusable public acceptance; no critical promotion, package-manager execution or provider effects.",
     "prerequisites": ["Node and Git; owned source/planner fixtures; no network, credentials, package-manager execution or shared resources"]
   }, {
     "names": ["T-PRD085 idle observer reconciliation completes without granting validation credit"],
@@ -67,7 +67,7 @@ import { writePayloadFixture, fixtureCanonical, fixtureSHA, fixtureWindowsLaunch
 import { repositoryRoot } from '../scripts/test-runner.mjs';
 import { previousReleasePins } from '../scripts/release-bundle.mjs';
 import { nativePrParts, nativeLegacyPrParts, nativePartJobKey, nativeFrameworkShardPlan,
-  nativeResourceFacts, nativePrPartsForProtocol, nativeFrameworkShardProtocols, nativeFrameworkShardProtocol,
+  nativeResourceFacts, nativeConfigurationDigest, nativePrPartsForProtocol, nativeFrameworkShardProtocols, nativeFrameworkShardProtocol,
   nativeStableCostFrameworkShardProtocol, nativeResourceAffinityFrameworkShardProtocol,
   nativeCatalogIsolationFrameworkShardProtocol, nativePhasedIsolationFrameworkShardProtocol,
   nativeComponentRebalanceFrameworkShardProtocol, nativeParallelReadyPoolFrameworkShardProtocol,
@@ -2138,21 +2138,54 @@ test('T-PRD032 complete native release inventories fit each declared aggregate h
   const release = inspectWorkflowPolicy(workflows).workflows
     .find(item => item.file === '.github/workflows/release.yml').document;
   const releaseGate = release.jobs['release-gates'];
+  const releaseVerifier = release.jobs['release-bundle'];
   const inventory = await compileValidationInventory(repositoryRoot);
   const plan = await fs.readFile(path.join(repositoryRoot, 'docs', 'sdlc', 'public-readiness', 'test-plan.md'), 'utf8');
   const groups = nativeStageSelections(inventory, plan).flatMap(stage =>
     validationExecutionGroups(inventory, { files: stage.files, pattern: stage.selectorName }));
   for (const { target } of releaseGate.strategy.matrix.include) {
+    const configuredWorkers = releaseGate.env.SDLC_TEST_WORKERS ?? release.env?.SDLC_TEST_WORKERS ?? null;
     const resources = nativeResourceFacts({
       availableParallelism: target === 'macos-arm64' ? 3 : 4,
       totalMemoryBytes: 8 * 1024 ** 3,
-      configuredWorkers: releaseGate.env.SDLC_TEST_WORKERS ?? release.env?.SDLC_TEST_WORKERS ?? null,
+      configuredWorkers,
     });
     assert.ok(groups.every(group => group.minimumSlots <= resources.workerCapacity),
       `The complete ${target} R-PRE inventory must fit its aggregate host allocation`);
+    const configuration = { inventory, plan, target, profile: 'r-pre' };
+    assert.equal(nativeConfigurationDigest({ ...configuration, configuredWorkers:
+      releaseVerifier.env?.SDLC_TEST_WORKERS ?? release.env?.SDLC_TEST_WORKERS ?? null }),
+    nativeConfigurationDigest({ ...configuration, configuredWorkers }),
+    `Independent ${target} bundle verification must retain the producer's selected allocation`);
   }
   assert.ok(releaseGate.steps.every(step => step.env?.SDLC_TEST_WORKERS === undefined),
     'Release bootstrap and execution must inherit the same aggregate allocation');
+  assert.ok(releaseVerifier.steps.every(step => step.env?.SDLC_TEST_WORKERS === undefined),
+    'Release sealing and later bundle verification must inherit the same aggregate allocation');
+  const acceptance = inspectWorkflowPolicy(workflows).workflows
+    .find(item => item.file === '.github/workflows/release-acceptance.yml').document;
+  const consumer = acceptance.jobs['anonymous-acceptance'];
+  const outputWorkers = releaseVerifier.outputs.test_workers === '${{ env.SDLC_TEST_WORKERS }}'
+    ? releaseVerifier.env?.SDLC_TEST_WORKERS ?? release.env?.SDLC_TEST_WORKERS ?? null
+    : releaseVerifier.outputs.test_workers ?? null;
+  const inputWorkers = release.jobs.acceptance.with.test_workers === '${{ needs.release-bundle.outputs.test_workers }}'
+    ? outputWorkers : release.jobs.acceptance.with.test_workers ?? null;
+  const consumerWorkers = consumer.env.SDLC_TEST_WORKERS === '${{ inputs.test_workers }}'
+    ? inputWorkers : consumer.env.SDLC_TEST_WORKERS ?? acceptance.env?.SDLC_TEST_WORKERS ?? null;
+  for (const { target } of releaseGate.strategy.matrix.include) {
+    const configuration = { inventory, plan, target, profile: 'r-pre' };
+    assert.equal(nativeConfigurationDigest({ ...configuration, configuredWorkers: consumerWorkers }),
+      nativeConfigurationDigest({ ...configuration, configuredWorkers:
+        releaseGate.env.SDLC_TEST_WORKERS ?? release.env?.SDLC_TEST_WORKERS ?? null }),
+      `Independent ${target} public acceptance verification must retain the producer's selected allocation`);
+  }
+  assert.equal(acceptance.on.workflow_call.inputs.test_workers.type, 'string');
+  assert.equal(acceptance.on.workflow_call.inputs.test_workers.required, true);
+  assert.equal(releaseVerifier.outputs.test_workers, '${{ env.SDLC_TEST_WORKERS }}');
+  assert.equal(release.jobs.acceptance.with.test_workers, '${{ needs.release-bundle.outputs.test_workers }}');
+  assert.equal(consumer.env.SDLC_TEST_WORKERS, '${{ inputs.test_workers }}');
+  assert.ok(consumer.steps.every(step => step.env?.SDLC_TEST_WORKERS === undefined),
+    'Reusable acceptance bootstrap and bundle verification must inherit the caller selection');
 });
 
 // PR-only: native-validation maintainer; owned Node/source fixtures, no new capability or critical membership.

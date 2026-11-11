@@ -4270,6 +4270,20 @@ function originalNativePhaseFixtureSource(contents) {
 
 function preCommandInputQualificationSource(contents, file) {
   if (file === 'test/public-readiness-ci.test.mjs') {
+    assert.equal(digest(contents), 'd149fc2993387d4b3bca0238d9b234799125cf3c267045f51c7b505f5b1bbdcb',
+      'Replay requires the exact release producer/verifier allocation regression source');
+    const lines = contents.split(/(?<=\n)/u);
+    const splices = [
+      [0, 28],
+      '    "reason": "PR-only source/planner regression derives the complete R-PRE execution groups and proves every root fits each release host\'s common aggregate allocation; no critical promotion, package-manager execution or provider effects.",\n',
+      [29, 40],
+      '  nativeResourceFacts, nativePrPartsForProtocol, nativeFrameworkShardProtocols, nativeFrameworkShardProtocol,\n',
+      [70, 2070], [2141, 5], [2147, 3],
+      '      configuredWorkers: releaseGate.env.SDLC_TEST_WORKERS ?? release.env?.SDLC_TEST_WORKERS ?? null,\n',
+      [2151, 3], [2159, 3], [2188, lines.length - 2188],
+    ];
+    contents = splices.map(part => typeof part === 'string' ? part :
+      lines.slice(part[0], part[0] + part[1]).join('')).join('');
     assert.equal(digest(contents), 'bda809dc5c1b3cb9b4bbef958044e59c71c46124d9acaf0fbb4faae9b528bb08',
       'Replay requires the exact dynamic insufficient-allocation fixture source');
     contents = contents
