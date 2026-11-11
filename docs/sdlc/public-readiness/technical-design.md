@@ -3181,6 +3181,12 @@ and emits a digest-bound data handoff. The OIDC job verifies bounded inline data
 exact bundle/payload hashes, caller/source/environment and token-free auth before
 publishing only that tgz. No secret inheritance or token fallback.
 
+Preserve exactly `ACTIONS_ID_TOKEN_REQUEST_URL` and
+`ACTIONS_ID_TOKEN_REQUEST_TOKEN` through the npm subprocess environment filter.
+Both names contain `TOKEN`; validating them only in the parent is insufficient.
+Continue excluding unrelated credential-bearing variables and inherited npm
+configuration.
+
 Independent artifact verification confirms the handoff came from the expected
 source/run/verifier, not just that its JSON says ready. The sole tooling exception
 is the approved integrity-pinned npm CLI, with scripts disabled. OIDC and

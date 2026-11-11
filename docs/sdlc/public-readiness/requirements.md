@@ -489,6 +489,8 @@ approved release sequence without manual glue or repeated per-job intervention.
 - AC-206.4: A PR never publishes. Preserve token-free npm trusted publishing and
   exact caller/environment checks; missing permissions/trust are explicit
   preflight findings, not token fallback or policy-bypass instructions.
+  Both GitHub OIDC request fields reach the actual npm subprocess; unrelated
+  inherited credentials remain excluded.
 - AC-206.5: The trigger/approval policy is confirmed before implementation.
   One explicit maintainer release start is the confirmed entry point; the
   remaining approved sequence is automated without separate manual acceptance
