@@ -3957,6 +3957,7 @@ function authenticV10ObserverSource(contents) {
 }
 
 function authenticV13CatalogSource(contents) {
+  contents = preFunctionalFixtureSource(contents, 'test/validation-catalog.test.mjs');
   const reason = 'PR-only owned producer/admission boundary. Starting a real new fixture execution needs the bound working directory, not replay of prior outcomes; immutable-page corruption and loss still fail closed at admission and fresh reload.';
   contents = contents.replace('PR-only owned producer/admission boundary. Real fixture execution and admission do not depend on an unused caller-authored report; starting the producer needs the bound working directory, not replay of prior outcomes. Immutable-page corruption and loss still fail closed at admission and fresh reload.', reason)
     .replace('async function submit(f, cycle, tests, statuses = {}) {\n' +
@@ -4252,6 +4253,14 @@ function originalNativePhaseFixtureSource(contents) {
   assert.ok(helper > 0 && following > helper);
   contents = contents.slice(0, helper) + contents.slice(following);
   contents = contents.replaceAll('    contents = preCommandInputQualificationSource(contents, file);\n', '')
+    .replace("  contents = preFunctionalFixtureSource(contents, 'test/validation-catalog.test.mjs');\n", '')
+    .replace('  const catalog = currentFunctionalCatalogGroup(groups);\n',
+      '  const catalog = groups.find(group => group.rootId === nativePass.nativePlacementOwnershipV15.catalog.rootId);\n')
+    .replace("  assert.equal(catalogCost.costStatus, 'unknown-root');\n",
+      "  assert.equal(catalogCost.costStatus, 'stale-closure-or-resources');\n")
+    .replace('  const currentCatalog = currentFunctionalCatalogGroup(groups);\n', '')
+    .replace('  for (const [index, id] of [currentCatalog.rootId, anchors[1], currentObserver.id].entries()) {\n',
+      '  for (const [index, id] of [anchors[0], anchors[1], currentObserver.id].entries()) {\n')
     .replaceAll('      contents = originalNativePhaseFixtureSource(contents);\n', '')
     .replace('  await nativePhaseSynchronizationControls(t);\n', '')
     .replace('validationCommandArguments, processDiagnostic }', 'validationCommandArguments }')
@@ -4268,8 +4277,132 @@ function originalNativePhaseFixtureSource(contents) {
   return restored;
 }
 
+function currentFunctionalCatalogGroup(groups) {
+  const selected = groups.filter(group => group.file === 'test/validation-catalog.test.mjs' &&
+    group.root === 'complete functional per-case reports obey unit prerequisites and full aggregate coverage');
+  assert.equal(selected.length, 1, 'Current catalog must have exactly one complete functional root');
+  assert.notEqual(selected[0].rootId, nativePass.nativePlacementOwnershipV15.catalog.rootId,
+    'The renamed functional catalog cannot inherit the historical stress identity');
+  return selected[0];
+}
+
+function preFunctionalFixtureSource(contents, file) {
+  const inverse = {
+    'test/install-progress.unit.test.mjs': {
+      current: 'bfbb88f628e2315fa10f5e6aab040cffd1ec27bcca66dc8b471a81e59aab72e6',
+      original: 'bdf72117db8affc24c7befc8492bb6be5913f233726e7617ac0795d5e9c570dc',
+      splices: [[0, 2],
+        '  "surfaces": [{"coverage": "direct", "paths": ["src/install-progress.mjs"]}]\n',
+        [10, 142], "      for (let count = 0; count < 1000; count++) installPhase('replacement-writes', 'progress', count);\n",
+        [153, 8]],
+    },
+    'test/observation-refresh-worker.mjs': {
+      current: 'e74d14fc74ba6bc35db0535d81dab4882f59868ac7a64f2232243c217d497b3c',
+      original: '73b5fe1bd4bedd15df7374f3f0164cb6bc5577c359242003a4c1c097e2121785',
+      splices: [[0, 41],
+        "  for (let index = 0; index < 550; index++) {\n    f.clock.advance(1);\n    repository = await observeFixtureRepository(f);\n    if (index % 2 === 0) {\n      pr = await refreshPr(f, repository, pr);\n      await updatePrFacts(f.store, factsInput(f, pr));\n    }\n    if (index % 50 === 0) await pruneWork(f.store, f.workItemId);\n    const records = await f.store.records(f.workItemId);\n    assert.ok(Buffer.byteLength(canonical(records)) < LIMITS.workingSet,\n      `refresh ${index} must be admitted below the unchanged working-set budget`);\n    assert.ok(records.filter(record => ['repository-observation',\n",
+        [71, 1], '    `refresh ${index} must keep superseded history bounded, not wait for capacity failure`);\n',
+        [73, 1],
+        "  const records = await f.store.records(f.workItemId);\n  const history = await fs.readdir(path.join(f.store.workPath(f.workItemId), 'evidence'));\n  assert.ok(history.filter(name => name.startsWith('repository-observation-')).length >= 550);\n  assert.ok(history.filter(name => name.startsWith('pr-observation-')).length >= 275);\n",
+        [82, 4], [95, 252]],
+    },
+    'test/public-readiness-inventory.test.mjs': {
+      current: 'c4f57c418a82839f97471599c957b6a04692747c6337c4f19b279bf17ba6c2ec',
+      original: '1bbb82e0291f12f889a6dc67f2c33c865e375e0cd415c4780ea3f39f8cf35f70',
+      splices: [[0, 42], [48, 1177],
+        "      '^complete synthetic per-case reports obey all 2066 unit prerequisites and full aggregate coverage$',\n",
+        [1226, 1216],
+        "  test('T-PRD013 process-isolated retention scheduling preserves the original ordered exhaustion assertions and identity', async () => {\n",
+        [2443, 15], "      'f03ae57142aa5719195f61fa979581e7ac2e42d82ce8909656eb9a96c0383d3b');\n",
+        [2459, 486]],
+    },
+    'test/public-readiness-runner.test.mjs': {
+      current: '4ff6b51b26095c8ed76860a30ed1e9473fc820be9fe94d502137219aec934202',
+      original: 'ab0d0b45b894e3fc219516dd2d2226162237d429524f238e4eec19f6e8870391',
+      splices: [[0, 30], [36, 1731],
+        "  const tests = Array.from({ length: 100 }, (_, index) => ({\n    id: `T-PRD${String(index + 1).padStart(3, '0')}`, level: index % 2 ? 'unit' : 'integration',\n",
+        [1769, 1649]],
+    },
+    'test/static-checks.unit.test.mjs': {
+      current: '9cd04f8c57e8d2fa297204b7925ff0955809180e5782dae830001e9c9053df1c',
+      original: 'fcf2be737d643a9aaf1f5753d4ba24e02554a9f36d6e9f9983f04dfede669d56',
+      splices: [[0, 5], [12, 103],
+        "  const declarations = Array.from({ length: 20000 }, (_, index) => `export const value${index} = ${index};`).join('\\n');\n",
+        [116, 76]],
+    },
+    'test/validation-catalog.test.mjs': {
+      current: 'dbfc3c189472428394ec9804bed8fb8fbf37c853ccc872547d2b71724ca82ef3',
+      original: '4e17baa4e5c6b3275aac31201c565b1e282e55485823cbf844d894c1a4fc7d63',
+      splices: [[0, 3],
+        '    "root": "complete synthetic per-case reports obey all 2066 unit prerequisites and full aggregate coverage",\n',
+        [4, 6],
+        '    "names": ["complete synthetic per-case reports obey all 2066 unit prerequisites and full aggregate coverage"],\n',
+        [11, 2],
+        '    "reason": "PR-only complete catalog integration root. Reserve its worker, CLI and five concurrent candidate-snapshot Git readers; direct fixture arithmetic and sequential Git setup require fewer slots. Preserve all original assertions and deadlines; no critical promotion or hosted process-peak/timing claim.",\n',
+        [14, 14],
+        '    {"expression": "`public ${count}-case manual and semi-automated procedures retain their real owner and evidence contract`", "domains": {"count": ["2", "101"]}}\n',
+        [29, 16],
+        "import { appendTestObservation, testHistory, cycleResultIds, readTestEvidence, testResetDigest, retainTestEvidence } from '../src/validation-evidence.mjs';\n",
+        [46, 9], '  return JSON.stringify({ tests: Array.from({ length: 2265 }, (_, index) => ({\n',
+        [56, 2],
+        "    level: index < 2066 ? 'unit' : index < 2245 ? 'integration' :\n      index < 2251 ? 'review' : 'regression',\n    checkpoint: index < 2245 ? 'pre-review' : index < 2251 ? 'review' : 'post-review',\n",
+        [61, 7], 'async function largeFixture(t, contents = catalogFixturePlan()) {\n',
+        [82, 14],
+        "    configDigest: digest('fixture-config'), cause: 'Full catalog fixture, not real GitHub acceptance' });\n  return { ...f, cycle: started.cycle };\n",
+        [98, 196], [295, 65], "for (const count of [2, 101]) {\n  test(`public ${count}-case manual and semi-automated procedures retain their real owner and evidence contract`, async t => {\n    const tests = Array.from({ length: count }, (_, index) => ({\n",
+        [363, 6], [370, 20],
+        "test('public CLI and Store retain all 2265 synthetic NotRun slots in 36 thin-cycle pages', async t => {\n",
+        [391, 7], "  assert.equal(tests.length, 2265);\n  assert.equal(tests.filter(item => item.level === 'unit').length, 2066);\n",
+        [400, 1], "    tests.filter(item => item.checkpoint === checkpoint).length), [2245, 6, 14]);\n",
+        [402, 1], '  assert.equal(root.pageRefs.length, 36);\n  assert.equal((await readValidationObject(f.store, f.workItemId, root.pageRefs[35])).slots.length, 25);\n',
+        [405, 11], '  assert.equal(listed.json.inventory.tests.count, 2265);\n', [417, 32],
+        "test('complete synthetic per-case reports obey all 2066 unit prerequisites and full aggregate coverage', async t => {\n",
+        [450, 19], '  assert.equal((await recordFixtureTests(f.store, cycle, units)).evidence.length, 2066);\n',
+        [470, 16], "  assert.equal(Object.keys(cycleResultIds(cycle)).length, 2245);\n  assert.equal(tests.filter(item => currentTestEvidence(cycle, state.records, item)?.status === 'Passed').length, 2245);\n",
+        [488, 3], "    .filter(item => item.status === 'Passed').length, 2245);\n", [492, 10],
+        '  assert.equal((await status(f.store, f.workItemId, { offset: 0, limit: 100 })).inventory.tests.count, 2265);\n',
+        [503, 308], '  assert.equal((await resolveTestSpecification(f.store, f.workItemId)).tests.length, 2265);\n',
+        [812, 4], '  const tests = Array.from({ length: 100 }, (_, index) => ({\n', [817, 22],
+        "  const cycle = (await startCycle(f.store, { workItemId: f.workItemId,\n    configDigest: digest('fixture-config'), cause: 'Referenced STAGING fixture' })).cycle;\n",
+        [842, 267], '    const count = referenced ? 101 : 2;\n    const tests = Array.from({ length: count }, (_, index) => ({\n',
+        [1110, 12], [1123, 87], '    const tests = Array.from({ length: referenced ? 101 : 3 }, (_, index) => ({\n',
+        [1211, 10], '    const cycle = (await startCycle(f.store, { workItemId: f.workItemId,\n', [1222, 1], [1224, 53]],
+    },
+  }[file];
+  if (!inverse || digest(contents) === inverse.original) return contents;
+  assert.equal(digest(contents), inverse.current, `Unknown functional-fixture source for ${file}`);
+  const lines = contents.match(/[^\n]*\n|[^\n]+$/gu) ?? [];
+  const restored = inverse.splices.map(part => typeof part === 'string' ? part :
+    lines.slice(part[0], part[0] + part[1]).join('')).join('');
+  assert.equal(digest(restored), inverse.original, `Historical fixture bytes changed for ${file}`);
+  return restored;
+}
+
 function preCommandInputQualificationSource(contents, file) {
+  contents = preFunctionalFixtureSource(contents, file);
+  if (file === 'scripts/publish-release.mjs') {
+    assert.equal(digest(contents), 'b8352846c1d54801324b162441b04a19cedb48eec66fcf11b7a4438be0a0c4b9');
+    const lines = contents.split(/(?<=\n)/u);
+    contents = [
+      ...lines.slice(0, 179), ...lines.slice(180, 183),
+      "      Accept: binary ? 'application/octet-stream' : 'application/vnd.github+json',\n",
+      ...lines.slice(184),
+    ].join('');
+    assert.equal(digest(contents), '600c26b9f80dad762e59452533053ca35086c1d6cff91037ae7750b40e797067',
+      'Replay must preserve the authentic publisher before API media negotiation changed');
+  }
   if (file === 'test/public-readiness-release-history.test.mjs') {
+    assert.equal(digest(contents), '162b7cbf2f91777dc6f844daf3e3251d4fce5e1940ddf07180fcf90760209452');
+    const transportLines = contents.split(/(?<=\n)/u);
+    const transportSplices = [
+      [0, 2],
+      '  "surfaces": [{"coverage": "direct", "paths": ["scripts/release-history.mjs"]}],\n',
+      [3, 1], [5, 6], [12, 10],
+      '    "reason": "PR-only FR-206/207 history and publication-recovery coverage uses actual collector APIs with paginated in-memory provider records. Unrelated repository artifacts cannot exhaust selected release history; late-page originals, supersession, immutable-source conflicts and uncertain effects remain enforced. No critical promotion or provider/package-manager effects.",\n',
+      [23, 8], [32, 90], [165, 215],
+    ];
+    contents = transportSplices.map(part => typeof part === 'string' ? part :
+      transportLines.slice(part[0], part[0] + part[1]).join('')).join('');
     assert.equal(digest(contents), '38db34aeae0fc3c48092e0273d9058d5546c910c49ed9a22d03b358ea761ce42',
       'Replay requires the exact run-scoped release history regression source');
     const lines = contents.split(/(?<=\n)/u);
@@ -4831,12 +4964,12 @@ function assertCurrentIntelFallback(inventory, plan) {
     }
     assert.ok(group.minimumSlots <= 14);
   }
-  const catalog = groups.find(group => group.rootId === nativePass.nativePlacementOwnershipV15.catalog.rootId);
+  const catalog = currentFunctionalCatalogGroup(groups);
   assert.ok(catalog, 'Fallback must locate the complete catalog by actual owner, not assume body-0');
   assert.equal(catalog.minimumSlots, 7);
   const catalogCost = current.placement.groups.find(group => group.rootId === catalog.rootId);
   assert.equal(catalogCost.durationMs, null);
-  assert.equal(catalogCost.costStatus, 'stale-closure-or-resources');
+  assert.equal(catalogCost.costStatus, 'unknown-root');
   assert.ok(current.placement.groups.every(group => !Object.hasOwn(group, 'observedSourceRevision') &&
     !Object.hasOwn(group, 'observedRunId')), 'Current fallback cannot inherit qualified C74 service attribution');
   const cryptoRoot = inventory.cases.find(test =>
@@ -5120,7 +5253,8 @@ test('T-PRD017 native v11 pools qualified complete Intel components within uncha
   assert.ok(currentObserver);
   assert.notEqual(currentObserver.id, anchors[2], 'The changed timing-policy root has a new assertion identity');
   assert.equal(f.inventory.cases.some(test => test.id === anchors[2]), false);
-  for (const [index, id] of [anchors[0], anchors[1], currentObserver.id].entries()) {
+  const currentCatalog = currentFunctionalCatalogGroup(groups);
+  for (const [index, id] of [currentCatalog.rootId, anchors[1], currentObserver.id].entries()) {
     const group = groups.find(group => group.rootId === id);
     const owner = current.parts.find(part => part.assertionIds.includes(id));
     assert.equal(groups.filter(group => group.rootId === id).length, 1);

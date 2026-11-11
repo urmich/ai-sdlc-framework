@@ -39,29 +39,60 @@ export async function runRefreshScenario(t) {
   assert.deepEqual(await archivedBytes(f, firstPr.id), prBytes);
   assert.deepEqual(await archivedBytes(f, firstFacts.id), factsBytes);
 
-  for (let index = 0; index < 550; index++) {
-    f.clock.advance(1);
-    repository = await observeFixtureRepository(f);
-    if (index % 2 === 0) {
-      pr = await refreshPr(f, repository, pr);
-      await updatePrFacts(f.store, factsInput(f, pr));
-    }
-    if (index % 50 === 0) await pruneWork(f.store, f.workItemId);
-    const records = await f.store.records(f.workItemId);
-    assert.ok(Buffer.byteLength(canonical(records)) < LIMITS.workingSet,
-      `refresh ${index} must be admitted below the unchanged working-set budget`);
-    assert.ok(records.filter(record => ['repository-observation',
-      'pr-observation', 'pr-facts'].includes(record.type)).length <= 6,
-    `refresh ${index} must keep superseded history bounded, not wait for capacity failure`);
-  }
+  const refreshedFacts = await updatePrFacts(f.store, factsInput(f, pr));
+  const refreshed = [repository, pr, refreshedFacts];
+  const refreshedBytes = new Map(await Promise.all(refreshed.map(async record => [
+    record.id, await fs.readFile(f.store.recordPath(f.workItemId, record.id)),
+  ])));
+
+  f.clock.advance(1);
+  repository = await observeFixtureRepository(f);
+  const repositoryOnlyRecords = await f.store.records(f.workItemId);
+  assert.equal(repositoryOnlyRecords.some(record => record.id === refreshed[0].id), false,
+    'repository-only refresh must archive its superseded observation');
+  assert.deepEqual(repositoryOnlyRecords.filter(record =>
+    ['pr-observation', 'pr-facts'].includes(record.type)).map(record => record.id).sort(),
+  [pr.id, refreshedFacts.id].sort(),
+  'repository-only refresh must preserve the current PR and its facts');
+  assert.equal((await f.store.currentRepositoryObservation(f.workItemId,
+    'primary')).observation.id, repository.id);
+
+  pr = await refreshPr(f, repository, pr);
+  const currentFacts = await updatePrFacts(f.store, factsInput(f, pr));
+  await pruneWork(f.store, f.workItemId);
   const records = await f.store.records(f.workItemId);
-  const history = await fs.readdir(path.join(f.store.workPath(f.workItemId), 'evidence'));
-  assert.ok(history.filter(name => name.startsWith('repository-observation-')).length >= 550);
-  assert.ok(history.filter(name => name.startsWith('pr-observation-')).length >= 275);
+  for (const [transition, snapshot] of [
+    ['initial refresh/prune', active],
+    ['repository-only refresh', repositoryOnlyRecords],
+    ['PR/facts refresh/prune', records],
+  ]) {
+    assert.ok(Buffer.byteLength(canonical(snapshot)) < LIMITS.workingSet,
+      `${transition} must be admitted below the unchanged working-set budget`);
+    assert.ok(snapshot.filter(record => ['repository-observation',
+      'pr-observation', 'pr-facts'].includes(record.type)).length <= 6,
+    `${transition} must keep superseded history bounded, not wait for capacity failure`);
+  }
+  for (const record of refreshed) {
+    assert.equal(records.some(candidate => candidate.id === record.id), false,
+      'the second transition must remove each superseded observation and facts');
+    assert.deepEqual(await archivedBytes(f, record.id), refreshedBytes.get(record.id));
+  }
+  assert.deepEqual(records.filter(record => ['repository-observation',
+    'pr-observation', 'pr-facts'].includes(record.type)).map(record => record.id).sort(),
+  [repository.id, pr.id, currentFacts.id].sort());
   assert.ok(records.some(record => record.id === repository.id));
   assert.ok(records.some(record => record.id === pr.id));
   assert.equal((await f.store.currentRepositoryObservation(f.workItemId,
     'primary')).observation.id, repository.id);
+  const currentReadiness = evaluateReadiness(records, {
+    environment: 'PROD', prRecordId: pr.id,
+    localRepositoryPath: repository.localRepositoryPath,
+    remoteRepositoryURL: repository.remoteRepositoryURL,
+    prId: pr.pullRequestRef, sourceRevision: pr.sourceRevision,
+    targetRevision: pr.targetRevision, policyVersion: 'policy-1',
+  }, { clock: f.clock });
+  assert.deepEqual(currentReadiness.gaps, ['required-check-set-unverified'],
+    'readiness must select the current PR/facts without treating empty checks as qualifying');
   const oldReadiness = evaluateReadiness(records, {
     environment: 'PROD', prRecordId: firstPr.id,
     localRepositoryPath: first.localRepositoryPath,

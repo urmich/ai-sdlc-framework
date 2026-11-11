@@ -1,13 +1,15 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
-  "surfaces": [{"coverage": "direct", "paths": ["scripts/release-history.mjs"]}],
+  "surfaces": [{"coverage": "direct", "paths": ["scripts/release-history.mjs", "scripts/publish-release.mjs"]}],
   "groups": [
+    {"root": "T-PRD034 release history negotiates Actions archives separately from published release assets", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD034 release history ignores unrelated repository artifacts and reconciles every selected run page", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD037 publication recovery finds unresolved originals without scanning unrelated repository artifacts", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
     {"root": "T-PRD037 scoped publication discovery still rejects reuse of an intent from a conflicting source", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}
   ],
   "applicability": [{
     "names": [
+      "T-PRD034 release history negotiates Actions archives separately from published release assets",
       "T-PRD034 release history ignores unrelated repository artifacts and reconciles every selected run page",
       "T-PRD034 independent run chronology rejects A-pass B-fail C-reusing-A instead of trusting the selected older artifact",
       "T-PRD034 distinct physical reruns preserve original unchanged targets but invalidate newer cancelled or missing work",
@@ -18,7 +20,7 @@ export const validationDeclarations = {
     ],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "release-workflow",
-    "reason": "PR-only FR-206/207 history and publication-recovery coverage uses actual collector APIs with paginated in-memory provider records. Unrelated repository artifacts cannot exhaust selected release history; late-page originals, supersession, immutable-source conflicts and uncertain effects remain enforced. No critical promotion or provider/package-manager effects.",
+    "reason": "PR-only FR-206/207 history and publication-recovery coverage uses actual collector and transport APIs with paginated in-memory provider records. Actions archives and logs negotiate JSON while published release assets retain binary negotiation. Unrelated repository artifacts cannot exhaust selected release history; late-page originals, supersession, immutable-source conflicts and uncertain effects remain enforced. Mutable fetch/environment fixtures are restored inside independent process-isolated roots. No critical promotion or provider/package-manager effects.",
     "prerequisites": ["Node; owned in-memory provider and ZIP fixtures, independent process-isolated roots with no shared resources or external access"]
   }]
 };
@@ -27,6 +29,7 @@ import assert from 'node:assert/strict';
 import { canonical, sha256, zip } from '../packaging/standalone/archive.mjs';
 import { collectReleaseAttemptHistory, requireCurrentReleaseGates, collectPublicationAttempts,
   immutablePublicationBinding, publicationRecoveryDecision, readReleaseArtifactJson } from '../scripts/release-history.mjs';
+import { githubRequest } from '../scripts/publish-release.mjs';
 
 const repository = 'urmich/ai-sdlc-framework';
 const sourceCommit = 'a'.repeat(40);
@@ -117,6 +120,49 @@ function addBusyRepositoryArtifacts(fixture) {
     })));
   }
 }
+
+test('T-PRD034 release history negotiates Actions archives separately from published release assets', async t => {
+  const f = providerFixture();
+  f.addRun('101', 4);
+  const originalToken = process.env.GH_TOKEN;
+  process.env.GH_TOKEN = 'owned-transport-fixture-not-a-credential';
+  t.after(() => {
+    if (originalToken === undefined) delete process.env.GH_TOKEN;
+    else process.env.GH_TOKEN = originalToken;
+  });
+  const prefix = `/repos/${repository}`;
+  const asset = Buffer.from([0, 255, 128, 10]);
+  const log = Buffer.from('retained native producer log\n');
+  const downloads = [];
+  t.mock.method(globalThis, 'fetch', async (input, options) => {
+    const url = new URL(input);
+    assert.equal(url.origin, 'https://api.github.com');
+    assert.equal(options.method, 'GET');
+    assert.equal(options.headers.Authorization, 'Bearer owned-transport-fixture-not-a-credential');
+    const route = `${url.pathname}${url.search}`;
+    if (route === `${prefix}/releases/assets/9001`) {
+      return new Response(options.headers.Accept === 'application/octet-stream' ?
+        asset : JSON.stringify({ id: 9001, size: asset.length }), { status: 200 });
+    }
+    if (route.endsWith('/zip') || route === `${prefix}/actions/jobs/9002/logs`) {
+      if (options.headers.Accept !== 'application/vnd.github+json') {
+        return new Response('Actions downloads require the JSON API media type', { status: 415 });
+      }
+      downloads.push(route);
+    }
+    if (route === `${prefix}/actions/jobs/9002/logs`) return new Response(log, { status: 200 });
+    const response = await f.api(route);
+    return new Response(Buffer.isBuffer(response.value) ? response.value : JSON.stringify(response.value),
+      { status: response.status });
+  });
+  const history = await collectReleaseAttemptHistory({ api: githubRequest, sourceRepository: repository,
+    binding, notBefore: startedAt, now });
+  assert.equal(requireCurrentReleaseGates(history, gates()).attempts.length, 1);
+  assert.deepEqual((await githubRequest(`${prefix}/actions/jobs/9002/logs`, { binary: true })).value, log);
+  assert.deepEqual(downloads, [`${prefix}/actions/artifacts/1000/zip`, `${prefix}/actions/jobs/9002/logs`]);
+  assert.deepEqual((await githubRequest(`${prefix}/releases/assets/9001`, { binary: true })).value, asset);
+  assert.deepEqual((await githubRequest(`${prefix}/releases/assets/9001`)).value, { id: 9001, size: asset.length });
+});
 
 test('T-PRD034 release history ignores unrelated repository artifacts and reconciles every selected run page', async () => {
   const f = providerFixture();

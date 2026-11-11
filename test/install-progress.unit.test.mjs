@@ -1,6 +1,13 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
-  "surfaces": [{"coverage": "direct", "paths": ["src/install-progress.mjs"]}]
+  "surfaces": [{"coverage": "direct", "paths": ["src/install-progress.mjs"]}],
+  "applicability": [{
+    "names": ["install progress caps diagnostic records and visibly marks truncation"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "installation-observability",
+    "reason": "PR-only real 256-record trace-cap boundary plus one suppressed emission, without redundant post-cap repetition. The isolated root restores its environment and writeSync instrumentation; no shared resources or critical promotion.",
+    "prerequisites": ["Node"]
+  }]
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -143,7 +150,7 @@ test('install progress caps diagnostic records and visibly marks truncation', as
   syncBuiltinESMExports();
   try {
     await observeInstallOperation(async () => {
-      for (let count = 0; count < 1000; count++) installPhase('replacement-writes', 'progress', count);
+      for (let count = 0; count < 257; count++) installPhase('replacement-writes', 'progress', count);
     });
   } finally {
     write.mock.restore();

@@ -177,10 +177,11 @@ export async function preflightRelease({ sourceCommit, version, repository, rele
 export async function githubRequest(route, { method = 'GET', body, bytes, binary = false } = {}) {
   const upload = route.startsWith('/uploads/');
   const url = upload ? `https://uploads.github.com/${route.slice('/uploads/'.length)}` : `https://api.github.com${route}`;
+  const binaryAsset = binary && /\/releases\/assets\/[1-9]\d*$/u.test(route);
   if (!process.env.GH_TOKEN) throw new Error('An approved GitHub release token is required');
   const response = await fetch(url, {
     method, signal: AbortSignal.timeout(30_000), headers: { Authorization: `Bearer ${process.env.GH_TOKEN}`,
-      Accept: binary ? 'application/octet-stream' : 'application/vnd.github+json',
+      Accept: binaryAsset ? 'application/octet-stream' : 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',
       ...(body ? { 'Content-Type': 'application/json' } : {}),
       ...(bytes ? { 'Content-Type': 'application/octet-stream' } : {}) },

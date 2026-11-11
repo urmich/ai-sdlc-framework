@@ -398,8 +398,8 @@ ready-pool runtime; retain old group IDs, order, protocol and execution records.
 Split independent top-level scenarios into coherent file processes, retaining
 stable case IDs. Each has unique Git/home/cache/temp roots. Do not enable blanket
 same-process concurrency around environment changes, module patches, registries
-or mutable shared package-manager state. A causally ordered 550-refresh retention
-scenario stays ordered; moving it to another shard does not make it faster.
+or mutable shared package-manager state. Causally ordered retention transitions
+stay ordered; moving them to another shard does not make them faster.
 
 Read independent active and archived JSON entries in bounded batches of sixteen,
 using the directory's canonical root once per scan while preserving the existing
@@ -530,7 +530,7 @@ dependency state is cached across mutation phases.
 For ordinary PR validation, use twenty-five independently required native producer
 parts consuming the same frozen candidate. Intel Mac has two unit producers;
 each other platform has one unit producer
-and one producer containing the entire unchanged 550-refresh root. Partition
+and one producer containing the complete functional refresh root. Partition
 the remaining root closures across four Linux/Windows body producers and three
 body producers per Mac architecture; each Mac also retains its real Homebrew
 producer. Separate hosts add actual execution capacity rather than multiplying
@@ -784,8 +784,9 @@ from the validated bound manifest instead of eagerly replaying every previous
 retained outcome merely to find that directory. Actual production admission
 and fresh `Store.load` still verify the complete original immutable records;
 no retention, durability, integrity or outcome requirement is bypassed.
-Preserve the complete catalog callback, all 2066 unit prerequisites, 2245
-pre-review outcomes, seven-slot reservation and original exhaustion boundaries.
+Authentic historical replay preserves the complete original catalog callback,
+2066 unit prerequisites, 2245 pre-review outcomes, seven-slot reservation and
+original exhaustion boundaries. The current workload follows AC-202.8 below.
 The existing published-reference regression starts a real owned producer with
 a previous page temporarily missing, requires admission to reject that missing
 page, restores its exact bytes and admits the same evaluation. Freshly reopened
@@ -810,7 +811,8 @@ unmeasured. Keep the existing component owners, non-Intel selections, unit
 partition algorithm, resource reservations and complete assertion union.
 The catalog fixture removes only an unused caller-authored report from its
 private submission path. Actual producer execution, admission, explicit negative
-reports, fresh integrity checks and the 2066/2245/2265 boundaries remain intact.
+reports and fresh integrity checks remain intact. Historical v15 retains its
+2066/2245/2265 workload; current functional fixtures follow AC-202.8 below.
 Keep all thirteen historical placement literal JSON texts unchanged, including
 v14's actual source, reservation, parallel-plan and transfer qualification.
 Preserve the original twenty-four causal rows: the authentic C81 v14 row retains
@@ -1251,8 +1253,8 @@ sanitizer still examines JWTs and other sensitive text; marker-free text is
 never accepted merely because it lacks parser punctuation. Other text keeps
 the complete original parsing path, work limits and final equality check.
 
-The existing 550-refresh retention root keeps its assertion identity and every
-ordered assertion, but executes that unchanged body in one source-bound Node
+The retention root keeps its functional assertions and executes its
+deterministic transition scenario in one source-bound Node
 child without `node:test` bookkeeping. The protected outer test yields its
 existing active worker slot; the child acquires that same aggregate budget.
 The original fixture module is explicitly preloaded before transport imports
@@ -1262,7 +1264,7 @@ Completion requires the actual owned PID, source/preload digest, nonce, closed
 lease, exit zero, single complete result and verified fixture teardown. An
 assertion, cleanup, cancellation or provenance failure remains non-passing and
 retains its owned evidence. No new timeout, grace, process allowance, CI part
-or reduced iteration/durability boundary is introduced; child setup, execution,
+or reduced production durability boundary is introduced; child setup, execution,
 retention and cleanup remain inside whole-root and whole-lane measurements.
 The preservation guard binds the outer dispatch and reconstructs the original
 callback fingerprint from the actual exported scenario. Confirm the actual
@@ -1271,6 +1273,19 @@ child exit. The worker, command observer and broker own separate clock domains:
 check their individual intervals without cross-observer UTC comparisons or an
 added grace interval. Retain child and broker timing with the actual inspection,
 including on validation failure.
+
+Under AC-202.8, the current catalog uses a couple of representative definitions
+per functional category rather than 2,265 dummy cases, and retention uses
+explicit successive observation transitions rather than 550 repetitions.
+Keep real producer/admission, incomplete-result, unit-order, checkpoint,
+idempotency, archived-byte and stale-input assertions. This is a deliberate
+owner-authorized change to test workload, not a production storage change,
+GitHub API stress test, timeout extension or assertion skip. Other large
+synthetic data must exercise an actual protocol/pagination/storage boundary;
+use the smallest boundary-crossing input rather than repeated equivalent runs.
+Preserve authentic historical placement capsules and restore exact old fixture
+bytes before their existing digest-checked qualification. Historical stress
+counts describe those archived inputs, not a requirement on current execution.
 
 Standalone activation hands its exact version to the existing launch path in
 the current runtime process instead of starting another verifier process.
@@ -3219,6 +3234,11 @@ across source revisions so a reused logical intent with conflicting immutable
 inputs still rejects. Complete pagination, original digest/origin validation,
 physical-attempt supersession and unresolved-effect checks remain unchanged;
 unrelated CI artifact growth cannot consume a release-history acquisition bound.
+
+Actions artifact ZIP and job-log requests negotiate the documented JSON API
+media type while reading the downloaded response as bytes. Only release-asset
+binary downloads negotiate `application/octet-stream`; response decoding does
+not select the API media type. Archive digests and origin checks remain required.
 
 After a publish command succeeds, allow a bounded ten-minute propagation window
 with observable backoff (1, 2, 4, 8, 16 seconds, then at most 30 seconds between

@@ -28,6 +28,12 @@ export const validationDeclarations = {
     "exclusiveResources": []
   }],
   "applicability": [{
+    "names": ["T-PRD005 finite sanity membership ignores historical planned-case growth and rejects budget expansion"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "runner-resource-contract",
+    "reason": "PR-only finite membership regression with two unit and two integration planned cases, preserving the unapproved PR-only case and every exact 27/28 assertion budget guard. One process-isolated root owns its repository-local fixtures; no shared resources or critical promotion.",
+    "prerequisites": ["Node"]
+  }, {
     "names": ["T-PRD011 exclusive ready clocks exclude the previous holder capture without hiding eligible failures"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "runner-resource-contract",
@@ -1759,8 +1765,8 @@ test('T-PRD005 finite sanity membership ignores historical planned-case growth a
   }
   for (const [file, names] of sourceCases) declarations.push(discoverDeclarations(
     "import test from 'node:test';" + names.map(name => `test(${JSON.stringify(name)},()=>{});`).join(''), file));
-  const tests = Array.from({ length: 100 }, (_, index) => ({
-    id: `T-PRD${String(index + 1).padStart(3, '0')}`, level: index % 2 ? 'unit' : 'integration',
+  const tests = [1, 2, 99, 100].map((id, index) => ({
+    id: `T-PRD${String(id).padStart(3, '0')}`, level: index % 2 ? 'unit' : 'integration',
     mode: 'automated', environment: 'local', checkpoint: 'pre-review', location: 'development-machine',
   }));
   declarations.push(discoverDeclarations("import test from 'node:test';" +
