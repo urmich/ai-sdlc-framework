@@ -3328,6 +3328,20 @@ authority. Preflight rejects missing prerequisites before irreversible calls.
    reconciling the current attempt and retain prior failures; do not rebuild/
    replace the immutable approved candidate as a verification shortcut.
 
+PR-only T-PRD034/037 exercise the actual history collectors against owned
+in-memory provider/ZIP fixtures with more unrelated CI artifacts than the
+existing acquisition bound and selected preflight/dispatch originals beyond the
+first artifact page. Native chronology and uncertain publication recovery must
+remain complete without repository-wide artifact enumeration. Conflicting
+source reuse of the same intent still rejects; original digest, supersession
+and no-duplicate-publication assertions remain required. These independent
+process-isolated roots need only Node, share no resources and perform no network,
+package-manager or provider mutation. They do not enlarge the critical gate or
+supply genuine R-PRE/publication acceptance credit.
+Existing T-PRD017 replay restores the exact pre-change history/integration Git
+blobs through digest-checked inverse splices; archived qualification inputs and
+digests remain immutable. npm-dependent integration stays on capable PR runners.
+
 ### 11.2 End-to-end completion observation
 
 Use an expressly authorized **new** version or controlled release destination;

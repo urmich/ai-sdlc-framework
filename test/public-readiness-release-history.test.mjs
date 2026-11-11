@@ -1,6 +1,26 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
-  "surfaces": [{"coverage": "direct", "paths": ["scripts/release-history.mjs"]}]
+  "surfaces": [{"coverage": "direct", "paths": ["scripts/release-history.mjs"]}],
+  "groups": [
+    {"root": "T-PRD034 release history ignores unrelated repository artifacts and reconciles every selected run page", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD037 publication recovery finds unresolved originals without scanning unrelated repository artifacts", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD037 scoped publication discovery still rejects reuse of an intent from a conflicting source", "dependsOn": [], "minimumSlots": 1, "exclusiveResources": []}
+  ],
+  "applicability": [{
+    "names": [
+      "T-PRD034 release history ignores unrelated repository artifacts and reconciles every selected run page",
+      "T-PRD034 independent run chronology rejects A-pass B-fail C-reusing-A instead of trusting the selected older artifact",
+      "T-PRD034 distinct physical reruns preserve original unchanged targets but invalidate newer cancelled or missing work",
+      "T-PRD034 source intent, original preflight digest and missing newer-origin bindings fail closed",
+      "T-PRD037 publication recovery finds unresolved originals without scanning unrelated repository artifacts",
+      "T-PRD037 scoped publication discovery still rejects reuse of an intent from a conflicting source",
+      "T-PRD037 independent original publication effects survive job restart and prevent uncertain republishing"
+    ],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "release-workflow",
+    "reason": "PR-only FR-206/207 history and publication-recovery coverage uses actual collector APIs with paginated in-memory provider records. Unrelated repository artifacts cannot exhaust selected release history; late-page originals, supersession, immutable-source conflicts and uncertain effects remain enforced. No critical promotion or provider/package-manager effects.",
+    "prerequisites": ["Node; owned in-memory provider and ZIP fixtures, independent process-isolated roots with no shared resources or external access"]
+  }]
 };
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -34,6 +54,13 @@ function providerFixture() {
   const jobs = new Map();
   const requests = [];
   const prefix = `/repos/${repository}`;
+  const page = (rows, field, route) => {
+    const query = new URL(route, 'https://api.github.com').searchParams;
+    const number = Number(query.get('page') ?? 1);
+    const size = Number(query.get('per_page') ?? 100);
+    return { status: 200, value: { total_count: rows.length,
+      [field]: rows.slice((number - 1) * size, number * size) } };
+  };
   function artifact(name, runId, filename, data) {
     const bytes = zip([{ path: filename, mode: 0o644, data: Buffer.from(canonical(data)) }]);
     const value = { id: artifacts.length + 1000, name, expired: false, digest: `sha256:${sha256(bytes)}`,
@@ -57,11 +84,15 @@ function providerFixture() {
   const api = async (route, options) => {
     requests.push({ route, options });
     if (route.startsWith(`${prefix}/actions/workflows/release.yml/runs?`)) {
-      return { status: 200, value: { total_count: runs.length, workflow_runs: runs } };
+      const selectedSource = new URL(route, 'https://api.github.com').searchParams.get('head_sha');
+      return page(runs.filter(row => !selectedSource || row.head_sha === selectedSource), 'workflow_runs', route);
     }
     if (route.startsWith(`${prefix}/actions/artifacts?`)) {
-      return { status: 200, value: { total_count: artifacts.length, artifacts } };
+      return page(artifacts, 'artifacts', route);
     }
+    const runArtifacts = new RegExp(`^${prefix}/actions/runs/(\\d+)/artifacts\\?`, 'u').exec(route);
+    if (runArtifacts) return page(artifacts.filter(row => String(row.workflow_run?.id) === runArtifacts[1]),
+      'artifacts', route);
     const file = new RegExp(`^${prefix}/actions/artifacts/(\\d+)(/zip)?$`, 'u').exec(route);
     if (file) return { status: 200, value: file[2] ? payloads.get(file[1]) : artifacts.find(row => String(row.id) === file[1]) };
     const run = new RegExp(`^${prefix}/actions/runs/(\\d+)/attempts/(\\d+)(/jobs\\?.*)?$`, 'u').exec(route);
@@ -77,6 +108,27 @@ function collect(fixture) {
   return collectReleaseAttemptHistory({ api: fixture.api, sourceRepository: repository, binding,
     notBefore: startedAt, now });
 }
+
+function addBusyRepositoryArtifacts(fixture) {
+  for (const [runId, count, firstId] of [['999', 5001, 20000], ['101', 100, 30000]]) {
+    fixture.artifacts.push(...Array.from({ length: count }, (_, index) => ({
+      id: firstId + index, name: `ci-diagnostic-${runId}-${index}`,
+      workflow_run: { id: Number(runId), head_sha: sourceCommit },
+    })));
+  }
+}
+
+test('T-PRD034 release history ignores unrelated repository artifacts and reconciles every selected run page', async () => {
+  const f = providerFixture();
+  addBusyRepositoryArtifacts(f);
+  f.addRun('101', 4);
+  const history = requireCurrentReleaseGates(await collect(f), gates());
+  assert.deepEqual(history.attempts.map(row => row.runId), ['101']);
+  assert.equal(history.attempts[0].observations.length, targets.length);
+  assert.ok(f.requests.some(({ route }) =>
+    route === `/repos/${repository}/actions/runs/101/artifacts?per_page=100&page=2`));
+  assert.equal(f.requests.some(({ route }) => route.startsWith(`/repos/${repository}/actions/artifacts?`)), false);
+});
 
 test('T-PRD034 independent run chronology rejects A-pass B-fail C-reusing-A instead of trusting the selected older artifact', async () => {
   const f = providerFixture();
@@ -165,6 +217,43 @@ test('T-PRD034 original provider artifact reader rejects duplicate names and esc
     assert.throws(() => readReleaseArtifactJson(archive, 'release-preflight.json'), /Duplicate|escaping/u);
   }
   assert.throws(() => readReleaseArtifactJson(bytes.subarray(0, -1), 'release-preflight.json'), /Incomplete/u);
+});
+
+test('T-PRD037 publication recovery finds unresolved originals without scanning unrelated repository artifacts', async () => {
+  const f = providerFixture();
+  addBusyRepositoryArtifacts(f);
+  f.addRun('101', 4);
+  f.artifact(`npm-publication-dispatch-${binding.releaseIntentId}-101-1`, '101',
+    'publication-dispatch.json', { schemaVersion: 1, kind: 'npm-publication-attempt', binding: publicationBinding,
+      run: { id: '101', attempt: '1' }, mode: 'publish',
+      invocationRef: `https://github.com/${repository}/actions/runs/101/attempts/1` });
+  f.jobs.set('101/1', [{ id: 600, name: 'npm-handoff / publish', steps: [{
+    name: 'Publish exact tgz through OIDC only, with automatic npm provenance',
+    started_at: startedAt, conclusion: 'failure',
+  }] }]);
+  const result = await collectPublicationAttempts({ api: f.api, sourceRepository: repository, handoff });
+  assert.equal(result.mayDispatch, false);
+  assert.equal(result.disposition, 'ReconcileOnly');
+  assert.deepEqual(result.unresolvedAttempts, [{ run: { id: '101', attempt: '1' },
+    invocationRef: `https://github.com/${repository}/actions/runs/101/attempts/1` }]);
+  assert.ok(f.requests.some(({ route }) =>
+    route === `/repos/${repository}/actions/runs/101/artifacts?per_page=100&page=2`));
+  assert.equal(f.requests.some(({ route }) => route.startsWith(`/repos/${repository}/actions/artifacts?`)), false);
+});
+
+test('T-PRD037 scoped publication discovery still rejects reuse of an intent from a conflicting source', async () => {
+  const f = providerFixture();
+  const run = f.addRun('202', 5);
+  run.head_sha = 'b'.repeat(40);
+  f.physical.get('202/1').head_sha = run.head_sha;
+  const artifact = f.artifact(`npm-publication-dispatch-${binding.releaseIntentId}-202-1`, '202',
+    'publication-dispatch.json', { schemaVersion: 1, kind: 'npm-publication-attempt',
+      binding: { ...publicationBinding, sourceCommit: run.head_sha },
+      run: { id: '202', attempt: '1' }, mode: 'publish',
+      invocationRef: `https://github.com/${repository}/actions/runs/202/attempts/1` });
+  artifact.workflow_run.head_sha = run.head_sha;
+  await assert.rejects(collectPublicationAttempts({ api: f.api, sourceRepository: repository, handoff }),
+    /foreign source|immutable/u);
 });
 
 test('T-PRD037 independent original publication effects survive job restart and prevent uncertain republishing', async () => {

@@ -145,7 +145,6 @@ export async function collectReleaseAttemptHistory({ api, sourceRepository, bind
   const prefix = `/repos/${sourceRepository}`;
   const runs = await paginate(api, `${prefix}/actions/workflows/release.yml/runs?event=workflow_dispatch&head_sha=${binding.sourceCommit}`,
     'workflow_runs');
-  const artifacts = await paginate(api, `${prefix}/actions/artifacts`, 'artifacts');
   const attempts = [];
   for (const run of runs.filter(row => row.head_sha === binding.sourceCommit &&
     Date.parse(row.created_at) >= Date.parse(notBefore) && String(row.id) !== currentRunId)) {
@@ -153,6 +152,7 @@ export async function collectReleaseAttemptHistory({ api, sourceRepository, bind
       numeric.test(String(run.id)) && Number.isSafeInteger(run.run_number) && run.run_number > 0 &&
       Number.isSafeInteger(run.run_attempt) && run.run_attempt > 0 && run.run_attempt <= 64,
     'RELEASE_HISTORY', 'Unexpected release workflow/run origin');
+    const artifacts = await paginate(api, `${prefix}/actions/runs/${run.id}/artifacts`, 'artifacts');
     let request;
     let requestOrigin;
     for (let attempt = 1; attempt <= run.run_attempt; attempt++) {
@@ -238,8 +238,17 @@ export async function collectPublicationAttempts({ api, sourceRepository, handof
   requireThat(retainOriginal === undefined || typeof retainOriginal === 'function',
     'RELEASE_HISTORY', 'Original publication retention is an in-process data capability');
   const prefix = `/repos/${sourceRepository}`;
-  const artifacts = await paginate(api, `${prefix}/actions/artifacts`, 'artifacts');
   const name = `npm-publication-dispatch-${binding.releaseIntentId}-`;
+  const runs = await paginate(api, `${prefix}/actions/workflows/release.yml/runs?event=workflow_dispatch`,
+    'workflow_runs');
+  const artifacts = [];
+  for (const run of runs) {
+    requireThat(run.path === '.github/workflows/release.yml' && run.event === 'workflow_dispatch' &&
+      numeric.test(String(run.id)), 'RELEASE_HISTORY', 'Unexpected publication release workflow/run origin');
+    const originals = await paginate(api, `${prefix}/actions/runs/${run.id}/artifacts`, 'artifacts');
+    artifacts.push(...originals.filter(artifact => artifact.name.startsWith(name) ||
+      artifact.name.startsWith(`npm-oidc-result-${run.id}-`)));
+  }
   const originals = [];
   const pending = artifacts.filter(artifact => artifact.name.startsWith(name));
   const seen = new Set();

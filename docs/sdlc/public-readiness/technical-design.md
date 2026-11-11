@@ -3211,6 +3211,15 @@ artifact producer/step. Newer failed/cancelled/missing work and unresolved
 original publication effects remain visible and prevent silent reuse; dropping
 their dependencies or changing immutable input cannot erase uncertainty.
 
+Discover native chronology from exact-source release-workflow dispatches in the
+selected interval, then paginate artifacts only for those run IDs. Publication
+recovery likewise enumerates release-workflow dispatches and their per-run
+artifacts, not the repository-wide CI artifact inventory. It retains dispatches
+across source revisions so a reused logical intent with conflicting immutable
+inputs still rejects. Complete pagination, original digest/origin validation,
+physical-attempt supersession and unresolved-effect checks remain unchanged;
+unrelated CI artifact growth cannot consume a release-history acquisition bound.
+
 After a publish command succeeds, allow a bounded ten-minute propagation window
 with observable backoff (1, 2, 4, 8, 16 seconds, then at most 30 seconds between
 checks), honoring an earlier explicit provider retry delay within the budget.
