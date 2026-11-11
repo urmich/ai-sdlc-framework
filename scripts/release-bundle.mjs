@@ -453,7 +453,7 @@ async function verifyNativeProducer(gate, sourceCommit, api, sourceRepository) {
 }
 
 async function verifyGateExecutions({ candidateDir, candidate, gateFiles, gates,
-  verifyEvidence, expectedRepositoryId = process.env.GITHUB_REPOSITORY_ID,
+  verifyEvidence, allowGeneratedPrompt = false, expectedRepositoryId = process.env.GITHUB_REPOSITORY_ID,
   expectedWorkflowRef = process.env.GITHUB_WORKFLOW_REF, api, sourceRepository, now = Date.now() }) {
   const trustedTestVerifier = verifyEvidence !== undefined;
   verifyEvidence ??= await nativeVerifier();
@@ -464,6 +464,7 @@ async function verifyGateExecutions({ candidateDir, candidate, gateFiles, gates,
   for (const [index, gate] of gates.entries()) {
     if (!trustedTestVerifier || api) origins.push(await verifyNativeProducer(gate, candidate.context.identity.sourceCommit, api, sourceRepository));
     const result = await verifyEvidence({ target: gate.target, profile: 'r-pre', candidateDir,
+      allowGeneratedPrompt,
       evidenceDir: path.join(path.dirname(gateFiles[index]), ...gate.reportDirectory.split('/')),
       expectedSourceCommit: candidate.context.identity.sourceCommit,
       expectedRunId: gate.run.id, expectedAttempt: gate.run.attempt,
@@ -551,7 +552,7 @@ export async function verifyBundle({ directory, expectedBundleSha256, verifyEvid
   const gates = await Promise.all(gateFiles.map(readJson));
   validateGates(gates, candidate.context.identity, { releaseIntentId: bundle.releaseIntentId, now: clock() });
   const producerVerification = await verifyGateExecutions({ candidateDir: directory, candidate, gateFiles, gates, verifyEvidence,
-    api, sourceRepository, now: clock() });
+    allowGeneratedPrompt: true, api, sourceRepository, now: clock() });
   const readiness = windowsTesterReadiness(candidate, gates, { now: clock() });
   const testerPrompt = await validateWindowsTesterPrompt({ outputDir: path.join(directory, 'handoff'),
     ...candidate.testerInput, readiness });

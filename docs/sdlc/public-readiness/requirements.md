@@ -474,6 +474,9 @@ approved release sequence without manual glue or repeated per-job intervention.
   gates before publication. Publish one immutable, source-bound package/bundle
   to the approved npm and GitHub destinations without rebuilding between channels.
   The macOS distribution uses the single shared artifact required by FR-212.
+  Generate the Windows tester handoff only after mandatory native validation;
+  sealed-bundle replay must accept that bound handoff without relaxing native
+  evidence, immutable-byte or generated-prompt validation.
 - AC-206.3: Automatically invoke required postpublication acceptance with the
   exact saved artifact IDs/digests and source. No separate manual workflow
   dispatch or unpublished-GitHub-assets surprise remains.

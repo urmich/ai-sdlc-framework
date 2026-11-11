@@ -3199,6 +3199,13 @@ Use this dependency order:
 7. After publication, separate completion evidence referencing prior proof,
    publication effects and actual consumer reports.
 
+Initial candidate validation and native execution reject a premature Windows
+tester handoff. After mandatory gate verification, sealing generates the bound
+handoff. Sealed-bundle verification explicitly propagates that phase allowance
+through native evidence replay to candidate validation; the allowance defaults
+to false everywhere else. It bypasses only the premature-handoff guard, never
+source, native evidence, bundle inventory or final generated-prompt validation.
+
 The bundle does not contain a readiness file that hashes that same bundle.
 Postpublication evidence is not inserted into already frozen distribution
 checksums. Publish evidence archives under unique digest/attempt-bearing names;

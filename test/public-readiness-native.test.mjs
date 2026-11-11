@@ -4288,6 +4288,20 @@ function currentFunctionalCatalogGroup(groups) {
 
 function preFunctionalFixtureSource(contents, file) {
   const inverse = {
+    'test/release-ci.test.mjs': {
+      current: '2c427268b95cb16f08f43522b97350369559ed6f5554b0e7787b6f81fde493d6',
+      original: '579931dd1c888e47b4027525805d42ec2226bbc98abf251289bb0dc97b5ef375',
+      splices: [[0, 3], [7, 12], [25, 28],
+        '    {"coverage": "direct", "paths": ["scripts/release-bundle.mjs", "scripts/release-gate.mjs", "scripts/accept-release.mjs", "scripts/publish-release.mjs", "scripts/npm-handoff.mjs", "scripts/release-orchestration.mjs", "scripts/release-retention.mjs", "scripts/homebrew-quality.mjs", "packaging/windows-tester/generate.mjs"]},\n',
+        [54, 27], 'import { generateWindowsTesterPrompt, INPUT_FILENAME, renderWindowsTesterPrompt,\n',
+        [82, 5],
+        "  prepareRelease, prepublicationEvidence, reuseBundle, resumeCandidate, verifyCandidate, windowsTesterInput, windowsTesterReadiness, writeJson } from '../scripts/release-bundle.mjs';\n",
+        [88, 10], [99, 181], 'async function unitNativeVerifier({ target, evidenceDir }) {\n',
+        [281, 8], "      revision: sourceCommit, contentDigest: 'f'.repeat(64) }], profile: spec.profile,\n",
+        [290, 12],
+        '  return { context, evaluation: evaluateReadiness(spec, [normalized], { profile: spec.profile,\n',
+        [303, 9], [314, 85], [539, 2064]],
+    },
     'test/install-progress.unit.test.mjs': {
       current: 'bfbb88f628e2315fa10f5e6aab040cffd1ec27bcca66dc8b471a81e59aab72e6',
       original: 'bdf72117db8affc24c7befc8492bb6be5913f233726e7617ac0795d5e9c570dc',

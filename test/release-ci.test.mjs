@@ -1,6 +1,10 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
   "groups": [
+    {"root": "T-PRD029 sealed replay admits the generated handoff only after mandatory candidate verification",
+      "minimumSlots": 1, "exclusiveResources": []},
+    {"root": "T-PRD029 candidate guards and incomplete native observations cannot gain sealing readiness",
+      "minimumSlots": 1, "exclusiveResources": []},
     {"root": "TOOL03 release gate retains unsettled original workspaces and preserves primary errors across cleanup failure",
       "minimumSlots": 1, "exclusiveResources": []},
     {"root": "TOOL03 native Homebrew helper binds command settlement to its caller lifetime without trusting success evidence",
@@ -13,6 +17,12 @@ export const validationDeclarations = {
       "minimumSlots": 1, "exclusiveResources": []}
   ],
   "applicability": [
+    {"names": [
+      "T-PRD029 sealed replay admits the generated handoff only after mandatory candidate verification",
+      "T-PRD029 candidate guards and incomplete native observations cannot gain sealing readiness"
+    ], "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "release-workflow",
+      "reason": "PR-only AC-206.2 functional regressions through real candidate archives, sealing, nested replay, branded readiness evaluation and T-60 validation. Actual native evidence replay retains committed-source checks and rejects absent/invalid original execution contexts after explicitly admitting the handoff; no passing native evidence is claimed. Independent one-slot roots own and verify cleanup of checkout-local fixtures; no package manager, provider, shared environment mutation or critical promotion.",
+      "prerequisites": ["Node >=22", "Git", "Committed source/test inputs and canonical Test Plan matching HEAD for actual native replay", "Owned repository-local synthetic archives; no npm, native launcher execution, credentials or network"]},
     {"names": [
       "T-PRD029 completed native readiness seals an acyclic data-only publication handoff",
       "T-PRD037 successful recovery durably retains full original publisher diagnostics without recursive privileged handoffs",
@@ -41,7 +51,7 @@ export const validationDeclarations = {
     {"options": "{skip:packagePrerelease?'Stable Homebrew acceptance is not applicable to prereleases':false}", "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "maintainer", "reason": "Controlled public-consumer adapter tests do not substitute for actual later native consumers.", "prerequisites": ["Stable source version for the required Homebrew release profile"]}
   ],
   "surfaces": [
-    {"coverage": "direct", "paths": ["scripts/release-bundle.mjs", "scripts/release-gate.mjs", "scripts/accept-release.mjs", "scripts/publish-release.mjs", "scripts/npm-handoff.mjs", "scripts/release-orchestration.mjs", "scripts/release-retention.mjs", "scripts/homebrew-quality.mjs", "packaging/windows-tester/generate.mjs"]},
+    {"coverage": "direct", "paths": ["scripts/release-bundle.mjs", "scripts/native-validation.mjs", "scripts/release-gate.mjs", "scripts/accept-release.mjs", "scripts/publish-release.mjs", "scripts/npm-handoff.mjs", "scripts/release-orchestration.mjs", "scripts/release-retention.mjs", "scripts/homebrew-quality.mjs", "packaging/windows-tester/generate.mjs"]},
     {"coverage": "fixture-only", "paths": ["scripts/homebrew-lifecycle.mjs"]}
   ],
   "plannedCases": [
@@ -69,13 +79,13 @@ import { createContext, runInContext } from 'node:vm';
 import { canonical, readTarGzip, readZip, sha256, tarGzip, zip } from '../packaging/standalone/archive.mjs';
 import { isPrerelease, platformEntries, TARGETS, validateWindowsLauncher, verifyEntries } from '../packaging/standalone/protocol.mjs';
 import { generateManifests } from '../packaging/winget/generate.mjs';
-import { generateWindowsTesterPrompt, INPUT_FILENAME, renderWindowsTesterPrompt,
+import { generateWindowsTesterPrompt, INPUT_FILENAME, PROMPT_FILENAME, renderWindowsTesterPrompt,
   validateWindowsTesterPrompt } from '../packaging/windows-tester/generate.mjs';
 import { writeReleaseMetadata } from '../scripts/package-platforms.mjs';
 import { materializeSyntheticReleaseInputs, syntheticReleaseLauncher } from '../scripts/synthetic-release-fixture.mjs';
 import { RELEASE_SCOPE, RELEASE_TARGETS, RELEASE_EXECUTION_PLATFORMS, RELEASE_GATE_TARGETS, RELEASE_PRE_CASES, archiveRecord, evidenceIdentity, options,
   copyNativeReports, homebrewMetadata, releaseRepository, sealBundle as sealProductionBundle, selectGateFiles, validateGates, verifyBundle as verifyProductionBundle,
-  prepareRelease, prepublicationEvidence, reuseBundle, resumeCandidate, verifyCandidate, windowsTesterInput, windowsTesterReadiness, writeJson } from '../scripts/release-bundle.mjs';
+  prepareRelease, prepublicationEvidence, previousReleasePins, reuseBundle, resumeCandidate, verifyCandidate, windowsTesterInput, windowsTesterReadiness, writeJson } from '../scripts/release-bundle.mjs';
 import { boundedReadback, preflightRelease, promoteRelease, publishApprovedDraft, publishDraft, validateReleaseActions, verifyRegistryPayload } from '../scripts/publish-release.mjs';
 import { NPM_TRUST, npmHandoffFromVerifiedBundle, prepareNpmHandoff } from '../scripts/npm-handoff.mjs';
 import { acceptPublicHomebrew, completeRelease, downloadPublicAssets } from '../scripts/accept-release.mjs';
@@ -86,6 +96,7 @@ import { createOwnedCommandRunner } from '../scripts/validation-tools.mjs';
 import { digest } from '../src/core.mjs';
 import { parseTestPlan } from '../src/artifacts.mjs';
 import { evaluateReadiness, normalizeExecutionReport, validationInventoryDigest } from '../src/evidence.mjs';
+import { verifyNativeEvidence } from '../scripts/native-validation.mjs';
 import { createCompletionFixture } from './readiness-release-consumer-fixture.mjs';
 import { admitAcceptanceHandoff, prepareAcceptanceHandoff, runReleaseAcceptance,
   releaseConsumerTargets } from '../scripts/release-orchestration.mjs';
@@ -267,7 +278,7 @@ function simulatedGates(candidate) {
   });
 }
 
-async function unitNativeVerifier({ target, evidenceDir }) {
+async function unitNativeVerifier({ target, evidenceDir, omitObservations = false, expectedSourceCommit = sourceCommit }) {
   const gate = JSON.parse(await fs.readFile(path.resolve(evidenceDir, '..', '..', `${target}.json`)));
   const spec = { schemaVersion: 1, profile: `r-pre-${target}`, cases: [{
     id: RELEASE_PRE_CASES[target], conditions: ['AC-206.2'], expectedDigest: 'b'.repeat(64),
@@ -276,7 +287,7 @@ async function unitNativeVerifier({ target, evidenceDir }) {
   }] };
   const context = { candidateDigest: 'c'.repeat(64), testSpecDigest: 'd'.repeat(64), configDigest: 'e'.repeat(64),
     inventoryDigest: validationInventoryDigest(spec), sources: [{ repositoryId: 'repository-123',
-      revision: sourceCommit, contentDigest: 'f'.repeat(64) }], profile: spec.profile,
+      revision: expectedSourceCommit, contentDigest: 'f'.repeat(64) }], profile: spec.profile,
     environment: 'local', location: `github-${target}`, mode: 'automated', owner: 'provider',
     native: gate.host, producer: { provider: 'github', connection: 'repository-ci', scopeRef: 'repository:123',
       definitionRef: 'unit-fixture-release-workflow', executionRef: '123', attemptKind: 'known', attemptRef: '1' },
@@ -289,7 +300,7 @@ async function unitNativeVerifier({ target, evidenceDir }) {
   const normalized = normalizeExecutionReport(report, context, input => ({
     verifierId: 'unit-native-fixture', reportDigest: input.reportDigest, context, sourceTime: gate.finishedAt, sourceSequence: 1,
   }));
-  return { context, evaluation: evaluateReadiness(spec, [normalized], { profile: spec.profile,
+  return { context, evaluation: evaluateReadiness(spec, omitObservations ? [] : [normalized], { profile: spec.profile,
     executions: [{ id: `native-${target}`, context }], now: new Date().toISOString(),
     policy: { maxAgeMs: 86_400_000, revisionPolicy: 'exact', verifierIds: ['unit-native-fixture'] } }) };
 }
@@ -299,6 +310,8 @@ const verifyBundle = options => verifyProductionBundle({ ...options, verifyEvide
 
 test.beforeEach(async context => {
   if (context.name.startsWith('T-PRD028 ') ||
+      context.name === 'T-PRD029 sealed replay admits the generated handoff only after mandatory candidate verification' ||
+      context.name === 'T-PRD029 candidate guards and incomplete native observations cannot gain sealing readiness' ||
       context.name === 'T-PRD057 two archive targets retain four mandatory native execution platforms without Linux standalone support') return;
   fixtureSetup ??= prepareReleaseFixture(context);
   await fixtureSetup;
@@ -384,6 +397,146 @@ async function fixture(t) {
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   return { directory, candidateDir, evidenceDir, outputDir, candidate };
 }
+
+async function handoffReplayFixture(t, candidateSourceCommit = sourceCommit) {
+  const directory = path.resolve('.test-data', `handoff-replay-${randomUUID()}`);
+  const candidateDir = path.join(directory, 'candidate');
+  const assets = path.join(candidateDir, 'assets');
+  await fs.mkdir(assets, { recursive: true });
+  t.after(async () => {
+    await fs.rm(directory, { recursive: true });
+    await assert.rejects(fs.lstat(directory), { code: 'ENOENT' });
+  });
+  const sources = {
+    'package.json': JSON.stringify({ name: 'ai-sdlc-framework', version: '0.4.0', engines: { node: '>=22' } }),
+    LICENSE: 'Owned synthetic fixture, not a published package.\n',
+    'bin/sdlc.mjs': '// Nonexecuted fixture.\n',
+    'src/install.mjs': '// Nonexecuted fixture.\n',
+    'packaging/standalone/runtime.mjs': '// Nonexecuted fixture.\n',
+    'packaging/standalone/install.sh': '#!/bin/sh\n',
+    'packaging/standalone/install.ps1': '# Nonexecuted fixture.\n',
+    'packaging/standalone/sdlc': '#!/bin/sh\n',
+  };
+  const bytes = tarGzip(Object.entries(sources).map(([file, contents]) => ({
+    path: `package/${file}`, data: Buffer.from(contents), mode: 0o644,
+  })));
+  const artifact = path.join(directory, 'ai-sdlc-framework-0.4.0.tgz');
+  const launcher = syntheticReleaseLauncher();
+  await fs.writeFile(artifact, bytes);
+  for (const target of RELEASE_TARGETS) {
+    const encode = target === 'windows-x64' ? zip : tarGzip;
+    await fs.writeFile(path.join(assets, `ai-sdlc-framework-0.4.0-${target}.${TARGETS[target].extension}`),
+      encode(platformEntries(bytes, target, launcher).entries));
+  }
+  const initial = await writeReleaseMetadata({ outputDir: assets, artifact, sourceCommit: candidateSourceCommit });
+  const formula = path.join(directory, 'ai-sdlc-framework.rb');
+  await fs.writeFile(formula, fixtureFormula(initial.descriptor));
+  const release = await writeReleaseMetadata({ outputDir: assets, artifact, sourceCommit: candidateSourceCommit,
+    metadataFiles: [{ artifact: formula, kind: 'homebrew' }] });
+  await writeJson(path.join(candidateDir, INPUT_FILENAME), windowsTesterInput(release, repository, sha256(launcher)));
+  await writeJson(path.join(candidateDir, 'context.json'), { schemaVersion: 1, releaseRepository: repository,
+    releaseIntentId, identity: evidenceIdentity(release), scope: RELEASE_SCOPE, prerelease: false,
+    launcher: { sha256: sha256(launcher) }, homebrew: { status: 'Generated' },
+    ...(previousReleasePins(process.env, repository) ? { previousRelease: previousReleasePins(process.env, repository) } : {}) });
+  const candidate = await verifyCandidate(candidateDir);
+  const evidenceDir = path.join(directory, 'evidence');
+  for (const gate of simulatedGates(candidate)) {
+    await writeJson(path.join(evidenceDir, `${gate.target}.json`), gate);
+    await writeJson(path.join(evidenceDir, 'native', gate.target, 'execution.json'),
+      { fixtureOnly: true, observedAt: gate.finishedAt, sequence: 1 });
+  }
+  return { directory, candidateDir, evidenceDir, outputDir: path.join(directory, 'bundle') };
+}
+
+test('T-PRD029 sealed replay admits the generated handoff only after mandatory candidate verification', async t => {
+  const f = await handoffReplayFixture(t);
+  const calls = [];
+  const verifyEvidence = async options => {
+    const { candidateDir, expectedSourceCommit, allowGeneratedPrompt = false } = options;
+    await verifyCandidate(candidateDir, { sourceCommit: expectedSourceCommit, allowGeneratedPrompt });
+    calls.push({ target: options.target, candidateDir, allowGeneratedPrompt });
+    return unitNativeVerifier(options);
+  };
+  const seal = () => sealProductionBundle({ ...f, sourceCommit, releaseIntentId, verifyEvidence });
+  await fs.mkdir(path.join(f.candidateDir, 'handoff'));
+  await assert.rejects(seal(), /T-60 prompt generation is deferred/u);
+  assert.deepEqual(calls, [], 'A premature handoff cannot reach native admission');
+  await fs.rm(path.join(f.candidateDir, 'handoff'), { recursive: true });
+  const missingGate = path.join(f.evidenceDir, 'macos-x64.json');
+  const originalGate = await fs.readFile(missingGate);
+  await fs.rm(missingGate);
+  await assert.rejects(seal(), /every scoped mandatory gate/u);
+  await assert.rejects(fs.lstat(f.outputDir), { code: 'ENOENT' });
+  await fs.writeFile(missingGate, originalGate);
+  const sealed = await seal();
+  assert.equal(sealed.publicationReady, true);
+  const phaseSize = RELEASE_GATE_TARGETS.length;
+  const targets = [...RELEASE_GATE_TARGETS].sort();
+  const byTarget = (left, right) => left.target < right.target ? -1 : left.target > right.target ? 1 : 0;
+  assert.deepEqual([
+    calls.slice(0, phaseSize).sort(byTarget),
+    calls.slice(phaseSize).sort(byTarget),
+  ], [
+    targets.map(target => ({ target, candidateDir: f.candidateDir, allowGeneratedPrompt: false })),
+    targets.map(target => ({ target, candidateDir: f.outputDir, allowGeneratedPrompt: true })),
+  ]);
+  const verified = await verifyProductionBundle({ directory: f.outputDir,
+    expectedBundleSha256: sealed.bundleSha256, verifyEvidence });
+  assert.equal(verified.testerPrompt.completionValidation, 'Passed');
+  await assert.rejects(verifyCandidate(f.outputDir), /T-60 prompt generation is deferred/u);
+  const prompt = Buffer.from('Incomplete tester handoff.\n');
+  await fs.writeFile(path.join(f.outputDir, 'handoff', PROMPT_FILENAME), prompt);
+  const manifestPath = path.join(f.outputDir, 'bundle.json');
+  const manifest = JSON.parse(await fs.readFile(manifestPath));
+  Object.assign(manifest.files.find(file => file.filename === `handoff/${PROMPT_FILENAME}`),
+    { sha256: sha256(prompt), size: prompt.length });
+  await fs.writeFile(manifestPath, canonical(manifest));
+  await assert.rejects(verifyProductionBundle({ directory: f.outputDir, verifyEvidence }),
+    /T-60 handoff is stale, nondeterministic or not bound/u);
+});
+
+test('T-PRD029 candidate guards and incomplete native observations cannot gain sealing readiness', async t => {
+  const selectedSourceCommit = (await execute('git', ['rev-parse', 'HEAD'],
+    { cwd: path.resolve(import.meta.dirname, '..') })).stdout.trim();
+  const f = await handoffReplayFixture(t, selectedSourceCommit);
+  await fs.mkdir(path.join(f.candidateDir, 'handoff'));
+  await assert.rejects(verifyCandidate(f.candidateDir), /T-60 prompt generation is deferred/u);
+  await assert.rejects(verifyCandidate(f.candidateDir, { allowGeneratedPrompt: false }), /T-60 prompt generation is deferred/u);
+  assert.equal((await verifyCandidate(f.candidateDir, { allowGeneratedPrompt: true })).context.releaseIntentId, releaseIntentId);
+  const nativeOptions = { target: 'linux-x64', profile: 'r-pre', candidateDir: f.candidateDir,
+    evidenceDir: path.join(f.directory, 'incomplete-native'), expectedSourceCommit: selectedSourceCommit,
+    expectedRunId: '123', expectedAttempt: '1', releaseIntentId };
+  await assert.rejects(verifyNativeEvidence(nativeOptions), /T-60 prompt generation is deferred/u);
+  await assert.rejects(verifyNativeEvidence({ ...nativeOptions, allowGeneratedPrompt: false }),
+    /T-60 prompt generation is deferred/u);
+  await assert.rejects(verifyNativeEvidence({ ...nativeOptions, allowGeneratedPrompt: true }), {
+    code: 'INPUT', message: 'Validation data must be plain JSON without executable values',
+  });
+  await writeJson(path.join(nativeOptions.evidenceDir, 'execution.json'),
+    { context: null, complete: true, exitCode: 0, results: [] });
+  await assert.rejects(verifyNativeEvidence({ ...nativeOptions, allowGeneratedPrompt: true }), {
+    code: 'INPUT', message: 'Expected plain validation data',
+  });
+  await assert.rejects(sealProductionBundle({ ...f, sourceCommit: selectedSourceCommit, releaseIntentId,
+    allowGeneratedPrompt: true, verifyEvidence: unitNativeVerifier }), /T-60 prompt generation is deferred/u);
+  await fs.rm(path.join(f.candidateDir, 'handoff'), { recursive: true });
+  for (const [mode, error] of [
+    ['missing', /Complete underlying R-PRE execution did not pass/u],
+    ['malformed', /Re-evaluate inputs before reporting or bundling readiness/u],
+    ['historical', /Historical\/as-of verification cannot provide current publication readiness/u],
+  ]) {
+    const verifyEvidence = async options => {
+      const result = await unitNativeVerifier({ ...options, omitObservations: mode === 'missing' });
+      if (mode === 'malformed') return { ...result, evaluation: { status: 'Passed' } };
+      return mode === 'historical' ? { ...result, historical: true } : result;
+    };
+    await assert.rejects(sealProductionBundle({ ...f, sourceCommit: selectedSourceCommit, releaseIntentId, verifyEvidence }), error);
+    await assert.rejects(fs.lstat(f.outputDir), { code: 'ENOENT' });
+  }
+  await fs.mkdir(path.join(f.candidateDir, 'handoff'));
+  await fs.writeFile(path.join(f.candidateDir, INPUT_FILENAME), canonical({}));
+  await assert.rejects(verifyCandidate(f.candidateDir, { allowGeneratedPrompt: true }), /T-60 input is not bound/u);
+});
 
 test('T-PRD057 two archive targets retain four mandatory native execution platforms without Linux standalone support', () => {
   assert.deepEqual(RELEASE_TARGETS, ['macos', 'windows-x64']);
