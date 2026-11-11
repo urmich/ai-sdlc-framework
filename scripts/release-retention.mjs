@@ -100,18 +100,20 @@ export async function verifyArchiveWithGh({ archive, attestationBundle, expected
   expectedTrustedRootSha256, run = execute }) {
   requireThat(attestationBundle && hash(expectedArchiveSha256) && source(expectedSourceCommit),
     'RELEASE_REPLAY', 'Use externally selected source/archive pins and a retained signed attestation bundle');
-  const args = ['attestation', 'verify', archive, '--bundle', attestationBundle,
+  const archivePath = path.resolve(archive);
+  const args = ['attestation', 'verify', archivePath, '--bundle', path.resolve(attestationBundle),
     '--repo', releaseRepository(sourceRepository), '--signer-workflow', `${sourceRepository}/.github/workflows/release.yml`,
     '--signer-digest', expectedSourceCommit, '--source-digest', expectedSourceCommit,
     '--source-ref', 'refs/heads/main', '--deny-self-hosted-runners',
     '--predicate-type', 'https://slsa.dev/provenance/v1', '--format', 'json'];
   if (trustedRoot) {
+    const trustedRootPath = path.resolve(trustedRoot);
     requireThat(hash(expectedTrustedRootSha256) &&
-      sha256(await fs.readFile(trustedRoot)) === expectedTrustedRootSha256,
+      sha256(await fs.readFile(trustedRootPath)) === expectedTrustedRootSha256,
     'RELEASE_REPLAY', 'An archive cannot select its own trust root; supply an independent expected root digest');
-    args.push('--custom-trusted-root', trustedRoot);
+    args.push('--custom-trusted-root', trustedRootPath);
   }
-  const output = await run('gh', args, { cwd: path.dirname(path.resolve(archive)), timeout: 120_000,
+  const output = await run('gh', args, { cwd: path.dirname(archivePath), timeout: 120_000,
     maxBuffer: 8 * 1024 * 1024, env: process.env });
   const verified = JSON.parse(output.stdout);
   requireThat(Array.isArray(verified) && verified.some(row =>

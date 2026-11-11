@@ -3345,6 +3345,18 @@ share no resources and do not enlarge the critical gate. The existing complete
 release-lifetime replay still closes all original inputs; neither unit success
 nor a size estimate supplies genuine R-PRE/publication acceptance credit.
 
+Two additional PR-only T-PRD037 roots in `release-retention.unit.test.mjs`
+exercise trust retention with a caller-relative archive and shared verification
+with caller-relative bundle/custom-root paths, including spaces and absolute-path
+compatibility. The injected transport opens real owned files using the received
+subprocess cwd/argv semantics; retention must preserve signed subject and sidecar
+bytes. Wrong custom-root pins reject before transport invocation. Each independent
+one-slot root owns and verifies fixture cleanup, has no dependencies or shared
+resources, and requires only Node >=22 on all four PR platforms. There is no
+global cwd mutation, package manager, network, real credential or critical-budget
+increase. Controlled verifier output proves file-open behavior, not authentic
+cryptography or release acceptance.
+
 PR-only T-PRD034/037 exercise the actual history collectors against owned
 in-memory provider/ZIP fixtures with more unrelated CI artifacts than the
 existing acquisition bound and selected preflight/dispatch originals beyond the

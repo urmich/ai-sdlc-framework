@@ -3218,6 +3218,14 @@ Continue accepting version 1 full-definition graphs without rewriting them.
 Keep the existing 128 MiB archive limit and all original native evidence;
 deduplication changes storage, not evidence, source or trust requirements.
 
+The shared `verifyArchiveWithGh` boundary resolves archive, attestation-bundle
+and optional custom-root paths in the caller's working directory before starting
+`gh` in the archive directory. Pass these as separate absolute argv entries,
+including paths with spaces. Prepublication/completion trust retention and
+historical prepublication/completion replay use this same boundary. Default host
+roots, independently pinned custom roots, signer/source binding, bounded reads
+and immutable subject/sidecar bytes remain unchanged.
+
 The bundle does not contain a readiness file that hashes that same bundle.
 Postpublication evidence is not inserted into already frozen distribution
 checksums. Publish evidence archives under unique digest/attempt-bearing names;
