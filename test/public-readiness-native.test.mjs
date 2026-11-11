@@ -4269,7 +4269,29 @@ function originalNativePhaseFixtureSource(contents) {
 }
 
 function preCommandInputQualificationSource(contents, file) {
+  if (file === 'scripts/publish-release.mjs') {
+    assert.equal(digest(contents), 'b8352846c1d54801324b162441b04a19cedb48eec66fcf11b7a4438be0a0c4b9');
+    const lines = contents.split(/(?<=\n)/u);
+    contents = [
+      ...lines.slice(0, 179), ...lines.slice(180, 183),
+      "      Accept: binary ? 'application/octet-stream' : 'application/vnd.github+json',\n",
+      ...lines.slice(184),
+    ].join('');
+    assert.equal(digest(contents), '600c26b9f80dad762e59452533053ca35086c1d6cff91037ae7750b40e797067',
+      'Replay must preserve the authentic publisher before API media negotiation changed');
+  }
   if (file === 'test/public-readiness-release-history.test.mjs') {
+    assert.equal(digest(contents), '162b7cbf2f91777dc6f844daf3e3251d4fce5e1940ddf07180fcf90760209452');
+    const transportLines = contents.split(/(?<=\n)/u);
+    const transportSplices = [
+      [0, 2],
+      '  "surfaces": [{"coverage": "direct", "paths": ["scripts/release-history.mjs"]}],\n',
+      [3, 1], [5, 6], [12, 10],
+      '    "reason": "PR-only FR-206/207 history and publication-recovery coverage uses actual collector APIs with paginated in-memory provider records. Unrelated repository artifacts cannot exhaust selected release history; late-page originals, supersession, immutable-source conflicts and uncertain effects remain enforced. No critical promotion or provider/package-manager effects.",\n',
+      [23, 8], [32, 90], [165, 215],
+    ];
+    contents = transportSplices.map(part => typeof part === 'string' ? part :
+      transportLines.slice(part[0], part[0] + part[1]).join('')).join('');
     assert.equal(digest(contents), '38db34aeae0fc3c48092e0273d9058d5546c910c49ed9a22d03b358ea761ce42',
       'Replay requires the exact run-scoped release history regression source');
     const lines = contents.split(/(?<=\n)/u);

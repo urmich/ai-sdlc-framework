@@ -3220,6 +3220,11 @@ inputs still rejects. Complete pagination, original digest/origin validation,
 physical-attempt supersession and unresolved-effect checks remain unchanged;
 unrelated CI artifact growth cannot consume a release-history acquisition bound.
 
+Actions artifact ZIP and job-log requests negotiate the documented JSON API
+media type while reading the downloaded response as bytes. Only release-asset
+binary downloads negotiate `application/octet-stream`; response decoding does
+not select the API media type. Archive digests and origin checks remain required.
+
 After a publish command succeeds, allow a bounded ten-minute propagation window
 with observable backoff (1, 2, 4, 8, 16 seconds, then at most 30 seconds between
 checks), honoring an earlier explicit provider retry delay within the budget.

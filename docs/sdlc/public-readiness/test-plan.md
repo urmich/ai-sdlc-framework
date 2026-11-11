@@ -3338,6 +3338,12 @@ and no-duplicate-publication assertions remain required. These independent
 process-isolated roots need only Node, share no resources and perform no network,
 package-manager or provider mutation. They do not enlarge the critical gate or
 supply genuine R-PRE/publication acceptance credit.
+The PR-only T-PRD034 transport root runs the actual history collector through
+`githubRequest`, reproducing Actions ZIP rejection for the wrong media type.
+It verifies digest-bound history, JSON negotiation with binary decoding for
+Actions ZIP/log downloads, and unchanged binary versus metadata negotiation for
+release assets. Its process-local fetch and credential fixtures are restored;
+the independent one-slot root needs no network, real credentials or shared state.
 Existing T-PRD017 replay restores the exact pre-change history/integration Git
 blobs through digest-checked inverse splices; archived qualification inputs and
 digests remain immutable. npm-dependent integration stays on capable PR runners.
