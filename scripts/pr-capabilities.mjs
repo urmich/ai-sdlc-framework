@@ -2,7 +2,6 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { requireThat } from '../src/core.mjs';
 import { sha256 } from '../packaging/standalone/archive.mjs';
-import { pinnedNpmTool } from './accept-release.mjs';
 import { verifyRetainedNpmAttestation } from './verify-npm-attestation.mjs';
 
 // Public verification material only. These pins do not confer signing authority.
@@ -32,6 +31,8 @@ export async function fetchPinnedFixture(pin, fetcher = fetch) {
 export async function provisionPrCryptoFixture({ root, environment, run, fetcher = fetch }) {
   requireThat(environment.GITHUB_ACTIONS === 'true', 'HOST',
     'Required PR crypto fixture provisioning runs only in CI; local tests consume retained owned bytes');
+  // Public fixture pins must load without waiting on the completion CLI's top-level await.
+  const { pinnedNpmTool } = await import('./accept-release.mjs');
   await fs.mkdir(root);
   const bundleFile = path.join(root, 'public-intoto.sigstore');
   const cachePath = path.join(root, 'offline-trust');

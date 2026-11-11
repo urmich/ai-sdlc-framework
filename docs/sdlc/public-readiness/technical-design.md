@@ -3218,6 +3218,20 @@ through native evidence replay to candidate validation; the allowance defaults
 to false everywhere else. It bypasses only the premature-handoff guard, never
 source, native evidence, bundle inventory or final generated-prompt validation.
 
+Completion's CLI top-level await must also remain acyclic during bundle
+verification. The default native verifier imports public `prCryptoFixture` pins
+from `pr-capabilities.mjs`; loading those pins must not statically import the
+still-evaluating `accept-release.mjs` CLI. Load `pinnedNpmTool` dynamically only
+inside `provisionPrCryptoFixture`, after its CI-only guard and before filesystem
+effects. Provisioning retains the same tool implementation, integrity pins,
+offline signature/certificate/transparency checks and environment contract.
+The isolated T-PRD035 child-CLI regression retains the real bundle checks and
+default native-verifier import, doubles only artifact verification/provider I/O,
+and must reach an explicit rejected read rather than exit 13 on an unsettled
+await. These controlled inputs provide no native, cryptographic or release
+acceptance proof; channel reporting and T-PRD037 historical retention are
+unchanged.
+
 Replay graph version 2 separates each captured native definition's `sourceFiles`
 into a content-addressed `replay/sources/<sha256>.json` entry. Identical snapshots
 share one entry; distinct snapshots remain distinct. Each definition reference
