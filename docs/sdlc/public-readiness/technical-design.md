@@ -3206,6 +3206,18 @@ through native evidence replay to candidate validation; the allowance defaults
 to false everywhere else. It bypasses only the premature-handoff guard, never
 source, native evidence, bundle inventory or final generated-prompt validation.
 
+Replay graph version 2 separates each captured native definition's `sourceFiles`
+into a content-addressed `replay/sources/<sha256>.json` entry. Identical snapshots
+share one entry; distinct snapshots remain distinct. Each definition reference
+binds its compact stored JSON and source snapshot by size and SHA-256, while its
+`definitionDigest` continues to identify the complete original definition.
+Replay verifies both stored inputs, reconstructs the complete definition and
+checks that original digest before native verification. Shared entries belong
+to the closed archive allowlist; missing, changed or ambiguous inputs reject.
+Continue accepting version 1 full-definition graphs without rewriting them.
+Keep the existing 128 MiB archive limit and all original native evidence;
+deduplication changes storage, not evidence, source or trust requirements.
+
 The bundle does not contain a readiness file that hashes that same bundle.
 Postpublication evidence is not inserted into already frozen distribution
 checksums. Publish evidence archives under unique digest/attempt-bearing names;

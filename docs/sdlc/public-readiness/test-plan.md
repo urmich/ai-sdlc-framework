@@ -3335,6 +3335,16 @@ authority. Preflight rejects missing prerequisites before irreversible calls.
    reconciling the current attempt and retain prior failures; do not rebuild/
    replace the immutable approved candidate as a verification shortcut.
 
+Two PR-only T-PRD037 unit roots exercise retained definition storage/replay with
+small functional fixtures. They prove identical source snapshots are stored
+once, distinct snapshots stay distinct, every reconstructed definition preserves
+its complete digest and version 1 remains readable. Missing, changed, wrongly
+shaped or ambiguous source data must reject before native replay. These
+independent one-slot roots use only Node and owned repository-local fixtures,
+share no resources and do not enlarge the critical gate. The existing complete
+release-lifetime replay still closes all original inputs; neither unit success
+nor a size estimate supplies genuine R-PRE/publication acceptance credit.
+
 PR-only T-PRD034/037 exercise the actual history collectors against owned
 in-memory provider/ZIP fixtures with more unrelated CI artifacts than the
 existing acquisition bound and selected preflight/dispatch originals beyond the
