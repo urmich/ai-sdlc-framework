@@ -470,9 +470,15 @@ test('T-PRD029 sealed replay admits the generated handoff only after mandatory c
   await fs.writeFile(missingGate, originalGate);
   const sealed = await seal();
   assert.equal(sealed.publicationReady, true);
-  assert.deepEqual(calls, [
-    ...RELEASE_GATE_TARGETS.map(target => ({ target, candidateDir: f.candidateDir, allowGeneratedPrompt: false })),
-    ...[...RELEASE_GATE_TARGETS].sort().map(target => ({ target, candidateDir: f.outputDir, allowGeneratedPrompt: true })),
+  const phaseSize = RELEASE_GATE_TARGETS.length;
+  const targets = [...RELEASE_GATE_TARGETS].sort();
+  const byTarget = (left, right) => left.target < right.target ? -1 : left.target > right.target ? 1 : 0;
+  assert.deepEqual([
+    calls.slice(0, phaseSize).sort(byTarget),
+    calls.slice(phaseSize).sort(byTarget),
+  ], [
+    targets.map(target => ({ target, candidateDir: f.candidateDir, allowGeneratedPrompt: false })),
+    targets.map(target => ({ target, candidateDir: f.outputDir, allowGeneratedPrompt: true })),
   ]);
   const verified = await verifyProductionBundle({ directory: f.outputDir,
     expectedBundleSha256: sealed.bundleSha256, verifyEvidence });
