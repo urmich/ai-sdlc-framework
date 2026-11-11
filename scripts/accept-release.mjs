@@ -169,7 +169,7 @@ export async function downloadPreviousRelease({ repository, version, descriptorS
       if (!tool.root || !path.isAbsolute(tool.root)) {
         throw blocked('The approved pinned npm tool must expose its bundled Sigstore verifier; audit counts cannot prove provenance identity');
       }
-      const certificateIdentity = 'https://github.com/urmich/ai-sdlc-framework/.github/workflows/release.yml@refs/heads/main';
+      const certificateIdentity = 'https://github.com/urmich/ai-sdlc-framework/.github/workflows/npm-publish.yml@refs/heads/main';
       const exact = await run(process.execPath, [path.join(ROOT, 'scripts', 'verify-npm-attestation.mjs'),
         '--tool-root', tool.root, '--bundle', signedFile, '--certificate-identity', certificateIdentity,
         '--cache-path', path.join(root, 'sigstore-trust')], { env: environment, cwd: root,

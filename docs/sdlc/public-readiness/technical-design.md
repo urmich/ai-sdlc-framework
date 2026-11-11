@@ -3187,6 +3187,12 @@ Both names contain `TOKEN`; validating them only in the parent is insufficient.
 Continue excluding unrelated credential-bearing variables and inherited npm
 configuration.
 
+For npm provenance, the exact certificate identity is the reusable
+`npm-publish.yml@refs/heads/main` signer. Independently require the signed
+statement's workflow to identify the root `release.yml@refs/heads/main` caller,
+the exact repository, source commit and package bytes. These identities are
+distinct; neither may substitute for the other.
+
 Independent artifact verification confirms the handoff came from the expected
 source/run/verifier, not just that its JSON says ready. The sole tooling exception
 is the approved integrity-pinned npm CLI, with scripts disabled. OIDC and
