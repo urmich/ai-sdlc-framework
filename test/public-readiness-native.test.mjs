@@ -4254,6 +4254,13 @@ function originalNativePhaseFixtureSource(contents) {
   contents = contents.slice(0, helper) + contents.slice(following);
   contents = contents.replaceAll('    contents = preCommandInputQualificationSource(contents, file);\n', '')
     .replace("  contents = preFunctionalFixtureSource(contents, 'test/validation-catalog.test.mjs');\n", '')
+    .replace('  const catalog = currentFunctionalCatalogGroup(groups);\n',
+      '  const catalog = groups.find(group => group.rootId === nativePass.nativePlacementOwnershipV15.catalog.rootId);\n')
+    .replace("  assert.equal(catalogCost.costStatus, 'unknown-root');\n",
+      "  assert.equal(catalogCost.costStatus, 'stale-closure-or-resources');\n")
+    .replace('  const currentCatalog = currentFunctionalCatalogGroup(groups);\n', '')
+    .replace('  for (const [index, id] of [currentCatalog.rootId, anchors[1], currentObserver.id].entries()) {\n',
+      '  for (const [index, id] of [anchors[0], anchors[1], currentObserver.id].entries()) {\n')
     .replaceAll('      contents = originalNativePhaseFixtureSource(contents);\n', '')
     .replace('  await nativePhaseSynchronizationControls(t);\n', '')
     .replace('validationCommandArguments, processDiagnostic }', 'validationCommandArguments }')
@@ -4268,6 +4275,15 @@ function originalNativePhaseFixtureSource(contents) {
   assert.equal(digest(restored), '273fd079c026e3f66504c972e7363e02e869a9be9841ce5b75cca99e14977c38',
     'Replay must restore the exact genuine 993fb011 phase fixture source before independent historical splices');
   return restored;
+}
+
+function currentFunctionalCatalogGroup(groups) {
+  const selected = groups.filter(group => group.file === 'test/validation-catalog.test.mjs' &&
+    group.root === 'complete functional per-case reports obey unit prerequisites and full aggregate coverage');
+  assert.equal(selected.length, 1, 'Current catalog must have exactly one complete functional root');
+  assert.notEqual(selected[0].rootId, nativePass.nativePlacementOwnershipV15.catalog.rootId,
+    'The renamed functional catalog cannot inherit the historical stress identity');
+  return selected[0];
 }
 
 function preFunctionalFixtureSource(contents, file) {
@@ -4948,12 +4964,12 @@ function assertCurrentIntelFallback(inventory, plan) {
     }
     assert.ok(group.minimumSlots <= 14);
   }
-  const catalog = groups.find(group => group.rootId === nativePass.nativePlacementOwnershipV15.catalog.rootId);
+  const catalog = currentFunctionalCatalogGroup(groups);
   assert.ok(catalog, 'Fallback must locate the complete catalog by actual owner, not assume body-0');
   assert.equal(catalog.minimumSlots, 7);
   const catalogCost = current.placement.groups.find(group => group.rootId === catalog.rootId);
   assert.equal(catalogCost.durationMs, null);
-  assert.equal(catalogCost.costStatus, 'stale-closure-or-resources');
+  assert.equal(catalogCost.costStatus, 'unknown-root');
   assert.ok(current.placement.groups.every(group => !Object.hasOwn(group, 'observedSourceRevision') &&
     !Object.hasOwn(group, 'observedRunId')), 'Current fallback cannot inherit qualified C74 service attribution');
   const cryptoRoot = inventory.cases.find(test =>
@@ -5237,7 +5253,8 @@ test('T-PRD017 native v11 pools qualified complete Intel components within uncha
   assert.ok(currentObserver);
   assert.notEqual(currentObserver.id, anchors[2], 'The changed timing-policy root has a new assertion identity');
   assert.equal(f.inventory.cases.some(test => test.id === anchors[2]), false);
-  for (const [index, id] of [anchors[0], anchors[1], currentObserver.id].entries()) {
+  const currentCatalog = currentFunctionalCatalogGroup(groups);
+  for (const [index, id] of [currentCatalog.rootId, anchors[1], currentObserver.id].entries()) {
     const group = groups.find(group => group.rootId === id);
     const owner = current.parts.find(part => part.assertionIds.includes(id));
     assert.equal(groups.filter(group => group.rootId === id).length, 1);
