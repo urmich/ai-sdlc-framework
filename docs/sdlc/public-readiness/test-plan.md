@@ -3279,7 +3279,10 @@ authority. Preflight rejects missing prerequisites before irreversible calls.
    The release jobs declare one bounded aggregate worker allocation shared by
    bootstrap and execution. T-PRD032 derives every selected execution group's
    minimum slots and verifies that the complete inventories fit each release
-   allocation, including hosts with three or four physical CPU slots. Do not
+   allocation, including hosts with three or four physical CPU slots. It also
+   compares the real configuration digests selected by native capture and
+   independent bundle verification; both inherit the same workflow-level worker
+   request without per-step overrides. Do not
    omit roots, weaken reservations or enable shared-state callback concurrency
    to fit the default CPU-based allocation.
 3. Before publication, a candidate-only loopback fixture may serve the verified

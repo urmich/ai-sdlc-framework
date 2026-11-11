@@ -57,6 +57,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  SDLC_TEST_WORKERS: '15'
   RELEASE_REPOSITORY: ${{ inputs.release_repository }}
   RELEASE_INTENT_ID: ${{ inputs.release_intent_id }}
   EXPECTED_SOURCE_COMMIT: ${{ inputs.source_commit }}
@@ -237,7 +238,6 @@ jobs:
       contents: read
       actions: read
     env:
-      SDLC_TEST_WORKERS: '15'
       EXPECTED_DESCRIPTOR_SHA256: ${{ needs.candidate.outputs.descriptor_sha256 }}
       EXPECTED_CHECKSUMS_SHA256: ${{ needs.candidate.outputs.checksums_sha256 }}
     steps:

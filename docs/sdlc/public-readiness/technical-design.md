@@ -3130,6 +3130,9 @@ any other native obligation passed. Those complete lane reports remain mandatory
 inputs to the final conjunction; they need not serialize all other hosts behind
 the complete Linux regression. PR production follows the same freeze-once,
 four-lane parallel pattern, with bounded actual resources on each host.
+Release bootstrap, native execution and independent bundle verification inherit
+one workflow-level worker request, so verification reconstructs the exact producer
+configuration rather than an unrelated verifier-host default.
 Public-download consumers are exclusively R-POST. Acceptance observers/reports
 T-PRD055/056/074 assess completed flows afterwards; their own results are never
 inputs to the flow they observe.
