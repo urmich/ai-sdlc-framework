@@ -129,6 +129,8 @@ if (process.argv[2] === '--version') {
 } else if (process.argv[2] === 'publish') {
   fs.writeFileSync(path.join(process.env.TEST_NPM_ROOT, 'npm-call.json'), JSON.stringify({
     args: process.argv.slice(2),
+    oidcRequest: { url: process.env.ACTIONS_ID_TOKEN_REQUEST_URL, token: process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN },
+    unrelatedCredentials: { artifactReadToken: process.env.ARTIFACT_READ_TOKEN, secret: process.env.TEST_SECRET },
     config: { registry: process.env.NPM_CONFIG_REGISTRY, scripts: process.env.NPM_CONFIG_IGNORE_SCRIPTS,
       user: process.env.NPM_CONFIG_USERCONFIG, global: process.env.NPM_CONFIG_GLOBALCONFIG,
       inheritedRegistry: process.env.npm_config_registry, provenance: process.env.NPM_CONFIG_PROVENANCE }
@@ -508,7 +510,9 @@ test('inline OIDC transport is idempotent, rejects conflicting versions, and nev
     await f.run('NPM_OIDC_PREFLIGHT');
     await f.run('NPM_DATA_VERIFY');
     const work = path.join(f.directory, 'npm-work');
-    const published = await f.run('NPM_OIDC_PUBLISH', { npm_config_registry: 'https://example.invalid' }, work);
+    const published = await f.run('NPM_OIDC_PUBLISH', {
+      npm_config_registry: 'https://example.invalid', TEST_SECRET: 'controlled-unit-fixture',
+    }, work);
     assert.match(published.stdout, /PublishedAndBytesVerified/u);
     const receipt = JSON.parse(await fs.readFile(path.join(work, 'npm-publication-result.json'), 'utf8'));
     assert.equal(receipt.provenanceMetadata.validation, 'Verified');
@@ -516,6 +520,10 @@ test('inline OIDC transport is idempotent, rejects conflicting versions, and nev
     const call = JSON.parse(await fs.readFile(path.join(f.directory, 'npm-call.json'), 'utf8'));
     assert.deepEqual(call.args, ['publish', `./${f.filename}`, '--ignore-scripts', '--access', 'public', '--json',
       '--tag', f.handoff.distTag, '--registry', 'https://registry.npmjs.org']);
+    assert.deepEqual(call.oidcRequest, {
+      url: f.env.ACTIONS_ID_TOKEN_REQUEST_URL, token: f.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN,
+    });
+    assert.deepEqual(call.unrelatedCredentials, {});
     assert.equal(call.config.inheritedRegistry,
       process.platform === 'win32' ? 'https://registry.npmjs.org' : undefined);
     assert.equal(call.config.provenance, undefined);

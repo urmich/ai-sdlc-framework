@@ -4394,6 +4394,17 @@ function preFunctionalFixtureSource(contents, file) {
 
 function preCommandInputQualificationSource(contents, file) {
   contents = preFunctionalFixtureSource(contents, file);
+  if (file === 'test/npm-oidc.test.mjs') {
+    assert.equal(digest(contents), 'a1b62183a5da49625491df0aefbda74486c81ae0efc13ba841018d1d0705e45e');
+    const lines = contents.split(/(?<=\n)/u);
+    contents = [
+      ...lines.slice(0, 131), ...lines.slice(133, 512),
+      "    const published = await f.run('NPM_OIDC_PUBLISH', { npm_config_registry: 'https://example.invalid' }, work);\n",
+      ...lines.slice(515, 522), ...lines.slice(526),
+    ].join('');
+    assert.equal(digest(contents), '26a40ae30a50feea736caf5d9a31a80cf56855fbad1c9f9fc2834f84bf2a0422',
+      'Replay must preserve the authentic publisher fixture before child environment assertions');
+  }
   if (file === 'scripts/publish-release.mjs') {
     assert.equal(digest(contents), 'b8352846c1d54801324b162441b04a19cedb48eec66fcf11b7a4438be0a0c4b9');
     const lines = contents.split(/(?<=\n)/u);

@@ -499,7 +499,8 @@ jobs:
           }
           const npmEnvironment = {
             ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^npm_/iu.test(key) &&
-              (!/token|secret|credential|password/iu.test(key) || key === 'ACTIONS_ID_TOKEN_REQUEST_TOKEN'))),
+              (!/token|secret|credential|password/iu.test(key) ||
+                ['ACTIONS_ID_TOKEN_REQUEST_URL', 'ACTIONS_ID_TOKEN_REQUEST_TOKEN'].includes(key)))),
             HOME: path.resolve('home'), NPM_CONFIG_USERCONFIG: path.resolve('user.npmrc'),
             NPM_CONFIG_GLOBALCONFIG: path.resolve('global.npmrc'), NPM_CONFIG_CACHE: path.resolve('cache'),
             NPM_CONFIG_REGISTRY: 'https://registry.npmjs.org', NPM_CONFIG_IGNORE_SCRIPTS: 'true',
