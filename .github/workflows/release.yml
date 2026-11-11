@@ -316,6 +316,7 @@ jobs:
       attestations: write
     outputs:
       artifact_id: ${{ steps.upload.outputs.artifact-id || inputs.saved_bundle_artifact_id }}
+      test_workers: ${{ env.SDLC_TEST_WORKERS }}
       artifact_digest: ${{ steps.upload.outputs.artifact-digest || steps.saved.outputs.bundleArtifactDigest }}
       source_run_id: ${{ inputs.saved_bundle_artifact_id != '' && inputs.saved_run_id || github.run_id }}
       bundle_sha256: ${{ steps.seal.outputs.bundleSha256 || inputs.saved_bundle_sha256 }}
@@ -616,6 +617,7 @@ jobs:
     uses: ./.github/workflows/release-acceptance.yml
     with:
       acceptance_handoff: ${{ needs.promote.outputs.acceptance_handoff }}
+      test_workers: ${{ needs.release-bundle.outputs.test_workers }}
 
   completion:
     if: always() && needs.release-bundle.result == 'success'

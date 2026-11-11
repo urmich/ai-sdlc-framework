@@ -3282,7 +3282,11 @@ authority. Preflight rejects missing prerequisites before irreversible calls.
    allocation, including hosts with three or four physical CPU slots. It also
    compares the real configuration digests selected by native capture and
    independent bundle verification; both inherit the same workflow-level worker
-   request without per-step overrides. Do not
+   request without per-step overrides. The same regression follows the bundle
+   job output through the caller's required reusable-workflow input to native
+   public acceptance, then compares its independent R-PRE verification digest
+   against the producer. Acceptance bootstrap and verification inherit that
+   input without step-local overrides. Do not
    omit roots, weaken reservations or enable shared-state callback concurrency
    to fit the default CPU-based allocation.
 3. Before publication, a candidate-only loopback fixture may serve the verified

@@ -6,6 +6,9 @@ on:
       acceptance_handoff:
         type: string
         required: true
+      test_workers:
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -35,6 +38,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     env:
+      SDLC_TEST_WORKERS: ${{ inputs.test_workers }}
       EXPECTED_BUNDLE_SHA256: ${{ fromJSON(inputs.acceptance_handoff).bundle.sha256 }}
       EXPECTED_SOURCE_COMMIT: ${{ fromJSON(inputs.acceptance_handoff).identity.sourceCommit }}
       RELEASE_INTENT_ID: ${{ fromJSON(inputs.acceptance_handoff).releaseIntentId }}

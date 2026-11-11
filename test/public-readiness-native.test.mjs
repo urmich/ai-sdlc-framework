@@ -4270,7 +4270,7 @@ function originalNativePhaseFixtureSource(contents) {
 
 function preCommandInputQualificationSource(contents, file) {
   if (file === 'test/public-readiness-ci.test.mjs') {
-    assert.equal(digest(contents), '28c68bcb4c0ebb822cadae7341398dc246863cef1e40190b0cd194ec710c8be4',
+    assert.equal(digest(contents), 'd149fc2993387d4b3bca0238d9b234799125cf3c267045f51c7b505f5b1bbdcb',
       'Replay requires the exact release producer/verifier allocation regression source');
     const lines = contents.split(/(?<=\n)/u);
     const splices = [
@@ -4280,7 +4280,7 @@ function preCommandInputQualificationSource(contents, file) {
       '  nativeResourceFacts, nativePrPartsForProtocol, nativeFrameworkShardProtocols, nativeFrameworkShardProtocol,\n',
       [70, 2070], [2141, 5], [2147, 3],
       '      configuredWorkers: releaseGate.env.SDLC_TEST_WORKERS ?? release.env?.SDLC_TEST_WORKERS ?? null,\n',
-      [2151, 3], [2159, 3], [2164, lines.length - 2164],
+      [2151, 3], [2159, 3], [2188, lines.length - 2188],
     ];
     contents = splices.map(part => typeof part === 'string' ? part :
       lines.slice(part[0], part[0] + part[1]).join('')).join('');

@@ -3133,6 +3133,10 @@ four-lane parallel pattern, with bounded actual resources on each host.
 Release bootstrap, native execution and independent bundle verification inherit
 one workflow-level worker request, so verification reconstructs the exact producer
 configuration rather than an unrelated verifier-host default.
+The bundle job exposes that selected request as a job output and passes it through
+a required string input to reusable acceptance. Its native bootstrap and consumer
+verification use that input; workflow-level environment variables do not cross
+the reusable-workflow boundary implicitly.
 Public-download consumers are exclusively R-POST. Acceptance observers/reports
 T-PRD055/056/074 assess completed flows afterwards; their own results are never
 inputs to the flow they observe.
