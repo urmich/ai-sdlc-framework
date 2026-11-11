@@ -199,7 +199,7 @@ contributor to reproduce all hosted environments before opening a PR.
   contracts work. Its finite membership, count budget and addition rationale are
   explicit and reviewable. A test does not become critical merely because it is
   automated, local, pre-review, in a unit file or associated with this increment.
-  Exhaustive feature, stress, platform, packaging and failure-matrix coverage
+  Required feature, platform, packaging and distinct failure-path coverage
   stays required in PR rather than being relabeled critical. A narrow sanity
   result never claims complete feature or release acceptance.
 - AC-201.3: Failure, cancellation and partial completion produce explicit
@@ -290,6 +290,18 @@ counts.
   and include all preparation in the complete lane measurement. A longer setup
   allowance does not authorize retries, unknown-cleanup success or omitted
   assertions.
+- AC-202.8: Required tests use small deterministic functional fixtures, with a
+  couple of representative examples per behavior instead of hundreds or
+  thousands of equivalent dummy executions or refreshes. Replace the former
+  2,265-definition catalog and 550-refresh stress workloads without removing
+  checks for unit ordering, invalid evidence, incomplete results, checkpoint
+  isolation, retention, archival integrity or stale-observation rejection.
+  Other synthetic volume is justified only by a real protocol, pagination or
+  storage boundary and uses the smallest data needed to cross that boundary;
+  it does not justify repeatedly executing equivalent test cases. This changes
+  test workload, not production limits, durability, native-platform coverage,
+  immutable historical evidence or release acceptance. Report actual new lane
+  times rather than assuming a speedup.
 
 ### FR-203: Require complete PR validation without trusting local claims
 
@@ -321,9 +333,10 @@ merge, even when its author ran nothing locally.
   Parallel producer parts are independently required, source/artifact-bound
   executions; a passing framework part cannot substitute for a missing native
   package-manager procedure or its cleanup evidence.
-- AC-203.5: Sharding and change-aware selection never omit required coverage.
-  Heavy stress/security/install cases are assigned explicit required jobs rather
-  than silently moved to non-blocking schedules.
+- AC-203.5: Sharding and change-aware selection never omit required functional
+  coverage. Required security/install cases are assigned explicit required jobs
+  rather than silently moved to non-blocking schedules. Unnecessary stress
+  repetition is replaced under AC-202.8, not hidden in another required lane.
 - AC-203.6: Uploaded sanitized reports expose exact commands/selectors, toolchains,
   case results, skips and source identities, including partial/failing runs.
   PR authors and approvers can inspect test successes, failures and unexecuted

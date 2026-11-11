@@ -41,6 +41,12 @@ export const validationDeclarations = {
     "reason": "PR-only real cmd/Node child verifies Windows verbatim argument forwarding through a path containing spaces. Worker, shell, child and possible owned termination controller share four slots. No installer, package manager, external or shared resource and no critical promotion.",
     "prerequisites": ["Node, Windows cmd.exe and owned repository-local command/report fixtures"]
   }, {
+    "names": ["T-PRD013 process-isolated retention scheduling preserves the ordered functional assertions and identity"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "native-regression-contract",
+    "reason": "PR-only source inventory guard for the authorized small functional refresh scenario, preserving its exact wrapper identity, current callback fingerprint and disjoint shard assignment. Historical stress bytes remain historical; no critical promotion, source execution or shared mutable resources.",
+    "prerequisites": ["Node; independent read-only root"]
+  }, {
     "names": ["T-PRD013 measured GitHub process partitions preserve every original assertion and callback definition"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "native-regression-contract",
@@ -1217,7 +1223,7 @@ test('T-PRD018 capture admission reserves its complete process tree while indepe
     assert.deepEqual(admittedCancellation.notRun, []);
 
     const catalogPlan = await createPlan(parseOptions(['targeted', '--workers', '8', '--name',
-      '^complete synthetic per-case reports obey all 2066 unit prerequisites and full aggregate coverage$',
+      '^complete functional per-case reports obey unit prerequisites and full aggregate coverage$',
       'test/validation-catalog.test.mjs']));
     assert.equal(catalogPlan.groups.length, 1);
     const catalog = catalogPlan.groups[0];
@@ -2434,7 +2440,7 @@ test('T-PRD017 recursive source additions, renames and deletions retain exact sh
     assert.throws(() => partitionValidationInventory(inventory, 33));
   });
 
-  test('T-PRD013 process-isolated retention scheduling preserves the original ordered exhaustion assertions and identity', async () => {
+  test('T-PRD013 process-isolated retention scheduling preserves the ordered functional assertions and identity', async () => {
     const inventory = await compileValidationInventory(process.cwd());
     const original = inventory.cases.filter(test =>
       test.name === 'FR-063/064 real refresh and prune archive superseded observations/facts before exhaustion');
@@ -2450,7 +2456,7 @@ test('T-PRD017 recursive source additions, renames and deletions retain exact sh
     assert.deepEqual(preserved.unresolved, []);
     assert.equal(preserved.cases.length, 1);
     assert.equal(preserved.cases[0].definitionDigest,
-      'f03ae57142aa5719195f61fa979581e7ac2e42d82ce8909656eb9a96c0383d3b');
+      '65abc444fa59371acf3faea8f768de72819e22582c5c36377915738244fe5088');
     const shards = partitionValidationInventory(inventory, 4, [{
       assertionId: original[0].id, sourceDigest: original[0].sourceDigest, durationMs: 100000,
     }]);

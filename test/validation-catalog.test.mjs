@@ -1,17 +1,17 @@
 export const validationDeclarations = {
   "schemaVersion": 1,
   "groups": [{
-    "root": "complete synthetic per-case reports obey all 2066 unit prerequisites and full aggregate coverage",
+    "root": "complete functional per-case reports obey unit prerequisites and full aggregate coverage",
     "minimumSlots": 7
   }, {
     "root": "published references are fresh-checked after cache use and missing/corrupt pages cannot become success",
     "minimumSlots": 6
   }],
   "applicability": [{
-    "names": ["complete synthetic per-case reports obey all 2066 unit prerequisites and full aggregate coverage"],
+    "names": ["complete functional per-case reports obey unit prerequisites and full aggregate coverage"],
     "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
     "owner": "catalog-resource-contract",
-    "reason": "PR-only complete catalog integration root. Reserve its worker, CLI and five concurrent candidate-snapshot Git readers; direct fixture arithmetic and sequential Git setup require fewer slots. Preserve all original assertions and deadlines; no critical promotion or hosted process-peak/timing claim.",
+    "reason": "PR-only functional catalog integration root. Reserve its worker, CLI and five concurrent candidate-snapshot Git readers; direct fixture arithmetic and sequential Git setup require fewer slots. Preserve all original assertions and deadlines; no critical promotion or hosted process-peak/timing claim.",
     "prerequisites": ["Node, Git and seven aggregate worker slots; owned repository-local repository and Copilot home"]
   }, {
     "names": ["published references are fresh-checked after cache use and missing/corrupt pages cannot become success"],
@@ -26,7 +26,7 @@ export const validationDeclarations = {
     {"expression": "`${referenced ? 'referenced' : 'inline'} NotRun pending/running evidence keeps immutable dispatch source without completion credit`", "domains": {"referenced ? 'referenced' : 'inline'": ["inline", "referenced"]}},
     {"expression": "`${referenced ? 'referenced' : 'inline'} late progress cannot replace tied-time terminal Passed Failed or cancelled NotRun`", "domains": {"referenced ? 'referenced' : 'inline'": ["inline", "referenced"]}},
     {"expression": "`public automated ${count}-case cycle requires retained original proof regardless of inline storage`", "domains": {"count": ["2", "100", "101"]}},
-    {"expression": "`public ${count}-case manual and semi-automated procedures retain their real owner and evidence contract`", "domains": {"count": ["2", "101"]}}
+    {"expression": "`public ${referenced ? 'referenced' : 'inline'} manual and semi-automated procedures retain their real owner and evidence contract`", "domains": {"referenced ? 'referenced' : 'inline'": ["inline", "referenced"]}}
   ]
 };
 import test from 'node:test';
@@ -43,7 +43,7 @@ import { registerArtifact, parseTestPlan, resolveTestSpecification } from '../sr
 import { startCycle, recordReadiness, recordTest, recordTests, stagingHandoff } from '../src/validation.mjs';
 import { applicableOverride, currentCycle, currentTestEvidence, hasStagingCompletion, stagePassed } from '../src/authority.mjs';
 import { cycleTests, flushValidationObjects, readValidationObject, stageValidationObject, validationObjectPath } from '../src/validation-catalog.mjs';
-import { appendTestObservation, testHistory, cycleResultIds, readTestEvidence, testResetDigest, retainTestEvidence } from '../src/validation-evidence.mjs';
+import { appendTestObservation, testHistory, cycleResultIds, initializeReferencedCycle, readTestEvidence, testResetDigest, retainTestEvidence } from '../src/validation-evidence.mjs';
 import { claimOperationDispatch, prepareOperation, markDispatching, recordOperation, pruneWork } from '../src/operations.mjs';
 import { status, resume } from '../src/recovery.mjs';
 import { byteSize, digest, LIMITS } from '../src/core.mjs';
@@ -53,12 +53,12 @@ import { Store } from '../src/store.mjs';
 import { formatAudit, recordAudit } from '../src/audit.mjs';
 
 function catalogFixturePlan() {
-  return JSON.stringify({ tests: Array.from({ length: 2265 }, (_, index) => ({
+  return JSON.stringify({ tests: Array.from({ length: 6 }, (_, index) => ({
     id: `T-catalog-${index}`,
     environment: 'local',
-    level: index < 2066 ? 'unit' : index < 2245 ? 'integration' :
-      index < 2251 ? 'review' : 'regression',
-    checkpoint: index < 2245 ? 'pre-review' : index < 2251 ? 'review' : 'post-review',
+    level: index < 2 ? 'unit' : index < 4 ? 'integration' :
+      index < 5 ? 'review' : 'regression',
+    checkpoint: index < 4 ? 'pre-review' : index < 5 ? 'review' : 'post-review',
     mode: 'automated', owner: 'agent', location: 'local',
     implementation: 'test/catalog-fixture.mjs',
     expected: `Independently accounted catalog fixture case ${index}`,
@@ -66,7 +66,20 @@ function catalogFixturePlan() {
   })) });
 }
 
-async function largeFixture(t, contents = catalogFixturePlan()) {
+async function referenceFixtureCycle(f) {
+  const specification = await resolveTestSpecification(f.store, f.workItemId);
+  await f.store.transaction(f.workItemId, tx => {
+    const cycle = currentCycle(tx.all(), tx.checkpoint);
+    initializeReferencedCycle(tx, cycle, specification);
+    tx.put(cycle);
+  });
+  const state = await f.store.load(f.workItemId);
+  return currentCycle(state.records, state.checkpoint);
+}
+
+async function largeFixture(t, contents) {
+  const referenced = contents === undefined;
+  contents ??= catalogFixturePlan();
   const f = await coding(await fixture(t));
   if (contents.trimStart().startsWith('{')) {
     const plan = JSON.parse(contents);
@@ -81,8 +94,8 @@ async function largeFixture(t, contents = catalogFixturePlan()) {
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Isolated catalog fixture');
   const started = await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: digest('fixture-config'), cause: 'Full catalog fixture, not real GitHub acceptance' });
-  return { ...f, cycle: started.cycle };
+    configDigest: digest('fixture-config'), cause: 'Functional catalog fixture, not real GitHub acceptance' });
+  return { ...f, cycle: referenced ? await referenceFixtureCycle(f) : started.cycle };
 }
 async function report(f, cycle, tests, statuses = {}) {
   const state = await f.store.load(f.workItemId);
@@ -279,6 +292,7 @@ test('F02 caller-authored assertions cannot acquire automated credit through rec
   }
 });
 
+// 100/101 exercise the actual public inline-storage boundary, not a workload target.
 for (const count of [2, 100, 101]) {
   test(`public automated ${count}-case cycle requires retained original proof regardless of inline storage`, async t => {
     const tests = Array.from({ length: count }, (_, index) => ({
@@ -344,15 +358,16 @@ for (const count of [2, 100, 101]) {
   });
 }
 
-for (const count of [2, 101]) {
-  test(`public ${count}-case manual and semi-automated procedures retain their real owner and evidence contract`, async t => {
-    const tests = Array.from({ length: count }, (_, index) => ({
+for (const referenced of [false, true]) {
+  test(`public ${referenced ? 'referenced' : 'inline'} manual and semi-automated procedures retain their real owner and evidence contract`, async t => {
+    const tests = Array.from({ length: 2 }, (_, index) => ({
       id: `T-procedure-${index}`, environment: 'local', level: 'unit', checkpoint: 'pre-review',
       mode: index % 2 ? 'semi-automated' : 'manual', owner: index % 2 ? 'agent' : 'user',
       location: 'procedure-host', implementation: `Observe declared procedure ${index}`,
       expected: `Observed procedure outcome ${index}`, status: 'NotRun',
     }));
     const f = await largeFixture(t, JSON.stringify({ tests }));
+    if (referenced) f.cycle = await referenceFixtureCycle(f);
     await recordTests(f.store, { workItemId: f.workItemId, cycleId: f.cycle.id,
       results: tests.map(definition => ({ testId: definition.id, status: 'Passed', expectedMet: true,
         owner: definition.owner, host: definition.location, evidenceRef: `procedure:${definition.id}` })) });
@@ -373,7 +388,7 @@ for (const count of [2, 101]) {
   });
 }
 
-test('public CLI and Store retain all 2265 synthetic NotRun slots in 36 thin-cycle pages', async t => {
+test('public CLI and Store retain every functional NotRun slot in thin-cycle storage', async t => {
   const f = await largeFixture(t);
   const state = await f.store.load(f.workItemId);
   const cycle = currentCycle(state.records, state.checkpoint);
@@ -381,13 +396,13 @@ test('public CLI and Store retain all 2265 synthetic NotRun slots in 36 thin-cyc
   assert.equal(cycle.tests, undefined);
   assert.equal(cycle.results, undefined);
   const tests = cycleTests(cycle);
-  assert.equal(tests.length, 2265);
-  assert.equal(tests.filter(item => item.level === 'unit').length, 2066);
+  assert.equal(tests.length, 6);
+  assert.equal(tests.filter(item => item.level === 'unit').length, 2);
   assert.deepEqual(['pre-review', 'review', 'post-review'].map(checkpoint =>
-    tests.filter(item => item.checkpoint === checkpoint).length), [2245, 6, 14]);
+    tests.filter(item => item.checkpoint === checkpoint).length), [4, 1, 1]);
   const root = await readValidationObject(f.store, f.workItemId, cycle.testOutcomeRef);
-  assert.equal(root.pageRefs.length, 36);
-  assert.equal((await readValidationObject(f.store, f.workItemId, root.pageRefs[35])).slots.length, 25);
+  assert.equal(root.pageRefs.length, 1);
+  assert.equal((await readValidationObject(f.store, f.workItemId, root.pageRefs[0])).slots.length, 6);
   assert.ok(tests.every(item => currentTestEvidence(cycle, state.records, item) === null));
   assert.ok(byteSize(state.records) < LIMITS.workingSet);
   assert.ok(byteSize(state.checkpoint) < LIMITS.checkpoint);
@@ -399,7 +414,7 @@ test('public CLI and Store retain all 2265 synthetic NotRun slots in 36 thin-cyc
   const listed = await cli(f, ['status', '--json', '--work-item', f.workItemId,
     '--offset', '0', '--limit', '100']);
   assert.equal(listed.code, 0, listed.stderr);
-  assert.equal(listed.json.inventory.tests.count, 2265);
+  assert.equal(listed.json.inventory.tests.count, 6);
 });
 
 test('current canonical 133-case plan retains each core variant and separate execution checkpoint', async t => {
@@ -432,7 +447,7 @@ test('current canonical 133-case plan retains each core variant and separate exe
   assert.ok(byteSize(state.records) < LIMITS.workingSet);
 });
 
-test('complete synthetic per-case reports obey all 2066 unit prerequisites and full aggregate coverage', async t => {
+test('complete functional per-case reports obey unit prerequisites and full aggregate coverage', async t => {
   const f = await largeFixture(t);
   let state = await f.store.load(f.workItemId);
   let cycle = currentCycle(state.records, state.checkpoint);
@@ -452,7 +467,7 @@ test('complete synthetic per-case reports obey all 2066 unit prerequisites and f
   });
   assert.notEqual(admitted.code, 0);
   assert.equal(admitted.json.error.code, 'EVIDENCE');
-  assert.equal((await recordFixtureTests(f.store, cycle, units)).evidence.length, 2066);
+  assert.equal((await recordFixtureTests(f.store, cycle, units)).evidence.length, units.length);
   state = await f.store.load(f.workItemId);
   cycle = currentCycle(state.records, state.checkpoint);
   const first = currentTestEvidence(cycle, state.records, units[0]);
@@ -469,12 +484,12 @@ test('complete synthetic per-case reports obey all 2066 unit prerequisites and f
   state = await f.store.load(f.workItemId);
   cycle = currentCycle(state.records, state.checkpoint);
   assert.equal(stagePassed(cycle, state.records, 'local'), true);
-  assert.equal(Object.keys(cycleResultIds(cycle)).length, 2245);
-  assert.equal(tests.filter(item => currentTestEvidence(cycle, state.records, item)?.status === 'Passed').length, 2245);
+  assert.equal(Object.keys(cycleResultIds(cycle)).length, units.length + other.length);
+  assert.equal(tests.filter(item => currentTestEvidence(cycle, state.records, item)?.status === 'Passed').length, units.length + other.length);
   assert.ok(tests.filter(item => item.checkpoint !== 'pre-review')
     .every(item => currentTestEvidence(cycle, state.records, item) === null));
   assert.equal(parseTestPlan(await fs.readFile(path.join(f.repo, 'docs', 'test-plan.md'), 'utf8'))
-    .filter(item => item.status === 'Passed').length, 2245);
+    .filter(item => item.status === 'Passed').length, units.length + other.length);
   const retained = testHistory(cycle, state.records, units[0].id)[0].retainedPayloadRef;
   const payload = await readValidationObject(f.store, f.workItemId, retained);
   assert.doesNotMatch(JSON.stringify(payload), /fixture-do-not-retain/u);
@@ -485,7 +500,7 @@ test('complete synthetic per-case reports obey all 2066 unit prerequisites and f
   assert.ok(byteSize(state.records) < LIMITS.workingSet);
   const checked = await check(f.store, f.workItemId, 'state');
   assert.equal(checked.exitCode, 0);
-  assert.equal((await status(f.store, f.workItemId, { offset: 0, limit: 100 })).inventory.tests.count, 2265);
+  assert.equal((await status(f.store, f.workItemId, { offset: 0, limit: 100 })).inventory.tests.count, tests.length);
 });
 
 test('immutable execution sources survive revision-only root replacement; content drift resets every slot', async t => {
@@ -794,12 +809,12 @@ test('object-publication failure cannot commit an orphan pass and checkpoint res
   assert.equal(resumed.workItemId, f.workItemId);
   state = await f.store.load(f.workItemId);
   assert.equal(currentTestEvidence(currentCycle(state.records, state.checkpoint), state.records, unit).status, 'Passed');
-  assert.equal((await resolveTestSpecification(f.store, f.workItemId)).tests.length, 2265);
+  assert.equal((await resolveTestSpecification(f.store, f.workItemId)).tests.length, cycleTests(cycle).length);
 });
 
 async function stagingFixture(t) {
   const f = await coding(await fixture(t));
-  const tests = Array.from({ length: 100 }, (_, index) => ({
+  const tests = Array.from({ length: 2 }, (_, index) => ({
     id: `T-unit-${index}`, environment: 'local', level: 'unit', checkpoint: 'pre-review',
     mode: 'automated', owner: 'agent', location: 'local',
     implementation: 'test/fixture.mjs', expected: `Unit fixture ${index}`, status: 'NotRun',
@@ -822,8 +837,9 @@ async function stagingFixture(t) {
   await f.runGit('add', '.');
   await f.runGit('commit', '-qm', 'Isolated deployment-bound catalog fixture');
   await observeFixtureRepository(f);
-  const cycle = (await startCycle(f.store, { workItemId: f.workItemId,
-    configDigest: digest('fixture-config'), cause: 'Referenced STAGING fixture' })).cycle;
+  await startCycle(f.store, { workItemId: f.workItemId,
+    configDigest: digest('fixture-config'), cause: 'Referenced STAGING fixture' });
+  const cycle = await referenceFixtureCycle(f);
   const state = await f.store.load(f.workItemId);
   await submit(f, cycle, cycleTests(currentCycle(state.records, state.checkpoint))
     .filter(item => item.environment === 'local'));
@@ -1091,8 +1107,7 @@ test('post-commit atomic plan-sync failure leaves a durable claim and never auth
 for (const referenced of [false, true]) {
   test(`${referenced ? 'referenced' : 'inline'} NotRun pending/running evidence keeps immutable dispatch source without completion credit`, async t => {
     const f = await coding(await fixture(t));
-    const count = referenced ? 101 : 2;
-    const tests = Array.from({ length: count }, (_, index) => ({
+    const tests = Array.from({ length: 2 }, (_, index) => ({
       id: `T-pending-${index}`, environment: 'local', level: 'unit', checkpoint: 'pre-review',
       mode: 'automated', owner: 'agent', location: 'local',
       implementation: 'test/pending-fixture.mjs', expected: `Pending case ${index}`, status: 'NotRun',
@@ -1105,6 +1120,7 @@ for (const referenced of [false, true]) {
     await f.runGit('commit', '-qm', 'Nonconclusive operation evidence fixture');
     let cycle = (await startCycle(f.store, { workItemId: f.workItemId,
       configDigest: digest('fixture-config'), cause: 'Pending operation evidence regression' })).cycle;
+    if (referenced) cycle = await referenceFixtureCycle(f);
     const original = structuredClone(cycle.sources);
     const operation = await localOperation(f, cycle, tests[0].id, 'pending-case');
     await markDispatching(f.store, f.workItemId, operation.id);
@@ -1192,7 +1208,7 @@ for (const referenced of [false, true]) {
   test(`${referenced ? 'referenced' : 'inline'} late progress cannot replace tied-time terminal Passed Failed or cancelled NotRun`, async t => {
     const f = await coding(await fixture(t));
     const outcomes = ['succeeded', 'failed', 'cancelled'];
-    const tests = Array.from({ length: referenced ? 101 : 3 }, (_, index) => ({
+    const tests = Array.from({ length: outcomes.length }, (_, index) => ({
       id: `T-terminal-${index}`, environment: 'local', level: 'unit', checkpoint: 'pre-review',
       mode: 'automated', owner: 'agent', location: 'local',
       implementation: 'test/terminal-fixture.mjs', expected: `Terminal case ${index}`, status: 'NotRun',
@@ -1203,8 +1219,9 @@ for (const referenced of [false, true]) {
       repositoryId: 'primary', path: 'docs/test-plan.md' });
     await f.runGit('add', '.');
     await f.runGit('commit', '-qm', 'Late progress terminal-state fixture');
-    const cycle = (await startCycle(f.store, { workItemId: f.workItemId,
+    let cycle = (await startCycle(f.store, { workItemId: f.workItemId,
       configDigest: digest('fixture-config'), cause: 'Late progress cannot displace terminal evidence' })).cycle;
+    if (referenced) cycle = await referenceFixtureCycle(f);
     for (const [index, terminalStatus] of outcomes.entries()) {
       const testId = tests[index].id;
       const operation = await localOperation(f, cycle, testId, `terminal-${terminalStatus}`);

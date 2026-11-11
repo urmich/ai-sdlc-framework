@@ -1240,8 +1240,9 @@ ambiguous references before dispatch; a source fragment alone reports that
 catalog resolution is required, not phantom coverage. Existing T-16 critical
 selection overlaps execute once. The three specific retention roots are real
 required behavior, not a replacement mock/fingerprint. The causally ordered
-550-refresh stress scenario remains unchanged in full native/directly affected
-coverage and is not silently pulled into every routine local critical run.
+refresh scenario now uses small functional transitions under AC-202.8 rather
+than the historical 550-refresh stress workload. It remains required in full
+native/directly affected coverage, not every routine local critical run.
 The PR-only retention-fixture regression observes actual child-process dispatch:
 unchanged fixture reads reuse the existing cache, while a real commit, remote
 change and same-commit branch switch invalidate it. All ordered refreshes,
@@ -1534,7 +1535,7 @@ a Test Design/review responsibility.
 | T-PRD010 | local | integration | post-review | automated | provider | github-pr-matrix | FR-202; AC-202.1; AC-202.5; AC-202.6; AC-202.7 | F: original process/barrier events prove independent roots from one or multiple files overlap, released sibling capacity is reused, dependencies wait for success, minimum/exclusive and nested/controller budgets hold, and failed prerequisites/cancellation cannot start dependents or leave child processes. Reject duplicate/missing/cyclic assignments before dispatch. | test/public-readiness-runner.test.mjs#T-PRD010; source-bound group/pool and process-timeline regressions | NotRun | |
 | T-PRD011 | local | integration | post-review | automated | provider | github-pr-matrix | FR-202; AC-202.2; AC-202.5 | F: independent owned roots overlap while module-global environment/setup and patches stay process-isolated; shared Store/lock/prefix and causal steps remain ordered. Assert no cross-case reads, state leaks or cleanup of another group. | test/public-readiness-runner.test.mjs#T-PRD011 via declared independent-worker isolation and group/resource selectors | NotRun | |
 | T-PRD012 | local | integration | post-review | automated | provider | github-pr-matrix | FR-202; AC-202.3; AC-202.7 | P: perform section 6's comparable benchmark on matched inventories/toolchains/resources; retain actual local and hosted group timelines, utilization, critical path, serial tail and repeated elapsed outcomes. Different selections/environments or configured concurrency cannot yield a speedup/full-optimization claim. | procedure: section-6-benchmark | NotRun | |
-| T-PRD013 | local | integration | post-review | automated | provider | github-pr-matrix | FR-202; AC-202.4 | F: compare pre/post assertion and stress-limit inventories; actual lock/durability/retention/cleanup behavior remains real; missing cases, cheaper substituted mocks or reduced exhaustion boundaries fail the contract. | test/public-readiness-inventory.test.mjs#T-PRD013 fingerprint/stress assertions plus explicit cross-file original storage and retention selectors in section 3.1.1 | NotRun | |
+| T-PRD013 | local | integration | post-review | automated | provider | github-pr-matrix | FR-202; AC-202.4; AC-202.8 | F: compare functional assertion inventories; actual lock/durability/retention/cleanup behavior remains real. Small catalog and refresh fixtures retain ordering, authentic evidence, completeness, archival and stale-input checks without redundant stress execution; necessary production exhaustion boundaries remain covered. | test/public-readiness-inventory.test.mjs#T-PRD013 fingerprint assertions; test/validation-catalog.test.mjs; test/observation-retention-refresh.test.mjs; cross-file storage selectors in section 3.1.1 | NotRun | |
 
 ### 5.2 Complete PR coverage, trust and provider enforcement
 
@@ -1991,8 +1992,10 @@ An incomplete or failed attempt is not a successful full-suite benchmark.
 For catalog/proof processing, measure fresh catalog/proof reload, immutable
 object publication, actual grouped execution, normalization, evaluation and
 admission separately. Distinguish nonoverlapping elapsed phases from inclusive
-or summed concurrent service times. Keep the authentic original root and
-2066/2245/2265 exhaustion boundaries; account for new regressions separately.
+or summed concurrent service times. Preserve authentic historical qualification
+inputs and their old 2066/2245/2265 workload only for exact archival replay;
+current functional fixtures follow AC-202.8. Report changed workload explicitly
+instead of calling an unlike-inventory comparison a measured speedup.
 The fixture readiness helper may read the validated bound manifest to obtain
 the working directory without eagerly replaying old outcome pages before a
 fresh producer starts. Production admission and fresh `Store.load` must still
@@ -2411,8 +2414,8 @@ the new root cannot become retrospective execution credit.
 2. Confirm all four logical native lanes and all twenty-five required producer parts
    start with their own prerequisites. Intel Mac has two unit producers; each
    other platform has one. Every platform also has an
-   independently required producer for the unchanged, causally ordered
-   550-refresh root. The remaining complete root closures are partitioned across
+   independently required producer for the causally ordered functional
+   refresh root. The remaining complete root closures are partitioned across
    four body producers on Linux/Windows and three on each Mac architecture.
    Each Mac lane also requires its genuine Homebrew producer. No part alone
    completes a platform. Native unit evidence must complete before that
@@ -2639,8 +2642,9 @@ the new root cannot become retrospective execution credit.
    NotRun until their actual executions complete.
    V13 corrects only the complete catalog root's reservation: its worker, CLI
    and five concurrent Git readers require seven slots. Direct arithmetic and
-   sequential setup branches require fewer. Preserve the unchanged callback,
-   all 2066 unit prerequisites, 2245 pre-review outcomes and original deadlines.
+   sequential setup branches require fewer. Historical v13 replay preserves its
+   original callback, 2066 unit prerequisites, 2245 pre-review outcomes and
+   deadlines. Current fixtures follow AC-202.8 without changing slot reservations.
    Extend the existing PR-only capture-admission root with the real catalog
    selection: capacity six rejects before dispatch; capacity seven admits the
    complete reservation. Its real owned seven-slot lease must settle before
@@ -2694,8 +2698,10 @@ the new root cannot become retrospective execution credit.
    including its original reservation, parallel plan and six transfers.
    Keep the complete real catalog with only its unused caller-authored report
    removed; actual producer/admission and explicit negative reports still run.
-   Retain all 2066/2245/2265 boundaries, integrity/retention checks and seven-slot
-   reservation. The original interrupted baseline is NotRun, not a comparison
+   Authentic historical replay retains its original 2066/2245/2265 workload,
+   integrity/retention checks and seven-slot reservation; current functional
+   fixtures follow the owner-authorized replacement below instead. The original
+   interrupted baseline is NotRun, not a comparison
    or passing performance result. Existing PR-only source/SDK roots must cover
    actual current v15 and authentic historical v14/v10 replay, strict literal
    rejection, incompatible input fallback and unchanged complete ownership.
@@ -2906,7 +2912,8 @@ the new root cannot become retrospective execution credit.
    lanes. Install tests operate only in fixture homes; fork jobs have no publish
    capability. Required authentic-verifier setup supplies independently pinned
    bundle/trust/tool inputs; absence fails the group rather than skipping it.
-   Sharding/grouping preserves exact original assertions and stress boundaries.
+   Sharding/grouping preserves all current required functional assertions and
+   real protocol/storage boundaries; AC-202.8 retires redundant stress repetition.
 3. Reconcile every expected file/case/platform variant against completed producer
    evidence. A legitimate cross-platform skip must be satisfied by its matching
    native lane, not counted Passed where skipped. New/deleted/renamed cases and
@@ -3347,6 +3354,33 @@ the independent one-slot root needs no network, real credentials or shared state
 Existing T-PRD017 replay restores the exact pre-change history/integration Git
 blobs through digest-checked inverse splices; archived qualification inputs and
 digests remain immutable. npm-dependent integration stays on capable PR runners.
+
+### Functional fixtures instead of stress repetition
+
+AC-202.8 replaces the current oversized catalog and observation-refresh
+workloads, rather than moving them to another required lane. Catalog examples
+exercise unit-first ordering, authentic versus forged evidence, missing versus
+complete outcomes, idempotency, checkpoint isolation and durable reload/prune
+behavior with a couple of representative definitions per category. Observation
+examples exercise successive repository/PR/facts transitions, byte-exact archive
+preservation, current-record selection and stale-input rejection without the
+550-refresh loop or periodic fifty-refresh pruning.
+
+These remain PR-only, process-isolated functional roots on their existing
+applicable native lanes. Existing owned child, worker-budget, source-identity,
+cleanup and failure guards remain required. No test enters the critical set;
+its 27-root/27-assertion budget is unchanged. Review other repeated synthetic
+loads and retain larger data only where it crosses a real pagination, size or
+protocol boundary, not to repeat an equivalent successful execution.
+
+The local checkpoint is `node scripts/test-runner.mjs critical`, then
+`node scripts/check.mjs`, followed by the affected catalog, refresh and native
+historical-replay roots. Freeze the combined candidate before that checkpoint
+and built-in Copilot Review. Current execution remains NotRun until those
+commands produce applicable results. Hosted PR/release correctness, native
+consumer acceptance and measured lane runtimes remain separate. Historical
+qualification reconstructs exact original source bytes; reduced current
+fixtures cannot rewrite or inherit the old execution's result.
 
 ### 11.2 End-to-end completion observation
 

@@ -3,6 +3,13 @@ export const validationDeclarations = {
   "surfaces": [
     {"coverage": "direct", "paths": ["scripts/check.mjs"]}
   ],
+  "applicability": [{
+    "names": ["T-PRD015 syntax checks use actual parsing without executing source and preserve the first failing file"],
+    "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"],
+    "owner": "static-checks",
+    "reason": "PR-only actual parser regression with two representative declarations rather than repeated source padding; preserves parsing-only behavior, ordered failure and observed child overlap. Owned repository-local fixtures, two aggregate slots, no shared resources or critical promotion.",
+    "prerequisites": ["Node and two aggregate worker slots"]
+  }],
   "groups": [
     {"root": "T-PRD015 syntax checks use actual parsing without executing source and preserve the first failing file", "minimumSlots": 2},
     {"root": "T-PRD015 syntax checks preserve explicit full-check imports and reject invalid hook metadata", "minimumSlots": 2}
@@ -106,7 +113,7 @@ test('T-PRD015 syntax checks use actual parsing without executing source and pre
   const good = path.join(root, 'good.mjs');
   const bad = path.join(root, 'first-bad.mjs');
   const later = path.join(root, 'later-bad.mjs');
-  const declarations = Array.from({ length: 20000 }, (_, index) => `export const value${index} = ${index};`).join('\n');
+  const declarations = 'export const first = 1;\nexport const second = 2;';
   await fs.writeFile(good, `${declarations}\nthrow new Error("Syntax checks must not execute source");\n`);
   await fs.writeFile(bad, `${declarations}\nexport const broken = ;\n`);
   await fs.writeFile(later, 'export const alsoBroken = ;\n');
