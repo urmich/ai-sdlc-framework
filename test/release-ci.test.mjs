@@ -14,6 +14,15 @@ export const validationDeclarations = {
   ],
   "applicability": [
     {"names": [
+      "T-PRD029 completed native readiness seals an acyclic data-only publication handoff",
+      "T-PRD037 successful recovery durably retains full original publisher diagnostics without recursive privileged handoffs",
+      "T-PRD034 production bundle reuse retains exact original identities at the 24-hour boundary and rejects replacements",
+      "T-PRD034 frozen candidate recovery admits only its exact original artifact and successful producer step",
+      "T-PRD037 release-lifetime archive reconstructs all original inputs as of their original time without renewing current credit"
+    ], "platforms": ["linux-x64", "windows-x64", "macos-arm64", "macos-x64"], "owner": "release-workflow",
+      "reason": "Existing PR-only release integration fixtures mirror per-run artifact discovery without changing digest, reuse, recovery, retention or uncertainty assertions. No critical promotion, live providers or shared package-manager state.",
+      "prerequisites": ["Node >=22", "Capable isolated package/tool fixtures on mandatory PR runners; npm-dependent setup is NotRun on protected local hosts"]},
+    {"names": [
       "T-PRD028 release CLI digest option names preserve pairing and duplicate rejection",
       "T-PRD028 retain-trust CLI accepts SHA256 pins and rejects malformed digest values before verification",
       "T-PRD028 historical completion CLI accepts all SHA256 pin names without weakening independent input checks"
@@ -1396,8 +1405,10 @@ function nativeProducerFixture(candidate, gates) {
     if (route.startsWith(`${prefix}/actions/workflows/release.yml/runs?`)) {
       return { status: 200, value: { total_count: runs.length, workflow_runs: runs } };
     }
-    if (route.startsWith(`${prefix}/actions/artifacts?`)) {
-      return { status: 200, value: { total_count: artifacts.length, artifacts } };
+    const runArtifacts = new RegExp(`^${prefix}/actions/runs/(\\d+)/artifacts\\?`, 'u').exec(route);
+    if (runArtifacts) {
+      const selected = artifacts.filter(row => String(row.workflow_run?.id) === runArtifacts[1]);
+      return { status: 200, value: { total_count: selected.length, artifacts: selected } };
     }
     const artifact = new RegExp(`^${prefix}/actions/artifacts/(\\d+)(/zip)?$`, 'u').exec(route);
     if (artifact) return { status: 200, value: artifact[2] ? archives.get(artifact[1]) :

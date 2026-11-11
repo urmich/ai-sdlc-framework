@@ -4269,6 +4269,39 @@ function originalNativePhaseFixtureSource(contents) {
 }
 
 function preCommandInputQualificationSource(contents, file) {
+  if (file === 'test/public-readiness-release-history.test.mjs') {
+    assert.equal(digest(contents), '38db34aeae0fc3c48092e0273d9058d5546c910c49ed9a22d03b358ea761ce42',
+      'Replay requires the exact run-scoped release history regression source');
+    const lines = contents.split(/(?<=\n)/u);
+    const splices = [
+      [0, 2],
+      '  "surfaces": [{"coverage": "direct", "paths": ["scripts/release-history.mjs"]}]\n',
+      [23, 33], [63, 23],
+      '      return { status: 200, value: { total_count: runs.length, workflow_runs: runs } };\n',
+      [88, 2],
+      '      return { status: 200, value: { total_count: artifacts.length, artifacts } };\n',
+      [91, 1], [95, 16], [132, 89], [258, 76],
+    ];
+    contents = splices.map(part => typeof part === 'string' ? part :
+      lines.slice(part[0], part[0] + part[1]).join('')).join('');
+    assert.equal(digest(contents), 'd6988a8692e6877ae4d65f895746481bd3b931b2acc1582ce471bee70e0d6e5f',
+      'Replay must preserve the authentic release history fixture before scoped discovery');
+  }
+  if (file === 'test/release-ci.test.mjs') {
+    assert.equal(digest(contents), '579931dd1c888e47b4027525805d42ec2226bbc98abf251289bb0dc97b5ef375',
+      'Replay requires the exact run-scoped native producer fixture source');
+    const lines = contents.split(/(?<=\n)/u);
+    const splices = [
+      [0, 15], [24, 1383],
+      '    if (route.startsWith(`${prefix}/actions/artifacts?`)) {\n' +
+        '      return { status: 200, value: { total_count: artifacts.length, artifacts } };\n',
+      [1411, 1039],
+    ];
+    contents = splices.map(part => typeof part === 'string' ? part :
+      lines.slice(part[0], part[0] + part[1]).join('')).join('');
+    assert.equal(digest(contents), 'ff1277e22c0185f3a5d7d71d237f0eb2a8d9d59e76d380218b7e08cfa1adb97c',
+      'Replay must preserve the authentic release integration fixture before scoped discovery');
+  }
   if (file === 'test/public-readiness-ci.test.mjs') {
     assert.equal(digest(contents), 'd149fc2993387d4b3bca0238d9b234799125cf3c267045f51c7b505f5b1bbdcb',
       'Replay requires the exact release producer/verifier allocation regression source');
