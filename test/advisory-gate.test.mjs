@@ -80,6 +80,7 @@ import { resume } from '../src/recovery.mjs';
 import { recordArtifact, startCycle } from '../src/validation.mjs';
 import { recordFixtureTest as recordTest } from './helpers.mjs';
 import { readTarGzip } from '../packaging/standalone/archive.mjs';
+import { markdownLinks } from '../scripts/check-docs.mjs';
 
 const entry = path.resolve('bin/sdlc.mjs');
 const packageVersion = JSON.parse(await fs.readFile(
@@ -1564,7 +1565,8 @@ test('T-42 unknown ownership manifests refuse upgrades without mutating installe
 
 test('T-42 README documents cross-platform npm migration and complete maintenance procedures', async () => {
   const readme = await fs.readFile('README.md', 'utf8');
-  assert.match(readme, /\[installation\]\(docs\/installation\/README\.md\)/u);
+  assert.ok(markdownLinks(readme).links.includes('docs/installation/README.md'),
+    'README must link to the installation guide regardless of link wording');
   const installation = await fs.readFile('docs/installation/README.md', 'utf8');
   const migrationStart = installation.indexOf('### Clean migration from the private or an earlier installation');
   assert.ok(migrationStart >= 0);
@@ -1576,8 +1578,10 @@ test('T-42 README documents cross-platform npm migration and complete maintenanc
     .map(match => match[1]).join('\n');
   const migrationCommands = commands(migration);
   assert.equal((migrationCommands.match(/sdlc install --purge-existing/gu) ?? []).length, 1);
-  assert.ok(migrationCommands.includes(
-    `npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@${packageVersion} sdlc install --purge-existing --home "<owned-copilot-home>"`));
+  assert.match(migrationCommands,
+    /npx --yes --registry=https:\/\/registry\.npmjs\.org --package=(['"])ai-sdlc-framework@<release-version>\1 sdlc install --purge-existing --home "<owned-copilot-home>"/u);
+  assert.match(migration, /Select an\s+exact version from \[Releases\]/u);
+  assert.match(migration, /replace `<release-version>` before running it/u);
   assert.match(migration, /cross-platform command/iu);
   assert.match(migration, /postpublication/iu);
   assert.match(migration, /explicit,[\s\S]*irreversible clean migration/iu);
