@@ -4288,6 +4288,11 @@ function currentFunctionalCatalogGroup(groups) {
 
 function preFunctionalFixtureSource(contents, file) {
   const inverse = {
+    'test/public-readiness-docs.test.mjs': {
+      current: 'be3548e76fe9bc59169e0723f1ab225a980cd8ee35c8daf7ba7a48d5c5261941',
+      original: 'fc55e3a61e09fc87cc2af9873c80a16b6e54d9371edda2038bba1227b5918868',
+      splices: [[0, 468], "    ['SECURITY.md', text => text.replaceAll(`**${pkg.version}**`, '**0.0.1**'), /current version differs/u],\n", [472, 24], [503, 42], "  const readme = await fs.readFile(path.join(root, 'README.md'), 'utf8');\n  const defaultCommands = /```sh\\r?\\n([\\s\\S]*?)\\r?\\n```/u.exec(\n    readme.slice(readme.indexOf('## Contributor validation')))?.[1];\n", [546, 4], "  assert.match(readme, /standalone `npm run test:unit`/iu);\n", [551, 253], "  assert.ok(legalIdentity, 'Retain the existing required legal attribution');\n", [805, 13], "    assert.ok(!guide.includes(legalIdentity), `${file}: current reader guidance needs no legal-name repetition`);\n", [818, 120]],
+    },
     'test/release-ci.test.mjs': {
       current: '2c427268b95cb16f08f43522b97350369559ed6f5554b0e7787b6f81fde493d6',
       original: '579931dd1c888e47b4027525805d42ec2226bbc98abf251289bb0dc97b5ef375',
