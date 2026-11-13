@@ -24,6 +24,20 @@ with integration support for **GitHub** and **Azure DevOps**.
 
 ![AI SDLC Framework lifecycle](docs/images/ai-sdlc-framework-overview.svg)
 
+## What you gain
+
+From the first request to the next handoff, give every change a clearer path forward.
+
+| Your advantage | What it looks like in practice |
+| --- | --- |
+| **Build the right thing sooner.** | Turn a broad request into agreed behavior, edge cases, and a plan to test it before implementation starts. [Plan your work](docs/usage/README.md). |
+| **Keep your project's memory.** | Return to saved requirements, decisions, and results when you resume work. Spend less effort piecing together the backstory. [Pick up where you left off](docs/usage/README.md#resume-from-authoritative-records). |
+| **Put evidence behind “ready to ship.”** | See which requirements have tests, what actually ran, and what still needs attention—so your next step has a basis you can inspect. [Follow the evidence](docs/usage/evidence.md). |
+| **Keep review in step with your code.** | Track Copilot's review against the code you validated. When that code changes, the workflow calls for a fresh review. [See the review workflow](docs/reference/cli.md#candidate-review-through-copilot-cli-review). |
+| **Bring the tools you already use.** | Keep your test runners and CI/CD, with integration support for GitHub and Azure DevOps workflows. [Explore integrations](docs/integrations/README.md). |
+| **Connect work across repositories.** | Keep related repositories, requirements, and plans together in one coordinated workflow—even when a change spans projects. [See how it fits together](docs/architecture/README.md). |
+| **Move forward on your terms.** | Choose when to skip a stage, publish a PR, or authorize an environment handoff. You keep control of consequential decisions. [Explore the workflow](docs/usage/README.md). |
+
 ## From request to reviewable work
 
 AI can help write code quickly. Deciding what to build, checking that it works,
@@ -41,6 +55,15 @@ provide a record to return to for the next change.
 Start with a local task. Add provider integrations when your workflow needs them.
 You choose your repositories, test runners, and CI/CD; stages can be explicitly
 skipped or reordered. See the [workflow guide](docs/usage/README.md).
+
+## Workflow and trust
+
+You control delivery decisions. The framework provides instructions, skills,
+hooks, and an offline CLI; Copilot and your authorized tools perform the work.
+Recovery restores project records. Permissions remain with your host and
+providers, and production deployment is never automatic. See the
+[trust boundaries](docs/architecture/README.md) and
+[integration prerequisites](docs/integrations/README.md) for details.
 
 ## Runtime and installation
 
@@ -90,30 +113,7 @@ check [Releases](https://github.com/urmich/ai-sdlc-framework/releases) and the
 offline installation, and native channels, use the
 [installation guide](docs/installation/README.md).
 
-## What you gain
-
-From the first request to the next handoff, give every change a clearer path forward.
-
-| Your advantage | What it looks like in practice |
-| --- | --- |
-| **Build the right thing sooner.** | Turn a broad request into agreed behavior, edge cases, and a plan to test it before implementation starts. [Plan your work](docs/usage/README.md). |
-| **Keep your project's memory.** | Return to saved requirements, decisions, and results when you resume work. Spend less effort piecing together the backstory. [Pick up where you left off](docs/usage/README.md#resume-from-authoritative-records). |
-| **Put evidence behind “ready to ship.”** | See which requirements have tests, what actually ran, and what still needs attention—so your next step has a basis you can inspect. [Follow the evidence](docs/usage/evidence.md). |
-| **Keep review in step with your code.** | Track Copilot's review against the code you validated. When that code changes, the workflow calls for a fresh review. [See the review workflow](docs/reference/cli.md#candidate-review-through-copilot-cli-review). |
-| **Bring the tools you already use.** | Keep your test runners and CI/CD, with integration support for GitHub and Azure DevOps workflows. [Explore integrations](docs/integrations/README.md). |
-| **Connect work across repositories.** | Keep related repositories, requirements, and plans together in one coordinated workflow—even when a change spans projects. [See how it fits together](docs/architecture/README.md). |
-| **Move forward on your terms.** | Choose when to skip a stage, publish a PR, or authorize an environment handoff. You keep control of consequential decisions. [Explore the workflow](docs/usage/README.md). |
-
-## Workflow and trust
-
-You control delivery decisions. The framework provides instructions, skills,
-hooks, and an offline CLI; Copilot and your authorized tools perform the work.
-Recovery restores project records. Permissions remain with your host and
-providers, and production deployment is never automatic. See the
-[trust boundaries](docs/architecture/README.md) and
-[integration prerequisites](docs/integrations/README.md) for details.
-
-## Clone it, try it, help shape it
+## Explore the source
 
 Explore the source and bundled example:
 
@@ -127,18 +127,16 @@ a small project's requirements, design, test plan, and framework assessment.
 For source-candidate installation, follow the
 [isolated-home instructions](docs/installation/README.md#choose-a-channel-and-home).
 
+## Contributing
+
 - **Star the repository** if this is a workflow you want to follow and help
   others discover.
 - **Try one small task** and [share what worked or got in your way](https://github.com/urmich/ai-sdlc-framework/issues).
 - **Contribute a focused improvement** to the docs, examples, or implementation.
-  Start with [Contributing](CONTRIBUTING.md).
+  Start with [Contributing](CONTRIBUTING.md) and the
+  [testing guide](docs/contributing/README.md) for local checks and PR requirements.
 
-## Contributing
-
-Start with [Contributing](CONTRIBUTING.md) and the
-[testing guide](docs/contributing/README.md) for local checks and PR requirements.
-
-## Start here
+## Documentation and support
 
 [Documentation](docs/README.md) · [Support](SUPPORT.md) ·
 [Security reporting](SECURITY.md) · [Code of Conduct](CODE_OF_CONDUCT.md) ·
