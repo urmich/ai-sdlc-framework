@@ -1,4 +1,4 @@
-# Test Design / Test Plan — <work-item>
+# Test Design / Test Plan - <work-item>
 
 This is one living document. Execution status is not implementation readiness.
 

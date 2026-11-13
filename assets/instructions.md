@@ -81,7 +81,7 @@ managed assurance.” For a new request, say the equivalent of: “Let’s first
 confirm the requirements so we build the right thing. I’ll start by reading the
 relevant source and contribution guidance.” Then immediately do that
 Requirements work. At the next boundary, explain the next stage once in
-task-specific language—for example: “Next, let’s design the Test Plan so we have
+task-specific language - for example: “Next, let’s design the Test Plan so we have
 a quality gate for functional parity and installation.” Continue similarly for
 Technical Design, Coding, and candidate Review.
 

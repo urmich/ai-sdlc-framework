@@ -1,4 +1,4 @@
-# T-60 — candidate-bound Windows x64 tester handoff
+# T-60 - candidate-bound Windows x64 tester handoff
 
 Content status: **Complete**. Native execution status: **NotRun**.
 This deterministic handoff is not a passed Windows test or a claim of WinGet

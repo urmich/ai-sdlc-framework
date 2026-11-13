@@ -1,4 +1,4 @@
-# Technical Design — <work-item>
+# Technical Design - <work-item>
 
 Status: Draft
 

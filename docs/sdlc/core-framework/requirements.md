@@ -266,7 +266,7 @@ formalized in section 6. All sources below concern framework behavior.
 | S-43 | 2026-09-09 | Replace the combined engineering guidance with dedicated, focused coding, testing, building, knowledge-retrieval, and review instructions. Incorporate proven technology-neutral concepts without copying technology-specific runtime, library, emulator, or infrastructure rules. |
 | S-44 | 2026-09-09 | A Copilot session may start in a non-Git parent workspace and must be able to read documentation, clone or initialize the requested repository, bind it, and continue work without forcing the user to restart Copilot inside the child repository. |
 | S-45 | 2026-09-09 | Make the framework work across macOS and Windows, including Windows PowerShell and Command Prompt. Cover installation, hooks, shell/token parsing, paths and filesystem semantics, process/Git behavior, build/test command adapters, diagnostics, and truthful host-specific validation. |
-| S-46 | 2026-09-10 | The framework must never prevent the user from operating Copilot as requested. Framework stages—Requirements, Test Design, Technical Design, Coding, Review, and related lifecycle progression—may be emphasized at most once, then the user's override is honored. Other actions proceed as unmanaged through Copilot and the real local-machine, network, identity and access management, repository, and provider controls. Framework state remains truthful, and self-maintenance works outside Git. |
+| S-46 | 2026-09-10 | The framework must never prevent the user from operating Copilot as requested. Framework stages - Requirements, Test Design, Technical Design, Coding, Review, and related lifecycle progression - may be emphasized at most once, then the user's override is honored. Other actions proceed as unmanaged through Copilot and the real local-machine, network, identity and access management, repository, and provider controls. Framework state remains truthful, and self-maintenance works outside Git. |
 | S-47 | 2026-09-10 | An ordinary end-to-end development request, PR objective, urgency statement, or words such as “go” must start the normal framework flow, not be inferred as a request to skip it. The framework should try to guide the user through its stages once; only an unmistakable instruction to skip, bypass, reorder, or reject identified stages is an override. |
 | S-48 | 2026-09-14 | A multi-repository work item must retain lifecycle artifacts independently per repository. Registering a Requirements, Test Plan, or Technical Design artifact in one member must not replace the same role in another member; all applicable artifacts must participate in status, checks, recovery, snapshots, and lifecycle assurance. |
 | S-49 | 2026-09-16 | The OSS migration may intentionally discard the private framework's runtime compatibility. Provide an explicit purge command, executed from the new package before installation, that removes all old framework-owned files and runtime state while preserving unrelated Copilot content. |
@@ -1585,8 +1585,8 @@ relevant configuration changes.
   and unrevoked. Staging unchanged bytes or updating execution-only Test Plan
   metadata does not invalidate an otherwise unchanged candidate.
 - AC-041.12: Candidate hashing uses Git-normalized effective blob identities for
-  both working-tree and indexed content, so staging unchanged text—including
-  configured line-ending normalization—does not invalidate Review.
+  both working-tree and indexed content, so staging unchanged text - including
+  configured line-ending normalization - does not invalidate Review.
 - AC-041.6: After a PR exists, changes made for PR feedback, test failures, or
   any other reason follow the same `Coding -> local validation -> Review -> push`
   loop. Existing PR validation or approval remains historical until re-evaluated
@@ -1935,8 +1935,8 @@ proposed.
   gather and confirm the requirements,” explains why that helps, and immediately
   begins relevant discovery or clarification.
 - AC-046.11: At each transition, the agent naturally explains the value of the
-  next stage once—for example, designing the Test Plan as a quality gate before
-  solution design—then asks to proceed when approval is required. It does not
+  next stage once - for example, designing the Test Plan as a quality gate before
+  solution design - then asks to proceed when approval is required. It does not
   expose internal terms such as “lifecycle-stage override,” “receipt-backed
   deviation,” or “reduced managed assurance” as the primary user experience.
   Conventional professional terminology such as requirements, quality gate,

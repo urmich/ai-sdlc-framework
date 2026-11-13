@@ -3,7 +3,7 @@
 **Give your AI coding workflow a plan, a memory, and a definition of done.**
 
 Turn a development request into clear requirements, a test plan, working code,
-and reviewable evidence—with you in control of delivery decisions.
+and reviewable evidence - with you in control of delivery decisions.
 AI SDLC Framework adds a structured engineering workflow to **GitHub Copilot CLI**,
 with integration support for **GitHub** and **Azure DevOps**.
 
@@ -32,10 +32,10 @@ From the first request to the next handoff, give every change a clearer path for
 | --- | --- |
 | **Build the right thing sooner.** | Turn a broad request into agreed behavior, edge cases, and a plan to test it before implementation starts. [Plan your work](docs/usage/README.md). |
 | **Keep your project's memory.** | Return to saved requirements, decisions, and results when you resume work. Spend less effort piecing together the backstory. [Pick up where you left off](docs/usage/README.md#resume-from-authoritative-records). |
-| **Put evidence behind “ready to ship.”** | See which requirements have tests, what actually ran, and what still needs attention—so your next step has a basis you can inspect. [Follow the evidence](docs/usage/evidence.md). |
+| **Put evidence behind “ready to ship.”** | See which requirements have tests, what actually ran, and what still needs attention - so your next step has a basis you can inspect. [Follow the evidence](docs/usage/evidence.md). |
 | **Keep review in step with your code.** | Track Copilot's review against the code you validated. When that code changes, the workflow calls for a fresh review. [See the review workflow](docs/reference/cli.md#candidate-review-through-copilot-cli-review). |
 | **Bring the tools you already use.** | Keep your test runners and CI/CD, with integration support for GitHub and Azure DevOps workflows. [Explore integrations](docs/integrations/README.md). |
-| **Connect work across repositories.** | Keep related repositories, requirements, and plans together in one coordinated workflow—even when a change spans projects. [See how it fits together](docs/architecture/README.md). |
+| **Connect work across repositories.** | Keep related repositories, requirements, and plans together in one coordinated workflow - even when a change spans projects. [See how it fits together](docs/architecture/README.md). |
 | **Move forward on your terms.** | Choose when to skip a stage, publish a PR, or authorize an environment handoff. You keep control of consequential decisions. [Explore the workflow](docs/usage/README.md). |
 
 ## From request to reviewable work
