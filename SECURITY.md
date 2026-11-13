@@ -2,14 +2,15 @@
 
 ## Scope and supported versions
 
-[urmich](https://github.com/urmich) maintains this personal third-party MIT project on a
-best-effort basis. Release candidate: **0.5.0**, not yet published; current npm
-`latest`: **0.4.0**. The project does not
+This independently maintained third-party MIT project receives best-effort
+maintenance. Use the latest published release listed in
+[Releases](https://github.com/urmich/ai-sdlc-framework/releases).
+The project does not
 promise LTS, support for every older release, a response SLA, corporate approval,
 first-party status, CFS exemption or guaranteed availability.
 Node >=22 is external to the shipped dependency-free JavaScript runtime.
 Published releases are immutable; remediation requires an authorized new release,
-not overwriting 0.4.0 assets or tags.
+not overwriting existing published assets or tags.
 
 ## Report a vulnerability privately
 

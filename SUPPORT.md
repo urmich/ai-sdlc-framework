@@ -1,6 +1,6 @@
 # Support
 
-This is personal/community-maintained third-party OSS by [urmich](https://github.com/urmich),
+AI SDLC Framework is independently maintained third-party OSS,
 not Microsoft-owned, sponsored or approved software. Support is best effort:
 there is no guaranteed response time, SLA, enterprise entitlement or promise
 that a corporate environment permits the package.

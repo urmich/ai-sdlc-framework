@@ -87,26 +87,23 @@ launcher to a payload-free channel root is not supported.
 The generator consumes the Windows archive record **before** the outer release
 descriptor exists, avoiding an archive/descriptor/manifest digest cycle:
 
-The following historical 0.3.0 schema illustration contains placeholders, not
-current release pins or a usable community submission. Actual generation must
-use the selected future candidate's verified version, archive and approved
-destination; published historical records are not rewritten.
+The following input illustration contains placeholders, not a usable community
+submission. Replace `<release-version>` with the selected candidate's verified
+version and supply its actual archive metadata and approved destination.
 
-<!-- historical:start -->
 ```json
 {
-  "version": "0.3.0",
+  "version": "<release-version>",
   "releaseRepository": "approved-owner/public-release-assets",
   "archive": {
-    "filename": "ai-sdlc-framework-0.3.0-windows-x64.zip",
+    "filename": "ai-sdlc-framework-<release-version>-windows-x64.zip",
     "kind": "archive",
     "sha256": "<64 hexadecimal characters>",
     "size": 123
   },
-  "archivePath": "dist/ai-sdlc-framework-0.3.0-windows-x64.zip"
+  "archivePath": "dist/ai-sdlc-framework-<release-version>-windows-x64.zip"
 }
 ```
-<!-- historical:end -->
 
 `releaseRepository` must explicitly identify the approved **public** GitHub asset
 repository; it is not inferred from a possibly private source repository.

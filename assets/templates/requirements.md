@@ -1,4 +1,4 @@
-# Requirements — <work-item>
+# Requirements - <work-item>
 
 Status: Draft
 Canonical role: requirements

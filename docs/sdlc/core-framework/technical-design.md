@@ -1913,7 +1913,7 @@ Text adjacent to a closing quoted token is rejected when PowerShell can emit a
 new native argument, and parsed tokens are rechecked for quoted/assembled `--%`
 or `%...%` expansion markers rather than relying only on raw-text matching.
 When session resolution falls back from a non-Git outer workspace, non-read
-shell commands—and configured read/bookkeeping shell adapters—cannot inherit the
+shell commands - and configured read/bookkeeping shell adapters - cannot inherit the
 child repository's configured action or authority unless the tool request itself
 runs with that child as its cwd, or a Git command uses an explicit validated
 `-C` path to that member. Only independently classified built-in read forms and
@@ -2011,13 +2011,13 @@ as agreeing on the port architecture before coding; Review is framed as checking
 the exact candidate before publication. Approval prompts remain concise.
 
 An override exists only when the user unmistakably names or rejects the
-lifecycle path—for example, “skip Requirements,” “bypass Test Design,” “go
+lifecycle path - for example, “skip Requirements,” “bypass Test Design,” “go
 straight to Coding,” or “do not use these stages.” Ambiguous language defaults
 to the normal flow, not to an override. Once an explicit override is understood,
 the agent states the skipped stage's value/consequence once and proceeds.
 If the user rejects a suggested stage in ordinary language, the agent responds
-naturally—for example, “Understood; I’ll proceed directly to implementation and
-keep the skipped Test Plan work visible as incomplete”—then acts. It does not
+naturally - for example, “Understood; I’ll proceed directly to implementation and
+keep the skipped Test Plan work visible as incomplete” - then acts. It does not
 repeat the rationale or demand framework-specific override terminology.
 
 The hook cannot prove natural-language intent. Therefore a captured prompt by

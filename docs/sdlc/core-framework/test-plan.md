@@ -182,7 +182,7 @@ These retained feature-acceptance procedures do not replace the current
 | T-59 | local | acceptance | post-review | Semi-automated | agent | clean public-consumer clients and verification endpoints; public release | FR-054; AC-054.6, AC-054.9, AC-054.14, AC-054.15, AC-054.19 | Downloaded candidate-bound release evidence, SBOM/provenance verification and negative controls satisfy every assertion in procedure T-59 without modifying public assets or implying release authority. | Planned postpublication consumer-verification procedure; no public candidate observed | NotRun |
 | T-60 | local | contract | post-review | Automated | agent | generated Windows handoff document and candidate release metadata; prepublication release handoff | FR-053; AC-053.17 | The deterministic, exact-candidate Windows handoff satisfies every assertion in procedure T-60; generation cannot establish native Windows execution. | Planned generated Windows acceptance prompt and deterministic document test | NotRun |
 
-### Procedure T-51 — retained prepublication release gate
+### Procedure T-51 - retained prepublication release gate
 
 **Prepublication release gate.** Two independent same-source/toolchain builds produce byte-identical npm and in-scope standalone archives plus one versioned checksum/payload manifest. Canonical inventory checks reject missing, extra, duplicate, changed, truncated, or wrong-platform entries and any difference outside allowlisted launchers, metadata, executable modes, and line endings. Every published archive contains the license, version, checksum reference, payload, and required launcher. A positive isolated macOS arm64 scenario blocks npm/network access while a verified standalone archive and Node 22+ are available, then completes install, doctor, update, ordinary uninstall, clean migration, purge, Homebrew lifecycle, switching, and post-removal hook verification. Missing/malformed/swapped checksums, wrong-version artifacts, Node 21, missing/shadowed/non-executable/wrong-architecture Node, interrupted download/extraction/copy/replace, permission failures, simultaneous installs, install-versus-purge, and interrupted channel switching assert no premature execution, no unintended destructive migration, bounded locking/cleanup, preserved prior framework/unrelated state, and truthful partial-purge reporting. Windows cross-build validation rejects invalid PE identity, payload integrity, stale URLs/versions, wrong installer/uninstall metadata, missing Node dependency, and architecture mismatch without claiming native execution. Deterministic macOS Intel archive and Homebrew metadata checks reject wrong architecture, stale URLs, swapped Intel/arm64 checksums, missing or incorrect Node dependency metadata, and formula audit/style failures without claiming native Intel execution. The native arm64 Homebrew path also runs audit/style and rejects missing dependency metadata before lifecycle execution. Package-manager install/upgrade/uninstall snapshots prove they affect only channel payloads until explicit `sdlc install`/`--purge-existing`; Homebrew captures rollback state before install/upgrade and suppresses cleanup while verifying the old keg remains available; switching executes the new launcher before old-package removal; every completed switch reruns hooks and doctor to prove they no longer depend on the removed payload; and Homebrew-to-npm removal additionally proves the hook-bound Node runtime survives formula dependency autoremove. The mandatory macOS arm64 native job plus deterministic Windows x64 and macOS Intel x64 non-execution jobs block publication when failed, skipped, cancelled, or absent. Windows native lifecycle and macOS Intel native lifecycle remain `NotRun` and non-blocking; Linux installer generation, native testing, and publication are out of scope. Stable metadata excludes prereleases.
 
@@ -190,7 +190,7 @@ The preceding platform treatment is the retained original feature-acceptance
 definition. It does not supersede the subsequently approved
 [public-readiness native matrix](../public-readiness/test-plan.md#22-hosts-and-prerequisites).
 
-### Procedure T-52 — postpublication acceptance
+### Procedure T-52 - postpublication acceptance
 
 **Postpublication acceptance.** After authorized publication, clean clients anonymously fetch release metadata, checksum manifest, and exact candidate-bound assets with empty caches and no repository credentials; downloaded SHA-256 and payload manifest must equal the prepublication evidence before execution. Public npm install/update/uninstall/purge and direct standalone install run against published bytes in clean homes. For stable releases, real Homebrew tap install/upgrade/uninstall and tap usability are required; prereleases mark published-Homebrew acceptance not applicable and retain the native local-formula T-51 gate. GitHub Release publication is required. WinGet remains `repository-ready` until community acceptance and becomes client-available only after a real `winget` discovery/install test. Channel removal leaves explicit Copilot-home installation intact; clean migration remains explicit. CFS quarantine, package exception, client registry denial, WinGet policy, GitHub/download denial, and OS execution controls are tested and reported separately. A generic network error never proves CFS, and no alternate channel is promised to bypass policy. Inconclusive execution remains Test Plan `NotRun` with a separate `Blocked` diagnostic. Documentation assertions require npm-first guidance, equivalent channel lifecycle commands, approved CFS wait/exception guidance, checksums-before-execution, restart requirements, and no bypass language.
 
@@ -216,15 +216,15 @@ separate blocker. Preserve each part's mode, owner, location and original result
 neither an automated pass nor instructions establish the user's observations.
 This amended definition remains NotRun and supplies no approval or Review credit.
 
-### Procedure T-58 — observed repository controls
+### Procedure T-58 - observed repository controls
 
 **Observed repository controls, separate from local fixtures.** After separate authorization, observe actual public source/issue/discussion channels and the private vulnerability-reporting path without submitting a report. Read effective dependency/security settings, secret-scanning versus push-protection state, unresolved/dismissed-alert evidence, applicable branch/tag/release rules, actor/bypass configuration, and required check associations. Match observations to the exact candidate revision and real workflow/check runs proving source/test/package/security/SBOM checks, pinned action identities, privilege separation, immutable artifacts, and the release gate for unresolved findings/current exceptions. A real scheduled run, its observed alert inventory (including zero alerts), and triage states for any findings are required; a schedule declaration or historical green release is insufficient. Do not introduce a real vulnerability merely to obtain triage evidence. Observe candidate-bound PR/check enforcement decisions or separately authorized benign owner validation; do not weaken rules or push secrets. Missing/inaccessible/unsupported capabilities remain NotRun with a Blocked reason; observed disabled protection, bypassed required checks, expired exceptions, wrong-revision evidence, or untriaged alerts fail. Settings files, local mocks, or unobserved owner assertions cannot substitute for effective-setting/run evidence.
 
-### Procedure T-59 — downloaded public release evidence
+### Procedure T-59 - downloaded public release evidence
 
 **Downloaded public release evidence.** After separately authorized publication, anonymously download the exact candidate's npm and standalone assets and collect published inventory/checksum/license/SBOM/provenance evidence through its documented consumer-verification path. Record any verifier authentication requirement separately from asset availability; repository-collaborator access cannot stand in for public distribution. Verify downloaded bytes against prepublication identity and attestations against the expected repository, full source commit, workflow identity, and digest; validate the downloaded SBOM schema/completeness and compare its canonical content to the independently repeated prepublication generation. Bind public evidence links and verifier results to the candidate in the checklist. Corrupt only isolated downloaded copies to test digest/signature failure; swapped versions/repositories/commits/workflows/SBOMs, missing required attestations, or successful verification of a different artifact fail. Capability evidence distinguishes unsupported mechanisms from missing or invalid required provenance; public/private labels alone do not establish support. No published candidate, inaccessible evidence, or unavailable mechanism remains NotRun with a separate Blocked reason, never a passing public-integrity claim. No public asset is modified and no release is authorized by this scenario.
 
-### Procedure T-60 — Windows tester handoff completeness
+### Procedure T-60 - Windows tester handoff completeness
 
 **Windows tester handoff completeness.** Generate the tester prompt only after implementation and macOS arm64 validation are complete, and bind it to the exact version, source commit, release descriptor digest, Windows archive digest, launcher digest, and public download locations. Deterministic assertions require prerequisites, anonymous download, SHA-256 and payload verification before execution, PowerShell and Command Prompt standalone lifecycle, WinGet validation/discovery/install behavior, paths with spaces, hook execution, clean migration, ordinary uninstall, purge, unrelated-content preservation, restart boundaries, evidence-file locations, cleanup, and truthful `Passed`/`Failed`/`NotRun`/`Blocked` reporting. Missing identity fields, mutable `latest` URLs, execution before verification, fabricated WinGet availability, omitted destructive-operation warnings, or commands that depend on repository checkout/credentials fail. Regeneration for the same candidate is byte-identical. This validates the handoff instructions, not native Windows behavior; native results remain `NotRun` until a tester returns evidence.
 
@@ -239,14 +239,14 @@ and require their own authoritative external evidence if a consumer requests the
 | --- | --- | --- |
 | AC-054.1 | T-53 | T-58 |
 | AC-054.2 | T-53 | T-58 |
-| AC-054.3 | T-53 | — |
+| AC-054.3 | T-53 | - |
 | AC-054.4 | T-54 | T-58 |
 | AC-054.5 | T-54, T-55, T-56 | T-58 |
 | AC-054.6 | T-56 | T-59 |
-| AC-054.7 | T-53 | — |
+| AC-054.7 | T-53 | - |
 | AC-054.8 | T-55, T-57 | T-58 |
 | AC-054.9 | T-57 | T-59 |
-| AC-054.10 | T-53, T-57 | — |
+| AC-054.10 | T-53, T-57 | - |
 | AC-054.11 | T-54 | T-58 |
 | AC-054.12 | T-57 | T-58 |
 | AC-054.13 | T-54 | T-58 |

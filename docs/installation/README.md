@@ -2,9 +2,9 @@
 
 ## Choose a channel and home
 
-This table describes the **0.5.0 source candidate**, not the asset
-inventory of immutable published 0.4.0. The future shared Mac filename must not
-be presented as an already published 0.4.0 download.
+Use [Releases](https://github.com/urmich/ai-sdlc-framework/releases) to select
+a published version and its assets. This guide describes the source tree;
+check the selected release's notes for availability and compatibility.
 
 | Contract | Value |
 | --- | --- |
@@ -19,19 +19,18 @@ be presented as an already published 0.4.0 download.
 Node >=22 remains an external prerequisite for every channel. npm is primary
 and supports Windows/macOS/Linux; standalone supports Windows x64 and macOS
 Apple Silicon/Intel, not Linux. See [release state](../releases/README.md)
-before assuming candidate packaging has been published or accepted.
-0.5.0 is not yet published. For source-candidate validation, run the checkout's
+for publication and acceptance boundaries.
+For source-candidate validation, run the checkout's
 entry against a newly owned isolated home:
 
 ```sh
 node bin/sdlc.mjs install --home "<owned-copilot-home>"
 ```
 
-The following npm command is for use only after exact 0.5.0 publication and
-public-consumer verification:
+To install the latest published npm package into a deliberately selected home:
 
 ```sh
-npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@0.5.0 sdlc install --home "<owned-copilot-home>"
+npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@latest sdlc install --home "<owned-copilot-home>"
 ```
 
 Replace the home placeholder with a deliberate absolute path; contributor tests
@@ -56,10 +55,12 @@ passed. Record the actual Copilot/Node/OS versions for an observed walkthrough.
 
 Close every Copilot CLI process first. After backing up and reconciling any
 required history, this postpublication cross-platform command performs an **explicit,
-irreversible clean migration** into your deliberately selected home:
+irreversible clean migration** into your deliberately selected home. Select an
+exact version from [Releases](https://github.com/urmich/ai-sdlc-framework/releases)
+and replace `<release-version>` before running it:
 
 ```sh
-npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@0.5.0 sdlc install --purge-existing --home "<owned-copilot-home>"
+npx --yes --registry=https://registry.npmjs.org --package="ai-sdlc-framework@<release-version>" sdlc install --purge-existing --home "<owned-copilot-home>"
 ```
 
 It removes modified framework-owned files and owned runtime work items,
@@ -86,11 +87,9 @@ owned files are preserved and reported as conflicts. Unknown owner/schema or
 malformed/unprovable ownership stops ordinary update without destructive
 fallback; `--purge-existing` remains a separate explicit irreversible choice.
 
-The following examples target the **0.5.0** npm archive after publication;
-they do not work before that version and its release assets are available.
-The release-specific acceptance must include an ordinary upgrade from the
-currently published 0.4.0, not just the representative 0.3.1 CI fixture.
-Use version-specific download
+Select the target version from [Releases](https://github.com/urmich/ai-sdlc-framework/releases)
+and replace `<release-version>` in the examples below with its version number
+without the `v` prefix. Use version-specific download
 and package directories outside the selected Copilot home. `--clobber` replaces
 the named downloaded assets only; it is not permission to purge an installation.
 Before proceeding from download to installation, verify the archive's SHA-256
@@ -110,7 +109,7 @@ subsequent same-version maintenance; see the
 ### Update on macOS or Linux
 
 ```sh
-VERSION="0.5.0"
+VERSION="<release-version>"
 DOWNLOAD_DIR="$HOME/Downloads/ai-sdlc-framework-$VERSION"
 PACKAGE_ROOT="$HOME/.local/share/ai-sdlc-framework/$VERSION"
 COPILOT_HOME="${COPILOT_HOME:-$HOME/.copilot}"
@@ -140,7 +139,7 @@ node "$COPILOT_HOME/sdlc/bin/sdlc.mjs" \
 ### Update on Windows PowerShell
 
 ```powershell
-$Version = "0.5.0"
+$Version = "<release-version>"
 $DownloadDir = Join-Path $HOME "Downloads\ai-sdlc-framework-$Version"
 $PackageRoot = Join-Path $env:LOCALAPPDATA "ai-sdlc-framework\$Version"
 $CopilotHome = if ($env:COPILOT_HOME) {
@@ -174,7 +173,7 @@ node (Join-Path $CopilotHome "sdlc\bin\sdlc.mjs") `
 ### Update on Windows Command Prompt
 
 ```bat
-set "VERSION=0.5.0"
+set "VERSION=<release-version>"
 set "DOWNLOAD_DIR=%USERPROFILE%\Downloads\ai-sdlc-framework-%VERSION%"
 set "PACKAGE_ROOT=%LOCALAPPDATA%\ai-sdlc-framework\%VERSION%"
 if defined COPILOT_HOME (set "FRAMEWORK_HOME=%COPILOT_HOME%") else (set "FRAMEWORK_HOME=%USERPROFILE%\.copilot")
@@ -248,10 +247,10 @@ For an offline `.tgz`, verify exact release checksum/inventory before extraction
 extract outside the destination home and run `node bin/sdlc.mjs install --home
 "<owned-copilot-home>"` from that package. Use release-specific standalone or
 Homebrew instructions only after verifying their asset/version/source identities.
-Windows remains a separate native PE; the future single Mac archive contains
+Windows remains a separate native PE; the single Mac archive contains
 one portable JavaScript/shell payload, no embedded npm tgz, no bundled Node and
 no Universal 2 binary. Both Mac architectures require their actual native Node.
-The published 0.4.0 artifacts cannot be repacked or replaced.
+Published artifacts cannot be repacked or replaced.
 
 ## Troubleshooting without weakening policy
 

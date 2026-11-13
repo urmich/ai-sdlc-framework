@@ -11,8 +11,10 @@ must not register adapters, read credentials, acquire data or dispatch effects
 merely on import/construction. The actual retained boundary has seven nested
 modules and 28 public facade exports. Integrated root/package/install wiring
 and direct test adaptation remain separate; current acceptance stays `NotRun`.
-The 0.5.0 source/package candidate ships the inventory below, but is not yet
-published. The inventory is not a package-install, live-provider or execution pass.
+The inventory below describes the source tree; consult
+[Releases](https://github.com/urmich/ai-sdlc-framework/releases) for availability
+in your selected package. The inventory is not a package-install, live-provider
+or execution pass.
 
 ## Actual public facade
 

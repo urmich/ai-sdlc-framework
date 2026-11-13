@@ -105,7 +105,7 @@ loopback formulas and keeps public acceptance NotRun. Current native validation
 selects Node 24.20.0 with `node@24`; the separate mandatory minimum-runtime
 compatibility job uses Node 22.23.3. Publishing uses Node 24.22.0. The shipped
 consumer minimum remains Node >=22. These current prerequisites do not rewrite
-the explicitly historical published 0.4.0 formula, dependency or receipt.
+historical published formulas, dependencies or receipts.
 
 After publication, public acceptance requires all four external pins, exact
 downloaded previous/current public directories, and the independently frozen

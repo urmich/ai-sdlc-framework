@@ -466,7 +466,10 @@ test('T-PRD049 public version, platform and latest-readiness examples reject sta
   assertNoDiagnostics(await checkDocumentation({ root }), 'Unmodified public reader fixture');
   const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
   const corruptions = [
-    ['SECURITY.md', text => text.replaceAll(`**${pkg.version}**`, '**0.0.1**'), /current version differs/u],
+    ['SECURITY.md', text => text.replaceAll('https://github.com/urmich/ai-sdlc-framework/releases',
+      'https://github.com/urmich/ai-sdlc-framework/versions'), /missing repository Releases link/u],
+    ['docs/releases/README.md', text => text.replaceAll('https://github.com/urmich/ai-sdlc-framework/releases',
+      'https://github.com/urmich/ai-sdlc-framework/versions'), /missing repository Releases link/u],
     ['README.md', text => `${text}\nai-sdlc-framework@0.0.1\n`, /stale public version pin/u],
     ['README.md', text => `${text}\nai-sdlc-framework@${pkg.version}\n`, /pinned framework release/u],
     ['README.md', text => text.replaceAll('https://github.com/urmich/ai-sdlc-framework/releases',
@@ -491,6 +494,13 @@ test('T-PRD049 public version, platform and latest-readiness examples reject sta
     } finally { await fs.writeFile(file, original); }
   }
   assertNoDiagnostics(await checkDocumentation({ root }), 'Restored public reader fixture');
+  const packagePath = path.join(root, 'package.json');
+  const originalPackage = await fs.readFile(packagePath, 'utf8');
+  try {
+    await fs.writeFile(packagePath, JSON.stringify({ ...pkg, version: '99.0.0' }));
+    assertNoDiagnostics(await checkDocumentation({ root }),
+      'A future framework release must not require editing version-neutral reader guides');
+  } finally { await fs.writeFile(packagePath, originalPackage); }
   const security = await fs.readFile(path.join(root, 'SECURITY.md'), 'utf8');
   assert.match(security, /https:\/\/github\.com\/urmich\/ai-sdlc-framework\/security\/advisories\/new/u);
   assert.match(security, /enabled: true/u);
@@ -533,14 +543,12 @@ test('T-PRD051 documented source-check command works in an isolated fixture and 
     'await fs.writeFile(process.env.RECIPE_SENTINEL,"executed");});' +
     'test("unselected sibling must not run",()=>{throw new Error("wrong selection");});\n');
   const guide = await fs.readFile(path.join(root, 'docs/contributing/README.md'), 'utf8');
-  const readme = await fs.readFile(path.join(root, 'README.md'), 'utf8');
-  const defaultCommands = /```sh\r?\n([\s\S]*?)\r?\n```/u.exec(
-    readme.slice(readme.indexOf('## Contributor validation')))?.[1];
+  const defaultCommands = /```sh\r?\n([\s\S]*?)\r?\n```/u.exec(guide)?.[1];
   assert.ok(defaultCommands);
   assert.equal((defaultCommands.match(/^npm run test:critical(?: -- .*)?\r?$/gmu) ?? []).length, 1);
   assert.doesNotMatch(defaultCommands, /^npm run test:unit\r?$/mu);
   assert.doesNotMatch(defaultCommands, /--affected/u);
-  assert.match(readme, /standalone `npm run test:unit`/iu);
+  assert.match(guide, /standalone `npm run test:unit`/iu);
   const defaultLine = defaultCommands.split(/\r?\n/u).find(line => line.startsWith('npm run test:critical'));
   const defaultArguments = defaultLine.slice('npm run test:critical'.length).trim();
   assert.equal(defaultArguments, '');
@@ -794,7 +802,7 @@ test('T-PRD088 RC66 current reader identity needs only the repository maintainer
   assert.equal(pkg.author, handle);
   const legal = await fs.readFile(path.join(source, 'LICENSE'), 'utf8');
   const legalIdentity = /Copyright \(c\) \d{4} ([^\r\n]+)/u.exec(legal)?.[1];
-  assert.ok(legalIdentity, 'Retain the existing required legal attribution');
+  assert.equal(legalIdentity, handle, 'Copyright attribution must use only the repository maintainer handle');
   const current = ['README.md', 'CONTRIBUTING.md', 'OWNERSHIP.md', 'SUPPORT.md',
     'SECURITY.md', 'CODE_OF_CONDUCT.md', 'RELEASING.md'];
   const collect = async relative => {
@@ -808,7 +816,6 @@ test('T-PRD088 RC66 current reader identity needs only the repository maintainer
   for (const directory of ['docs', 'assets', 'packaging']) await collect(directory);
   for (const file of current) {
     const guide = await fs.readFile(path.join(source, file), 'utf8');
-    assert.ok(!guide.includes(legalIdentity), `${file}: current reader guidance needs no legal-name repetition`);
     assert.doesNotMatch(guide, /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/iu,
       `${file}: use project routes rather than personal email`);
   }
