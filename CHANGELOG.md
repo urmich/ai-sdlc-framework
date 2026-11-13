@@ -9,6 +9,9 @@ agnostic, use release links for availability, and let readers select an exact
 version for downloads and upgrades. Documentation checks retain release-link
 and runtime/platform validation without requiring the current package version
 to appear in policy pages.
+The quick start includes installed-entry doctor commands, contributor details
+live in the testing guide, and destructive migration requires a selected exact
+release. Copyright attribution uses only the maintainer’s GitHub username.
 
 ## 0.5.0 - development record
 

@@ -55,13 +55,23 @@ Install the published npm `latest` into the Copilot home selected by
 npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@latest sdlc install
 ```
 
-Then:
+Check the installation using its installed entry.
 
-1. Run `doctor` through the **installed** `sdlc/bin/sdlc.mjs` entry, using the
-   same home. The [installation guide](docs/installation/README.md#choose-a-channel-and-home)
-   has commands for your platform and explicit home selection.
-2. Restart Copilot so it loads the installed instructions, skills, and hooks.
-3. Open a disposable local Git repository with no remote and try:
+macOS / Linux:
+
+```sh
+node "${COPILOT_HOME:-$HOME/.copilot}/sdlc/bin/sdlc.mjs" doctor --home "${COPILOT_HOME:-$HOME/.copilot}"
+```
+
+Windows PowerShell:
+
+```powershell
+$CopilotHome = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $HOME ".copilot" }
+node (Join-Path $CopilotHome "sdlc\bin\sdlc.mjs") doctor --home $CopilotHome
+```
+
+Restart Copilot so it loads the installed instructions, skills, and hooks.
+Open a disposable local Git repository with no remote and try:
 
 ```text
 Add a tiny local-only example that prints hello. First gather the requirements
@@ -94,22 +104,12 @@ offline installation, and native channels, use the
 
 ## Workflow and trust
 
-The framework installs instructions, skills, hooks, and an offline CLI with no
-runtime package dependencies. Your authorized host tools run tests, access
-providers, and perform external operations. Copilot supplies the coding agent
-and built-in reviewer; the framework tracks workflow context and results.
-
-GitHub and Azure DevOps adapters have [different scopes](docs/integrations/README.md).
-Pipeline monitoring requires a running host, a recurring scheduler, and
-authorized provider-read tools. The offline CLI does not start a timer or
-contact providers. Recovery restores project records; host chat/session recovery
-belongs to Copilot.
-
-Instructions and hooks are advisory. Actual permissions and enforcement belong
-to Copilot, the host, and your providers. Approvals and execution evidence stay
-distinct; PR publication, merge, DEV, and STAGING need their own authorization.
-PROD is never automatic. Your project's CI policy remains yours.
-Read the [trust boundaries](docs/architecture/README.md) for details.
+You control delivery decisions. The framework provides instructions, skills,
+hooks, and an offline CLI; Copilot and your authorized tools perform the work.
+Recovery restores project records. Permissions remain with your host and
+providers, and production deployment is never automatic. See the
+[trust boundaries](docs/architecture/README.md) and
+[integration prerequisites](docs/integrations/README.md) for details.
 
 ## Clone it, try it, help shape it
 
@@ -131,22 +131,10 @@ For source-candidate installation, follow the
 - **Contribute a focused improvement** to the docs, examples, or implementation.
   Start with [Contributing](CONTRIBUTING.md).
 
-## Contributor validation
+## Contributing
 
-From a source checkout, the default local gate runs critical tests first,
-then static and documentation checks. No dependency restore is needed:
-
-```sh
-npm run test:critical
-npm run check
-```
-
-Use standalone `npm run test:unit` for a unit-only iteration. Targeted and
-full/coverage runs are optional locally; every PR, including documentation-only
-changes, requires the complete applicable hosted native matrix.
-Read `AGENTS.md` and `.github/testing-policy.md` before changing source or tests.
-Use an isolated Copilot home for contributor validation.
-See [testing and CI reproduction](docs/contributing/README.md).
+Start with [Contributing](CONTRIBUTING.md) and the
+[testing guide](docs/contributing/README.md) for local checks and PR requirements.
 
 ## Start here
 

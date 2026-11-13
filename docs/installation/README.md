@@ -55,10 +55,12 @@ passed. Record the actual Copilot/Node/OS versions for an observed walkthrough.
 
 Close every Copilot CLI process first. After backing up and reconciling any
 required history, this postpublication cross-platform command performs an **explicit,
-irreversible clean migration** into your deliberately selected home:
+irreversible clean migration** into your deliberately selected home. Select an
+exact version from [Releases](https://github.com/urmich/ai-sdlc-framework/releases)
+and replace `<release-version>` before running it:
 
 ```sh
-npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@latest sdlc install --purge-existing --home "<owned-copilot-home>"
+npx --yes --registry=https://registry.npmjs.org --package='ai-sdlc-framework@<release-version>' sdlc install --purge-existing --home "<owned-copilot-home>"
 ```
 
 It removes modified framework-owned files and owned runtime work items,
