@@ -1579,7 +1579,7 @@ test('T-42 README documents cross-platform npm migration and complete maintenanc
   const migrationCommands = commands(migration);
   assert.equal((migrationCommands.match(/sdlc install --purge-existing/gu) ?? []).length, 1);
   assert.match(migrationCommands,
-    /npx --yes --registry=https:\/\/registry\.npmjs\.org --package=(['"])ai-sdlc-framework@<release-version>\1 sdlc install --purge-existing --home "<owned-copilot-home>"/u);
+    /npx --yes --registry=https:\/\/registry\.npmjs\.org --package="ai-sdlc-framework@<release-version>" sdlc install --purge-existing --home "<owned-copilot-home>"/u);
   assert.match(migration, /Select an\s+exact version from \[Releases\]/u);
   assert.match(migration, /replace `<release-version>` before running it/u);
   assert.match(migration, /cross-platform command/iu);

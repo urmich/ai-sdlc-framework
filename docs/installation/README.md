@@ -60,7 +60,7 @@ exact version from [Releases](https://github.com/urmich/ai-sdlc-framework/releas
 and replace `<release-version>` before running it:
 
 ```sh
-npx --yes --registry=https://registry.npmjs.org --package='ai-sdlc-framework@<release-version>' sdlc install --purge-existing --home "<owned-copilot-home>"
+npx --yes --registry=https://registry.npmjs.org --package="ai-sdlc-framework@<release-version>" sdlc install --purge-existing --home "<owned-copilot-home>"
 ```
 
 It removes modified framework-owned files and owned runtime work items,

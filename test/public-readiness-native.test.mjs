@@ -4289,7 +4289,7 @@ function currentFunctionalCatalogGroup(groups) {
 function preFunctionalFixtureSource(contents, file) {
   const inverse = {
     'test/advisory-gate.test.mjs': {
-      current: '4c0cfc0ab7e8062d35c32b26f2e0451eef5dd39755882b35c08ba31729e441d5',
+      current: '61881a79957de0002dd82a7c92d3db81446eed9a2a86c5f1e470c82210b9d1e8',
       original: 'b325b2472b65bcfdf642968256d396c1271b6d8abfd950233a369293a604e13c',
       splices: [[0, 82], [83, 1484], "  assert.match(readme, /\\[installation\\]\\(docs\\/installation\\/README\\.md\\)/u);\n",
         [1569, 11], "  assert.ok(migrationCommands.includes(\n    `npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@${packageVersion} sdlc install --purge-existing --home \"<owned-copilot-home>\"`));\n",
