@@ -10,5 +10,5 @@
 Source topic paths differ from installed compatibility paths. Installed
 `sdlc/cli.md`, `sdlc/provider-adapters.md` and `sdlc/github-adapters.md` remain
 stable; the installer also preserves the documentation tree for relative links.
-The 0.5.0 candidate includes the evidence/coverage entry points; it is not yet
-published and does not change immutable published 0.4.0.
+The published 0.5.0 package includes the evidence/coverage entry points.
+This checkout includes post-tag changes and does not change immutable releases.

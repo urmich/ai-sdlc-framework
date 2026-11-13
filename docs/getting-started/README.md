@@ -1,8 +1,8 @@
 # Getting started
 
 The framework combines Copilot instructions/skills/hooks with an offline,
-dependency-free Node CLI. [urmich](https://github.com/urmich) maintains this personal third-party
-MIT project; [support boundaries](../../SUPPORT.md) are not a corporate SLA.
+dependency-free Node CLI. This independently maintained third-party MIT project
+provides [best-effort support](../../SUPPORT.md).
 
 ## Prerequisites and platforms
 

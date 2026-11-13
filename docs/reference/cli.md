@@ -153,9 +153,9 @@ trusted origin. Detached CI does not fabricate phase receipts or managed credit.
 See the [consumer integration guide](../usage/evidence.md) for exact inputs,
 retention/replay and the separate provider/lifecycle authority boundaries.
 
-The candidate is not yet published. These interfaces are absent from the
-immutable published 0.4.0 package; candidate packaging is not native/public
-acceptance.
+These interfaces are included in published 0.5.0 and absent from the immutable
+published 0.4.0 package. This checkout includes post-tag changes; publication
+is not native/public acceptance of those changes.
 
 Offline `pr description-prepare` additionally prepares the in-memory
 description/coverage handoff from registered committed canonical definitions.

@@ -1,6 +1,6 @@
 # Ownership and review
 
-[urmich](https://github.com/urmich) owns/maintains this
+The [repository owner](https://github.com/urmich/ai-sdlc-framework) maintains this
 personal third-party OSS project. See [MIT](LICENSE) and [package metadata](package.json).
 No employer, Microsoft team, corporate support organization or additional
 maintainer approval is implied.

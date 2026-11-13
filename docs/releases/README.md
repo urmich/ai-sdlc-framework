@@ -2,12 +2,15 @@
 
 ## Current versus candidate
 
-The package candidate is **0.5.0**, Node >=22, offline and runtime-dependency-free.
-It is not yet published; npm `latest` remains **0.4.0**.
-Published 0.4.0 assets/tags are immutable. Historical release/repair acceptance
-does not establish current-candidate readiness.
+Published version: **0.5.0**, Node >=22, offline and runtime-dependency-free.
+On 2026-11-13, anonymous npm metadata identified 0.5.0 as `latest`, and GitHub
+listed v0.5.0 as its latest non-prerelease, published on 2026-11-11.
+See [Releases](https://github.com/urmich/ai-sdlc-framework/releases) for current assets.
+This checkout includes changes after that tag. Publication does not establish
+current-source readiness or completion of the acceptance gates below.
+Published assets/tags and historical release/repair evidence remain immutable.
 
-The future distribution has one **shared macOS archive** containing one portable
+The 0.5.0 distribution has one **shared macOS archive** containing one portable
 JavaScript payload and shell launcher. It is **not Universal 2**, bundles
 **no Node runtime**, and requires native arm64 and x64 execution.
 Windows retains a separate x64 PE archive; npm remains primary and Linux
@@ -72,6 +75,7 @@ handoff. The following known issues are deferred, not resolved by local checks:
 0.5.0 release acceptance must use independently verified published 0.4.0
 descriptor/checksum pins for the actual previous-version upgrade on every
 required native consumer host. Representative 0.3.1 fixtures do not replace it.
-Fresh R-PRE, immutable npm/GitHub publication, R-POST integrity/provenance and
-clean consumers, and actual default-branch/release-page verification remain
-required before an announcement. They are not completed by the version edit.
+An announcement's readiness claims require the release's actual R-PRE and
+R-POST integrity/provenance and clean-consumer evidence, plus verification of
+the public default branch and release page. Publication metadata alone does
+not establish those outcomes or validate post-tag source changes.

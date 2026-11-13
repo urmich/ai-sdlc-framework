@@ -1,8 +1,9 @@
 # Generic evidence and PR-description coverage
 
-**0.5.0 candidate integration guide.** These interfaces are included in the
-0.5.0 source/package candidate, not yet published. Immutable published 0.4.0
-does not include the public evidence facade.
+**0.5.0 integration guide.** These interfaces are included in the 0.5.0 source
+and published package. This checkout includes post-tag changes; publication
+does not establish current-source or live-provider acceptance.
+Immutable published 0.4.0 does not include the public evidence facade.
 Candidate integration tests use an isolated installation, never the live home.
 
 This is a reusable framework capability, not a GitHub-only test ledger.

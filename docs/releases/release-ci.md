@@ -4,8 +4,9 @@
 describes the current workflow/helper source, not verified repository settings,
 native execution, npm trust, public-client availability or a completed release.
 The required hosted release cases remain NotRun for this candidate.
-The package candidate is 0.5.0, not yet published;
-published 0.4.0 bytes, assets, tags and historical evidence are immutable.
+Version 0.5.0 is published on npm and GitHub; the current source includes
+post-tag changes. This guide describes source contracts, not a retrospective
+acceptance verdict. Published bytes, assets, tags and historical evidence are immutable.
 This document never authorizes dispatch, settings changes or publication.
 
 ## One explicit maintainer start
@@ -68,7 +69,7 @@ Do not copy synthetic test hashes, invent a previous version's metadata or
 substitute collaborator-authenticated private downloads for public legacy pins.
 Unavailable authentic prior-release inputs block the real upgrade prerequisite;
 they are not permission to replace an upgrade with reinstall or repack history.
-For the 0.5.0 launch, select the currently published 0.4.0 as
+For reproduction of the 0.5.0 launch contract, select its previous release 0.4.0 as
 `SUPPORTED_PREVIOUS_VERSION` and verify its actual public descriptor/checksum
 pins. The representative 0.3.1 PR baseline is not this release's upgrade proof.
 The immutable GitHub 0.4.0 inputs retrieved for launch preparation have these

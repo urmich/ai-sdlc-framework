@@ -33,7 +33,7 @@ This is implemented integration behavior, not an automatic network client:
 the caller's authorized host tools queue/read pipelines and acquire results.
 Installing the framework does not create workflows, configure pipeline
 credentials or grant dispatch/deployment authority. The new generic evidence
-and coverage interfaces are in the **0.5.0 candidate**, not published 0.4.0;
+and coverage interfaces are included in **0.5.0**, not in published 0.4.0;
 implemented support does not establish current live-provider acceptance.
 
 ## Guides

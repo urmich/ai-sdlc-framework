@@ -1,6 +1,20 @@
 # Change history
 
-## 0.5.0 - unreleased candidate
+## Unreleased
+
+The README now leads with workflow benefits, a first-use path, a concrete
+example, and ways to star, try, and contribute. Reader policies use project
+roles instead of personal profile introductions. Current release guidance
+reflects the published 0.5.0 package and distinguishes post-tag source changes
+from immutable release evidence.
+
+## 0.5.0 - development record
+
+Version 0.5.0 was published on npm and GitHub; the GitHub release date is
+2026-11-11. The notes below retain the development-time candidate status and
+scope. They do not establish current acceptance or validate later source changes.
+
+<!-- historical:start -->
 
 The launch correction scope is token-family sanitization, automated execution
 proof independent of inline plan size, exact literal credential-URL admission
@@ -31,6 +45,8 @@ from complete applicable PR coverage. Newcomer guidance now describes installed
 doctor, restart and disposable Requirements-first activation; live compatibility
 still needs observation. Private vulnerability reporting was enabled and its
 setting verified on 2026-10-20; no report submission is claimed.
+
+<!-- historical:end -->
 
 ## 0.4.0
 

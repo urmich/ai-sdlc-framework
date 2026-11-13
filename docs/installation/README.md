@@ -2,9 +2,9 @@
 
 ## Choose a channel and home
 
-This table describes the **0.5.0 source candidate**, not the asset
-inventory of immutable published 0.4.0. The future shared Mac filename must not
-be presented as an already published 0.4.0 download.
+This table describes the **0.5.0 source tree**. Version 0.5.0 is published on
+npm and GitHub; this checkout includes changes after its release tag.
+Use the selected release's asset inventory, not the source tree, for downloads.
 
 | Contract | Value |
 | --- | --- |
@@ -19,16 +19,15 @@ be presented as an already published 0.4.0 download.
 Node >=22 remains an external prerequisite for every channel. npm is primary
 and supports Windows/macOS/Linux; standalone supports Windows x64 and macOS
 Apple Silicon/Intel, not Linux. See [release state](../releases/README.md)
-before assuming candidate packaging has been published or accepted.
-0.5.0 is not yet published. For source-candidate validation, run the checkout's
+for publication and acceptance boundaries.
+For source-candidate validation, run the checkout's
 entry against a newly owned isolated home:
 
 ```sh
 node bin/sdlc.mjs install --home "<owned-copilot-home>"
 ```
 
-The following npm command is for use only after exact 0.5.0 publication and
-public-consumer verification:
+To install the published 0.5.0 npm package into a deliberately selected home:
 
 ```sh
 npx --yes --registry=https://registry.npmjs.org --package=ai-sdlc-framework@0.5.0 sdlc install --home "<owned-copilot-home>"
@@ -86,10 +85,9 @@ owned files are preserved and reported as conflicts. Unknown owner/schema or
 malformed/unprovable ownership stops ordinary update without destructive
 fallback; `--purge-existing` remains a separate explicit irreversible choice.
 
-The following examples target the **0.5.0** npm archive after publication;
-they do not work before that version and its release assets are available.
-The release-specific acceptance must include an ordinary upgrade from the
-currently published 0.4.0, not just the representative 0.3.1 CI fixture.
+The following examples target the published **0.5.0** npm archive.
+The release-specific acceptance requires an ordinary upgrade from its
+previous release, 0.4.0, not just the representative 0.3.1 CI fixture.
 Use version-specific download
 and package directories outside the selected Copilot home. `--clobber` replaces
 the named downloaded assets only; it is not permission to purge an installation.
@@ -248,7 +246,7 @@ For an offline `.tgz`, verify exact release checksum/inventory before extraction
 extract outside the destination home and run `node bin/sdlc.mjs install --home
 "<owned-copilot-home>"` from that package. Use release-specific standalone or
 Homebrew instructions only after verifying their asset/version/source identities.
-Windows remains a separate native PE; the future single Mac archive contains
+Windows remains a separate native PE; the single Mac archive contains
 one portable JavaScript/shell payload, no embedded npm tgz, no bundled Node and
 no Universal 2 binary. Both Mac architectures require their actual native Node.
 The published 0.4.0 artifacts cannot be repacked or replaced.
