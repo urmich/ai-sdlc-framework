@@ -596,9 +596,11 @@ maintain the project.
   examples and unqualified readiness claims. Verify navigation separately in
   source, packaged and installed layouts; essential offline guidance must have
   a shipped target or an explicitly identified online reference.
-  README links to the repository's Releases instead of hardcoding a framework
-  release version; required runtime constraints and immutable release history
-  remain accurate in their own documentation.
+  README and ordinary reader guides link to the repository's Releases instead
+  of hardcoding a framework release version. Installation uses `@latest` or an
+  explicitly reader-selected version. Required runtime constraints, schema/API
+  versions, reproducible release inputs and immutable release history remain
+  accurate in the documentation that needs them.
 - AC-210.2: Provide discoverable contribution, support, security-reporting,
   ownership/review and change/release guidance appropriate to this personal
   third-party OSS project.

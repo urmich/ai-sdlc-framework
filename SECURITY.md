@@ -3,8 +3,8 @@
 ## Scope and supported versions
 
 This independently maintained third-party MIT project receives best-effort
-maintenance. Published version: **0.5.0**; npm `latest` was verified as 0.5.0
-on 2026-11-13. The source checkout includes changes after that release tag.
+maintenance. Use the latest published release listed in
+[Releases](https://github.com/urmich/ai-sdlc-framework/releases).
 The project does not
 promise LTS, support for every older release, a response SLA, corporate approval,
 first-party status, CFS exemption or guaranteed availability.

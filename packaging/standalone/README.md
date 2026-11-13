@@ -27,7 +27,7 @@ requires fresh Linux x64, Windows x64, Mac arm64 and Mac Intel native R-PRE
 reports for the same frozen bytes. Linux is a development validation host, not
 a standalone release target. Metadata simulation or Rosetta cannot replace
 native Intel or Windows execution. Both Homebrew architectures consume the
-same shared Mac URL/hash with native Node. Existing published 0.4.0 archives
+same shared Mac URL/hash with native Node. Existing published archives
 and their legacy readers remain unchanged.
 CI checks the archive inventory and native evidence separately from `complete`.
 Other ad hoc target subsets do not establish release eligibility.

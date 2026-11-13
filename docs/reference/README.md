@@ -10,5 +10,6 @@
 Source topic paths differ from installed compatibility paths. Installed
 `sdlc/cli.md`, `sdlc/provider-adapters.md` and `sdlc/github-adapters.md` remain
 stable; the installer also preserves the documentation tree for relative links.
-The published 0.5.0 package includes the evidence/coverage entry points.
-This checkout includes post-tag changes and does not change immutable releases.
+Check [Releases](https://github.com/urmich/ai-sdlc-framework/releases) for
+interface availability in your selected package; source documentation may
+include changes beyond a published release.

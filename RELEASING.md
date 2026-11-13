@@ -6,7 +6,7 @@ bump, tag, publication, provider/trust change or PROD execution.
 
 Follow the [release guide](docs/releases/README.md) and preserve the exact
 source/version/destination, frozen artifact IDs/digests, native gate reports and
-per-channel outcomes. Published **0.4.0 is immutable**.
+per-channel outcomes. Published releases are immutable.
 
 One explicit maintainer release start owns the approved sequence: preflight,
 complete fresh release-prepublication checks, deterministic packaging/native

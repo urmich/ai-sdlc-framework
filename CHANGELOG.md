@@ -4,9 +4,11 @@
 
 The README now leads with workflow benefits, a first-use path, a concrete
 example, and ways to star, try, and contribute. Reader policies use project
-roles instead of personal profile introductions. Current release guidance
-reflects the published 0.5.0 package and distinguishes post-tag source changes
-from immutable release evidence.
+roles instead of personal profile introductions. Reader guides are version
+agnostic, use release links for availability, and let readers select an exact
+version for downloads and upgrades. Documentation checks retain release-link
+and runtime/platform validation without requiring the current package version
+to appear in policy pages.
 
 ## 0.5.0 - development record
 

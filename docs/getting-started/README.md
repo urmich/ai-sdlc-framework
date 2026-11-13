@@ -12,8 +12,7 @@ provides [best-effort support](../../SUPPORT.md).
 - Native Windows x64 PE for the Windows standalone channel.
 - macOS Apple Silicon and Intel execute the same portable JavaScript/shell
   launcher with their own native Node runtime, not a bundled binary or Node.
-  Published 0.4.0 remains
-  unchanged. Linux has no standalone archive.
+  Linux has no standalone archive.
 
 Use [installation](../installation/README.md) to select a release/home and run
 doctor, then restart Copilot. Do not infer host capability from a platform label.

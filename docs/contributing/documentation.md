@@ -43,7 +43,7 @@ manifest or runtime. **Runtime locator admission has not been performed for this
 migration**: the installed 0.4 resume failed its existing capacity boundary and
 issued no acknowledgment token. Old active bindings require separately valid
 recovery/rebinding; this source migration is not managed relocation evidence.
-Published 0.4.0 and historical content-addressed snapshots are never edited.
+Published releases and historical content-addressed snapshots are never edited.
 
 ### Blocked current locator adoption
 
@@ -90,6 +90,13 @@ objects, original approvals and a real definition-changing link edit. Their
 success, when executed, will not adopt any of these actual work items.
 
 ## Markdown checker contract
+
+Keep reader guides version agnostic. Use Releases and the change history for
+published-version details, `@latest` for ordinary npm installation, and an
+explicit reader-selected version for downloads and upgrades. Keep product
+version pins only where needed to reproduce historical behavior or exact
+release evidence. Runtime minimums, API/schema versions, and pinned toolchain
+inputs still belong beside the instructions that depend on them.
 
 `node scripts/check-docs.mjs` and `npm run check` check local inline/image links,
 reference links (full/collapsed/shortcut), explicit HTML anchors and GitHub-style

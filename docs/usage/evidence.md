@@ -1,10 +1,9 @@
 # Generic evidence and PR-description coverage
 
-**0.5.0 integration guide.** These interfaces are included in the 0.5.0 source
-and published package. This checkout includes post-tag changes; publication
-does not establish current-source or live-provider acceptance.
-Immutable published 0.4.0 does not include the public evidence facade.
-Candidate integration tests use an isolated installation, never the live home.
+Use the evidence and coverage interfaces described here with your selected
+framework release. Check [Releases](https://github.com/urmich/ai-sdlc-framework/releases)
+for availability; source documentation may include changes beyond a published
+package. Integration tests use an isolated installation, never the live home.
 
 This is a reusable framework capability, not a GitHub-only test ledger.
 Use the public `ai-sdlc-framework/evidence` facade; retain the consumer's own
@@ -192,7 +191,7 @@ they are test implementation, not evidence the latest repository candidate passe
 
 ## 6. Authorized PR description handoff
 
-The 0.5.0 candidate extends the existing `ai-sdlc-framework/pr` export.
+The `ai-sdlc-framework/pr` export provides the PR-description handoff.
 `preparePrDescription(store, input)` and offline `sdlc pr description-prepare`
 are pure preparation: select registered committed canonical documents and
 exact source, supply `class: pr-create` or `pr-update` and current body prose;

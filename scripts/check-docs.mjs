@@ -108,15 +108,15 @@ export function inspectReaderContracts(contents, pkg) {
       diagnostics.push(`${file}: ${field} claim conflicts with distribution contract`);
     }
   }
+  const repository = pkg.repository?.url?.replace(/\.git$/u, '').replace(/\/$/u, '');
   for (const file of ['SECURITY.md', 'docs/releases/README.md']) {
-    if (!contents.get(file)?.includes(`**${pkg.version}**`)) {
-      diagnostics.push(`${file}: current version differs from package.json`);
+    if (repository && !markdownLinks(contents.get(file) ?? '').links.includes(`${repository}/releases`)) {
+      diagnostics.push(`${file}: missing repository Releases link for version-neutral guidance`);
     }
   }
   if (!contents.get('README.md')?.includes(`Node.js **${pkg.engines.node.slice(2)} or later**`)) {
     diagnostics.push('README.md: Node minimum differs from package.json');
   }
-  const repository = pkg.repository?.url?.replace(/\.git$/u, '').replace(/\/$/u, '');
   const readme = contents.get('README.md') ?? '';
   if (repository && !markdownLinks(readme).links.includes(`${repository}/releases`)) {
     diagnostics.push('README.md: missing repository Releases link for version-neutral guidance');

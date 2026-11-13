@@ -4,8 +4,8 @@
 describes the current workflow/helper source, not verified repository settings,
 native execution, npm trust, public-client availability or a completed release.
 The required hosted release cases remain NotRun for this candidate.
-Version 0.5.0 is published on npm and GitHub; the current source includes
-post-tag changes. This guide describes source contracts, not a retrospective
+Use [Releases](https://github.com/urmich/ai-sdlc-framework/releases) for published
+versions and assets. This guide describes source contracts, not a retrospective
 acceptance verdict. Published bytes, assets, tags and historical evidence are immutable.
 This document never authorizes dispatch, settings changes or publication.
 
@@ -69,11 +69,15 @@ Do not copy synthetic test hashes, invent a previous version's metadata or
 substitute collaborator-authenticated private downloads for public legacy pins.
 Unavailable authentic prior-release inputs block the real upgrade prerequisite;
 they are not permission to replace an upgrade with reinstall or repack history.
-For reproduction of the 0.5.0 launch contract, select its previous release 0.4.0 as
-`SUPPORTED_PREVIOUS_VERSION` and verify its actual public descriptor/checksum
-pins. The representative 0.3.1 PR baseline is not this release's upgrade proof.
-The immutable GitHub 0.4.0 inputs retrieved for launch preparation have these
-SHA-256 identities:
+Select the supported previous public release as `SUPPORTED_PREVIOUS_VERSION`
+and independently verify its public descriptor/checksum pins. Representative
+PR fixtures do not establish the actual release's upgrade proof.
+
+### Historical launch pins
+
+The following immutable inputs were retrieved for the 0.5.0 launch's upgrade
+from 0.4.0. Retain these exact SHA-256 identities for reproducing that release;
+select and verify the applicable inputs independently for a new release.
 
 | Input | SHA-256 |
 | --- | --- |
@@ -84,6 +88,8 @@ SHA-256 identities:
 The payload and descriptor match their records in `SHA256SUMS`. These are
 previous-release byte identities, not 0.5.0 R-PRE/R-POST results or a claim that
 the repository variables have been configured.
+
+### Runtime and destination prerequisites
 
 The dispatch destination becomes `RELEASE_REPOSITORY`; the exact source and
 logical intent become `EXPECTED_SOURCE_COMMIT` and `RELEASE_INTENT_ID`.
@@ -137,7 +143,7 @@ plus the integrity-pinned schema/Homebrew/Ruby inputs and actual image/tool
 identities in the [living Test Plan](../sdlc/public-readiness/test-plan.md#22-hosts-and-prerequisites).
 The separate mandatory minimum-runtime compatibility job uses Node 22.23.3;
 publishing uses Node 24.22.0. Product support remains Node >=22. These current
-baselines do not change explicitly historical published 0.4.0 examples or assets.
+baselines do not change historical examples or published assets.
 These are selected execution inputs, not proof of available or completed jobs.
 Translated/cross-build/metadata fixtures cannot satisfy native cases.
 

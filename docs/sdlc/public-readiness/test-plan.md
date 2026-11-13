@@ -3203,11 +3203,14 @@ Distinguish framework work-item recovery and evidence from host-agent chat/sessi
 restoration and external review, monitoring and delivery execution. Required
 runtime constraints and historical release documents are not removed merely to
 make README version-neutral.
-The existing Node-only, PR-only T-PRD049 reader-contract root accepts the
-version-neutral README, requires its repository Releases route and rejects
-even a current package-version pin. Keep stale-version checks for explicit
-supported-release documents, the Node/platform contract and all existing
-claim mutations. No critical expansion or npm capability substitution occurs.
+The existing Node-only, PR-only T-PRD049 reader-contract root accepts
+version-neutral reader guides, requires repository Releases routes in README,
+Security and the release guide, and rejects even a current package-version pin
+in README. A future package-version bump must pass without rewriting reader
+guides. Keep stale-version checks for explicitly pinned release procedures,
+the Node/platform contract and all existing claim mutations. Missing-release-link
+mutations replace the old requirement to repeat the package version in policies.
+No critical expansion or npm capability substitution occurs.
 
 T-PRD089 uses the five immutable reference revisions and adoption matrix in
 Requirements. For each selected practice, inspect its cited primary file and

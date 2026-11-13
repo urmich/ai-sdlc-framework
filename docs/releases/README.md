@@ -2,15 +2,15 @@
 
 ## Current versus candidate
 
-Published version: **0.5.0**, Node >=22, offline and runtime-dependency-free.
-On 2026-11-13, anonymous npm metadata identified 0.5.0 as `latest`, and GitHub
-listed v0.5.0 as its latest non-prerelease, published on 2026-11-11.
-See [Releases](https://github.com/urmich/ai-sdlc-framework/releases) for current assets.
-This checkout includes changes after that tag. Publication does not establish
-current-source readiness or completion of the acceptance gates below.
+Use [Releases](https://github.com/urmich/ai-sdlc-framework/releases) for published
+versions, release notes, and assets, and [change history](../../CHANGELOG.md) for
+changes by release. The framework requires Node >=22 and has an offline,
+runtime-dependency-free core. Source documentation may include changes beyond a
+published release. Publication does not establish current-source readiness or
+completion of the acceptance gates below.
 Published assets/tags and historical release/repair evidence remain immutable.
 
-The 0.5.0 distribution has one **shared macOS archive** containing one portable
+The distribution layout uses one **shared macOS archive** containing one portable
 JavaScript payload and shell launcher. It is **not Universal 2**, bundles
 **no Node runtime**, and requires native arm64 and x64 execution.
 Windows retains a separate x64 PE archive; npm remains primary and Linux
@@ -51,8 +51,7 @@ immutable version/tag/asset or invent rollback.
 maintainer-dispatch flow, exact repository prerequisites, four native R-PRE
 lanes, automatic same-byte publication/three-host R-POST and the two immutable
 saved-artifact recovery modes. This is not an executed/live-readiness claim.
-Original 0.4.0 release procedures and outcomes remain historical, not proof for
-the new candidate. The
+Historical release procedures and outcomes do not validate a new candidate. The
 [living Test Plan](../sdlc/public-readiness/test-plan.md#11-authorized-end-to-end-release-procedure)
 defines current required R-PRE/R-POST evidence. Neither document authorizes a run.
 See [root maintainer policy](../../RELEASING.md).
@@ -72,10 +71,10 @@ handoff. The following known issues are deferred, not resolved by local checks:
 | F11 | Markdown/YAML delimiters can make approved dummy credential URLs fail exact-source admission. This fails closed; do not relax value checks or claim those forms are admitted. |
 | F12 | WinGet smoke can report an executed launcher failure as NotRun/Blocked. Its nonzero outcome is not release success; retain and inspect the actual operation and exit. |
 
-0.5.0 release acceptance must use independently verified published 0.4.0
-descriptor/checksum pins for the actual previous-version upgrade on every
-required native consumer host. Representative 0.3.1 fixtures do not replace it.
+Release acceptance must use independently verified descriptor/checksum pins
+from the selected supported previous release for an actual upgrade on every
+required native consumer host. Representative fixtures do not replace it.
 An announcement's readiness claims require the release's actual R-PRE and
 R-POST integrity/provenance and clean-consumer evidence, plus verification of
 the public default branch and release page. Publication metadata alone does
-not establish those outcomes or validate post-tag source changes.
+not establish those outcomes or validate later source changes.

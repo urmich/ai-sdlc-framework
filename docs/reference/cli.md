@@ -143,7 +143,7 @@ a host scheduler.
 
 ## Generic coverage and readiness
 
-The 0.5.0 source/package candidate exposes `coverage prepare|inspect` and
+The CLI exposes `coverage prepare|inspect` and
 `readiness evaluate|report`, plus `ai-sdlc-framework/evidence`.
 These are offline data operations: PR-description coverage is generated in
 memory from existing canonical definitions, not an extra coverage/index/policy
@@ -153,9 +153,10 @@ trusted origin. Detached CI does not fabricate phase receipts or managed credit.
 See the [consumer integration guide](../usage/evidence.md) for exact inputs,
 retention/replay and the separate provider/lifecycle authority boundaries.
 
-These interfaces are included in published 0.5.0 and absent from the immutable
-published 0.4.0 package. This checkout includes post-tag changes; publication
-is not native/public acceptance of those changes.
+Check [Releases](https://github.com/urmich/ai-sdlc-framework/releases) for
+availability in your selected package. Source documentation may include changes
+beyond a published release; publication alone does not establish native or
+public-consumer acceptance.
 
 Offline `pr description-prepare` additionally prepares the in-memory
 description/coverage handoff from registered committed canonical definitions.

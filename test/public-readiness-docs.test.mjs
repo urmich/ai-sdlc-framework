@@ -466,7 +466,10 @@ test('T-PRD049 public version, platform and latest-readiness examples reject sta
   assertNoDiagnostics(await checkDocumentation({ root }), 'Unmodified public reader fixture');
   const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
   const corruptions = [
-    ['SECURITY.md', text => text.replaceAll(`**${pkg.version}**`, '**0.0.1**'), /current version differs/u],
+    ['SECURITY.md', text => text.replaceAll('https://github.com/urmich/ai-sdlc-framework/releases',
+      'https://github.com/urmich/ai-sdlc-framework/versions'), /missing repository Releases link/u],
+    ['docs/releases/README.md', text => text.replaceAll('https://github.com/urmich/ai-sdlc-framework/releases',
+      'https://github.com/urmich/ai-sdlc-framework/versions'), /missing repository Releases link/u],
     ['README.md', text => `${text}\nai-sdlc-framework@0.0.1\n`, /stale public version pin/u],
     ['README.md', text => `${text}\nai-sdlc-framework@${pkg.version}\n`, /pinned framework release/u],
     ['README.md', text => text.replaceAll('https://github.com/urmich/ai-sdlc-framework/releases',
@@ -491,6 +494,13 @@ test('T-PRD049 public version, platform and latest-readiness examples reject sta
     } finally { await fs.writeFile(file, original); }
   }
   assertNoDiagnostics(await checkDocumentation({ root }), 'Restored public reader fixture');
+  const packagePath = path.join(root, 'package.json');
+  const originalPackage = await fs.readFile(packagePath, 'utf8');
+  try {
+    await fs.writeFile(packagePath, JSON.stringify({ ...pkg, version: '99.0.0' }));
+    assertNoDiagnostics(await checkDocumentation({ root }),
+      'A future framework release must not require editing version-neutral reader guides');
+  } finally { await fs.writeFile(packagePath, originalPackage); }
   const security = await fs.readFile(path.join(root, 'SECURITY.md'), 'utf8');
   assert.match(security, /https:\/\/github\.com\/urmich\/ai-sdlc-framework\/security\/advisories\/new/u);
   assert.match(security, /enabled: true/u);
