@@ -13,8 +13,8 @@ with integration support for **GitHub** and **Azure DevOps**.
 
 ## Why use it?
 
-- **Spend less effort on rework.** Define acceptance conditions and plan how to
-  test them before implementation starts.
+- **Shorten your time to market.** Move from idea to delivery with a connected
+  workflow for planning, coding, validation, and review.
 - **Pick up work with context.** Recover requirements, decisions, and recorded
   results instead of reconstructing the project from a conversation.
 - **Make “done” something you can inspect.** Connect requirements to tests and
