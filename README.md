@@ -90,17 +90,19 @@ check [Releases](https://github.com/urmich/ai-sdlc-framework/releases) and the
 offline installation, and native channels, use the
 [installation guide](docs/installation/README.md).
 
-## Capabilities
+## What you gain
 
-| What you want | How the framework helps | Explore |
-| --- | --- | --- |
-| Clear scope before coding | Requirements, acceptance conditions, one living Test Plan, and Technical Design. | [Workflow](docs/usage/README.md) |
-| Context for the next session | Recoverable work-item records, canonical documents, decisions, and pending operation handles. | [Recovery](docs/usage/README.md#resume-from-authoritative-records) |
-| Evidence behind readiness | Requirements-to-tests traceability, retained execution outcomes, coverage gaps, and PR-description coverage. | [Evidence guide](docs/usage/evidence.md) |
-| Review tied to the candidate | Track the result of Copilot's built-in `/review`; changed inputs invalidate prior review credit. | [Candidate review](docs/reference/cli.md#candidate-review-through-copilot-cli-review) |
-| Your existing delivery tools | GitHub adapters, a scoped Azure DevOps adapter, and pipeline-monitoring records. | [Integrations](docs/integrations/README.md) |
-| Deliberate delivery decisions | Scoped approvals, PR/external-operation records, and environment/artifact handoffs. | [CLI reference](docs/reference/cli.md) |
-| Local work or multiple repositories | An offline core, local-only Git support, and coordinated repository/document bindings. | [Architecture](docs/architecture/README.md) |
+From the first request to the next handoff, give every change a clearer path forward.
+
+| Your advantage | What it looks like in practice |
+| --- | --- |
+| **Build the right thing sooner.** | Turn a broad request into agreed behavior, edge cases, and a plan to test it before implementation starts. [Plan your work](docs/usage/README.md). |
+| **Keep your project's memory.** | Return to saved requirements, decisions, and results when you resume work. Spend less effort piecing together the backstory. [Pick up where you left off](docs/usage/README.md#resume-from-authoritative-records). |
+| **Put evidence behind “ready to ship.”** | See which requirements have tests, what actually ran, and what still needs attention—so your next step has a basis you can inspect. [Follow the evidence](docs/usage/evidence.md). |
+| **Keep review in step with your code.** | Track Copilot's review against the code you validated. When that code changes, the workflow calls for a fresh review. [See the review workflow](docs/reference/cli.md#candidate-review-through-copilot-cli-review). |
+| **Bring the tools you already use.** | Keep your test runners and CI/CD, with integration support for GitHub and Azure DevOps workflows. [Explore integrations](docs/integrations/README.md). |
+| **Connect work across repositories.** | Keep related repositories, requirements, and plans together in one coordinated workflow—even when a change spans projects. [See how it fits together](docs/architecture/README.md). |
+| **Move forward on your terms.** | Choose when to skip a stage, publish a PR, or authorize an environment handoff. You keep control of consequential decisions. [Explore the workflow](docs/usage/README.md). |
 
 ## Workflow and trust
 
